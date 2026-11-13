@@ -238,6 +238,7 @@ TEXT_FORMAT_FETCHERS = (
     "azure/entra_dormant_identities",
     "azure/entra_groups",
     "azure/entra_pim_assignments",
+    "azure/entra_privileged_roles",
     "azure/entra_risky_users",
     "azure/entra_sign_ins",
     "azure/firewall_configuration",

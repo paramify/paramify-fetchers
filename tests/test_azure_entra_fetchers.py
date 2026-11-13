@@ -529,6 +529,125 @@ def test_a_failed_members_read_leaves_the_figures_it_feeds_unknown(monkeypatch):
     assert summary["privileged_role_assignments"] == 1 and summary["total_role_assignments"] is None
 
 
+# --- azure_entra_privileged_roles: the approved principals setting ------------
+
+U_OK, U_NEW = "0000000a-0000-4000-8000-00000000000a", "0000000b-0000-4000-8000-00000000000b"
+G_OK, SP_NEW = "0000000c-0000-4000-8000-00000000000c", "0000000d-0000-4000-8000-00000000000d"
+U_READER = "0000000e-0000-4000-8000-00000000000e"
+
+
+def _approval_graph(cast_error=None):
+    # U_NEW holds two privileged roles; U_READER holds only Directory Readers, which isn't privileged.
+    graph = FakeGraph(
+        roles=[_role("r-ga", "Global Administrator"), _role("r-sr", "Security Reader"),
+               _role("r-dr", "Directory Readers")],
+        role_members={"r-ga": [_obj(U_OK, "user"), _obj(U_NEW, "user")],
+                      "r-sr": [_obj(U_NEW, "user"), _obj(G_OK, "group")],
+                      "r-dr": [_obj(U_READER, "user")]},
+        group_members={},
+    )
+    for rid, builder in graph.role_members.items():
+        builder.graph_service_principal = Builder([_obj(SP_NEW, "servicePrincipal")] if rid == "r-sr" else [],
+                                                  error=cast_error)
+    return graph
+
+
+def _run_roles_main(graph, tmp_path, monkeypatch, approved=None):
+    async def fake_with_graph_client(collector, cred, work, default=None):
+        return await work(graph)
+
+    async def fake_tenant(collector, client):
+        return {"tenant_id": "t-1", "tenant_source": "env"}
+
+    monkeypatch.setattr(privileged_roles, "with_graph_client", fake_with_graph_client)
+    monkeypatch.setattr(privileged_roles, "resolve_tenant", fake_tenant)
+    monkeypatch.setattr(privileged_roles, "credential", lambda: object())
+    monkeypatch.setattr(privileged_roles, "load_dotenv", lambda: None)
+    monkeypatch.setenv("EVIDENCE_DIR", str(tmp_path))
+    monkeypatch.setenv("FETCHER_STATUS_FILE", str(tmp_path / "status.json"))
+    monkeypatch.delenv("AZURE_SUBSCRIPTION_ID", raising=False)
+    if approved is None:
+        monkeypatch.delenv(privileged_roles.APPROVED_ENV, raising=False)
+    else:
+        monkeypatch.setenv(privileged_roles.APPROVED_ENV, approved)
+    code = privileged_roles.main()
+    (path,) = tmp_path.glob("azure_entra_privileged_roles_*.json")
+    return code, json.loads(path.read_text())
+
+
+def test_approved_ids_split_on_commas_spaces_and_newlines_ignoring_case():
+    assert privileged_roles.parse_approved_ids(None) == (None, 0)
+    assert privileged_roles.parse_approved_ids(" \n ") == (None, 0)
+    assert privileged_roles.parse_approved_ids(f"{U_OK.upper()}, {G_OK}\n{U_OK}") == (sorted([U_OK, G_OK]), 0)
+    assert privileged_roles.parse_approved_ids(f"{U_OK} alice@contoso.test") == ([U_OK, "alice@contoso.test"], 1)
+
+
+def test_holders_off_the_approved_list_are_counted_once_and_listed(tmp_path, monkeypatch, assert_summary_documented):
+    code, evidence = _run_roles_main(_approval_graph(), tmp_path, monkeypatch, approved=f"{U_OK},{G_OK.upper()}")
+
+    assert code == 0
+    summary, results = evidence["summary"], evidence["results"]
+    assert summary["approved_principals_configured"] is True
+    # U_NEW holds two privileged roles and counts once; U_READER's role isn't privileged.
+    assert summary["unapproved_privileged_principals"] == 2
+    assert results["approved_principal_ids"] == sorted([U_OK, G_OK])
+    assert [(h["id"], h["principal_type"], h["privileged_roles"]) for h in results["unapproved_principals"]] == [
+        (U_NEW, "User", ["Global Administrator", "Security Reader"]),
+        (SP_NEW, "ServicePrincipal", ["Security Reader"]),
+    ]
+    assert_summary_documented("azure/entra_privileged_roles", summary)
+
+
+def test_every_holder_approved_reads_zero(tmp_path, monkeypatch):
+    code, evidence = _run_roles_main(_approval_graph(), tmp_path, monkeypatch,
+                                     approved=" ".join([U_OK, U_NEW, G_OK, SP_NEW]))
+
+    assert code == 0
+    assert evidence["summary"]["unapproved_privileged_principals"] == 0
+    assert evidence["results"]["unapproved_principals"] == []
+
+
+def test_without_the_setting_only_the_new_keys_are_added(tmp_path, monkeypatch):
+    code, evidence = _run_roles_main(_approval_graph(), tmp_path, monkeypatch)
+
+    assert code == 0
+    summary, results = evidence["summary"], evidence["results"]
+    assert summary.pop("approved_principals_configured") is False
+    assert summary.pop("unapproved_privileged_principals") is None
+    assert results.pop("approved_principal_ids") is None and results.pop("unapproved_principals") is None
+    roles = results["directory_roles"]
+    assert summary == privileged_roles.summarize(roles, True)
+    assert set(results) == {"directory_roles", "privileged_role_names_checked"}
+
+
+def test_a_failed_cast_leaves_the_unapproved_count_unknown(tmp_path, monkeypatch):
+    code, evidence = _run_roles_main(_approval_graph(cast_error=DENIED), tmp_path, monkeypatch, approved=U_OK)
+
+    assert code == 1
+    assert evidence["summary"]["approved_principals_configured"] is True
+    assert evidence["summary"]["unapproved_privileged_principals"] is None
+    assert evidence["results"]["unapproved_principals"] is None
+
+
+def test_a_failed_role_list_leaves_the_unapproved_count_unknown(tmp_path, monkeypatch):
+    graph = _approval_graph()
+    graph.directory_roles.error = DENIED
+    code, evidence = _run_roles_main(graph, tmp_path, monkeypatch, approved=U_OK)
+
+    assert code == 1 and evidence["summary"]["unapproved_privileged_principals"] is None
+
+
+def test_an_entry_that_is_not_an_object_id_fails_the_run_as_bad_config(tmp_path, monkeypatch):
+    code, evidence = _run_roles_main(_approval_graph(), tmp_path, monkeypatch, approved=f"{U_OK},alice@contoso.test")
+
+    assert code == 1
+    assert json.loads((tmp_path / "status.json").read_text())["code"] == "bad_config"
+    assert evidence["summary"]["approved_principals_configured"] is True
+    assert evidence["summary"]["unapproved_privileged_principals"] is None
+    # The rest of the evidence is still collected.
+    assert evidence["summary"]["distinct_privileged_principals"] == 4
+
+
 def test_a_failed_role_list_leaves_every_figure_unknown(monkeypatch):
     graph = _roles_graph(members={}, service_principals={})
     graph.directory_roles.error = DENIED
