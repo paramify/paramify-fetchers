@@ -1672,6 +1672,18 @@ schemas and the `paramify` CLI — not the internal code.
   catalog keeps half the page, and the blank rows around the filter and the
   settings row are dropped. An empty manifest takes only the rows of its
   hint. The add-fetchers picker is removed.
+- **The TUI's Paramify tab is a setup grid.** It has one row for each evidence
+  fetcher in the manifest: the evidence set, the script, the validators, the
+  linked solution capabilities, the artifacts, and whether the fetcher is
+  ready. Under the grid, a line counts each column. The highlighted fetcher
+  shows its validators and the capabilities that its validator pairs prove.
+  `/` filters the grid and `w` shows only the fetchers that need work. `s`
+  syncs the scripts, `v` syncs the validators and `u` uploads the newest run,
+  each after a preview and a confirm, and the grid then reads the workspace
+  again. Without an API token, a bar says how to set one, and the three keys
+  are off. The tab reads the workspace only when it shows. The scripts force
+  and reassociate options are no longer in the TUI; `paramify scripts sync`
+  keeps them.
 - **Scan reports are on their own Pipelines tab in the TUI.** The tabs are
   Fetchers, Run, Evidence, Paramify and Pipelines (keys `1` to `5`). The
   Pipelines tab lists the scan-report fetchers in the manifest, with the assessment

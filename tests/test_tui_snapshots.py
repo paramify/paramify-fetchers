@@ -130,7 +130,57 @@ def test_evidence_file_preview(shot):
     assert shot("3", "enter", "enter")
 
 
-def test_paramify(shot):
+def test_paramify_no_token(shot):
+    """The demo workspace has no token: the page reads nothing and says why."""
+    assert shot("4")
+
+
+def _setup_status() -> dict:
+    """Seven fetchers at different steps of setup, two capabilities linked."""
+    def row(name, ref, set_id, arts, script, paired, pairs=(), ready=False):
+        validators = [{"key": f"{name}-{i}", "role": "completeness" if i == 0 else "configuration",
+                       "name": label, "paired": ok}
+                      for i, (label, ok) in enumerate(paired)]
+        return {"name": name, "kind": "evidence",
+                "evidence_set": {"reference_id": ref, "name": name, "id": set_id, "artifact_count": arts},
+                "script": script, "validators": validators,
+                "pairs": [{"pair_id": f"{name}-p{i}", "validator_key": f"{name}-{v}", "capability_id": c,
+                           "function": fn} for i, (c, fn, v) in enumerate(pairs)],
+                "ready": ready}
+
+    complete = ("completeness: every certificate", True)
+    return {
+        "workspace": {"base_url": "https://app.paramify.com/api/v0", "base_url_source": "default", "token": True},
+        "fetchers": [
+            row("aws_acm_certificate_status", "EVD-ACM-CERT", "ev-1", 4, "in_sync",
+                [complete, ("TLS 1.2+ only", True), ("no cert expires < 30d", True)],
+                [("c1", "PROVIDER", 0), ("c1", "PROVIDER", 1), ("c2", "INTEGRATOR", 0), ("c2", "INTEGRATOR", 2)],
+                ready=True),
+            row("aws_access_analyzer_findings", "EVD-ACCESS-ANALYZER", "ev-2", 4, "in_sync",
+                [("completeness: every region", True), ("no public findings", True)],
+                [("c3", "PROVIDER", 0), ("c3", "PROVIDER", 1)], ready=True),
+            row("aws_cloudtrail_status", "EVD-CLOUDTRAIL", "ev-3", 2, "in_sync", [], ready=True),
+            row("github_branch_protection", "EVD-GITHUB-BRANCH-PROTECTION", "ev-4", 1, "in_sync",
+                [("completeness: every repo", True), ("reviews required", True), ("force push blocked", False)]),
+            row("github_dependabot_alerts", "EVD-GITHUB-DEPENDABOT-ALERTS", "ev-5", 0, "update",
+                [("completeness: every repo", True), ("alerts on every repo", False)]),
+            row("okta_authenticators", "EVD-OKTA-AUTHENTICATORS", "ev-6", 0, "create",
+                [("completeness: every user", False), ("MFA enforced", False)]),
+            row("knowbe4_training_enrollments", "EVD-SECURITY-AWARENESS-TRAINING", None, 0, "create",
+                [("completeness: every employee", False)]),
+        ],
+        "capabilities": [
+            {"id": "c1", "reference_id": "SC-SC-08", "name": "Encryption in transit", "functions": []},
+            {"id": "c2", "reference_id": "SC-SC-12", "name": "Key management", "functions": []},
+            {"id": "c3", "reference_id": "SC-AC-06", "name": "Least privilege", "functions": []},
+        ],
+        "pipelines_count": 2, "skipped": [], "errors": {},
+    }
+
+
+def test_paramify_by_fetcher(shot, monkeypatch):
+    monkeypatch.setattr(api, "paramify_status", lambda *a, **k: _setup_status())
+    monkeypatch.setattr(api, "list_artifacts", lambda set_id: [])
     assert shot("4")
 
 
