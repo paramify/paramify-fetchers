@@ -503,7 +503,8 @@ def stub_paramify_status(monkeypatch):
                           "token": token},
             "fetchers": fetchers if fetchers is not None else [{
                 "name": "demo_hello", "kind": "evidence",
-                "evidence_set": {"reference_id": "EVD-DEMO-HELLO", "name": "Demo", "id": None, "artifact_count": 0},
+                "evidence_set": {"reference_id": "EVD-DEMO-HELLO", "name": "Demo", "id": None, "exists": False,
+                                 "artifact_count": 0},
                 "script": None, "validators": [], "pairs": [], "ready": False,
             }],
             "capabilities": [], "pipelines_count": 0, "skipped": [], "errors": {},

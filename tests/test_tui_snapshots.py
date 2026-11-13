@@ -142,7 +142,8 @@ def _setup_status() -> dict:
                        "name": label, "paired": ok}
                       for i, (label, ok) in enumerate(paired)]
         return {"name": name, "kind": "evidence",
-                "evidence_set": {"reference_id": ref, "name": name, "id": set_id, "artifact_count": arts},
+                "evidence_set": {"reference_id": ref, "name": name, "id": set_id, "exists": set_id is not None,
+                                 "artifact_count": arts},
                 "script": script, "validators": validators,
                 "pairs": [{"pair_id": f"{name}-p{i}", "validator_key": f"{name}-{v}", "capability_id": c,
                            "function": fn} for i, (c, fn, v) in enumerate(pairs)],

@@ -82,10 +82,13 @@ _SCRIPT_DETAIL = {
 class StatusReady(Message):
     """One api.paramify_status() result (or its error) from the worker thread."""
 
-    def __init__(self, status: dict | None, manifest_path, error: str | None) -> None:
+    def __init__(self, status: dict | None, manifest_path, error: str | None, setup: bool = False) -> None:
         self.status = status
         self.manifest_path = manifest_path
         self.error = error
+        # True when the status could not be built from the local setup (an
+        # unreadable manifest, registry or uploader config), not the workspace.
+        self.setup = setup
         super().__init__()
 
 
@@ -132,12 +135,19 @@ def _fraction(have: int, want: int) -> Text:
     return Text(f"{have}/{want}", style=style)
 
 
+def _unknown() -> Text:
+    """A cell whose read failed: unknown, never a value that looks read."""
+    return Text("?", style=palette.WARN)
+
+
 def _capability_ids(row: dict) -> set:
     return {p["capability_id"] for p in row["pairs"]}
 
 
-def grid_cells(row: dict, online: bool) -> list:
-    """One status row as grid cells (spec §6.3)."""
+def grid_cells(row: dict, online: bool, errors: dict | None = None) -> list:
+    """One status row as grid cells (spec §6.3). A cell whose read failed is
+    "?", as in `paramify status`."""
+    errors = errors or {}
     validators = row["validators"]
     if not online:
         return [
@@ -145,38 +155,66 @@ def grid_cells(row: dict, online: bool) -> list:
             _dim(f"{len(validators)} in registry" if validators else "none"),
             _dim("—"), _dim("—"), _dim("·"),
         ]
-    have = sum(v["paired"] for v in validators)
+    es = row["evidence_set"]
+    sets_unknown = es.get("exists") is None
+    have = sum(v["paired"] is True for v in validators)
     script = _SCRIPT_CELLS.get(row["script"] or "")
     caps = len(_capability_ids(row))
-    arts = row["evidence_set"]["artifact_count"]
+    arts = es["artifact_count"]
+    if sets_unknown:
+        set_cell = _unknown()
+    else:
+        set_cell = Text("✓", style=palette.OK) if es["exists"] else Text("+ create", style=palette.INFO)
+    if row["script"] is None and "scripts" in errors:
+        script_cell = _unknown()
+    else:
+        script_cell = Text(script[0], style=script[1]) if script else _dim("—")
+    if not validators:
+        validators_cell = _dim("none")
+    elif any(v["paired"] is None for v in validators):
+        validators_cell = Text(f"?/{len(validators)}", style=palette.WARN)
+    else:
+        validators_cell = _fraction(have, len(validators))
+    if "capabilities" in errors or sets_unknown:
+        caps_cell = _unknown()
+    else:
+        caps_cell = Text(str(caps)) if caps else _dim("—")
+    if arts is None:
+        arts_cell = _unknown()
+    else:
+        arts_cell = Text(str(arts), style=palette.OK) if arts else _dim("0")
     return [
-        row["name"],
-        Text("✓", style=palette.OK) if row["evidence_set"]["id"] else Text("+ create", style=palette.INFO),
-        Text(script[0], style=script[1]) if script else _dim("—"),
-        _fraction(have, len(validators)) if validators else _dim("none"),
-        Text(str(caps)) if caps else _dim("—"),
-        Text(str(arts), style=palette.OK) if arts else _dim("0"),
+        row["name"], set_cell, script_cell, validators_cell, caps_cell, arts_cell,
         palette.pill("READY", "ok") if row["ready"] else _dim("·"),
     ]
 
 
-def totals_text(rows: list, shown: int) -> Text:
-    """How far each setup step has come, across the fetchers."""
+def totals_text(rows: list, shown: int, errors: dict | None = None) -> Text:
+    """How far each setup step has come, across the fetchers. A count whose
+    read failed is "?", as in `paramify status`."""
+    errors = errors or {}
     n = len(rows)
+    sets_known = "evidence_sets" not in errors
     text = Text()
 
-    def part(label: str, have: int) -> None:
+    def part(label: str, have: int, known: bool = True) -> None:
         text.append(f"{label} ", style=palette.MUTED)
-        text.append_text(_fraction(have, n) if n else Text("0/0"))
+        if not known:
+            text.append(f"?/{n}", style=palette.WARN)
+        else:
+            text.append_text(_fraction(have, n) if n else Text("0/0"))
         text.append("     ")
 
-    part("evidence sets", sum(r["evidence_set"]["id"] is not None for r in rows))
-    part("scripts", sum(r["script"] == "in_sync" for r in rows))
-    part("validators", sum(all(v["paired"] for v in r["validators"]) for r in rows))
+    part("evidence sets", sum(r["evidence_set"].get("exists") is True for r in rows), sets_known)
+    part("scripts", sum(r["script"] == "in_sync" for r in rows), "scripts" not in errors)
+    part("validators", sum(all(v["paired"] is True for v in r["validators"]) for r in rows), sets_known)
     text.append("capabilities ", style=palette.MUTED)
-    text.append(f"{sum(len(r['pairs']) for r in rows)} links")
+    if sets_known and "capabilities" not in errors:
+        text.append(f"{sum(len(r['pairs']) for r in rows)} links")
+    else:
+        text.append("? links", style=palette.WARN)
     text.append("     ")
-    part("uploaded", sum(r["evidence_set"]["artifact_count"] > 0 for r in rows))
+    part("uploaded", sum((r["evidence_set"]["artifact_count"] or 0) > 0 for r in rows), sets_known)
     if shown != n:
         text.append(f"showing {shown} of {n}", style=palette.ACCENT)
     return text
@@ -222,6 +260,7 @@ class ParamifyPage(ParamifyWriter, Vertical):
         self._status_at: float | None = None
         self._status_clock: str = ""
         self._error: str | None = None
+        self._error_setup = False
         self._reading = False
         self._reread = False
         self._stale = True
@@ -335,11 +374,14 @@ class ParamifyPage(ParamifyWriter, Vertical):
     # group would cancel the read that just posted when the re-read starts.
     @work(thread=True, group="paramify-status")
     def _status_worker(self, root, manifest_path) -> None:
+        setup = False
         try:
             status, error = api.paramify_status(root, Path(manifest_path)), None
+        except ValueError as exc:  # an unreadable manifest, registry or uploader config
+            status, error, setup = None, str(exc), True
         except Exception as exc:  # noqa: BLE001 — shown in the problem bar
             status, error = None, str(exc)
-        self.post_message(StatusReady(status, manifest_path, error))
+        self.post_message(StatusReady(status, manifest_path, error, setup))
 
     def on_status_ready(self, message: StatusReady) -> None:
         self._reading = False
@@ -351,6 +393,7 @@ class ParamifyPage(ParamifyWriter, Vertical):
             else:
                 self._draw_summary()
             return
+        self._error_setup = message.setup
         if message.error is not None:
             self._error = message.error
         else:
@@ -383,7 +426,10 @@ class ParamifyPage(ParamifyWriter, Vertical):
         problem: str | None = None
         if self._error is not None:
             since = f" This is the status from {self._status_clock}." if status else ""
-            problem = f"Could not read the workspace: {self._error}.{since} ctrl+r to try again."
+            if self._error_setup:
+                problem = f"{self._error.rstrip('.')}.{since} Fix it, then press ctrl+r."
+            else:
+                problem = f"Could not read the workspace: {self._error}.{since} ctrl+r to try again."
         elif status is not None and not status["workspace"]["token"]:
             problem = NO_TOKEN
         elif status is not None:
@@ -436,7 +482,7 @@ class ParamifyPage(ParamifyWriter, Vertical):
         shown = self._shown(rows)
         grid.clear()
         for row in shown:
-            grid.add_row(*grid_cells(row, online), key=row["name"])
+            grid.add_row(*grid_cells(row, online, status["errors"]), key=row["name"])
         empty = not rows
         panel.set_class(empty, "empty")
         detail.display = not empty and not self.query_one("#pf-activity-panel").display
@@ -448,7 +494,7 @@ class ParamifyPage(ParamifyWriter, Vertical):
             return
         ready = sum(r["ready"] for r in rows)
         panel.border_title = f"evidence sets ({len(rows)})" + (f"  ·  {ready} ready" if online else "")
-        self.query_one("#pf-totals", Static).update(totals_text(rows, len(shown)))
+        self.query_one("#pf-totals", Static).update(totals_text(rows, len(shown), status["errors"]))
         target = self._landing(keep, rows, shown)
         if target is not None:
             grid.move_cursor(row=grid.get_row_index(target))
@@ -512,7 +558,7 @@ class ParamifyPage(ParamifyWriter, Vertical):
         self.query_one("#pf-set", Static).update(self._set_info(row, online))
         self._show_caps(row, online)
         set_id = row["evidence_set"]["id"]
-        if online and set_id and row["evidence_set"]["artifact_count"] and set_id not in self._newest:
+        if online and set_id and (row["evidence_set"]["artifact_count"] or 0) and set_id not in self._newest:
             self._artifacts_worker(set_id)
 
     def _set_info(self, row: dict, online: bool) -> Group:
@@ -521,14 +567,20 @@ class ParamifyPage(ParamifyWriter, Vertical):
         info.add_column()
         es = row["evidence_set"]
         if online:
-            info.add_row("evidence set", Text(es["reference_id"], style=palette.INFO) if es["id"]
-                         else Text(f"{es['reference_id']}  created by the scripts sync", style=palette.INFO))
+            if es.get("exists") is None:
+                info.add_row("evidence set", Text(f"{es['reference_id']}  ? not read", style=palette.WARN))
+            else:
+                info.add_row("evidence set", Text(es["reference_id"], style=palette.INFO) if es["exists"]
+                             else Text(f"{es['reference_id']}  created by the scripts sync", style=palette.INFO))
             label, style = _SCRIPT_DETAIL.get(row["script"] or "", ("—", palette.MUTED))
             info.add_row("script", Text(label, style=style))
             arts = es["artifact_count"]
             newest = self._newest.get(es["id"])
-            info.add_row("artifacts", Text(f"{arts}" + (f"  newest {newest}" if newest else ""))
-                         if arts else _dim("none yet"))
+            if arts is None:
+                info.add_row("artifacts", _unknown())
+            else:
+                info.add_row("artifacts", Text(f"{arts}" + (f"  newest {newest}" if newest else ""))
+                             if arts else _dim("none yet"))
         else:
             info.add_row("evidence set", Text(es["reference_id"]))
         body: list = [Text(row["name"], style="bold"), Text(""), info, Text("")]
@@ -536,8 +588,12 @@ class ParamifyPage(ParamifyWriter, Vertical):
         if validators:
             table = Table.grid(padding=(0, 1))
             for i, v in enumerate(validators):
-                mark = (Text("✓", style=palette.OK) if v["paired"] else Text("+", style=palette.INFO)) if online \
-                    else _dim("·")
+                if not online:
+                    mark = _dim("·")
+                elif v["paired"] is None:
+                    mark = _unknown()
+                else:
+                    mark = Text("✓", style=palette.OK) if v["paired"] else Text("+", style=palette.INFO)
                 table.add_row(Text(f"V{i + 1}", style=palette.ACCENT), mark, Text(v["name"]))
             body += [_dim("validators"), table]
         else:
@@ -550,13 +606,19 @@ class ParamifyPage(ParamifyWriter, Vertical):
         empty = self.query_one("#pf-caps-empty", Static)
         table.clear(columns=True)
         status = self._status or {}
-        error = (status.get("errors") or {}).get("capabilities")
-        if not online or error or not row["pairs"]:
+        errors = status.get("errors") or {}
+        error = errors.get("capabilities")
+        # The pairs come from the evidence-set read: unread, "no pairs" is unknown.
+        sets_unknown = row["evidence_set"].get("exists") is None
+        if not online or error or sets_unknown or not row["pairs"]:
             panel.add_class("empty")
             if not online:
                 empty.update(Text(CAPS_OFFLINE))
             elif error:
                 empty.update(Text(f"Could not read the capabilities: {error}", style=palette.WARN))
+            elif sets_unknown:
+                reason = errors.get("evidence_sets") or "not read"
+                empty.update(Text(f"Could not read the evidence sets: {reason}", style=palette.WARN))
             else:
                 empty.update(Text(NO_LINKS))
             return
@@ -849,10 +911,11 @@ class ParamifyPage(ParamifyWriter, Vertical):
         create = outcomes.count("would_create")
         exist = sum(o.startswith("would_skip") for o in outcomes)
         rows = (self._status or {}).get("fetchers") or []
-        missing = sum(1 for r in rows if r["evidence_set"]["id"] is None)
+        missing = sum(1 for r in rows if r["evidence_set"].get("exists") is False)
         # The syncer pairs a validator only when it creates it, so a validator
         # that exists but is not paired stays that way.
-        unpaired = sum(1 for r in rows if r["evidence_set"]["id"] for v in r["validators"] if not v["paired"])
+        unpaired = sum(1 for r in rows if r["evidence_set"].get("exists") for v in r["validators"]
+                       if v["paired"] is False)
         if not create:
             text = f"validators: nothing to create ({exist} in Paramify already)."
             if unpaired:

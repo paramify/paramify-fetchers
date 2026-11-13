@@ -37,10 +37,15 @@ def _validators(*paired: bool) -> list:
              "name": f"check {i}", "paired": p} for i, p in enumerate(paired)]
 
 
-def _row(name, *, set_id="ev", arts=1, script="in_sync", validators=None, pairs=None, ready=False):
-    return {"name": name, "kind": "evidence",
-            "evidence_set": {"reference_id": f"EVD-{name.upper()}", "name": name, "id": set_id,
-                             "artifact_count": arts},
+def _row(name, *, set_id="ev", arts=1, script="in_sync", validators=None, pairs=None, ready=False,
+         unread=False):
+    """One status row. unread=True is a set whose read failed: its id, existence
+    and artifact count are unknown (None)."""
+    es = {"reference_id": f"EVD-{name.upper()}", "name": name, "id": set_id,
+          "exists": set_id is not None, "artifact_count": arts}
+    if unread:
+        es.update(id=None, exists=None, artifact_count=None)
+    return {"name": name, "kind": "evidence", "evidence_set": es,
             "script": script, "validators": _validators() if validators is None else validators,
             "pairs": pairs or [], "ready": ready}
 
@@ -185,6 +190,59 @@ def test_a_read_error_keeps_the_last_grid(tmp_path, monkeypatch, run_tui):
     assert rows == 3
     assert summary.startswith("Could not read the workspace: HTTP 503. This is the status from")
     assert "ctrl+r to try again." in summary
+
+
+def test_an_unreadable_config_shows_as_an_error(tmp_path, monkeypatch, run_tui):
+    """paramify_status raises ValueError for a setup it cannot read (here the
+    uploader config); the page says so in the problem bar and keeps running."""
+    _stub(monkeypatch, ValueError("Could not read uploader config upload.yaml: bad indent"))
+
+    async def body(app, pilot):
+        page = await _open(app, pilot)
+        return (page.query_one("#pf-summary", Static).has_class("problem"), _summary(page),
+                page.query_one("#pf-grid", DataTable).row_count, app.is_running)
+
+    problem, summary, rows, running = run_tui(body, _manifest(tmp_path))
+    assert problem and running and rows == 0
+    assert summary.startswith("Could not read uploader config upload.yaml: bad indent.")
+    assert "Fix it, then press ctrl+r." in summary
+    assert "Could not read the workspace" not in summary
+
+
+def test_a_failed_evidence_set_read_shows_unknowns(tmp_path, monkeypatch, run_tui):
+    """When /evidence fails, exists, artifact_count and paired are None: the grid,
+    totals and detail show "?" for them, as `paramify status` does, never a value
+    that looks read (create, 0, +)."""
+    rows = [_row("alpha", unread=True, validators=[
+        {"key": "k0", "role": "completeness", "name": "check 0", "paired": None}])]
+    _stub(monkeypatch, _status(rows, errors={"evidence_sets": "HTTP 500"}))
+
+    async def body(app, pilot):
+        page = await _open(app, pilot)
+        return (_cells(page, "alpha"), _text(page.query_one("#pf-totals", Static).content),
+                _text(page.query_one("#pf-set", Static).content),
+                _text(page.query_one("#pf-caps-empty", Static).content), _summary(page))
+
+    cells, totals, detail, caps, summary = run_tui(body, _manifest(tmp_path))
+    assert cells == ["alpha", "?", "✓", "?/1", "?", "?", "·"]
+    assert "evidence sets ?/1" in totals and "validators ?/1" in totals and "uploaded ?/1" in totals
+    assert "? links" in totals and "scripts 1/1" in totals
+    assert "EVD-ALPHA  ? not read" in detail and "created by the scripts sync" not in detail
+    assert "V1 ? check 0" in " ".join(detail.split())
+    assert "Could not read the evidence sets: HTTP 500" in caps
+    assert "Could not read evidence sets: HTTP 500." in summary
+
+
+def test_a_failed_scripts_read_shows_an_unknown_script(tmp_path, monkeypatch, run_tui):
+    _stub(monkeypatch, _status([_row("alpha", script=None)], errors={"scripts": "dry run failed"}))
+
+    async def body(app, pilot):
+        page = await _open(app, pilot)
+        return _cells(page, "alpha")[2], _text(page.query_one("#pf-totals", Static).content)
+
+    script, totals = run_tui(body, _manifest(tmp_path))
+    assert script == "?"
+    assert "scripts ?/1" in totals
 
 
 def test_empty_manifest_shows_the_hint(tmp_path, monkeypatch, run_tui):

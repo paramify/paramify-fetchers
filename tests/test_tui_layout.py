@@ -60,7 +60,8 @@ def _fifty() -> dict:
         rows.append({
             "name": f"azure_defender_regulatory_compliance_{i:02d}", "kind": "evidence",
             "evidence_set": {"reference_id": f"EVD-AZURE-DEFENDER-REGULATORY-{i:02d}", "name": "x",
-                             "id": f"ev-{i}" if i % 5 else None, "artifact_count": i % 7},
+                             "id": f"ev-{i}" if i % 5 else None, "exists": bool(i % 5),
+                             "artifact_count": i % 7},
             "script": ("in_sync", "update", "create", "drift")[i % 4], "validators": validators,
             "pairs": [{"pair_id": "p", "validator_key": "k0", "capability_id": "c1", "function": "PROVIDER"}],
             "ready": i % 3 == 0,
