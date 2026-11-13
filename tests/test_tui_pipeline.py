@@ -444,8 +444,8 @@ def test_a_broken_catalog_does_not_stop_the_tui(tmp_path, monkeypatch, run_tui):
 @pytest.mark.parametrize(
     "busy_page, busy_flag, tab, keys",
     [
-        (ParamifyPage, "_running", "5", ("i",)),    # upload or sync running: no scan send
-        (ParamifyPage, "_running", "5", ("C",)),    # ... and no cycle close
+        (ParamifyPage, "_acting", "5", ("i",)),     # upload or sync running: no scan send
+        (ParamifyPage, "_acting", "5", ("C",)),     # ... and no cycle close
         (ParamifyPage, "_planning", "5", ("i",)),   # a preview being planned: no scan send
         (PipelinesPage, "_uploading", "4", ("u",)),  # scan send running: no evidence upload
         (PipelinesPage, "_uploading", "4", ("s",)),  # ... no scripts preview

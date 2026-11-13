@@ -465,3 +465,116 @@ def test_an_empty_manifest_keeps_focus_in_the_page(tmp_path, monkeypatch, run_tu
 
     inside, focused = run_tui(body, _manifest(tmp_path))
     assert inside and focused == "pf-grid-empty"
+
+
+# ---- review fixes ------------------------------------------------------------ #
+
+def _second_manifest(tmp_path: Path) -> Path:
+    m = api.init_manifest()
+    api.add_entry(m, "demo_hello")
+    path = tmp_path / "second.yaml"
+    api.dump_manifest(m, path, REPO_ROOT)
+    return path
+
+
+def test_switching_the_manifest_on_the_tab_reads_the_new_one(tmp_path, monkeypatch, run_tui):
+    other = _second_manifest(tmp_path)
+    second = _status([_row("zulu")])
+    calls = _stub(monkeypatch, _status(), second)
+
+    async def body(app, pilot):
+        page = await _open(app, pilot)
+        app.load_manifest(other)
+        app.screen.reload()
+        await _settle(app, pilot)
+        return _keys(page)
+
+    assert run_tui(body, _manifest(tmp_path)) == ["zulu"]
+    assert Path(calls[-1]) == other
+
+
+def test_a_request_during_a_read_is_not_lost(tmp_path, monkeypatch, run_tui):
+    gate = threading.Event()
+
+    def slow():
+        gate.wait(5)
+        return _status()
+
+    calls = _stub(monkeypatch, _status(), slow, _status([_row("zulu")]))
+
+    async def body(app, pilot):
+        page = await _open(app, pilot)
+        page.request_status()          # a read that blocks
+        await pilot.pause()
+        page.request_status()          # e.g. an action ends during it
+        gate.set()
+        await _settle(app, pilot)
+        await _settle(app, pilot)
+        return _keys(page)
+
+    assert run_tui(body, _manifest(tmp_path)) == ["zulu"]
+    assert len(calls) == 3
+
+
+def test_the_page_stays_a_running_message_pump(tmp_path, monkeypatch, run_tui):
+    """Textual keeps its own _running on every widget; the page must not shadow it."""
+    _stub(monkeypatch, _status())
+
+    async def body(app, pilot):
+        return (await _open(app, pilot)).is_running
+
+    assert run_tui(body, _manifest(tmp_path)) is True
+
+
+def test_the_activity_log_takes_the_detail_row_until_the_cursor_moves(tmp_path, monkeypatch, run_tui):
+    _stub(monkeypatch, _status())
+    monkeypatch.setattr(api, "scripts_sync", lambda root, config_path=None, **kw: {"ok": True})
+
+    async def body(app, pilot):
+        page = await _open(app, pilot)
+        await pilot.press("s")           # nothing to sync: the log shows the result
+        await _settle(app, pilot)
+        during = page.query_one("#pf-activity-panel").display, page.query_one("#pf-detail").display
+        await pilot.press("down")
+        await pilot.pause()
+        after = page.query_one("#pf-activity-panel").display, page.query_one("#pf-detail").display
+        return during, after
+
+    during, after = run_tui(body, _manifest(tmp_path))
+    assert during == (True, False), "the log must replace the detail row, not push the grid down"
+    assert after == (False, True)
+
+
+def test_v_says_when_sets_do_not_exist_yet(tmp_path, monkeypatch, run_tui):
+    from framework.tui.modals import ConfirmModal
+
+    _stub(monkeypatch, _status())   # charlie's set does not exist yet
+    monkeypatch.setattr(api, "sync_validators", lambda root, manifest_path=None, config_path=None, *, dry_run=False,
+                        on_event=None, **kw: on_event({"event": "sync_validator", "key": "k9",
+                                                       "outcome": "would_create"}) or {"ok": True})
+
+    async def body(app, pilot):
+        await _open(app, pilot)
+        await pilot.press("v")
+        await _settle(app, pilot)
+        return str(app.screen._message) if isinstance(app.screen, ConfirmModal) else ""
+
+    confirm = run_tui(body, _manifest(tmp_path))
+    assert "1 evidence set(s) do not exist yet" in confirm and "press s first" in confirm
+    assert "and pair each one with its evidence sets" not in confirm
+
+
+def test_v_says_how_to_pair_validators_that_exist(tmp_path, monkeypatch, run_tui):
+    _stub(monkeypatch, _status())   # bravo has an unpaired validator that already exists
+    monkeypatch.setattr(api, "sync_validators", lambda root, manifest_path=None, config_path=None, *, dry_run=False,
+                        on_event=None, **kw: on_event({"event": "sync_validator", "key": "k1",
+                                                       "outcome": "would_skip_exists"}) or {"ok": True})
+
+    async def body(app, pilot):
+        page = await _open(app, pilot)
+        await pilot.press("v")
+        await _settle(app, pilot)
+        return _text(page.query_one("#pf-activity", Static).content)
+
+    activity = run_tui(body, _manifest(tmp_path))
+    assert "1 validator(s) exist but are not paired" in activity and "in Paramify" in activity

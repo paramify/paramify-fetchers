@@ -25,7 +25,15 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.message import Message
-from textual.widgets import ContentSwitcher, Input, RichLog, Static, Tab, Tabs
+from textual.widgets import (
+    ContentSwitcher,
+    Input,
+    RichLog,
+    Static,
+    Tab,
+    TabbedContent,
+    Tabs,
+)
 
 from framework import api
 from framework.sync.render import render_plan
@@ -186,9 +194,6 @@ class ParamifyPage(ParamifyWriter, Vertical):
 
     def compose(self) -> ComposeResult:
         yield Static("", id="pf-summary")
-        with Vertical(id="pf-activity-panel", classes="panel"):
-            yield Static("", id="pf-activity")
-            yield RichLog(id="pf-log", markup=False, wrap=True, highlight=False)
         yield Tabs(Tab("by fetcher", id="lens-fetcher"), Tab("by capability", id="lens-capability"),
                    id="pf-lens-tabs")
         with ContentSwitcher(initial="pf-by-fetcher", id="pf-lens"):
@@ -204,6 +209,11 @@ class ParamifyPage(ParamifyWriter, Vertical):
                     with Vertical(id="pf-caps-panel", classes="panel"):
                         yield DataTable(id="pf-caps", cursor_type="row")
                         yield Static("", id="pf-caps-empty", classes="empty-hint")
+                # An action's log takes the detail row's place, so the grid keeps
+                # its rows; moving the cursor brings the detail back.
+                with Vertical(id="pf-activity-panel", classes="panel"):
+                    yield Static("", id="pf-activity")
+                    yield RichLog(id="pf-log", markup=False, wrap=True, highlight=False)
             with Vertical(id="pf-by-capability"):
                 yield Static(_dim("Capabilities come in the next step."), id="pf-cap-placeholder")
 
@@ -213,13 +223,14 @@ class ParamifyPage(ParamifyWriter, Vertical):
         self._status_clock: str = ""
         self._error: str | None = None
         self._reading = False
+        self._reread = False
         self._stale = True
         self._newest: dict = {}
         self._rows: dict = {}
         self._filter = ""
         self._needs_work = False
         self._planning = False
-        self._running = False
+        self._acting = False
         activity = self.query_one("#pf-activity-panel", Vertical)
         activity.border_title = "activity"
         activity.display = False
@@ -235,7 +246,9 @@ class ParamifyPage(ParamifyWriter, Vertical):
 
     def on_resize(self) -> None:
         # Spec §7: on a short terminal the grid keeps its rows; the detail gives way.
-        self.query_one("#pf-detail").styles.height = 8 if self.app.size.height < 40 else 13
+        height = 8 if self.app.size.height < 40 else 13
+        self.query_one("#pf-detail").styles.height = height
+        self.query_one("#pf-activity-panel").styles.height = height
 
     # -- hints ------------------------------------------------------------ #
 
@@ -253,7 +266,7 @@ class ParamifyPage(ParamifyWriter, Vertical):
 
     @property
     def _own_busy(self) -> bool:
-        return self._planning or self._running
+        return self._planning or self._acting
 
     def check_action(self, action: str, parameters) -> bool | None:
         if action in ("sync_scripts", "sync_validators", "upload_run"):
@@ -268,13 +281,27 @@ class ParamifyPage(ParamifyWriter, Vertical):
     # -- reading ---------------------------------------------------------- #
 
     def rebuild(self) -> None:
-        """After a manifest load or switch: drop the old status and read again
-        the next time the page is shown (never from here — see the module doc)."""
-        if self._status is not None and self._status_manifest != getattr(self.app, "manifest_path", None):
+        """After a manifest load or switch: drop the old status, and read again
+        now when the page shows, else the next time it is shown."""
+        changed = self._status_manifest != getattr(self.app, "manifest_path", None)
+        if changed and (self._status is not None or self._error is not None):
             self._status = None
             self._rows = {}
+            self._error = None
+            self._newest = {}
+            for table in ("#pf-grid", "#pf-caps"):
+                self.query_one(table, DataTable).clear()
+            self.query_one("#pf-set", Static).update("")
         self._stale = True
         self._draw()
+        if changed and self._page_shown():
+            self.request_status()
+
+    def _page_shown(self) -> bool:
+        try:
+            return self.screen.query_one(TabbedContent).active == "tab-paramify"
+        except Exception:  # noqa: BLE001 — not inside the workspace
+            return False
 
     @property
     def _status_manifest(self):
@@ -294,6 +321,7 @@ class ParamifyPage(ParamifyWriter, Vertical):
 
     def request_status(self) -> None:
         if self._reading:
+            self._reread = True  # read again when this one lands
             return
         path = getattr(self.app, "manifest_path", None)
         if path is None:
@@ -303,7 +331,9 @@ class ParamifyPage(ParamifyWriter, Vertical):
         self._draw_summary()
         self._status_worker(self.app.root_path, path)
 
-    @work(thread=True, exclusive=True, group="paramify-status")
+    # Not exclusive: _reading already keeps one read at a time, and an exclusive
+    # group would cancel the read that just posted when the re-read starts.
+    @work(thread=True, group="paramify-status")
     def _status_worker(self, root, manifest_path) -> None:
         try:
             status, error = api.paramify_status(root, Path(manifest_path)), None
@@ -313,10 +343,14 @@ class ParamifyPage(ParamifyWriter, Vertical):
 
     def on_status_ready(self, message: StatusReady) -> None:
         self._reading = False
+        reread, self._reread = self._reread, False
         if message.manifest_path != getattr(self.app, "manifest_path", None):
-            self._stale = True
-            self._draw_summary()
-            return  # read for a manifest that is no longer open
+            self._stale = True  # read for a manifest that is no longer open
+            if reread:
+                self.request_status()
+            else:
+                self._draw_summary()
+            return
         if message.error is not None:
             self._error = message.error
         else:
@@ -331,6 +365,8 @@ class ParamifyPage(ParamifyWriter, Vertical):
         # to the next focusable widget: the hint, which takes focus for that.
         self._draw()
         self._refresh_hints()
+        if reread:
+            self.request_status()
 
     # -- rendering -------------------------------------------------------- #
 
@@ -403,7 +439,7 @@ class ParamifyPage(ParamifyWriter, Vertical):
             grid.add_row(*grid_cells(row, online), key=row["name"])
         empty = not rows
         panel.set_class(empty, "empty")
-        detail.display = not empty
+        detail.display = not empty and not self.query_one("#pf-activity-panel").display
         self.query_one("#pf-totals", Static).display = online and not empty
         if empty:
             hint = ONLY_SCAN if status["pipelines_count"] else EMPTY
@@ -460,6 +496,10 @@ class ParamifyPage(ParamifyWriter, Vertical):
 
     def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
         if event.data_table.id == "pf-grid" and event.row_key is not None:
+            # The user moved off the row the log opened on: the detail comes back.
+            if (self.query_one("#pf-activity-panel").display and not self._own_busy
+                    and event.row_key.value != getattr(self, "_activity_key", None)):
+                self._show_activity(False)
             self._show(event.row_key.value)
 
     # -- detail ----------------------------------------------------------- #
@@ -561,22 +601,28 @@ class ParamifyPage(ParamifyWriter, Vertical):
     # -- actions: shared -------------------------------------------------- #
 
     def _begin_log(self, banner) -> None:
-        panel = self.query_one("#pf-activity-panel", Vertical)
-        panel.display = True
         self.query_one("#pf-log", RichLog).clear()
         self._set_banner(banner)
         self._refresh_hints()
 
     def _set_banner(self, renderable) -> None:
-        self.query_one("#pf-activity-panel", Vertical).display = True
+        self._show_activity(True)
         self.query_one("#pf-activity", Static).update(renderable)
+
+    def _show_activity(self, shown: bool) -> None:
+        """The log and the detail row share one slot under the grid."""
+        self.query_one("#pf-activity-panel", Vertical).display = shown
+        has_rows = bool((self._status or {}).get("fetchers"))
+        self.query_one("#pf-detail").display = not shown and has_rows
+        if shown:
+            self._activity_key = self._cursor_key()
 
     def _log(self, line: Text) -> None:
         self.query_one("#pf-log", RichLog).write(line)
 
     def _done(self, banner: Text) -> None:
         """An action ended: say how, re-read the workspace, and re-enable the keys."""
-        self._planning = self._running = False
+        self._planning = self._acting = False
         self._set_banner(banner)
         self.request_status()
         self._refresh_hints()
@@ -637,7 +683,7 @@ class ParamifyPage(ParamifyWriter, Vertical):
     def _confirm_upload(self, run_dir: str, body: str, question: str, error: bool, manifest_path) -> None:
         def go(ok: bool) -> None:
             if ok and not error:
-                self._running = True
+                self._acting = True
                 self._begin_log(Text("uploading to Paramify…", style=palette.WARN))
                 self._upload_worker(run_dir, self.app.root_path, manifest_path)
             self._refresh_hints()
@@ -730,7 +776,7 @@ class ParamifyPage(ParamifyWriter, Vertical):
 
         def go(ok: bool) -> None:
             if ok:
-                self._running = True
+                self._acting = True
                 self._begin_log(Text("syncing scripts…", style=palette.WARN))
                 self._scripts_worker(self.app.root_path, names)
             else:
@@ -802,23 +848,34 @@ class ParamifyPage(ParamifyWriter, Vertical):
         self._planning = False
         create = outcomes.count("would_create")
         exist = sum(o.startswith("would_skip") for o in outcomes)
+        rows = (self._status or {}).get("fetchers") or []
+        missing = sum(1 for r in rows if r["evidence_set"]["id"] is None)
+        # The syncer pairs a validator only when it creates it, so a validator
+        # that exists but is not paired stays that way.
+        unpaired = sum(1 for r in rows if r["evidence_set"]["id"] for v in r["validators"] if not v["paired"])
         if not create:
-            self._done(Text(f"validators: nothing to create ({exist} in Paramify already)", style=palette.OK))
+            text = f"validators: nothing to create ({exist} in Paramify already)."
+            if unpaired:
+                text += (f" {unpaired} validator(s) exist but are not paired with their evidence set."
+                         " Pair them in Paramify.")
+            self._done(Text(text, style=palette.WARN if unpaired else palette.OK))
             return
 
         def go(ok: bool) -> None:
             if ok:
-                self._running = True
+                self._acting = True
                 self._begin_log(Text("syncing validators…", style=palette.WARN))
                 self._validators_worker(self.app.root_path, manifest_path)
             else:
                 self._set_banner(Text("validators sync cancelled", style=palette.MUTED))
             self._refresh_hints()
 
-        self.app.push_screen(ConfirmModal(
-            f"Create {create} validator(s) in {self._base_url()} and pair each one with its evidence sets? "
-            f"{exist} exist already and stay as they are."
-        ), go)
+        if missing:
+            ask = (f"Create {create} validator(s) in {self._base_url()}? {missing} evidence set(s) do not exist "
+                   "yet, and a validator is paired only when it is created: press s first to create the sets.")
+        else:
+            ask = f"Create {create} validator(s) in {self._base_url()} and pair each one with its evidence sets?"
+        self.app.push_screen(ConfirmModal(f"{ask} {exist} exist already and stay as they are."), go)
 
     @work(thread=True, exclusive=True, group="paramify-action")
     def _validators_worker(self, root, manifest_path) -> None:
