@@ -18,13 +18,13 @@ from framework.tui.components.chrome import AppHeader, HintFooter
 from framework.tui.screens.catalog import CatalogPanel
 from framework.tui.screens.evidence import EvidencePage
 from framework.tui.screens.fetchers import FetchersPage
+from framework.tui.screens.paramify import ParamifyPage
 from framework.tui.screens.pipelines import PipelinesPage
 from framework.tui.screens.run import RunPage
-from framework.tui.screens.upload import UploadPage
 
 
 class WorkspaceScreen(Screen):
-    TAB_IDS = ["tab-fetchers", "tab-run", "tab-evidence", "tab-upload", "tab-pipelines"]
+    TAB_IDS = ["tab-fetchers", "tab-run", "tab-evidence", "tab-paramify", "tab-pipelines"]
 
     # A one-shot callable that overrides the default focus for the next pane
     # activation (used by the search shortcut to land on the filter box instead
@@ -60,8 +60,8 @@ class WorkspaceScreen(Screen):
                 yield RunPage(id="run-page")
             with TabPane("Evidence", id="tab-evidence"):
                 yield EvidencePage(id="evidence-page")
-            with TabPane("Paramify", id="tab-upload"):
-                yield UploadPage(id="upload-page")
+            with TabPane("Paramify", id="tab-paramify"):
+                yield ParamifyPage(id="paramify-page")
             # "beta": a tag after the name, in the theme's warning color.
             with TabPane("Pipelines [$warning]beta[/]", id="tab-pipelines"):
                 yield PipelinesPage(id="pipelines-page")
@@ -81,7 +81,7 @@ class WorkspaceScreen(Screen):
             self.query_one(EvidencePage).rebuild_runs()
         except Exception:
             pass
-        for page in (UploadPage, PipelinesPage):
+        for page in (ParamifyPage, PipelinesPage):
             try:
                 self.query_one(page).rebuild()
             except Exception:
