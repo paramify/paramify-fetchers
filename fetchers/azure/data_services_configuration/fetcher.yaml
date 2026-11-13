@@ -1,16 +1,7 @@
 name: azure_data_services_configuration
 version: 0.2.1
-description: >
-  Inventories three data services in the subscription: Azure DocumentDB / Cosmos DB for MongoDB
-  vCore clusters (Microsoft.DocumentDB/mongoClusters), Azure Data Explorer clusters (Microsoft.Kusto)
-  and Event Hubs namespaces (Microsoft.EventHub). For every one: how reachable it is from the internet
-  (public network access, firewall or IP rules with allow-all rules flagged, private endpoints), how
-  clients authenticate (native or shared-key authentication still enabled, or Microsoft Entra ID), the
-  minimum TLS version where the service has one, customer-managed key encryption, high availability or
-  zone redundancy, and whether audit logs are exported. For Data Explorer also: which external tenants
-  are trusted, purge rights, each database's retention, and every cluster and database principal
-  assignment with its role. For Event Hubs also: every shared access policy with its rights, and each
-  event hub's retention and capture.
+description: >-
+  Shows whether MongoDB vCore clusters, Data Explorer clusters and Event Hubs namespaces limit network access, avoid shared keys, restrict admin rights, use customer-managed keys and export audit logs.
 category: azure
 
 config_schema:
@@ -78,71 +69,107 @@ ksis:
 evidence_set:
   reference_id: EVD-AZURE-DATA-SERVICES-CONFIG
   name: Azure Data Services Configuration
-  instructions: >
-    Script: azure/data_services_configuration/fetcher.py. Azure SDK calls: azure-mgmt-mongocluster MongoClusterMgmtClient
-    mongo_clusters.list() and firewall_rules.list_by_mongo_cluster per cluster; azure-mgmt-kusto
-    KustoManagementClient clusters.list(), cluster_principal_assignments.list, databases.list_by_cluster and
-    database_principal_assignments.list per cluster and database; azure-mgmt-eventhub
-    EventHubManagementClient namespaces.list(), namespaces.get_network_rule_set,
-    namespaces.list_authorization_rules, event_hubs.list_by_namespace and
-    event_hubs.list_authorization_rules per namespace and hub; azure-mgmt-monitor
-    diagnostic_settings.list for each cluster and namespace. No call reads a key, connection string or
-    administrator password.
-    MongoDB clusters: public_access is disabled when publicNetworkAccess is Disabled; otherwise only
-    firewall rules admit traffic, judged on the distinct addresses all rules admit together
-    (firewall_allowed_address_count and firewall_allowed_address_percentage, overlaps merged, the
-    Azure-services rule excluded): allow_all when that is every IPv4 address (so a range split into
-    halves counts), broad when it is wider than a /8 (16,777,216 addresses) or when the "allow Azure
-    services" rule is present (it admits every Azure-hosted client from any tenant), restricted when narrower,
-    and no_rules when there are none (nothing public can connect); null when the rules could not be
-    read. Each rule also carries its own address_count, so a validator can set a stricter threshold. allow_azure_services marks the 0.0.0.0-0.0.0.0 rule.
-    tls_enforced_by_platform is always true: MongoDB vCore accepts TLS 1.2 and above only and has no
-    setting to weaken it, so no TLS field is read. auth_modes lists the allowed authentication modes
-    (NativeAuth is username and password, MicrosoftEntraID is Entra). high_availability_enabled is true for any target mode other than
-    Disabled. customer_managed_key is true when customer-managed key encryption is set. data_api_enabled
-    is the Data API (HTTP access to the cluster). audit_logs_exported is true when a diagnostic setting
-    with a destination enables vCoreMongoRequests or the audit or allLogs group.
-    Data Explorer clusters: network_exposure is private when publicNetworkAccess is Disabled, restricted
-    when allowed_ip_ranges is set and does not admit every IPv4 address, and open otherwise (an empty
-    allow-list, or one such as 0.0.0.0/0, does not restrict). vnet_injected is true when the cluster has
-    a VNet configuration whose state is not Disabled (vnet_injection_state records it; Disabled means the
-    cluster has left the VNet).
-    trusts_any_tenant is true when trustedExternalTenants contains "*", which lets principals from any
-    Entra tenant be granted access. purge_enabled allows hard deletion of records. Each database records
-    soft_delete_days (retention) and hot_cache_days. callout_policies are the cluster's rules for
-    calling out to external services (SQL, web APIs, storage), read from the cluster itself (the
-    listCalloutPolicies action needs more than Reader; an empty list means none is set); allowed marks
-    those with outbound access Allow. Principal assignments at cluster and database level carry the role, principal type
-    (User, Group, App), name and id as Azure returns them (the name of a user principal includes the
-    sign-in address, as the portal shows it); admin is true for AllDatabasesAdmin and Admin. audit_logs_exported is true when a setting enables Command, Query,
-    Journal or the audit or allLogs group.
-    Event Hubs namespaces: tls_below_1_2 is true when minimumTlsVersion is 1.0 or 1.1.
-    network_exposure is private when the namespace's or the network rule set's publicNetworkAccess is
-    Disabled, restricted when the rule set's default action is Deny (open if an IP rule such as
-    0.0.0.0/0 then admits every IPv4 address), open otherwise, and null when the
-    rule set could not be read and the namespace does not disable public access. local_auth_enabled is
-    true unless disableLocalAuth is true (it defaults to false). authorization_rules lists each shared
-    access policy and its rights; shared_key_full_control is true when local auth is enabled and a
-    policy has Manage rights (full control of the namespace with one key). customer_managed_key is true
-    when encryption.keySource is Microsoft.KeyVault. geo_replica_regions counts secondary regions in
-    the namespace's geo-replication. Each event hub records retention, cleanup policy, capture and
-    its own authorization rules, with manage_rights_rules naming those that grant Manage. audit_logs_exported is true when a setting enables
-    RuntimeAuditLogs or the audit or allLogs group.
-    Lists that could not be read are null and set metadata.partial_failure.
-    provider_registration_status_mongo_clusters (Microsoft.DocumentDB), _data_explorer
-    (Microsoft.Kusto) and _event_hubs (Microsoft.EventHub) are reported separately.
+  instructions: |
+    Script: azure/data_services_configuration/fetcher.py
 
-    Clusters and namespaces the resource_exclusions patterns take out are listed under
-    results.excluded instead, each with the pattern that matched (kind mongo_cluster,
-    data_explorer_cluster or event_hub_namespace); their children are never read, so the principal,
-    event hub and database counts cover only in-scope parents.
+    Access: Reader on the subscription.
+
+    Commands Executed:
+    - subscriptions.list() — picks a subscription when none is set
+    - providers.get() for Microsoft.DocumentDB, Microsoft.Kusto and Microsoft.EventHub — tells "not registered" from "none there", for each provider
+    - mongo_clusters.list() — MongoDB vCore clusters with their public access, authentication, high availability, encryption and private endpoint settings
+    - firewall_rules.list_by_mongo_cluster() (per cluster) — the IP ranges each cluster's firewall admits
+    - clusters.list() — Data Explorer clusters with their network, encryption, tenant trust and callout policy settings; callout policies are read from the cluster itself, since the listCalloutPolicies action needs more than Reader
+    - cluster_principal_assignments.list() (per cluster) — who holds which role on the cluster
+    - databases.list_by_cluster() and database_principal_assignments.list() (per cluster and database) — databases, their retention and who holds which role on each
+    - namespaces.list() — Event Hubs namespaces with their TLS, local authentication, redundancy and encryption settings
+    - namespaces.get_network_rule_set() (per namespace) — the namespace's default network action and IP and virtual network rules
+    - namespaces.list_authorization_rules() (per namespace) — shared access policies and their rights
+    - event_hubs.list_by_namespace() and event_hubs.list_authorization_rules() (per namespace and event hub) — event hubs with their retention and capture, and each hub's shared access policies
+    - diagnostic_settings.list() (per cluster and namespace) — whether audit logs are exported
+
+    Output: azure_data_services_configuration_<subscription>.json — each MongoDB vCore cluster, Data Explorer cluster and Event Hubs namespace with its network access, authentication, access rights, encryption and audit log export, plus the resources left out and why; no key, connection string or administrator password is read, and a MongoDB cluster's tls_enforced_by_platform is always true, because the service accepts only TLS 1.2 or later and has no TLS setting to read.
+
+    Summary fields:
 
     Which resources are left out of scope?
-      - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
-      - resource_exclusion_patterns_unmatched — List of configured patterns that matched no Mongo vCore cluster, Data Explorer cluster or Event Hubs namespace, such as a mistyped name, or null when a list could not be read
-      - excluded_mongo_clusters — Number of Mongo vCore clusters left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, and no other count includes them; null if the list couldn't be read
-      - excluded_data_explorer_clusters — Number of Data Explorer clusters left out of scope the same way; their databases and principals leave with them; null if the list couldn't be read
-      - excluded_event_hub_namespaces — Number of Event Hubs namespaces left out of scope the same way; their event hubs and authorization rules leave with them; null if the list couldn't be read
-      - in_scope_mongo_clusters — Number of Mongo vCore clusters read and in scope; null if the list couldn't be read
-      - in_scope_data_explorer_clusters — Number of Data Explorer clusters read and in scope; null if the list couldn't be read
-      - in_scope_event_hub_namespaces — Number of Event Hubs namespaces read and in scope; null if the list couldn't be read, and 0 for all three kinds means there are none or the patterns took out every one, which a check can catch by requiring more than 0
+    - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
+    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no MongoDB vCore cluster, Data Explorer cluster or Event Hubs namespace, such as a mistyped name; null when any of the three lists could not be read
+    - excluded_mongo_clusters — Number of MongoDB vCore clusters left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, their children are never read and no other count includes them; null when the MongoDB cluster list could not be read
+    - excluded_data_explorer_clusters — Number of Data Explorer clusters left out of scope the same way; their databases and principals leave with them; null when the Data Explorer cluster list could not be read
+    - excluded_event_hub_namespaces — Number of Event Hubs namespaces left out of scope the same way; their event hubs and authorization rules leave with them; null when the namespace list could not be read
+    - in_scope_mongo_clusters — Number of MongoDB vCore clusters read and in scope; null when the MongoDB cluster list could not be read
+    - in_scope_data_explorer_clusters — Number of Data Explorer clusters read and in scope; null when the Data Explorer cluster list could not be read
+    - in_scope_event_hub_namespaces — Number of Event Hubs namespaces read and in scope; null when the namespace list could not be read; 0 for all three kinds means there are none or the patterns took out every one, which a check can catch by requiring more than 0
+
+    What was checked?
+    - total_mongo_clusters — Number of in-scope MongoDB vCore (Azure DocumentDB) clusters; reads 0, not null, when the list could not be read, so read it together with in_scope_mongo_clusters
+    - total_data_explorer_clusters — Number of in-scope Azure Data Explorer clusters; reads 0, not null, when the list could not be read, so read it together with in_scope_data_explorer_clusters
+    - total_event_hub_namespaces — Number of in-scope Event Hubs namespaces; reads 0, not null, when the list could not be read, so read it together with in_scope_event_hub_namespaces
+    - total_event_hubs — Number of event hubs across all in-scope namespaces whose event hubs could be read; a namespace whose event hub list couldn't be read adds none, and no count shows it (the run fails)
+    - provider_registration_status_mongo_clusters — Whether Microsoft.DocumentDB is registered on the subscription: registered, not_registered or unknown
+    - provider_registration_status_data_explorer — Whether Microsoft.Kusto is registered on the subscription: registered, not_registered or unknown
+    - provider_registration_status_event_hubs — Whether Microsoft.EventHub is registered on the subscription: registered, not_registered or unknown
+
+    Can MongoDB clusters be reached from the internet?
+    - mongo_clusters_public_access_disabled — Number of MongoDB clusters whose public network access is Disabled; otherwise public access is judged on the distinct IPv4 addresses all firewall rules admit together (overlaps merged, the allow Azure services rule 0.0.0.0-0.0.0.0 left out), and a cluster with no rules at all (nothing public can connect) is in none of the counts below
+    - mongo_clusters_firewall_allow_all — Number of MongoDB clusters whose firewall rules together admit every IPv4 address, even when split across several ranges
+    - mongo_clusters_firewall_broad — Number of MongoDB clusters whose firewall rules together admit more addresses than a /8 (16,777,216) but not every IPv4 address, or that have the allow Azure services rule, which admits every Azure-hosted client from any tenant
+    - mongo_clusters_firewall_restricted — Number of MongoDB clusters whose firewall rules together admit a /8 or fewer addresses and have no allow Azure services rule
+    - mongo_clusters_public_access_unknown — Number of MongoDB clusters whose firewall rules couldn't be read
+    - mongo_clusters_with_private_endpoints — Number of MongoDB clusters with at least one private endpoint connection
+
+    Are MongoDB clusters configured securely?
+    - mongo_clusters_native_auth_enabled — Number of MongoDB clusters that allow native username and password sign-in
+    - mongo_clusters_entra_auth_enabled — Number of MongoDB clusters that allow Microsoft Entra ID sign-in
+    - mongo_clusters_high_availability_enabled — Number of MongoDB clusters with a high availability target mode other than Disabled
+    - mongo_clusters_customer_managed_key — Number of MongoDB clusters encrypted with a customer-managed key
+    - mongo_clusters_data_api_enabled — Number of MongoDB clusters with the Data API (HTTP access to the cluster) turned on
+    - mongo_clusters_audit_logs_exported — Number of MongoDB clusters with audit logs exported: a diagnostic setting that sends to a destination (storage account, Log Analytics, event hub or partner solution) enables vCoreMongoRequests or the audit or allLogs category group
+    - mongo_clusters_audit_logs_unknown — Number of MongoDB clusters whose diagnostic settings couldn't be read
+
+    Can Data Explorer clusters be reached, and what can they reach?
+    - data_explorer_clusters_open_to_all_networks — Number of Data Explorer clusters whose network exposure is open: public network access is on and the allowed IP ranges are empty or admit every IPv4 address, such as 0.0.0.0/0
+    - data_explorer_clusters_network_restricted — Number of Data Explorer clusters whose network exposure is restricted: public network access is on but allowed IP ranges limit who can connect
+    - data_explorer_clusters_private_only — Number of Data Explorer clusters whose network exposure is private: public network access is Disabled
+    - data_explorer_clusters_vnet_injected — Number of Data Explorer clusters deployed into a virtual network (a VNet configuration whose state isn't Disabled)
+    - data_explorer_clusters_outbound_restricted — Number of Data Explorer clusters with outbound network access restricted (restrictOutboundNetworkAccess Enabled)
+    - data_explorer_callout_policies_allowed — Number of callout policies, across all in-scope Data Explorer clusters, that allow queries to call out to an external service (SQL, web APIs, storage); an empty list means none is set
+    - data_explorer_clusters_callout_policies_unknown — Number of Data Explorer clusters whose callout policies couldn't be read; always 0, since the policies come with the cluster list and a cluster returned without them reads as having none
+
+    Is Data Explorer data protected?
+    - data_explorer_clusters_disk_encryption_enabled — Number of Data Explorer clusters with disk encryption turned on
+    - data_explorer_clusters_double_encryption_enabled — Number of Data Explorer clusters with double encryption turned on
+    - data_explorer_clusters_customer_managed_key — Number of Data Explorer clusters encrypted with a customer-managed key (Key Vault properties set)
+    - data_explorer_clusters_purge_enabled — Number of Data Explorer clusters that allow purge (hard deletion of records)
+    - data_explorer_clusters_audit_logs_exported — Number of Data Explorer clusters with audit logs exported: a diagnostic setting that sends to a destination enables Command, Query, Journal or the audit or allLogs category group
+    - data_explorer_clusters_audit_logs_unknown — Number of Data Explorer clusters whose diagnostic settings couldn't be read
+
+    Who has access to Data Explorer?
+    - data_explorer_clusters_trusting_any_tenant — Number of Data Explorer clusters whose trusted external tenants include "*", so users, groups or apps from any Entra tenant can be granted access
+    - data_explorer_principal_assignments — Number of role assignments to users, groups or apps on in-scope Data Explorer clusters and their databases
+    - data_explorer_admin_assignments — Number of Data Explorer role assignments with an admin role (AllDatabasesAdmin or Admin), which can change data or grant access
+    - data_explorer_admin_user_assignments — Number of Data Explorer admin role assignments held by individual users rather than groups or apps
+    - data_explorer_clusters_principals_unknown — Number of Data Explorer clusters whose cluster role assignments, or the role assignments of any database that was listed, couldn't be read; a cluster whose database list couldn't be read isn't counted here (the run fails)
+
+    Can Event Hubs namespaces be reached from the internet?
+    - event_hub_namespaces_open_to_all_networks — Number of Event Hubs namespaces whose network exposure is open: public network access is on and the network rule set's default action is Allow (or unset), or Deny with an IP rule that admits every IPv4 address
+    - event_hub_namespaces_network_restricted — Number of Event Hubs namespaces whose network exposure is restricted: public network access is on but the network rule set's default action is Deny, so only its IP and virtual network rules get in
+    - event_hub_namespaces_private_only — Number of Event Hubs namespaces whose network exposure is private: the namespace or its network rule set sets public network access to Disabled
+    - event_hub_namespaces_network_exposure_unknown — Number of Event Hubs namespaces whose network rule set couldn't be read and that don't disable public network access themselves
+
+    Are Event Hubs namespaces configured securely?
+    - event_hub_namespaces_tls_below_1_2 — Number of Event Hubs namespaces whose minimum TLS version is below 1.2 (1.0 or 1.1)
+    - event_hub_namespaces_local_auth_enabled — Number of Event Hubs namespaces where shared access keys still work (disableLocalAuth isn't true; it defaults to false)
+    - event_hub_namespaces_shared_key_full_control — Number of Event Hubs namespaces where one shared key gives full control: local authentication is on and a namespace shared access policy has Manage rights; a namespace whose shared access policies couldn't be read isn't counted, and no count shows it (the run fails)
+    - event_hub_namespaces_customer_managed_key — Number of Event Hubs namespaces encrypted with a customer-managed key (key source Microsoft.KeyVault)
+    - event_hub_namespaces_zone_redundant — Number of Event Hubs namespaces spread across availability zones
+    - event_hub_namespaces_geo_replicated — Number of Event Hubs namespaces replicated to at least one region besides the primary
+    - event_hub_namespaces_audit_logs_exported — Number of Event Hubs namespaces with audit logs exported: a diagnostic setting that sends to a destination enables RuntimeAuditLogs or the audit or allLogs category group
+    - event_hub_namespaces_audit_logs_unknown — Number of Event Hubs namespaces whose diagnostic settings couldn't be read
+
+    Are individual event hubs protected and retained?
+    - event_hubs_with_capture — Number of event hubs with Capture turned on (events copied to storage)
+    - event_hubs_with_manage_rights_rules — Number of event hubs with at least one of their own shared access policies granting Manage rights
+    - event_hubs_authorization_rules_unknown — Number of event hubs whose shared access policies couldn't be read
+    - event_hubs_minimum_retention_days — Number of days of message retention on the event hub with the shortest retention; null when no event hub reports a retention in days
