@@ -689,6 +689,7 @@ def test_identities_a_refused_role_list_keeps_every_matched_identity(monkeypatch
     results = evidence["results"]
     # Which identities reach in is unknown, so none leaves; the run still fails.
     assert code == 1 and results["excluded"] == []
+    assert evidence["summary"]["resource_exclusion_patterns_unmatched"] is None
     marks = {i["name"]: i.get("kept_by_identity_rule") for i in results["user_assigned_identities"]}
     assert marks == {"id-in": None, "id-out": "rg:rg-out", "id-east": None}
     marks = {i["resource_name"]: i.get("kept_by_identity_rule") for i in results["system_assigned_identities"]}
@@ -714,11 +715,14 @@ def test_identities_a_refused_role_list_keeps_every_matched_identity(monkeypatch
     (run_identities, identities, "resourcegraph.resources(identity)", "system_assigned_identities"),
 ], ids=["clusters", "registries", "environments", "container_apps", "jobs", "container_groups", "function_apps",
         "virtual_machines", "scale_sets", "disks", "services", "user_assigned", "system_assigned"])
-def test_a_refused_list_leaves_its_exclusion_counts_null(runner, module, operation, plural, monkeypatch, tmp_path):
+def test_a_refused_list_leaves_its_exclusion_counts_null(runner, module, operation, plural, monkeypatch, tmp_path,
+                                                         caplog):
     _refuse(monkeypatch, module, operation)
     code, evidence = runner(monkeypatch, tmp_path, "rg:rg-out")[:2]
     summary = evidence["summary"]
     assert code == 1
+    assert summary["resource_exclusion_patterns_unmatched"] is None
+    assert "matched nothing" not in caplog.text
     assert (summary[f"in_scope_{plural}"], summary[f"excluded_{plural}"]) == (None, None)
     # The other lists were read, so their counts stay numbers.
     assert all(v is not None for k, v in summary.items() if k.startswith(("in_scope_", "excluded_")) and
@@ -736,9 +740,11 @@ def test_a_refused_list_leaves_its_exclusion_counts_null(runner, module, operati
     (run_identities, identities, "managed identity clients (init)"),
 ], ids=["aks", "acr", "workloads", "functions", "vms", "disks", "apim", "identities"])
 def test_a_client_that_couldnt_be_built_leaves_every_exclusion_count_null(runner, module, operation, monkeypatch,
-                                                                          tmp_path):
+                                                                          tmp_path, caplog):
     _refuse(monkeypatch, module, operation)
     code, evidence = runner(monkeypatch, tmp_path, "rg:rg-out")[:2]
+    assert evidence["summary"]["resource_exclusion_patterns_unmatched"] is None
+    assert "matched nothing" not in caplog.text
     counts = {k: v for k, v in evidence["summary"].items() if k.startswith(("in_scope_", "excluded_"))}
     assert code == 1 and counts and set(counts.values()) == {None}
 

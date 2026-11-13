@@ -1,5 +1,5 @@
 name: azure_app_service_configuration
-version: 0.5.0
+version: 0.5.1
 description: >-
   Shows how each App Service web app is hardened: TLS and cipher suites, basic-auth publishing, identity, access restrictions, logging, Key Vault references, runtime support and, opt-in, literal secrets.
 category: azure
@@ -111,7 +111,7 @@ evidence_set:
 
     Which resources are left out of scope?
     - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
-    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no web app, such as a mistyped name
+    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no web app, such as a mistyped name; null when the app list could not be read
     - excluded_web_apps — Number of web apps left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, none of its settings are read, and no other count includes it
     - in_scope_web_apps — Number of web apps read and in scope; 0 means none was read or the patterns took out every app, which a check can catch by requiring more than 0
 

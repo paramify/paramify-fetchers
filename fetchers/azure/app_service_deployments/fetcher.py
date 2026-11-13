@@ -643,8 +643,14 @@ def collect_web_apps(subscription_id, cred, collector: Collector, scope: Resourc
     are appended to `excluded` before any per-app read."""
     client = web_client(subscription_id, cred, collector)
     if client is None:
+        if scope is not None:
+            scope.mark_unread()
         return [], 0
-    sites = collector.guard("web.web_apps.list", lambda: [project_site(s) for s in client.web_apps.list()], default=[])
+    sites = collector.guard("web.web_apps.list", lambda: [project_site(s) for s in client.web_apps.list()], default=None)
+    if sites is None:
+        sites = []
+        if scope is not None:
+            scope.mark_unread()
     web_apps = [s for s in sites if is_web_app(s.get("kind"))]
     others = [s for s in sites if not is_web_app(s.get("kind"))]
     out: list[dict] = []
@@ -783,6 +789,8 @@ def main() -> int:
             RuntimeError("no subscription id (set AZURE_SUBSCRIPTION_ID or configure an ambient Azure "
                          "credential that can list subscriptions)"),
         )
+    if not (subscription_id and cred is not None):
+        scope.mark_unread()
     scope.warn_unmatched(logger)
 
     evidence = build_payload(

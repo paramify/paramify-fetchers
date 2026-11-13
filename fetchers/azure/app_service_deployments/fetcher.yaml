@@ -1,5 +1,5 @@
 name: azure_app_service_deployments
-version: 0.3.0
+version: 0.3.1
 description: >-
   Shows how each App Service web app and slot is deployed: recorded deployments, slot swaps and publishing-credential retrievals with who and when, deployment source, and slot drift from production.
 category: azure
@@ -106,7 +106,7 @@ evidence_set:
 
     Which resources are left out of scope?
     - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
-    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no web app, function app, deployment slot or site an Activity Log request was made on, such as a mistyped name
+    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no web app, function app, deployment slot or site an Activity Log request was made on, such as a mistyped name; null when the app list could not be read
     - boundary_excluded_web_apps — Number of web apps left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, none of its deployments, source, slots or settings are read, Activity Log requests made on it or its slots are not counted, and no other count includes it
     - boundary_excluded_function_apps — Number of function apps and other sites that aren't web apps left out of scope the same way; excluded_function_apps leaves them out
     - boundary_excluded_deployment_slots — Number of deployment slots of in-scope web apps left out of scope because a pattern matched them (in practice an id: pattern naming the slot, since a slot shares its app's resource group and region); each is listed under excluded, gets no reads and is not compared with production. An excluded app's slots are never read, so they are not counted here

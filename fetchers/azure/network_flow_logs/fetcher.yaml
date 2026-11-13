@@ -1,5 +1,5 @@
 name: azure_network_flow_logs
-version: 0.2.0
+version: 0.2.1
 description: >
   Inventories Azure Network Watcher and flow logs in the subscription, and works out which virtual
   networks' traffic is logged. For every Network Watcher: its region. For every flow log: what it
@@ -132,7 +132,7 @@ evidence_set:
     subnets_matched and leaves every count. Summary fields:
     resource_exclusion_patterns (the configured patterns, empty when none
     are set), resource_exclusion_patterns_unmatched (patterns that matched
-    nothing, such as a mistyped name), excluded_network_watchers,
+    nothing, such as a mistyped name, or null when a resource list couldn't be read), excluded_network_watchers,
     excluded_flow_logs, excluded_virtual_networks, excluded_subnets (how
     many the patterns took out) and in_scope_network_watchers,
     in_scope_flow_logs, in_scope_virtual_networks, in_scope_subnets (how

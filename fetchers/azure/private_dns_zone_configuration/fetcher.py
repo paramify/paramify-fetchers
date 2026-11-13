@@ -869,6 +869,9 @@ def main() -> int:
     zones, excluded = exclusions.split(zones, "private_dns_zone", location=lambda z: None)
     in_scope_names = {z["name"].lower() for z in zones}
     duplicates = [d for d in duplicates if d["name"] in in_scope_names]
+    unread_ops = ("privatedns.PrivateDnsManagementClient (init)", "privatedns.private_zones.list")
+    if not (subscription_id and cred is not None) or any(f["operation"].startswith(unread_ops) for f in collector.failures):
+        exclusions.mark_unread()
     exclusions.warn_unmatched(logger)
 
     evidence = build_payload(

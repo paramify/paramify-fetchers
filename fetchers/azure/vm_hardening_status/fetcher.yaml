@@ -1,5 +1,5 @@
 name: azure_vm_hardening_status
-version: 0.3.0
+version: 0.3.1
 description: >
   For every virtual machine and virtual machine scale set in the subscription,
   reports the hardening configuration: Trusted Launch (security type plus the UEFI
@@ -92,7 +92,7 @@ evidence_set:
     results.excluded instead, each with the pattern that matched; the summary gives
     resource_exclusion_patterns (the configured patterns, empty when none are set),
     resource_exclusion_patterns_unmatched (patterns that matched no virtual machine or scale
-    set, such as a mistyped name), excluded_virtual_machines and excluded_scale_sets (how many
+    set, such as a mistyped name, or null when the virtual machine or scale set list could not be read), excluded_virtual_machines and excluded_scale_sets (how many
     the patterns took out, null if the list couldn't be read; no other count includes them) and in_scope_virtual_machines and
     in_scope_scale_sets (how many stayed; null if the list couldn't be read, and 0 means there are none or the patterns took out every
     one).

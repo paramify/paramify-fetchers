@@ -1,5 +1,5 @@
 name: azure_app_service_plans
-version: 0.3.0
+version: 0.3.1
 description: >
   Every App Service plan in the subscription with its SKU (name and tier — Free and
   Shared carry no SLA), provisioned instance count (sku.capacity), zone redundancy,
@@ -83,7 +83,7 @@ evidence_set:
     under excluded, and its pattern counts as matched. Every count covers only
     what is in scope, and empty_plans counts plans with no in-scope site.
     resource_exclusion_patterns echoes the patterns,
-    resource_exclusion_patterns_unmatched lists those that matched nothing,
+    resource_exclusion_patterns_unmatched lists those that matched nothing (null when the plan or site list could not be read),
     excluded_app_service_plans and excluded_sites count what was taken out, and
     in_scope_app_service_plans (plans kept for an in-scope site included) and
     in_scope_sites what is left (0 means none was read or the patterns took out

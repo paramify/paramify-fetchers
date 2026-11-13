@@ -1,5 +1,5 @@
 name: azure_key_vault_key_rotation
-version: 0.6.0
+version: 0.6.1
 description: >-
   Shows whether Key Vault keys rotate, whether keys and secrets have an expiry and when certificates expire, whether certificates renew themselves, and where each App Service certificate comes from.
 category: azure
@@ -99,7 +99,7 @@ evidence_set:
 
     Which resources are left out of scope?
     - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
-    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no key vault, key, secret, Key Vault certificate or App Service certificate, such as a mistyped name
+    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no key vault, key, secret, Key Vault certificate or App Service certificate, such as a mistyped name, or null when the key vault or App Service certificate list could not be read
     - excluded_key_vaults — Number of key vaults left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, and no other count includes them or their keys, secrets and certificates
     - excluded_keys — Number of keys left out of scope, keys in an excluded vault included; each is listed under excluded
     - excluded_secrets — Number of secrets left out of scope, secrets in an excluded vault included; each is listed under excluded

@@ -939,9 +939,13 @@ def main() -> int:
     exclusions.record_invalid(collector)
     vaults, out = exclude_protected_items(exclusions, vaults)
     excluded += out
-    exclusions.warn_unmatched(logger)
     vaults = read_restore_job_details(subscription_id, cred, collector, vaults)
+    items_read = not any(f["operation"].startswith("recoveryservicesbackup.backup_protected_items.list")
+                         for f in collector.failures)
     restores_read = listed and all(v["restore_jobs_read"] for v in vaults)
+    if not (restores_read and items_read):
+        exclusions.mark_unread()
+    exclusions.warn_unmatched(logger)
 
     evidence = build_payload(
         subscription_id=subscription_id,

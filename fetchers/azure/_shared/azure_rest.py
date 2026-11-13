@@ -592,6 +592,8 @@ def run_workspaces(
             results["workspaces_without_sentinel"] = without_sentinel
             summary["workspaces_without_sentinel"] = len(without_sentinel)
         if exclusions is not None:
+            if not listed:
+                exclusions.mark_unread()
             exclusions.warn_unmatched(logger)
             results["excluded"] = excluded
             summary.update(exclusions.summary(excluded, ("workspace",), {"workspaces": len(found)}))

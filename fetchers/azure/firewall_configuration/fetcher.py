@@ -486,6 +486,8 @@ def collect(client, subscription_id: str, collector: Collector, exclusions: Opti
             if extra:
                 foreign.append(extra)
                 wanted.append(dig(extra, "properties", "basePolicy", "id"))
+    if not (firewalls_read and policies_read):
+        exclusions.mark_unread()
     exclusions.warn_unmatched(logger)
 
     policies: Dict[str, Dict[str, Any]] = {}

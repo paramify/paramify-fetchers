@@ -1,5 +1,5 @@
 name: azure_vpn_gateway_configuration
-version: 0.2.0
+version: 0.2.1
 description: >
   For every Azure VPN Gateway (Microsoft.Network/virtualNetworkGateways) in the subscription,
   reports its type, SKU, generation, active-active and BGP settings and its point-to-site
@@ -99,7 +99,7 @@ evidence_set:
     its verdict. Summary fields: resource_exclusion_patterns (the
     configured patterns, empty when none are set),
     resource_exclusion_patterns_unmatched (patterns that matched nothing,
-    such as a mistyped name), excluded_virtual_network_gateways,
+    such as a mistyped name, or null when a resource list couldn't be read), excluded_virtual_network_gateways,
     excluded_connections, excluded_local_network_gateways (how many the
     patterns took out) and in_scope_virtual_network_gateways,
     in_scope_connections, in_scope_local_network_gateways (how many

@@ -222,7 +222,7 @@ def _methods_user(uid, methods, admin=False):
     return reg
 
 
-def test_phishing_resistant_counts_only_resistant_methods():
+def test_phishing_resistant_counts_only_resistant_methods(assert_summary_documented):
     cases = {
         "p0": (["fido2SecurityKey"], True),
         "p1": (["windowsHelloForBusiness", "mobilePhone"], True),
@@ -243,6 +243,7 @@ def test_phishing_resistant_counts_only_resistant_methods():
     assert by_id["p-none"]["is_phishing_resistant"] is False
     assert by_id["p2"]["is_passwordless_capable"] is True
     summary = mfa_status.summarize(records)
+    assert_summary_documented("azure/entra_mfa_status", summary)
     assert summary["phishing_resistant_enabled_users"] == 7
     assert summary["phishing_resistant_coverage_percentage"] == 70
     assert summary["passwordless_capable_enabled_users"] == 9

@@ -325,6 +325,8 @@ def main() -> int:
             ),
         )
 
+    if collected is None:
+        resources.mark_unread()
     resources.warn_unmatched(logger)
     listed = collected is not None
     collected = collected or []

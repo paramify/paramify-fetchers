@@ -494,6 +494,14 @@ def test_an_unreadable_recovery_point_item_is_a_recorded_failure_not_a_crash(arm
     assert _evidence(tmp_path)["summary"]["backup_instances_recovery_points_unknown"] == 2
 
 
+def test_unmatched_patterns_are_null_when_the_vault_list_was_refused(arm, tmp_path, monkeypatch, caplog):
+    monkeypatch.setenv("AZURE_RESOURCE_EXCLUSIONS", "rg:typo")
+    arm(failed_lists=("/backupVaults",))
+    assert bv.main() == 1
+    assert _evidence(tmp_path)["summary"]["resource_exclusion_patterns_unmatched"] is None
+    assert "matched nothing" not in caplog.text
+
+
 def test_an_invalid_exclusion_pattern_fails_the_run(arm, tmp_path):
     arm()
     with pytest.MonkeyPatch.context() as mp:

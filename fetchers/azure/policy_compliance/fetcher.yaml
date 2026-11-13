@@ -1,16 +1,7 @@
 name: azure_policy_compliance
-version: 0.5.0
-description: >
-  Reads what Azure Policy found on the subscription: the service's counts of
-  non-compliant resources and policies, overall and per assignment, and a bounded
-  list of non-compliant (resource, policy) records with the expressions Azure
-  evaluated; a resource whose read Azure refuses is marked not_authorized rather
-  than failing the run. It also lists remediation tasks with their per-resource
-  deployments, each checked against the resource's latest state, and counts from
-  30 days of history which pairs were non-compliant throughout or only some of the
-  time. A subscription that never registered Microsoft.PolicyInsights reports
-  provider_registration_status: not_registered, which is valid evidence rather than
-  a collection failure.
+version: 0.5.1
+description: >-
+  Shows what Azure Policy found non-compliant on the subscription and why, whether remediation tasks fixed it, and which non-compliance keeps coming back.
 category: azure
 
 supports_targets: true
@@ -143,63 +134,103 @@ ksis:
 evidence_set:
   reference_id: EVD-AZURE-POLICY-COMPLIANCE
   name: Azure Policy Compliance State
-  instructions: >
-    Script: azure/policy_compliance/fetcher.py. Azure SDK calls (azure-mgmt-policyinsights
-    PolicyInsightsClient): resource.providers.get("Microsoft.PolicyInsights"), then
-    policy_states.summarize_for_subscription("latest", <subscription_id>),
-    policy_states.list_query_results_for_subscription("latest", <subscription_id>,
-    query_options=QueryOptions(filter="complianceState eq 'NonCompliant'", top=N+1);
-    no top when resource_exclusions is set, the limit then counting in-scope states only),
-    per listed resource policy_states.list_query_results_for_resource("latest",
-    <resource_id>, query_options=QueryOptions(filter="ComplianceState eq
-    'NonCompliant'", expand="PolicyEvaluationDetails")),
-    policy_states.list_query_results_for_subscription("default", ...) over the last 30
-    days grouped per (resource, region, policy, compliance state) and a count of those groups,
-    and per intermittent pair the same query filtered to that pair and ordered by
-    time, remediations.list_for_subscription(), and per task
-    remediations.list_deployments_at_subscription / _at_resource_group /
-    _at_management_group / _at_resource, then latest-state queries (resource, state,
-    time) for the task's policy, filtered to its remediated resources 20 at a time.
-    With resource_exclusions set, also policy_states.list_query_results_for_subscription("latest",
-    <subscription_id>, query_options=QueryOptions(apply="groupby((ResourceId, ResourceLocation,
-    PolicyAssignmentId, PolicyDefinitionId, PolicyDefinitionReferenceId, ComplianceState))"))
-    after the same query counting those groups, up to 50,000 groups (a count over that
-    skips the read).
-    Reader on the subscription. A per-resource details read refused with a 403 or an
-    AuthorizationFailed error code is retried once (at most 3 retries a run), then
-    marks that resource's states not_authorized instead of failing the run.
-    Assignments, non-compliant states, remediation tasks and remediation
-    deployments the resource_exclusions patterns take out are listed under
-    results.excluded instead (a state's or deployment's entry carries its
-    resource's id); the summary gives resource_exclusion_patterns (the configured
-    patterns, empty when none are set), resource_exclusion_patterns_unmatched
-    (patterns that matched nothing, such as a mistyped name),
-    excluded_policy_assignments, excluded_policy_states, excluded_remediation_tasks
-    and excluded_remediation_deployments (how many the patterns took out; no
-    itemized count includes them), and in_scope_policy_assignments,
-    in_scope_policy_states, in_scope_remediation_tasks and
-    in_scope_remediation_deployments (how many stayed). With patterns set,
-    non_compliant_resources, non_compliant_policies, compliant_resources,
-    resources_evaluated, resource_compliance_percentage, resources_by_compliance_state,
-    policies_by_compliance_state, non_compliant_assignments, compliant_assignments
-    and the same figures in results.subscription_compliance and
-    results.assignment_compliance (each assignment's counts, resource_details,
-    compliance_percentage, is_compliant and failing members) are recounted over the
-    in-scope latest (resource, policy) states: a resource counts once under its
-    highest-ranked state (NonCompliant, Compliant, Error, Conflict, Protected,
-    Exempt, Unknown), a policy the same way (at subscription scope an assignment,
-    an initiative counting once, as the service counts them; within an assignment
-    a member policy), and a by-state map
-    keeps the service's states, at 0 when none is in scope. They are null (each
-    map's values too) unless the grouped read came back whole, and
-    in_scope_states_status says how it went: read (every group, so the recount
-    stands; an empty count with no groups means nothing was evaluated), truncated
-    (fewer groups than the service counted, or more than 50,000), uncounted (groups
-    came back but the count didn't, so they can't be shown whole) or failed (the read
-    or its count failed, and the run exits non-zero); null without patterns. remediation_failed_deployments and
-    remediation_successful_deployments are recounted over the in-scope listed
-    deployments, null when that list is truncated, skipped or not read in full. A
-    failing member the service did not list takes the effect a listed state of it
-    ran under, else null. policy_group_details and
-    remediation_tasks_by_provisioning_state are still the service's and include
-    excluded resources. Without patterns every count is the service's own.
+  instructions: |
+    Script: azure/policy_compliance/fetcher.py
+
+    Access: Reader on the subscription.
+
+    Commands Executed:
+    - subscriptions.list() — picks a subscription when none is set
+    - providers.get("Microsoft.PolicyInsights") — tells "Azure Policy not in use" from "nothing non-compliant"
+    - policy_states.summarize_for_subscription("latest") — the service's own compliance counts, subscription-wide and per assignment
+    - policy_states.list_query_results_for_subscription("latest") filtered to NonCompliant — the non-compliant (resource, policy) records, up to a limit of in-scope records
+    - policy_states.list_query_results_for_resource("latest") expanded with evaluation details (per listed resource, up to a limit) — the values each policy compared
+    - policy_states.list_query_results_for_subscription("default") grouped per resource, region, policy and state, and a count of the groups — 30 days of evaluation history, checked to be complete
+    - policy_states.list_query_results_for_subscription("default") for one pair, ordered by time (per in-scope part-time non-compliant pair, up to a limit) — counts its separate non-compliant episodes
+    - remediations.list_for_subscription() — remediation tasks and their deployment counts
+    - remediations.list_deployments_at_subscription(), _at_resource_group(), _at_management_group() or _at_resource() (per in-scope task) — each resource a task remediated
+    - policy_states.list_query_results_for_subscription("latest") filtered to the task's policy and in-scope remediated resources (per task, 20 resources at a time) — whether each remediated resource is compliant now, and when that was evaluated
+    - policy_states.list_query_results_for_subscription("latest") grouped per resource, region, policy and state, and a count of the groups (only with resource_exclusions patterns set) — every resource's and policy's latest state, to recount the subscription's and each assignment's compliance over in-scope resources
+
+    Output: azure_policy_compliance_<subscription>.json — the subscription's and each assignment's compliance, the non-compliant resources with the values that failed, the remediation tasks and what each one fixed, and the policies that keep falling out of compliance. With a resource_exclusions pattern set, a failing member policy the service didn't list carries the effect a listed record of it ran under, else null.
+
+    Summary fields:
+
+    Which resources are left out of scope?
+    - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
+    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no assignment, non-compliant state, latest compliance state, 30-day history pair, remediation task or remediation deployment, such as a mistyped name, or null when the compliance reads didn't run (Microsoft.PolicyInsights not registered, no subscription or credential), max_non_compliant_resources is 0, the task list or a task's deployments could not be listed, the grouped latest-state read was cut short, or any other Policy Insights read failed; a list cut off at its max_ setting does not make it null
+    - excluded_policy_assignments — Number of policy assignments left out of scope because a pattern matched the resource group or id of the scope they were made at; assignments made at the subscription or a management group stay, and each excluded one is listed under excluded with the pattern
+    - excluded_policy_states — Number of non-compliant (resource, policy) records left out of scope because a pattern matched the resource they are about by id, resource group or region; each is listed under excluded with the pattern, and its evaluation details are not read
+    - excluded_remediation_tasks — Number of remediation tasks left out of scope because a pattern matched the resource group or id of the scope they were made at; each is listed under excluded with the pattern, and its deployments are not read
+    - excluded_remediation_deployments — Number of per-resource remediation deployments read and left out of scope because a pattern matched the resource they remediated by id, resource group or region; each is listed under excluded with the pattern, doesn't count toward the max_remediation_deployments limit, and its resource's current compliance is not read
+    - in_scope_policy_assignments — Number of policy assignments read and in scope
+    - in_scope_policy_states — Number of non-compliant (resource, policy) records read and in scope
+    - in_scope_remediation_tasks — Number of remediation tasks read and in scope
+    - in_scope_remediation_deployments — Number of remediation deployments read and in scope
+
+    What was evaluated?
+    - resources_evaluated — Number of resources with a compliance state in the service's evaluation window (the last day); 0 means nothing was evaluated, not that everything passed; also 0 when the summary read failed (the run fails) or Microsoft.PolicyInsights isn't registered. With a resource_exclusions pattern set, only in-scope resources count ("in scope": no pattern matches the resource by id, resource group or region), recounted from every latest (resource, policy) state; null unless that grouped read came back whole (see in_scope_states_status)
+    - in_scope_states_status — Whether the grouped read of every latest (resource, policy) state behind the in-scope counts came back whole, with a resource_exclusions pattern set; null when no pattern is set, or when the compliance reads didn't run (Microsoft.PolicyInsights not registered, no subscription or credential, or the Policy Insights client couldn't be created):
+      - read (every group came back, so the in-scope counts stand; an empty count with no groups means nothing was evaluated)
+      - truncated (fewer groups came back than the service counted, or it counted more than 50,000)
+      - uncounted (groups came back but their count didn't, so they can't be shown complete)
+      - failed (the read or its count failed, and the run exits non-zero)
+    - resources_by_compliance_state — Number of resources in each compliance state (for example compliant, noncompliant, exempt, unknown), each resource counted once under its highest-ranked state in the order noncompliant, compliant, error, conflict, protected, exempt, unknown, as the service counts them. With a resource_exclusions pattern set, counted over in-scope resources, keeping every state the service reported (0 when none is in scope); every value is null when resources_evaluated is null
+    - policies_by_compliance_state — Number of policy assignments in each compliance state (an initiative counts once), each under its highest-ranked state across the resources it evaluated, as the service counts them. With a resource_exclusions pattern set, counted over in-scope resources only; every value is null when resources_evaluated is null
+    - assignments_evaluated — Number of in-scope policy assignments the service summarized
+    - provider_registration_status — Whether the policy compliance provider (Microsoft.PolicyInsights) is registered on the subscription: registered, not_registered or unknown; not_registered is valid evidence, not a failure: the run succeeds, nothing else is read, and the counts read 0 (null with a resource_exclusions pattern set)
+
+    How compliant is the subscription?
+    - non_compliant_resources — Number of resources non-compliant with at least one policy, the noncompliant entry of resources_by_compliance_state. With no resource_exclusions pattern set, the service's own count; with one set, the in-scope resources with a non-compliant latest state, null when resources_evaluated is null
+    - non_compliant_policies — Number of policy assignments with at least one non-compliant resource (an initiative counts once), as the service counts them at subscription scope. With a resource_exclusions pattern set, counted over in-scope resources only, null when resources_evaluated is null
+    - compliant_resources — Number of resources compliant with every policy that applies to them, the compliant entry of resources_by_compliance_state. With a resource_exclusions pattern set, counted over in-scope resources only, null when resources_evaluated is null
+    - resource_compliance_percentage — Percentage of evaluated resources that are compliant = compliant_resources / (compliant_resources + non_compliant_resources) × 100 (a whole number, 0–100); 0 when that sum is 0. Resources in other states (exempt, unknown, conflict, error, protected) are left out of both. With a resource_exclusions pattern set, over in-scope resources only, null when resources_evaluated is null
+    - non_compliant_assignments — Number of in-scope policy assignments with at least one non-compliant resource. With no resource_exclusions pattern set, by the service's per-assignment count (0, not null, when that read failed); with one set, by each assignment's in-scope latest states, null when resources_evaluated is null
+    - compliant_assignments — Number of in-scope policy assignments with no non-compliant resource. With no resource_exclusions pattern set, by the service's per-assignment count (0, not null, when that read failed); with one set, by each assignment's in-scope latest states, null when resources_evaluated is null
+
+    Which resources are non-compliant?
+    - listed_non_compliant_states — Number of in-scope non-compliant (resource, policy) records listed in the evidence (at most the max_non_compliant_resources setting, default 1000; records a resource_exclusions pattern takes out don't count toward it)
+    - listed_distinct_non_compliant_resources — Number of distinct resources among the listed non-compliant records
+    - non_compliant_states_truncated — True if there were more in-scope non-compliant records than the list holds; false if every one is listed, or max_non_compliant_resources is 0 and the list is skipped
+
+    Why did they fail?
+    - evaluation_details_eligible_resources — Number of distinct resources among the listed non-compliant records whose evaluation details can be read (subscriptions and resource groups can't be)
+    - evaluation_details_resources_queried — Number of readable non-compliant resources whose evaluation details were requested, refused and failed reads included, at most the max_evaluation_detail_resources setting (default 100), the resources with the most listed records first
+    - evaluation_details_truncated — True if some readable resources were not requested because of the max_evaluation_detail_resources limit; false if every readable resource was requested, or the limit is 0 and the details are skipped
+    - evaluation_details_not_authorized_resources — Number of requested resources whose evaluation-details read Policy Insights refused (a 403 or an AuthorizationFailed error). A refused read is retried once, at most 3 times a run and not after a retry is refused again; a refusal that persists marks the resource's records not_authorized and doesn't fail the run
+    - non_compliant_states_with_evaluation_details — Number of listed non-compliant records that carry the values the policy compared: the field path, the operator, the resource's actual value and the policy's target value
+    - non_compliant_states_by_evaluation_details_status — Number of listed non-compliant records in each evaluation-details status:
+      - collected (the compared values are in the record)
+      - not_returned (the resource was read and the service returned the record, but without compared values, as it does for policies on Key Vault keys and secrets)
+      - not_in_detail_result (the resource was read, but the service no longer reported this record as non-compliant, for example after a re-evaluation in between)
+      - not_requested (the resource was past the read limit)
+      - unsupported_scope (the record is for a subscription or resource group)
+      - not_authorized (Policy Insights refused the read for the resource)
+      - failed (the read for the resource failed)
+
+    Do remediation tasks fix what they target?
+    - remediation_tasks — Number of in-scope remediation tasks on the subscription; 0 when the task list could not be read
+    - remediation_tasks_by_provisioning_state — Number of in-scope remediation tasks in each state (for example Succeeded, Failed, Evaluating); a task's state covers every resource it remediated, including resources a resource_exclusions pattern takes out
+    - remediation_successful_deployments — Number of remediation deployments that succeeded. With no resource_exclusions pattern set, as the tasks report them; with one set, the listed in-scope deployments whose status is Succeeded, null when remediation_deployments_truncated is true, max_remediation_deployments is 0 (the deployments are skipped), or the task list or any task's deployment list failed
+    - remediation_failed_deployments — Number of remediation deployments that failed. With no resource_exclusions pattern set, as the tasks report them; with one set, the listed in-scope deployments whose status is Failed, null when remediation_deployments_truncated is true, max_remediation_deployments is 0 (the deployments are skipped), or the task list or any task's deployment list failed
+    - remediation_deployments_listed — Number of in-scope per-resource remediation deployments listed in the evidence (at most the max_remediation_deployments setting, default 1000; deployments a resource_exclusions pattern takes out don't count toward it)
+    - remediation_deployments_truncated — True if some in-scope deployments were not listed because of the max_remediation_deployments limit; false if every in-scope one is listed, or the limit is 0 and the deployments are skipped
+    - remediation_deployments_by_status — Number of listed remediation deployments in each status (for example Succeeded, Failed)
+    - remediated_resources_listed — Number of distinct resources among the listed remediation deployments (remediated resources). A resource deployed to more than once is judged by its newest deployment, against the policy of that deployment's task, so remediated_resources_now_compliant, remediated_resources_now_non_compliant, remediated_resources_not_yet_reevaluated and remediated_resources_compliance_unknown add up to it
+    - remediated_resources_now_compliant — Number of remediated resources whose current compliance state for the task's policy is Compliant and wasn't evaluated before their newest deployment
+    - remediated_resources_now_non_compliant — Number of remediated resources whose current compliance state for the task's policy is NonCompliant and wasn't evaluated before their newest deployment, including resources fixed and later drifted back
+    - succeeded_remediations_now_non_compliant — Number of remediated resources whose newest deployment succeeded but which are non-compliant with the task's policy now, so the fix didn't hold
+    - remediated_resources_not_yet_reevaluated — Number of remediated resources whose current compliance state was evaluated before their newest deployment last changed, so it doesn't yet show whether the fix worked (Azure re-evaluates every 24 hours)
+    - remediated_resources_compliance_unknown — Number of remediated resources with no current Compliant or NonCompliant state for the task's policy (not evaluated in the last day, exempt, deleted, or the state read failed); resources not yet re-evaluated are counted apart
+
+    Does non-compliance keep coming back?
+    - recurrence_window_days — Days of evaluation history read (30)
+    - history_collected — True if the evaluation history was read; false if the read failed or didn't run (for example, Microsoft.PolicyInsights isn't registered), and then the history, recurrence-pair and episode counts are null rather than 0
+    - history_non_compliant_pairs — Number of in-scope (resource, policy) pairs non-compliant at least once in the history window; a pair is out of scope when a resource_exclusions pattern matches its resource by id, resource group or region, and is dropped before any history count or read; null if history_collected is false
+    - history_persistently_non_compliant_pairs — Number of in-scope (resource, policy) pairs non-compliant at every evaluation in the window; null if history_collected is false
+    - history_intermittently_non_compliant_pairs — Number of in-scope (resource, policy) pairs evaluated both compliant and non-compliant in the window; null if history_collected is false
+    - history_truncated — True if the history had more rows than the fetcher reads (50,000), or the service returned fewer (resource, policy, state) groups than its own group count says, so the pair counts are a lower bound; false if all of it was read; null if history_collected is false
+    - recurrence_pairs_read — Number of in-scope intermittently non-compliant pairs whose evaluations were read in time order, at most the max_recurrence_pairs setting (default 100), the most often non-compliant first; null if history_collected is false
+    - recurrence_pairs_truncated — True if some in-scope intermittently non-compliant pairs were not read because of the max_recurrence_pairs limit; false if every one was read, or the limit is 0 and none are read; null if history_collected is false
+    - recurring_non_compliant_pairs — Number of in-scope pairs read in time order with more than one separate non-compliant episode (a run of non-compliant evaluations with a compliant one between runs); null if history_collected is false
+    - max_non_compliant_episodes — Number of separate non-compliant episodes of the in-scope (resource, policy) pair with the most in the window; 1 for a pair non-compliant throughout, 0 when no in-scope pair was non-compliant; null if history_collected is false
