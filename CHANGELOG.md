@@ -53,8 +53,8 @@ schemas and the `paramify` CLI — not the internal code.
   With no new setting, approval is read exactly as in 0.2.0.
   - **`approval_field`** (`AZURE_DEVOPS_APPROVAL_FIELD`) names a person field's
     reference name, such as `Custom.ChangeApprover`. Each item records whom it names
-    and when it was filled (`field_approval`): from the first update that filled
-    it since it was last cleared. A display name is `bad_config`.
+    and since when (`field_approval`): from the last update that set it to that
+    person, so a change of person restarts it. A display name is `bad_config`.
   - **`approval_source`** (`AZURE_DEVOPS_APPROVAL_SOURCE`, `states_and_comments`
     by default): `field` counts only a filled field as approval, `both` counts it
     or a state or comment approval, whichever came first. Clearing the field

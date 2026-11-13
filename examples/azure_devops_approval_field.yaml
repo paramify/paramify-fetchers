@@ -8,8 +8,8 @@
 # is the approval: approval_source field ignores approval states and comments. Items
 # finished before 2026-01-15, when the field was added, are judged as before by
 # approval_before_field (states_and_comments), or by either route (both), or left out
-# of every approval figure (exclude); open items are judged by the field. A filled field approves from the first update that
-# filled it since it was last cleared. Find a field's reference name with
+# of every approval figure (exclude); open items are judged by the field. A filled field approves from the last update that
+# set it to the person it names now. Find a field's reference name with
 # GET https://dev.azure.com/<org>/_apis/wit/fields.
 #
 # Emergency Change items may be approved after their change: a changeset made before

@@ -125,11 +125,12 @@ config_schema:
       The reference name of a person (identity) field that records who
       approved an item, such as Custom.ChangeApprover, not its display name. Set,
       it is read from each item and its updates, and the item records whom it
-      names and when it was filled; it counts as approval only when
+      names and when it got that person; it counts as approval only when
       approval_source is field or both. A filled field approves the item, by
-      the person it names, from the first update that filled it since it was
-      last cleared; clearing it withdraws the approval, while a move back or a
-      rejection doesn't. Empty, as by default, reads no field. A name that
+      the person it names, from the last update that set it to that person,
+      so a change of person restarts it; clearing it withdraws the approval,
+      while a move back or a rejection doesn't. The field shows whom it names,
+      not who filled it in. Empty, as by default, reads no field. A name that
       isn't a reference name (a dotted name without spaces) is bad_config.
   approval_source:
     type: string
@@ -215,11 +216,11 @@ evidence_set:
     - GET {project}/_apis/wit/workitemtypes (per project) — the project's work item types, their states and which states are finished, and which types define approval_field
     - POST {project}/_apis/wit/wiql (per project) — a read-only query for the selected types or tags, changed in the window or still open
     - POST {project}/_apis/wit/workitemsbatch (200 at a time) — each item's fields, approval_field among them, and links; an item the query listed but this doesn't return is a failure
-    - GET {project}/_apis/wit/workItems/{id}/updates (per item) — its state history and when approval_field was filled or cleared, to see when and by whom it was approved and whether that approval was withdrawn
+    - GET {project}/_apis/wit/workItems/{id}/updates (per item) — its state history and when approval_field was set to a person or cleared, to see when and by whom it was approved and whether that approval was withdrawn
     - GET {project}/_apis/wit/workItems/{id}/comments (per item) — who commented when, and whether a comment, quoted text left out (and leading @mentions, if approval_mentions is on), matches the approval pattern; the text is not kept
     - GET _apis/tfvc/changesets/{id} (per linked changeset) — when the change was made and by whom
 
-    Output: azure_devops_work_items_<organization>.json — every selected work item with its title, type, state and reason, priority, severity, tags, area and iteration paths, who created, last changed, is assigned, resolved and closed it, its created, changed, activated, resolved, closed and planned dates, state history with each move's reason, whether it needs an approval and whether its type may be approved after the change, the person approval_field names and when it was filled, which route judged its approval, the approval in effect (state, comment or field, with who and when) and whether its creator gave it, and its linked changesets, commits, pull requests and builds; plus each project's states for the types collected, and the linked changesets' dates and authors.
+    Output: azure_devops_work_items_<organization>.json — every selected work item with its title, type, state and reason, priority, severity, tags, area and iteration paths, who created, last changed, is assigned, resolved and closed it, its created, changed, activated, resolved, closed and planned dates, state history with each move's reason, whether it needs an approval and whether its type may be approved after the change, the person approval_field names and since when, which route judged its approval, the approval in effect (state, comment or field, with who and when) and whether its creator gave it, and its linked changesets, commits, pull requests and builds; plus each project's states for the types collected, and the linked changesets' dates and authors.
 
     Summary fields:
 

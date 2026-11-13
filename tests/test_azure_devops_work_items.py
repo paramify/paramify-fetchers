@@ -834,8 +834,8 @@ def test_the_approval_field_counts_by_approval_source(tmp_path, monkeypatch, sou
     assert by_field["field_approval"] == {"at": iso_ago(days=8), "by": {"display_name": "Frank Approver",
                                           "login": "frank@example.com"}, "source": "field", "state": None}
     assert "aad.ZmFrZQ" not in text and GUID not in text
-    # Emptied and filled again: the approval runs from the refill, and a change of person doesn't restart it.
-    assert work_item(evidence, 105)["field_approval"]["at"] == iso_ago(days=6)
+    # Emptied, filled again, then given another person: the approval runs from when it got the person it names now.
+    assert work_item(evidence, 105)["field_approval"]["at"] == iso_ago(days=5)
     assert work_item(evidence, 105)["field_approval"]["by"]["login"] == "grace@example.com"
     # Emptied since: no approval.
     assert work_item(evidence, 106)["field_approval"] is None
@@ -858,6 +858,34 @@ def test_the_approval_field_counts_by_approval_source(tmp_path, monkeypatch, sou
         assert by_field["approval"]["source"] == "field" and work_item(evidence, 101)["approval"]["source"] == "state"
         assert (s["change_items_approved"], s["change_items_approved_by_field"]) == (4, 2)
         assert s["finished_change_items_without_approval"] == [103, 106]
+
+
+def test_a_self_filled_field_approves_only_from_when_the_approver_was_named(tmp_path, monkeypatch):
+    monkeypatch.setenv(mod.APPROVAL_FIELD_ENV, FIELD)
+    monkeypatch.setenv(mod.APPROVAL_SOURCE_ENV, "field")
+    alice = identity("Alice Requester", "alice@example.com")
+    # 104: the requester names herself, a changeset follows, then the approver puts his own name in; a later
+    # rewrite naming the same person doesn't move it. 105: values without logins, matched by display name.
+    fake = with_items(FakeADO(), {
+        104: item(104, "Change Request", "Closed", relations=[
+            artifact("vstfs:///VersionControl/Changeset/503", "Fixed in Changeset")], **{FIELD: FRANK}),
+        105: item(105, "Change Request", "Closed", **{FIELD: "Grace Approver"})},
+        updates={104: [filled(1, ago(days=10), alice, by="alice@example.com"),
+                       filled(2, ago(days=5), FRANK, old=alice, by="frank@example.com"),
+                       filled(3, ago(days=2), FRANK, old=FRANK, by="frank@example.com")],
+                 105: [filled(1, ago(days=10), "Alice Requester"),
+                       filled(2, ago(days=4), "Grace Approver", old="Alice Requester")]})
+    fake.routes[("GET", "/contoso/_apis/tfvc/changesets/503")] = Resp(body={
+        "changesetId": 503, "author": who("alice@example.com"), "checkedInBy": who("alice@example.com"),
+        "createdDate": ago(days=8)})
+    code, evidence, _, _, _ = run(tmp_path, with_field_types(fake))
+    assert code == 0
+    w = work_item(evidence, 104)
+    assert w["field_approval"]["at"] == iso_ago(days=5) and w["approval"]["by"]["login"] == "frank@example.com"
+    # Approved after its change, and not by the requester.
+    assert w["changed_before_approval"] is True and w["approved_by_requester"] is False
+    assert 104 in evidence["summary"]["change_items_changed_before_approval"]
+    assert work_item(evidence, 105)["field_approval"]["at"] == iso_ago(days=4)
 
 
 def test_with_both_the_earlier_approval_is_in_effect(tmp_path, monkeypatch):

@@ -358,20 +358,24 @@ def current_approval(history: Optional[List[Dict[str, Any]]], comments: Optional
     return min(standing, key=lambda a: a["at"]) if standing else None
 
 
+def names_same(a: Optional[Dict[str, Any]], b: Optional[Dict[str, Any]]) -> bool:
+    """Same person by login, or by display name where neither value carries a login."""
+    if a and b and not a.get("login") and not b.get("login"):
+        return bool(a.get("display_name")) and a.get("display_name") == b.get("display_name")
+    return same_person(a, b)
+
+
 def field_approval(updates: Optional[List[Dict[str, Any]]], ref: str, value: Any) -> Optional[Dict[str, Any]]:
-    """The person the approval field names now, approving from the first update that filled it since it was last
-    cleared; when is unknown if the updates weren't read."""
+    """The person the approval field names now, approving from the last update that set it to that person; when is
+    unknown if the updates weren't read."""
     by = person(value)
     if not by:
         return None
     at = None
     for update in updates or []:
         change = field_value(update.get("fields"), ref)
-        if not isinstance(change, dict):
-            continue
-        if not person(change.get("newValue")):
-            at = None
-        elif at is None:
+        if isinstance(change, dict) and names_same(person(change.get("newValue")), by) and \
+                not names_same(person(change.get("oldValue")), by):
             at = update_time(update)
     return {"at": iso(at), "by": by, "source": "field", "state": None}
 
