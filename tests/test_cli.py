@@ -1674,7 +1674,10 @@ _CAPABILITY_PAYLOAD = {
                  "implementationStatus": "IMPLEMENTED"},
                 {"type": "END_USER", "name": "Core Process",
                  "narrative": "The role configures Log Management to include audit records.",
-                 "implementationStatus": "IMPLEMENTED"},
+                 "implementationStatus": "IMPLEMENTED",
+                 "validatorEvidencePairs": [
+                     {"validatorEvidencePairId": "p-1", "validatorId": "v-1", "evidenceId": "ev-1"},
+                 ]},
             ],
         }
     ]
@@ -1683,7 +1686,9 @@ _CAPABILITY_PAYLOAD = {
 _EVIDENCE_PAYLOAD = {
     "evidences": [
         {"id": "ev-1", "referenceId": "EVD-1", "name": "SSP", "description": "",
-         "instructions": "", "artifactCount": 1, "automated": False, "frequency": "ANNUAL"},
+         "instructions": "", "artifactCount": 1, "automated": False, "frequency": "ANNUAL",
+         "validators": [{"validatorEvidencePairId": "p-1", "id": "v-1", "name": "VAL-1",
+                         "type": "AUTOMATED"}]},
         {"id": "ev-2", "referenceId": "EVD-2", "name": "Empty set", "artifactCount": 0},
     ]
 }
@@ -1755,6 +1760,24 @@ def test_list_capabilities_normalizes_and_keeps_only_written_narratives(workspac
     written = api.capability_narratives(cap)
     assert len(written) == 1                  # … but only one says anything
     assert written[0]["type"] == "END_USER"
+
+
+def test_list_evidence_sets_keeps_each_paired_validator(workspace_reads):
+    """The pair id is how a set's validators are told apart from the registry's:
+    `paramify status` reads it to say which registry validators are paired."""
+    sets = {s["reference_id"]: s for s in api.list_evidence_sets()}
+    assert sets["EVD-1"]["validators"] == [
+        {"pair_id": "p-1", "id": "v-1", "name": "VAL-1", "type": "AUTOMATED"}
+    ]
+    assert sets["EVD-2"]["validators"] == []
+
+
+def test_list_capabilities_keeps_each_functions_pairs(workspace_reads):
+    functions = {f["type"]: f for f in api.list_capabilities()[0]["functions"]}
+    assert functions["END_USER"]["pairs"] == [
+        {"pair_id": "p-1", "validator_id": "v-1", "evidence_id": "ev-1"}
+    ]
+    assert functions["PROVIDER"]["pairs"] == []
 
 
 def test_capabilities_show_prints_the_narrative(workspace_reads):

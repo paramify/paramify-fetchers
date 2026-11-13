@@ -3330,8 +3330,10 @@ def list_capabilities() -> List[dict]:
     Returns [{"id", "name", "reference_id", "template_reference_id", "family",
     "subfamily", "risk", "risk_family", "implementation_status",
     "main_component", "functions"}] sorted by display name, where `functions` is
-    [{"type", "name", "narrative", "implementation_status"}] — the narratives
-    being the point of the call.
+    [{"type", "name", "narrative", "implementation_status", "pairs"}] — the
+    narratives being the point of the call. `pairs` is
+    [{"pair_id", "validator_id", "evidence_id"}]: the validator-evidence pairs
+    the function holds.
 
     Raises RuntimeError with an actionable message on missing credentials, a
     non-https endpoint, or a transport/HTTP failure.
@@ -3356,6 +3358,16 @@ def list_capabilities() -> List[dict]:
                 # verbatim: deciding whether it says anything is the reader's job.
                 "narrative": fn.get("narrative") or "",
                 "implementation_status": fn.get("implementationStatus") or "",
+                # Each pair is one validator on one evidence set; the function
+                # holds the pairs that prove it.
+                "pairs": [
+                    {
+                        "pair_id": p.get("validatorEvidencePairId") or "",
+                        "validator_id": p.get("validatorId") or "",
+                        "evidence_id": p.get("evidenceId") or "",
+                    }
+                    for p in fn.get("validatorEvidencePairs") or [] if isinstance(p, dict)
+                ],
             })
         capabilities.append({
             "id": c["id"],
@@ -3417,7 +3429,8 @@ def list_evidence_sets() -> List[dict]:
     """Fetch the workspace's evidence sets via GET /evidence.
 
     Returns [{"id", "reference_id", "name", "description", "instructions",
-    "artifact_count", "automated", "frequency"}] sorted by display name.
+    "artifact_count", "automated", "frequency", "validators"}] sorted by display
+    name, where `validators` is [{"pair_id", "id", "name", "type"}].
     `artifact_count` is what says whether there is anything here to author
     against at all.
     """
@@ -3438,6 +3451,16 @@ def list_evidence_sets() -> List[dict]:
             # Derived server-side from whether a validator is attached; read-only.
             "automated": bool(e.get("automated")),
             "frequency": e.get("frequency") or "",
+            # The validators paired with this set, each with its pair id.
+            "validators": [
+                {
+                    "pair_id": v.get("validatorEvidencePairId") or "",
+                    "id": v.get("id") or "",
+                    "name": v.get("name") or "",
+                    "type": v.get("type") or "",
+                }
+                for v in e.get("validators") or [] if isinstance(v, dict)
+            ],
         })
     sets.sort(key=lambda e: evidence_set_display_name(e).lower())
     return sets
