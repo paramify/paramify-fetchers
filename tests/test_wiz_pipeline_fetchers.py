@@ -12,6 +12,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -82,14 +83,29 @@ def vuln_node(i: int) -> dict:
         "detailedName": "openssl", "version": "1.1.1", "fixedVersion": "3.0.0",
         "detectionMethod": "PACKAGE", "link": "https://nvd", "portalUrl": "https://app.wiz.us/x",
         "epssSeverity": "LOW", "epssPercentile": 0.5, "epssProbability": 0.01,
+        "isInternetReachable": True, "internetReachableReason": "ASSET_ACCESSIBLE_FROM_INTERNET",
+        "cisaKevDueDate": None, "isSsvcCisaAdpAutomatable": False, "ssvcCisaAdpTechnicalImpact": "PARTIAL",
+        "exploitabilityValidationStatus": "UNKNOWN", "hasInitialAccessPotential": False,
+        "reachability": "UNCHECKED", "effectiveAttackVector": "NETWORK",
         "relatedIssueAnalytics": {"issueCount": 1, "criticalSeverityCount": 0, "highSeverityCount": 1,
                                   "mediumSeverityCount": 0, "lowSeverityCount": 0},
         "vulnerableAsset": {"id": f"asset-{i % 7}", "type": "VIRTUAL_MACHINE", "name": f"vm-{i % 7}",
                             "region": "us-east-1", "providerUniqueId": f"i-{i % 7}", "cloudPlatform": "AWS",
                             "status": "Active", "subscriptionName": "prod", "subscriptionExternalId": "1",
                             "tags": {"env": "prod"}, "hasWideInternetExposure": False,
+                            "hasLimitedInternetExposure": True,
                             "operatingSystem": "Linux", "ipAddresses": ["10.0.0.1"]},
     }
+
+
+def selected(node: dict, query: str) -> dict:
+    """Only the fields the query selects, as real GraphQL returns."""
+    def keep(d: dict) -> dict:
+        return {k: v for k, v in d.items() if re.search(rf"\b{k}\b", query)}
+    out = keep(node)
+    if isinstance(out.get("vulnerableAsset"), dict):
+        out["vulnerableAsset"] = keep(out["vulnerableAsset"])
+    return out
 
 
 class FakeWiz:
@@ -105,6 +121,11 @@ class FakeWiz:
         self.vuln_error_page = 0
         self.vuln_filters: List[Any] = []
         self.queries: List[str] = []
+        # Introspection answers: type -> field names, or None for "no such type".
+        self.schema: Dict[str, Optional[List[str]]] = {
+            t: sorted({name for tt, name, _ in vulns.SLA_FIELDS if tt == t}) for t in
+            {t for t, _, _ in vulns.SLA_FIELDS}}
+        self.introspection_error = False
 
     def post(self, url, data=None, json=None, headers=None, timeout=None, allow_redirects=True):
         if url == AUTH:
@@ -114,9 +135,15 @@ class FakeWiz:
         assert url == API
         q = json["query"]
         # Read-only: every document this category sends is a query.
-        assert q.lstrip().startswith("query ")
+        assert q.lstrip().startswith(("query ", "{ __type"))
         self.queries.append(q)
         v = json.get("variables") or {}
+        if "__type" in q:
+            if self.introspection_error:
+                return Resp(200, {"data": None, "errors": [{"message": "introspection disabled"}]})
+            names = self.schema.get(q.split('"')[1])
+            t = None if names is None else {"fields": [{"name": n, "type": {"name": "X"}} for n in names]}
+            return Resp(200, {"data": {"__type": t}})
         for op, message in self.errors.items():
             if op in q:
                 return Resp(200, {"data": None, "errors": [{"message": message}]})
@@ -139,7 +166,7 @@ class FakeWiz:
             more = end < self.vuln_count
             cursor = None if self.vuln_break_page == page_no else (str(end) if more else None)
             return Resp(200, {"data": {"vulnerabilityFindings": {
-                "nodes": [vuln_node(i) for i in range(start, end)],
+                "nodes": [selected(vuln_node(i), q) for i in range(start, end)],
                 "pageInfo": {"hasNextPage": more, "endCursor": cursor}}}})
         raise AssertionError(f"unexpected query: {q[:60]}")
 
@@ -346,6 +373,50 @@ def test_vulns_every_page_lands_in_the_legacy_columns(fake, tmp_path):
     assert list(rows[0]) == vulns.CSV_COLUMNS
     assert rows[0]["Asset Tags"] == '{"env": "prod"}'
     assert rows[0]["Asset IP Addresses"] == "10.0.0.1"
+
+
+LEGACY_COLUMNS = vulns.CSV_COLUMNS[:-len(vulns.SLA_FIELDS)]
+
+
+def vuln_page_queries(fake) -> List[str]:
+    return [q for q in fake.queries if "VulnerabilityFindingsPage" in q]
+
+
+def test_vulns_sla_columns_follow_the_legacy_columns(fake, tmp_path):
+    fake.vuln_count = 3
+    assert vulns.main() == 0
+    rows = vuln_rows(tmp_path)
+    assert list(rows[0])[:len(LEGACY_COLUMNS)] == LEGACY_COLUMNS
+    assert LEGACY_COLUMNS[-1] == "Asset IP Addresses"
+    assert rows[0]["Is Internet Reachable"] == "True"
+    assert rows[0]["Internet Reachable Reason"] == "ASSET_ACCESSIBLE_FROM_INTERNET"
+    assert rows[0]["Asset Has Limited Internet Exposure"] == "True"
+    assert rows[0]["CISA SSVC Automatable"] == "False"
+    assert rows[0]["CISA SSVC Technical Impact"] == "PARTIAL"
+    assert rows[0]["CISA KEV Due Date"] == ""                # null is blank, not "None"
+    assert rows[0]["Attack Vector"] == "NETWORK"
+    q = vuln_page_queries(fake)[0]
+    assert "isInternetReachable" in q and "hasLimitedInternetExposure" in q
+
+
+def test_vulns_sla_field_missing_from_schema_is_blank_not_queried(fake, tmp_path):
+    fake.vuln_count = 3
+    fake.schema["VulnerabilityFinding"].remove("reachability")
+    assert vulns.main() == 0
+    assert "reachability" not in vuln_page_queries(fake)[0]
+    rows = vuln_rows(tmp_path)
+    assert rows[0]["Code Reachability"] == ""
+    assert rows[0]["Is Internet Reachable"] == "True"
+
+
+def test_vulns_unreadable_schema_sends_the_legacy_query_unchanged(fake, tmp_path):
+    fake.vuln_count = 3
+    fake.introspection_error = True
+    assert vulns.main() == 0
+    assert vuln_page_queries(fake)[0] == vulns.VULNERABILITIES_QUERY
+    rows = vuln_rows(tmp_path)
+    assert list(rows[0]) == vulns.CSV_COLUMNS
+    assert all(rows[0][column] == "" for _, _, column in vulns.SLA_FIELDS)
 
 
 def test_vulns_missing_cursor_fails_with_no_file(fake, tmp_path):

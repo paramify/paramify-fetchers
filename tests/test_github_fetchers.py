@@ -1764,10 +1764,12 @@ def actions_routes(files=None, repo_perms=None, org_perms=None, runners=None):
         f"{o}/actions/permissions/artifact-and-log-retention": {"days": 90, "maximum_allowed_days": 400},
         f"{o}/actions/permissions/self-hosted-runners": {"enabled_repositories": "all"},
         f"{o}/actions/runners": lambda q: (200, {"total_count": 0, "runners": []}),
+        f"{o}/actions/runner-groups": lambda q: (200, {"total_count": 0, "runner_groups": []}),
     })
     for n in ("app", "site"):
         b = f"repos/{ORG}/{n}"
         routes.update({
+            f"{b}/actions/oidc/customization/sub": {"use_default": True, "include_claim_keys": []},
             f"{b}/actions/permissions": (repo_perms or {}).get(n, {"enabled": True, "allowed_actions": "all",
                                                                    "sha_pinning_required": False}),
             f"{b}/actions/permissions/workflow": {"default_workflow_permissions": "read",
@@ -1794,7 +1796,7 @@ def test_workflow_files_are_read_and_judged(fake, monkeypatch, tmp_path):
     assert s["workflows_on_privileged_triggers"] == ["app:triage.yaml"]
     assert s["workflows_checking_out_untrusted_pr_code"] == ["app:triage.yaml"]
     assert s["workflows_with_untrusted_input_in_scripts"] == ["app:triage.yaml"]
-    assert s["workflows_using_oidc"] == ["site:deploy.yml"]
+    assert s["workflows_using_oidc"] == ["app:triage.yaml", "site:deploy.yml"]  # write-all grants id-token
     assert s["workflows_on_self_hosted_runners"] == ["app:triage.yaml"]
     triage = next(w for w in ev["repositories"][0]["workflows"] if w["file"] == "triage.yaml")
     assert triage["unpinned"] == ["actions/checkout@v4", "actions/github-script@v7", "docker://alpine:3.20",
@@ -2518,3 +2520,406 @@ def test_a_ref_pattern_the_matcher_cannot_read_leaves_the_reach_unknown(monkeypa
 def test_boolean_settings_read_from_the_environment(monkeypatch, raw, expected):
     monkeypatch.setenv("GITHUB_TEST_FLAG", raw)
     assert gc._env_value("GITHUB_TEST_FLAG", True) is expected
+
+
+# --- actions_security: runner groups and OIDC subjects ------------------------------
+
+def group(id_, name, visibility, public=False, restricted=False, **kw):
+    return {"id": id_, "name": name, "default": id_ == 1, "visibility": visibility, "inherited": False,
+            "allows_public_repositories": public, "restricted_to_workflows": restricted, **kw}
+
+
+def groups_and_oidc_routes():
+    routes = actions_routes({"app": {"deploy.yml": OIDC_WORKFLOW}, "site": {"deploy.yml": OIDC_WORKFLOW}})
+    o = f"orgs/{ORG}"
+    signing = group(2, "prod-signing", "selected", public=True, restricted=True,
+                    selected_workflows=[f"{ORG}/app/.github/workflows/release.yml@refs/heads/main"])
+    routes.update({
+        f"{o}/actions/runner-groups": lambda q: (200, {"total_count": 2, "runner_groups": [
+            group(1, "Default", "all"), signing]}),
+        f"{o}/actions/runner-groups/1/runners": lambda q: (200, {"total_count": 1, "runners": [{"name": "r1"}]}),
+        f"{o}/actions/runner-groups/2/runners": lambda q: (200, {"total_count": 1, "runners": [{"name": "signer"}]}),
+        f"{o}/actions/runner-groups/2/repositories": lambda q: (200, {"total_count": 1,
+                                                                      "repositories": [{"name": "app"}]}),
+        f"{o}/actions/oidc/customization/sub": {"include_claim_keys": ["repository_owner", "context"]},
+        # use_default false without keys opts in to the organization's template.
+        f"repos/{ORG}/app/actions/oidc/customization/sub": {"use_default": False, "include_claim_keys": []},
+        f"repos/{ORG}/site/actions/oidc/customization/sub": {"use_default": False, "use_immutable_subject": True,
+                                                             "include_claim_keys": ["repository_id", "environment"]},
+    })
+    return routes
+
+
+def test_runner_groups_and_oidc_subjects_reach_the_summary(fake, monkeypatch, tmp_path):
+    fake(groups_and_oidc_routes())
+    code, ev, _ = run_fetcher("actions_security", monkeypatch, tmp_path)
+    assert code == 0
+    s = ev["summary"]
+    assert s["runner_groups"] == 2
+    assert s["runner_groups_open_to_all_repositories"] == ["Default"]
+    assert s["runner_groups_allowing_public_repositories"] == ["prod-signing"]
+    assert s["runner_groups_not_restricted_to_workflows"] == ["Default"]
+    groups = {g["name"]: g for g in ev["organization"]["runner_groups"]}
+    assert groups["Default"]["repositories"] is None and groups["Default"]["runners"] == ["r1"]
+    assert groups["prod-signing"]["repositories"] == ["app"] and groups["prod-signing"]["runners"] == ["signer"]
+    # app opted in to the organization's template, which leaves the repository out; site names it by id.
+    assert s["organization_oidc_subject_claims"] == ["repository_owner", "context"]
+    assert s["repositories_with_custom_oidc_subject"] == ["site"]
+    assert s["repositories_on_organization_oidc_template"] == ["app"]
+    assert s["repositories_oidc_subject_without_repository"] == ["app"]
+    by = {r["repository"]: r for r in ev["repositories"]}
+    assert by["app"]["oidc_subject"]["effective_claim_keys"] == ["repository_owner", "context"]
+    assert by["site"]["oidc_subject"] == {"use_default": False, "include_claim_keys": ["repository_id", "environment"],
+                                          "use_immutable_subject": True,
+                                          "effective_claim_keys": ["repository_id", "environment"]}
+
+
+def test_an_organization_that_never_customized_oidc_gets_githubs_subject(fake, monkeypatch, tmp_path):
+    routes = groups_and_oidc_routes()
+    del routes[f"orgs/{ORG}/actions/oidc/customization/sub"]  # 404: never customized
+    fake(routes)
+    code, ev, _ = run_fetcher("actions_security", monkeypatch, tmp_path)
+    assert code == 0 and ev["organization"]["oidc_subject_template"] == {}
+    assert ev["summary"]["organization_oidc_subject_claims"] == ["repo", "context"]
+    assert ev["summary"]["repositories_oidc_subject_without_repository"] == []
+
+
+TEMPLATE = {"include_claim_keys": ["repository_owner", "context"]}
+
+
+@pytest.mark.parametrize("setting,org_template,expected", [
+    # GitHub's OIDC reference: true resets to GitHub's own subject and ignores the organization's template.
+    ({"use_default": True, "include_claim_keys": []}, TEMPLATE, ["repo", "context"]),
+    ({"use_default": False, "include_claim_keys": []}, TEMPLATE, ["repository_owner", "context"]),
+    ({"use_default": False, "include_claim_keys": []}, {}, ["repo", "context"]),
+    ({"use_default": False, "include_claim_keys": []}, None, None),
+    ({"use_default": False, "include_claim_keys": ["repository_id"]}, None, ["repository_id"]),
+    ({"include_claim_keys": ["repo"]}, TEMPLATE, None),
+    (None, TEMPLATE, None),
+])
+def test_the_claim_keys_a_repository_subject_is_built_from(setting, org_template, expected):
+    assert MODS["actions_security"].oidc_claims(setting, org_template) == expected
+
+
+def test_a_repository_on_githubs_default_ignores_the_organization_template(fake, monkeypatch, tmp_path):
+    routes = groups_and_oidc_routes()
+    routes[f"repos/{ORG}/app/actions/oidc/customization/sub"] = {"use_default": True, "include_claim_keys": []}
+    fake(routes)
+    code, ev, _ = run_fetcher("actions_security", monkeypatch, tmp_path)
+    assert code == 0
+    assert ev["summary"]["repositories_oidc_subject_without_repository"] == []
+    assert ev["summary"]["repositories_on_organization_oidc_template"] == []
+
+
+@pytest.mark.parametrize("permissions,expected", [
+    ("write-all", True),
+    ("read-all", False),
+    ("{id-token: write}", True),
+    ("{id-token: read}", False),
+    ("{contents: write}", False),
+])
+def test_a_workflow_that_can_write_an_id_token_uses_oidc(permissions, expected):
+    text = f"on: push\npermissions: {permissions}\njobs:\n  a:\n    runs-on: x\n    steps:\n      - run: true\n"
+    assert MODS["actions_security"].analyse("f.yml", text)["oidc"] is expected
+
+
+def test_a_write_all_workflow_has_its_oidc_subject_read(fake, monkeypatch, tmp_path):
+    f = fake(actions_routes({"app": {"triage.yaml": RISKY_WORKFLOW}}))
+    code, ev, _ = run_fetcher("actions_security", monkeypatch, tmp_path)
+    assert code == 0 and f"repos/{ORG}/app/actions/oidc/customization/sub" in {p for p, _ in f.calls}
+    assert ev["summary"]["workflows_using_oidc"] == ["app:triage.yaml"]
+
+
+def test_oidc_subjects_are_read_only_where_a_workflow_uses_oidc(fake, monkeypatch, tmp_path):
+    f = fake(actions_routes({"app": {"ci.yml": SAFE_WORKFLOW}, "site": {"deploy.yml": OIDC_WORKFLOW}}))
+    code, ev, _ = run_fetcher("actions_security", monkeypatch, tmp_path)
+    paths = {p for p, _ in f.calls}
+    assert code == 0
+    assert f"repos/{ORG}/site/actions/oidc/customization/sub" in paths
+    assert f"repos/{ORG}/app/actions/oidc/customization/sub" not in paths
+    assert ev["repositories"][0]["oidc_subject"] is None
+
+
+def test_an_unreadable_oidc_subject_leaves_the_repository_not_collected(fake, monkeypatch, tmp_path):
+    routes = groups_and_oidc_routes()
+    routes[f"repos/{ORG}/site/actions/oidc/customization/sub"] = (
+        403, {"message": "Resource not accessible by personal access token"},
+        {"X-Accepted-GitHub-Permissions": "actions=read"})
+    fake(routes)
+    code, ev, status = run_fetcher("actions_security", monkeypatch, tmp_path)
+    assert code == 1 and ev["summary"]["not_collected"] == ["site"]
+    assert "actions=read" in status["error"]
+
+
+def test_runner_groups_are_skipped_with_the_runners(fake, monkeypatch, tmp_path):
+    f = fake(groups_and_oidc_routes())
+    code, ev, _ = run_fetcher("actions_security", monkeypatch, tmp_path, GITHUB_INCLUDE_SELF_HOSTED_RUNNERS="false")
+    assert code == 0 and ev["organization"]["runner_groups"] is None
+    assert ev["summary"]["runner_groups"] is None and ev["summary"]["runner_groups_open_to_all_repositories"] is None
+    assert not any("runner-groups" in p for p, _ in f.calls)
+
+
+def test_an_unreadable_runner_group_fails_the_run(fake, monkeypatch, tmp_path):
+    routes = groups_and_oidc_routes()
+    del routes[f"orgs/{ORG}/actions/runner-groups/2/repositories"]
+    fake(routes)
+    code, ev, _ = run_fetcher("actions_security", monkeypatch, tmp_path)
+    assert code == 1 and ev["organization"]["runner_groups"] is None and ev["summary"]["runner_groups"] is None
+
+
+# --- deployment_controls: who approved ------------------------------------------------
+
+def approval(user, env="production", state="approved", comment="", jobs=1, bot=False):
+    # One review names its environment once per job it released (measured on cli/cli).
+    return {"state": state, "comment": comment, "environments": [{"id": 7, "name": env}] * jobs,
+            "user": {"login": user, "type": "Bot" if bot else "User"}}
+
+
+SHIPPED = ("success", "in_progress", "queued", "waiting")  # newest first, as GitHub lists them (measured)
+
+
+def approval_routes():
+    envs = [environment("production", ["ops"])]
+    deploys = {"production": [deployment(15, "main", 1), deployment(14, "main", 1), deployment(13, "main", 1), deployment(12, "main", 1),
+                              deployment(11, "main", 1),
+                              deployment(10, "main", 1), deployment(9, "main", 1), deployment(8, "main", 1),
+                              deployment(7, "main", 1), deployment(6, "main", 1), deployment(5, "main", 1, creator="lead"),
+                              deployment(4, "main", 1, creator="lead"), deployment(3, "main", 2),
+                              deployment(2, "main", 3), deployment(1, "main", 4, app=None)]}
+    routes = deploy_routes(envs, deploys)
+    b = f"repos/{ORG}/app"
+
+    def history(run, states=SHIPPED):
+        url = f"https://github.com/{ORG}/app/actions/runs/{run}/job/9" if run else ""
+        return [{"state": st, "created_at": ago(1), "log_url": url, "target_url": url} for st in states]
+    for d, run, states in ((15, 25, ("waiting",)), (14, 25, SHIPPED), (13, 25, SHIPPED), (12, 20, SHIPPED), (11, 20, SHIPPED),
+                           (10, 50, ("waiting",)), (9, 90, SHIPPED), (8, 80, SHIPPED), (7, 70, ("waiting",)),
+                           (6, 60, ("failure", "waiting")), (5, 50, SHIPPED), (4, 40, SHIPPED), (3, 30, SHIPPED),
+                           (2, None, SHIPPED), (1, 10, SHIPPED)):
+        routes[f"{b}/deployments/{d}/statuses"] = history(run, states)
+    # Anyone with deployments:write can add a status; the run is taken from the oldest, which Actions wrote.
+    routes[f"{b}/deployments/4/statuses"][0]["log_url"] = f"https://github.com/{ORG}/app/actions/runs/999/job/1"
+    # Run 25 has cli/cli's shape: a person and a bot each approved the two jobs that ran; a third still waits. In run
+    # 20 two people approved one job each, which may have been the same job.
+    routes[f"{b}/actions/runs/25/approvals"] = [approval("ops", jobs=2), approval("deploy-gate", bot=True, jobs=2)]
+    routes[f"{b}/actions/runs/20/approvals"] = [approval("ops"), approval("ops2"), approval("deploy-gate", bot=True)]
+    routes[f"{b}/actions/runs/90/approvals"] = [approval("deploy-gate", bot=True)]
+    routes[f"{b}/actions/runs/80/approvals"] = []
+    routes[f"{b}/actions/runs/70/approvals"] = []
+    routes[f"{b}/actions/runs/60/approvals"] = [approval("lead", state="rejected")]
+    # Run 50 made deployments 5 and 10: two reviews released two jobs, a third still waits. The staging review is
+    # another environment's.
+    routes[f"{b}/actions/runs/50/approvals"] = [approval("lead"), approval("gatewatcher[bot]", comment="Approved by @x"),
+                                                approval("other", env="staging")]
+    routes[f"{b}/actions/runs/40/approvals"] = [approval("lead", jobs=3)]
+    # Run 30 is past its retention: no route, so 404.
+    return routes
+
+
+def test_who_approved_each_production_deployment(fake, monkeypatch, tmp_path):
+    f = fake(approval_routes())
+    code, ev, _ = run_fetcher("deployment_controls", monkeypatch, tmp_path)
+    assert code == 0
+    s = ev["summary"]
+    assert s["production_deployments_by_gate"] == {"passed": 11, "stopped": 1, "waiting": 3}
+    # Held at the gate is the control working, not a deployment without approval.
+    assert s["production_deployments_held_at_gate"] == ["app:production#10", "app:production#15", "app:production#6",
+                                                        "app:production#7"]
+    assert s["production_deployments_approved"] == 7
+    assert s["production_deployments_approved_independently"] == 2
+    assert s["production_deployments_without_approval"] == ["app:production#8"]
+    assert s["production_deployments_approval_unknown"] == ["app:production#1", "app:production#2", "app:production#3"]
+    assert s["production_deployments_approved_by_bot"] == ["app:production#9"]
+    # 5's creator and a bot approved its run: no one else did, but neither alone is the whole story.
+    assert s["production_deployments_self_approved"] == ["app:production#4"]
+    assert s["production_deployments_without_independent_approver"] == ["app:production#4", "app:production#5",
+                                                                         "app:production#9"]
+    assert s["production_deployments_approver_ambiguous"] == ["app:production#11", "app:production#12"]
+    by = {d["id"]: d for d in ev["repositories"][0]["environments"][0]["deployments"]}
+    assert by[5]["run_id"] == 50 and by[5]["gate"] == "passed" and by[5]["approvals"] == [
+        {"user": "lead", "bot": False, "state": "approved", "comment": None, "jobs": 1},
+        {"user": "gatewatcher[bot]", "bot": True, "state": "approved", "comment": "Approved by @x", "jobs": 1}]
+    assert by[4]["run_id"] == 40 and by[4]["approvals"][0]["jobs"] == 3
+    assert [by[i]["independent_approval"] for i in (14, 11, 9, 8, 10, 3)] == [True, None, False, False, None, None]
+    assert (by[10]["gate"], by[7]["gate"], by[6]["gate"]) == ("waiting", "waiting", "stopped")
+    assert (by[3]["approvals_unknown"], by[2]["approvals_unknown"], by[1]["approvals_unknown"]) == (
+        "run_deleted", "run_not_linked", "not_made_by_actions")
+    assert by[8]["approvals_unknown"] is None and by[8]["approvals"] == []
+    assert by[1]["run_id"] is None  # another tool's deployment: a run link in its status is not GitHub's to vouch for
+    # Reviews are read once per run, and only for deployments a workflow run made.
+    assert sorted(p for p, _ in f.calls if p.endswith("/approvals")) == [
+        f"repos/{ORG}/app/actions/runs/{r}/approvals" for r in (20, 25, 30, 40, 50, 60, 70, 80, 90)]
+
+
+@pytest.mark.parametrize("states,expected", [
+    (["success", "in_progress", "queued", "waiting"], "passed"),
+    (["error", "in_progress", "queued", "waiting"], "passed"),
+    (["success", "in_progress", "queued"], "passed"),
+    (["waiting"], "waiting"),
+    (["failure", "waiting"], "stopped"),
+    (["error", "waiting"], "stopped"),
+    (["failure"], None),
+    ([], None),
+])
+def test_how_a_deployment_fared_at_the_gate(states, expected):
+    assert MODS["deployment_controls"].gate(states) == expected
+
+
+def test_unreadable_approvals_leave_the_repository_not_collected(fake, monkeypatch, tmp_path):
+    routes = approval_routes()
+    routes[f"repos/{ORG}/app/actions/runs/50/approvals"] = (
+        403, {"message": "Resource not accessible by personal access token"},
+        {"X-Accepted-GitHub-Permissions": "actions=read"})
+    fake(routes)
+    code, ev, status = run_fetcher("deployment_controls", monkeypatch, tmp_path)
+    assert code == 1 and ev["summary"]["not_collected"] == ["app"] and "actions=read" in status["error"]
+
+
+@pytest.mark.parametrize("status,expected", [
+    ({"log_url": "https://github.com/a/b/actions/runs/123/job/9"}, 123),
+    ({"log_url": "", "target_url": "https://github.com/a/b/actions/runs/77"}, 77),
+    ({"log_url": "https://vercel.com/a/b/deployments/123"}, None),
+    ({"log_url": "https://github.com/a/b/actions/runs/12x/job/9"}, None),
+    ({}, None),
+])
+def test_the_run_is_read_from_the_status_link(status, expected):
+    assert MODS["deployment_controls"].run_id(status) == expected
+
+
+# --- workflow_runs -------------------------------------------------------------------
+
+def wf_run(id_, days_ago, path="ci.yml", branch="main", conclusion="success", status="completed", attempt=1,
+           fork=False):
+    own = {"id": 1, "full_name": f"{ORG}/app"}
+    return {"id": id_, "name": path.split(".")[0], "path": f".github/workflows/{path}", "run_number": id_,
+            "run_attempt": attempt, "event": "pull_request" if fork else "push", "status": status,
+            "conclusion": conclusion, "head_branch": branch, "head_sha": f"h{id_}", "actor": {"login": "dev"},
+            "triggering_actor": {"login": "dev"}, "created_at": ago(days_ago), "updated_at": ago(days_ago),
+            "repository": own, "head_repository": {"id": 99, "full_name": "outsider/app"} if fork else own,
+            "display_title": "never collected"}
+
+
+def artifact(id_, run_id, days_ago, size=100, expired=False):
+    return {"id": id_, "name": f"a{id_}", "size_in_bytes": size, "digest": f"sha256:{id_}", "expired": expired,
+            "created_at": ago(days_ago), "expires_at": ago(days_ago - 90), "workflow_run": {"id": run_id},
+            "archive_download_url": "never collected"}
+
+
+def paged(path, key, items):
+    """A newest-first list under `key`, paged as GitHub does with a Link header."""
+    def route(q):
+        per_page, page = int(q.get("per_page", 30)), int(q.get("page", 1))
+        headers = {}
+        if page * per_page < len(items):
+            headers["Link"] = f'<{API}/{path}?{urlencode({**q, "page": page + 1})}>; rel="next"'
+        return 200, {"total_count": len(items), key: items[(page - 1) * per_page: page * per_page]}, headers
+    return route
+
+
+def runs_routes(runs=None, artifacts=None):
+    routes = org_routes([repo("app"), repo("site")])
+    for n in ("app", "site"):
+        b = f"repos/{ORG}/{n}"
+        routes[f"{b}/actions/runs"] = paged(f"{b}/actions/runs", "workflow_runs", (runs or {}).get(n, []))
+        routes[f"{b}/actions/artifacts"] = paged(f"{b}/actions/artifacts", "artifacts", (artifacts or {}).get(n, []))
+    return routes
+
+
+def test_workflow_run_verdicts(fake, monkeypatch, tmp_path):
+    runs = {"app": [wf_run(10, 0.5, "lint.yml", conclusion=None, status="queued"),
+                    wf_run(9, 1, conclusion="failure"), wf_run(8, 1, "release.yml", conclusion=None, status="in_progress"),
+                    wf_run(7, 2, "release.yml"), wf_run(6, 3, branch="feature", conclusion="failure"),
+                    wf_run(5, 4, attempt=2), wf_run(4, 5, "lint.yml", conclusion="timed_out"),
+                    wf_run(3, 40, conclusion="failure")]}
+    artifacts = {"app": [artifact(13, 7, 2, size=300), artifact(12, 5, 4, size=200, expired=True),
+                         artifact(11, 2, 6), artifact(10, 3, 40)]}
+    fake(runs_routes(runs, artifacts))
+    code, ev, _ = run_fetcher("workflow_runs", monkeypatch, tmp_path)
+    assert code == 0
+    s = ev["summary"]
+    assert s["runs_total"] == 7  # run 3 is outside the window
+    assert s["runs_by_outcome"] == {"failure": 2, "in_progress": 1, "queued": 1, "success": 2, "timed_out": 1}
+    assert s["default_branch_runs"] == 6 and s["default_branch_runs_failed"] == 2
+    # A workflow's newest finished run decides: lint.yml's queued run does not clear its timeout, nor does
+    # release.yml's in-progress run hide its last success.
+    assert s["workflows_failing_on_default_branch"] == ["app:.github/workflows/ci.yml",
+                                                        "app:.github/workflows/lint.yml"]
+    assert s["runs_rerun"] == 1 and s["workflows_run"] == 3
+    assert s["repositories_with_runs"] == ["app"] and s["repositories_without_runs"] == ["site"]
+    # Artifacts of runs outside the window (run 2, run 3) are not attached to anything.
+    assert s["artifacts_total"] == 2 and s["artifacts_expired"] == 1 and s["artifacts_size_bytes"] == 500
+    by = {r["id"]: r for r in ev["repositories"][0]["runs"]}
+    assert by[7]["artifacts"] == [{"name": "a13", "size_in_bytes": 300, "digest": "sha256:13",
+                                   "created_at": ago(2), "expires_at": ago(-88), "expired": False}]
+    assert by[6]["on_default_branch"] is False and by[9]["actor"] == "dev"
+    assert "display_title" not in by[9] and "never collected" not in json.dumps(ev)
+
+
+def test_a_fork_branch_named_like_the_default_branch_is_not_the_default_branch(fake, monkeypatch, tmp_path):
+    # Measured on cli/cli: pull requests from a fork's `trunk` run with head_branch "trunk".
+    runs = {"app": [wf_run(3, 0.5, conclusion="failure", fork=True), wf_run(2, 1),
+                    {**wf_run(1, 2, conclusion="failure"), "head_repository": None},
+                    {**wf_run(0, 2, conclusion="failure"), "head_repository": None, "repository": None}]}
+    fake(runs_routes(runs))
+    code, ev, _ = run_fetcher("workflow_runs", monkeypatch, tmp_path)
+    assert code == 0
+    s = ev["summary"]
+    assert s["default_branch_runs"] == 1 and s["default_branch_runs_failed"] == 0
+    assert s["workflows_failing_on_default_branch"] == []
+    by = {r["id"]: r for r in ev["repositories"][0]["runs"]}
+    assert by[3]["head_repository"] == "outsider/app" and by[3]["on_default_branch"] is False
+    assert by[2]["head_repository"] == f"{ORG}/app" and by[2]["on_default_branch"] is True
+    assert by[1]["on_default_branch"] is False  # a deleted fork leaves no head repository
+    assert by[0]["on_default_branch"] is False  # nor is a run that names no repository at all
+
+
+def test_runs_are_walked_newest_first_never_filtered_by_date(fake, monkeypatch, tmp_path):
+    # A created= filter stops at 1,000 results and then answers empty with total_count 0 (measured on cli/cli).
+    runs = {"app": [wf_run(i, 1) for i in range(250, 0, -1)] + [wf_run(0, 60)]}
+    f = fake(runs_routes(runs))
+    code, ev, _ = run_fetcher("workflow_runs", monkeypatch, tmp_path)
+    app_pages = [q for p, q in f.calls if p == f"repos/{ORG}/app/actions/runs"]
+    assert code == 0 and ev["summary"]["runs_total"] == 250
+    assert len(app_pages) == 3 and all("created" not in q for q in app_pages)
+
+
+def test_more_runs_than_the_cap_fail_rather_than_cut_history(fake, monkeypatch, tmp_path):
+    f = fake(runs_routes({"app": [wf_run(i, 1) for i in range(250, 0, -1)]}))
+    code, ev, status = run_fetcher("workflow_runs", monkeypatch, tmp_path, GITHUB_MAX_WORKFLOW_RUNS="5")
+    assert code == 1 and "GITHUB_MAX_WORKFLOW_RUNS" in status["error"] and ev["summary"]["not_collected"] == ["app"]
+    assert len([p for p, _ in f.calls if p == f"repos/{ORG}/app/actions/runs"]) == 1  # stops at the cap
+    # Exactly at the cap, with the next one outside the window, is complete.
+    fake(runs_routes({"app": [wf_run(i, 1) for i in range(5, 0, -1)] + [wf_run(0, 90)]}))
+    code, ev, _ = run_fetcher("workflow_runs", monkeypatch, tmp_path, GITHUB_MAX_WORKFLOW_RUNS="5")
+    assert code == 0 and ev["summary"]["runs_total"] == 5
+
+
+def test_more_artifacts_than_the_cap_fail(fake, monkeypatch, tmp_path):
+    fake(runs_routes({"app": [wf_run(1, 1)]}, {"app": [artifact(i, 1, 1) for i in range(5)]}))
+    code, ev, status = run_fetcher("workflow_runs", monkeypatch, tmp_path, GITHUB_MAX_ARTIFACTS="3")
+    assert code == 1 and "GITHUB_MAX_ARTIFACTS" in status["error"] and ev["summary"]["not_collected"] == ["app"]
+
+
+def test_a_repository_without_runs_reads_no_artifacts(fake, monkeypatch, tmp_path):
+    f = fake(runs_routes())
+    code, ev, _ = run_fetcher("workflow_runs", monkeypatch, tmp_path)
+    assert code == 0 and ev["summary"]["runs_total"] == 0
+    assert not any(p.endswith("/actions/artifacts") for p, _ in f.calls)
+
+
+def test_unreadable_runs_name_the_permission(fake, monkeypatch, tmp_path):
+    routes = runs_routes({"site": [wf_run(1, 1)]})
+    routes[f"repos/{ORG}/app/actions/runs"] = (403, {"message": "Resource not accessible by personal access token"},
+                                               {"X-Accepted-GitHub-Permissions": "actions=read"})
+    fake(routes)
+    code, ev, status = run_fetcher("workflow_runs", monkeypatch, tmp_path)
+    assert code == 1 and ev["summary"]["not_collected"] == ["app"] and ev["summary"]["runs_total"] == 1
+    assert "actions=read" in status["error"]
+
+
+@pytest.mark.parametrize("env", [{"GITHUB_WORKFLOW_RUNS_DAYS_BACK": "0"}, {"GITHUB_WORKFLOW_RUNS_DAYS_BACK": "367"},
+                                 {"GITHUB_MAX_WORKFLOW_RUNS": "0"}, {"GITHUB_MAX_ARTIFACTS": "0"}])
+def test_workflow_run_configuration_errors(fake, monkeypatch, tmp_path, env):
+    fake(runs_routes())
+    code, _, status = run_fetcher("workflow_runs", monkeypatch, tmp_path, **env)
+    assert code == 1 and status["code"] == "bad_config"

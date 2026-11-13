@@ -47,6 +47,31 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`wiz_vulnerability_findings` 0.4.0: SLA columns.** After the 43 legacy
+  columns (unchanged, so existing intake presets keep mapping), the CSV adds the
+  Wiz fields Paramify's remediation SLAs depend on: `Is Internet Reachable` and
+  `Internet Reachable Reason` (Wiz's finding-level classification, closer to
+  FedRAMP's Internet-Reachable Vulnerability than the asset-level `Asset Has Wide
+  Internet Exposure`), `Asset Has Limited Internet Exposure`, the BOD 26-04 KEV
+  inputs `CISA SSVC Automatable` and `CISA SSVC Technical Impact` plus `CISA KEV
+  Due Date`, and four signals toward Likely Exploitable (`Exploitability
+  Validation Status`, `Has Initial Access Potential`, `Code Reachability`,
+  `Attack Vector`). None of the four is a Likely Exploitable verdict. Each field
+  is selected only when the tenant's schema has it (read-only introspection); a
+  missing one leaves its column blank and is logged, and if the schema cannot be
+  read the legacy query is sent unchanged. The columns are listed in
+  [the fetcher's README](fetchers/wiz/vulnerability_findings/README.md#columns).
+
+- **Optional selected-subscription reads for mixed Entra evidence.**
+  `azure_entra_emergency_accounts` 0.2.0 and
+  `azure_entra_dormant_identities` 0.3.0 accept `target_subscription_only`
+  (default false). With an explicit subscription and `AZURE_TENANT_ID`, ARM
+  requests stay in that subscription and both source tenant reads must agree
+  before further directory reads. Shared Graph clients check continuation origins
+  and refuse redirects; scoped ARM REST/SDK requests validate before token/send.
+  Graph remains tenant-wide. Missing reads, licensing limits and unsupported APIs
+  remain recorded failures or unknown values. No source access is changed.
+
 - **`aws_route53_resolver_dns_security`** (`EVD-R53-RESOLVER-DNS-SECURITY`) —
   one record per VPC in the region with its Route 53 Resolver DNSSEC validation
   status (`NOT_CONFIGURED` when the VPC has no DNSSEC config), its DNS Firewall
@@ -123,6 +148,19 @@ schemas and the `paramify` CLI — not the internal code.
   before the fetcher started) and `notes`. Each item names the entry and the
   fetcher. The record of a failed invocation adds `error` and, when the fetcher
   gave one, `error_code`. The same record goes in `_run_metadata.json`.
+- **`github_workflow_runs` 0.1.0 gives the GitHub Actions run history.** For
+  each repository, it records every workflow run in the window: the workflow
+  file, trigger, branch, commit, actor, attempt, status and conclusion. It
+  also records the artifacts that each run uploaded (name, size, digest and
+  expiry, never the contents). The summary counts runs by outcome and failed
+  runs on the default branch. It also lists the workflows whose newest
+  finished run on the default branch failed. A run from a fork is never on
+  the default branch, even when the fork's branch has the same name. The run
+  reads the newest runs
+  first and does not use a date filter, because a filtered list stops at
+  1,000 results with no error. It fails as truncated beyond
+  `GITHUB_MAX_WORKFLOW_RUNS` or `GITHUB_MAX_ARTIFACTS`. It needs the Actions
+  (repository) read permission.
 
 - **Inspector ECR findings and Paramify issue intake:** `aws_inspector_ecr_findings`
   collects active findings, package details, image inventory and coverage;
@@ -1664,6 +1702,45 @@ schemas and the `paramify` CLI — not the internal code.
   - **Enhanced scanning permissions:** `ecr:DescribeImageScanFindings` also needs
     `inspector2:ListCoverage` and `inspector2:ListFindings` when the registry uses
     enhanced scanning; without them AWS denies the ECR call.
+- **`github_deployment_controls` 0.2.0 records who approved each production
+  deployment.** For a deployment that GitHub Actions made, the fetcher finds
+  the workflow run from the oldest deployment status and reads the run's
+  reviews of that environment. It reads the full status history to tell a
+  deployment that got past the gate from one held there. New fields per
+  deployment: `gate`, `run_id`, `approvals` (one entry per review),
+  `approvals_unknown` and `independent_approval` (a person other than the
+  creator approved it). New summary fields:
+  `production_deployments_by_gate`, `production_deployments_held_at_gate`,
+  `production_deployments_approved`, `production_deployments_without_approval`,
+  `production_deployments_approval_unknown`,
+  `production_deployments_approved_independently`,
+  `production_deployments_without_independent_approver`,
+  `production_deployments_approved_by_bot`,
+  `production_deployments_self_approved` and
+  `production_deployments_approver_ambiguous`. Approval is judged only for
+  deployments that passed the gate. If the approval is not known, the value
+  is `null`, not "not approved". This occurs when Actions did not make the
+  deployment, when the status has no run link, or when GitHub deleted the
+  run. The fetcher needs no new permission. It makes one more call for each
+  workflow run that made a production deployment.
+- **`github_actions_security` 0.2.0 records runner groups and OIDC subject
+  claims.** `organization.runner_groups` gives each group with its
+  visibility, the repositories that can use it, its runners, whether it
+  allows public repositories and whether it limits use to some workflows.
+  `organization.oidc_subject_template` gives the organization's subject
+  template. Each repository with a workflow that uses OIDC gets
+  `oidc_subject`, with the claim keys that its subject is built from. New
+  summary fields: `runner_groups`, `runner_groups_open_to_all_repositories`,
+  `runner_groups_allowing_public_repositories`,
+  `runner_groups_not_restricted_to_workflows`,
+  `organization_oidc_subject_claims`, `repositories_with_custom_oidc_subject`,
+  `repositories_on_organization_oidc_template` and
+  `repositories_oidc_subject_without_repository`. A workflow with
+  `permissions: write-all` counts as using OIDC. Runner groups use the
+  Self-hosted runners (organization) permission and follow
+  `include_self_hosted_runners`. The repository OIDC setting needs the Actions
+  (repository) read permission.
+
 - **The uploader guide explains the collection frequency of an evidence set.**
   A new section in [`docs/uploader_guide.md`](docs/uploader_guide.md#set-the-collection-frequency)
   gives the default (`THREE_DAY`), the values, and how to set `frequency` in
@@ -2304,6 +2381,13 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- **`azure_entra_authentication_policy` no longer shows Microsoft's password
+  defaults when the tenant's settings could not be read.** Before, a failed
+  `/groupSettings` read fell back to the template, so `password_settings_source`
+  read `template_defaults` and the banned-password and lockout fields showed
+  the defaults, though the tenant may have saved other values. The source and
+  those fields are now null, and the failed read still fails the run. Version
+  0.3.1.
 - **`paramify doctor` and the note before `paramify run` find an upload token
   in `.env`.** So do `manifest set-stack` and the stack picker in the TUI.
   Before, only `paramify stacks` and `paramify upload` read `.env`, and the

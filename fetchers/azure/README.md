@@ -196,6 +196,24 @@ Ready-to-edit manifests:
 - [`examples/azure_keys_and_monitoring.yaml`](../../examples/azure_keys_and_monitoring.yaml)
   — Key Vault, Activity Log export and alerts, Recovery Services vaults.
 
+### Limit mixed Entra reads to one subscription
+
+`azure_entra_emergency_accounts` and `azure_entra_dormant_identities` accept
+`config.target_subscription_only: true`. Supply an explicit `subscription_id`
+target and pass `AZURE_TENANT_ID` through the manifest's Azure authentication
+configuration. The option defaults to false.
+
+With it enabled, ARM requests and continuation URLs stay in the selected
+subscription. The subscription tenant must match `AZURE_TENANT_ID`, and Graph's
+organization must confirm the same tenant before further directory reads.
+Missing, denied or mismatched tenant reads remain failures. Graph data remains
+tenant-wide; selecting a subscription does not filter that directory population.
+
+The shared Graph clients reject continuations outside the configured HTTPS
+origin and refuse redirects. The selected-subscription ARM transports also
+refuse redirects. These checks do not grant access or replace read-only IAM.
+Unsupported cloud APIs and licensing gaps remain visible in the original result.
+
 ## Smoke test
 
 ```bash

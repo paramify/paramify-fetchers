@@ -15,6 +15,7 @@ from contextlib import asynccontextmanager
 from datetime import date, datetime
 from enum import Enum
 from typing import Any, Awaitable, Callable, Dict, List, Optional
+from urllib.parse import urlsplit
 from uuid import UUID
 
 _LOGGER = logging.getLogger("entra_graph")
@@ -319,16 +320,23 @@ async def graph_service_client(cred):
     from kiota_authentication_azure.azure_identity_authentication_provider import (
         AzureIdentityAuthenticationProvider,
     )
+    from kiota_http.middleware.options.redirect_handler_option import (
+        RedirectHandlerOption,
+    )
     from msgraph import GraphServiceClient
     from msgraph.graph_request_adapter import GraphRequestAdapter
     from msgraph_core import GraphClientFactory
 
     scope, host = graph_scope(), graph_host()
     _LOGGER.info("Microsoft Graph: host=%s scope=%s", host, scope)
-    # allowed_hosts is deliberately left at its default: kiota treats an empty
-    # allow-list as "any host", which is what lets the sovereign hosts above work.
-    auth_provider = AzureIdentityAuthenticationProvider(cred, scopes=[scope])
-    http_client = GraphClientFactory.create_with_default_middleware(host=host)
+    auth_provider = AzureIdentityAuthenticationProvider(
+        cred, scopes=[scope], allowed_hosts=[urlsplit(host).hostname]
+    )
+    redirect = RedirectHandlerOption(max_redirect=0, should_redirect=False)
+    http_client = GraphClientFactory.create_with_default_middleware(
+        host=host, options={redirect.get_key(): redirect}
+    )
+    http_client.follow_redirects = False
     try:
         yield GraphServiceClient(
             request_adapter=GraphRequestAdapter(auth_provider, client=http_client)
@@ -406,6 +414,10 @@ async def paginate(
             pages += 1
             if not next_link:
                 break
+            target, origin = urlsplit(next_link), urlsplit(graph_host())
+            if (target.scheme != "https" or target.netloc.lower() != origin.netloc.lower()
+                    or target.username is not None or target.password is not None or target.fragment):
+                raise ValueError("Graph continuation is outside the configured source origin")
             if pages >= page_limit:
                 collector.record(
                     operation,

@@ -222,7 +222,7 @@ def _methods_user(uid, methods, admin=False):
     return reg
 
 
-def test_phishing_resistant_counts_only_resistant_methods():
+def test_phishing_resistant_counts_only_resistant_methods(assert_summary_documented):
     cases = {
         "p0": (["fido2SecurityKey"], True),
         "p1": (["windowsHelloForBusiness", "mobilePhone"], True),
@@ -243,6 +243,7 @@ def test_phishing_resistant_counts_only_resistant_methods():
     assert by_id["p-none"]["is_phishing_resistant"] is False
     assert by_id["p2"]["is_passwordless_capable"] is True
     summary = mfa_status.summarize(records)
+    assert_summary_documented("azure/entra_mfa_status", summary)
     assert summary["phishing_resistant_enabled_users"] == 7
     assert summary["phishing_resistant_coverage_percentage"] == 70
     assert summary["passwordless_capable_enabled_users"] == 9
@@ -471,7 +472,7 @@ def _collect_roles(monkeypatch, graph):
     return collector, {r["display_name"]: r for r in roles}, privileged_roles.summarize(roles, roles_read)
 
 
-def test_service_principals_the_members_list_leaves_out_are_read_from_the_cast(monkeypatch):
+def test_service_principals_the_members_list_leaves_out_are_read_from_the_cast(monkeypatch, assert_summary_documented):
     # v1.0 members leaves sp-hidden out; the cast's items may carry no @odata.type.
     graph = _roles_graph(
         members={"r-sr": [_obj("g-sec", "group"), _obj("sp-listed", "servicePrincipal")],
@@ -487,6 +488,7 @@ def test_service_principals_the_members_list_leaves_out_are_read_from_the_cast(m
     reader = roles["Security Reader"]
     assert sorted(m["id"] for m in reader["members"]) == ["g-sec", "sp-hidden", "sp-listed"]
     assert reader["service_principal_member_count"] == 2 and reader["service_principal_members_read"] is True
+    assert_summary_documented("azure/entra_privileged_roles", summary)
     assert summary["service_principals_in_privileged_roles"] == 2
     assert summary["privileged_role_assignments"] == 3 and summary["total_role_assignments"] == 5
 

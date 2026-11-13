@@ -116,6 +116,11 @@ def test_inventory_without_patterns_adds_only_empty_exclusion_fields(monkeypatch
     assert (summary["excluded_resources"], summary["in_scope_resources"], summary["total_resources"]) == (0, 4, 4)
 
 
+def test_inventory_summary_fields_match_the_instructions(monkeypatch, tmp_path, assert_summary_documented):
+    _, evidence = run_inventory(monkeypatch, tmp_path, None)
+    assert_summary_documented("azure/resource_inventory", evidence["summary"])
+
+
 def test_inventory_excluded_resources_leave_every_tally_and_the_region_counts(monkeypatch, tmp_path):
     code, evidence = run_inventory(monkeypatch, tmp_path, PATTERNS)
     summary, results = evidence["summary"], evidence["results"]

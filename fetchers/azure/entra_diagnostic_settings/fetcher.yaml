@@ -1,13 +1,7 @@
 name: azure_entra_diagnostic_settings
 version: 0.1.0
-description: >
-  The Entra ID tenant's diagnostic settings: which directory log categories
-  (AuditLogs, SignInLogs, non-interactive, service-principal and managed-identity
-  sign-ins, provisioning, risk events, Graph activity) each setting exports, and
-  where to: Log Analytics workspace, storage account or Event Hub. Each
-  destination workspace is checked for Microsoft Sentinel. Per category: whether
-  any setting exports it, and whether it reaches a Sentinel workspace. Also
-  whether both AuditLogs and SignInLogs reach the SIEM.
+description: >-
+  Shows which Entra ID log categories the tenant exports, where each goes, and whether audit and sign-in logs reach a Sentinel workspace.
 category: azure
 
 supports_targets: true
@@ -53,13 +47,27 @@ ksis:
 evidence_set:
   reference_id: EVD-AZURE-ENTRA-DIAGNOSTIC-SETTINGS
   name: Azure Entra ID Diagnostic Settings
-  instructions: >
-    Script: azure/entra_diagnostic_settings/fetcher.py. ARM REST at tenant scope:
-    microsoft.aadiam/diagnosticSettings (api-version 2017-04-01) and
-    diagnosticSettingsCategories (2017-04-01-preview, the only version it answers). A
-    category counts as exported when a setting lists it enabled; categories_not_exported
-    is null when the category list can't be read. Each destination
-    workspace's SecurityInsights onboardingStates decides to_sentinel_workspace
-    (null when that workspace isn't readable). Needs an Entra role that reads
-    tenant diagnostic settings (Security Reader or Global Reader), plus Microsoft
-    Sentinel Reader on the destination workspaces.
+  instructions: |
+    Script: azure/entra_diagnostic_settings/fetcher.py
+
+    Access: Security Reader or Global Reader in Entra ID. Optional: Microsoft Sentinel Reader on the destination workspaces; without it, whether a category reaches Sentinel reads as unknown (null).
+
+    Commands Executed:
+    - GET /providers/microsoft.aadiam/diagnosticSettings — the tenant's diagnostic settings and the categories each exports
+    - GET /providers/microsoft.aadiam/diagnosticSettingsCategories — every available category, so unexported ones show
+    - GET Microsoft.SecurityInsights/onboardingStates (per destination workspace) — whether the workspace runs Sentinel
+
+    Output: azure_entra_diagnostic_settings_<tenant>.json — the tenant's diagnostic settings (Log Analytics workspace, storage account or Event Hub destinations) and, for each log category, whether it is exported, where to, and whether it reaches a Sentinel workspace; destination workspaces this credential can't read are recorded with an unknown Sentinel state.
+
+    Summary fields:
+
+    Are Entra ID logs exported?
+    - settings_total — Number of Entra ID diagnostic settings in the tenant
+    - categories_exported — Number of log categories that at least one setting exports (a category counts when a setting lists it enabled)
+    - categories_not_exported — List of log categories no setting exports; null if the list of available categories couldn't be read
+
+    Do audit and sign-in logs reach Sentinel?
+    - key_categories_to_sentinel — Whether each key category reaches a Sentinel workspace: true if any setting exporting it sends it to one; null if none does but a destination workspace couldn't be read; false otherwise, including when no setting exports it:
+      - AuditLogs (directory changes)
+      - SignInLogs (interactive user sign-ins)
+    - audit_and_signin_logs_to_sentinel — True if both AuditLogs and SignInLogs reach Sentinel; false if either doesn't; null if neither is false and one is unknown

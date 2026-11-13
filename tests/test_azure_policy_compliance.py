@@ -859,3 +859,24 @@ def test_main_writes_the_new_results_and_summary(monkeypatch, tmp_path):
         assert key in summary
     # Nothing was read, so the history counts are unknown rather than 0.
     assert summary["history_collected"] is False and summary["history_non_compliant_pairs"] is None
+
+
+def test_summary_fields_match_the_instructions(monkeypatch, tmp_path, assert_summary_documented):
+    monkeypatch.setattr(fx, "load_dotenv", lambda: None)
+    monkeypatch.setenv("EVIDENCE_DIR", str(tmp_path))
+    monkeypatch.setattr(fx, "resolve_subscription", lambda c: {"subscription_id": "s1", "subscription_source": "env"})
+    monkeypatch.setattr(fx, "credential", lambda: object())
+    monkeypatch.setattr(fx, "provider_registration_status", lambda *a: "registered")
+    statuses = (fx.DETAILS_COLLECTED, fx.DETAILS_NOT_RETURNED, fx.DETAILS_NOT_IN_RESULT, fx.DETAILS_NOT_REQUESTED,
+                fx.DETAILS_UNSUPPORTED_SCOPE, fx.DETAILS_NOT_AUTHORIZED, fx.DETAILS_FAILED)
+
+    def collect(subscription_id, cred, collector, limits, exclusions=None):
+        collected = fx.empty_collection()
+        collected["states"] = [{**state(VM), "evaluation_details_status": s} for s in statuses]
+        return collected
+
+    monkeypatch.setattr(fx, "collect_compliance", collect)
+    monkeypatch.setenv("AZURE_RESOURCE_EXCLUSIONS", "rg:other")
+    assert fx.main() == 0
+    summary = json.loads((tmp_path / "azure_policy_compliance_s1.json").read_text())["summary"]
+    assert_summary_documented("azure/policy_compliance", summary)
