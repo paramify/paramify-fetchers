@@ -1,7 +1,7 @@
 name: azure_entra_pim_assignments
 version: 0.2.0
 description: >-
-  Shows who can activate each Entra ID admin role and whether they're on an approved list, who holds one permanently, and whether activation needs MFA, approval and a time limit.
+  Shows who can activate each Entra ID admin role, whether they're approved, who holds one permanently, and whether activation needs MFA, a reason, approval and a time limit.
 category: azure
 
 supports_targets: true
