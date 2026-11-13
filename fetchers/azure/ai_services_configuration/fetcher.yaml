@@ -131,7 +131,7 @@ evidence_set:
     - deployments_data_zone_processing — Number of deployments that process data within one geography (DataZone deployment types); null when the account list could not be read
     - deployments_regional_processing — Number of deployments that process data in the account's own region (Standard, ProvisionedManaged or Batch types); null when the account list could not be read
     - deployments_processing_scope_unknown — Number of deployments whose deployment type is not recognised; null when the account list could not be read
-    - deployments_third_party_publisher — Number of deployments whose model publisher is neither OpenAI nor Microsoft; null when the account list could not be read
+    - deployments_third_party_publisher — Number of deployments whose model publisher is neither OpenAI nor Microsoft; a deployment with no publisher reported is not counted; null when the account list could not be read
     - deployments_by_model_publisher — Number of deployments for each model publisher (OpenAI, Anthropic and so on), with one entry per publisher found; a deployment with no publisher reported is counted under unknown; null when the account list could not be read
     - deployments_with_automatic_version_upgrade — Number of deployments whose model is upgraded automatically when a new default version is available or the current one expires; null when the account list could not be read
 
