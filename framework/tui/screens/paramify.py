@@ -307,6 +307,8 @@ class ParamifyPage(ParamifyWriter, Vertical):
         self.query_one("#pf-caps-panel").border_title = "linked capabilities"
         self._detail_rows = self.DETAIL_ROWS
         self._cap_filter = ""
+        self._cap_pairs: dict = {}
+        self._cap_others: dict = {}
         caps = self.query_one("#pf-cap-grid", DataTable)
         caps.add_columns("capability", "", "pairs", "from fetchers")
         self.query_one("#pf-cap-panel").border_title = "capabilities"
@@ -423,7 +425,9 @@ class ParamifyPage(ParamifyWriter, Vertical):
             self._rows = {}
             self._error = None
             self._newest = {}
-            for table in ("#pf-grid", "#pf-caps"):
+            self._cap_pairs = {}
+            self._cap_others = {}
+            for table in ("#pf-grid", "#pf-caps", "#pf-cap-grid", "#pf-pairs"):
                 self.query_one(table, DataTable).clear()
             self.query_one("#pf-set", Static).update("")
         self._stale = True
@@ -764,9 +768,9 @@ class ParamifyPage(ParamifyWriter, Vertical):
     def _show_pairs(self, cap_id: str | None) -> None:
         table = self.query_one("#pf-pairs", DataTable)
         table.clear()
-        for fetcher, function, validators in getattr(self, "_cap_pairs", {}).get(cap_id, []):
+        for fetcher, function, validators in self._cap_pairs.get(cap_id, []):
             table.add_row(fetcher, _dim(function.lower().replace("_", " ")), " + ".join(validators))
-        other = getattr(self, "_cap_others", {}).get(cap_id, 0)
+        other = self._cap_others.get(cap_id, 0)
         if other and "evidence_sets" in ((self._status or {}).get("errors") or {}):
             # Unread, the manifest's own pairs look like other sets' pairs.
             table.add_row(Text("?", style=palette.WARN), _dim("—"),

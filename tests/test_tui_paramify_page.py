@@ -1002,3 +1002,23 @@ def test_unread_evidence_sets_leave_the_pair_sources_unknown(tmp_path, monkeypat
     assert rows["SC-AC-06"][2:] == ["2", "? the evidence sets were not read"]
     assert rows["SC-AU-02"][2] == "2"
     assert pair_row == ["?", "—", "2 pair(s); the evidence sets were not read"]
+
+
+def test_a_manifest_switch_clears_the_old_capabilities(tmp_path, monkeypatch, run_tui):
+    """The old manifest's pairs must not stay on the capability view after a
+    switch, while the new read runs or when it fails."""
+    other = _second_manifest(tmp_path)
+    _stub(monkeypatch, _cap_status(), RuntimeError("HTTP 503"))
+
+    async def body(app, pilot):
+        page = await _capability_lens(app, pilot)
+        before = page.query_one("#pf-cap-grid", DataTable).row_count, page.query_one("#pf-pairs", DataTable).row_count
+        app.load_manifest(other)
+        app.screen.reload()
+        await _settle(app, pilot)
+        return (before, page.query_one("#pf-cap-grid", DataTable).row_count,
+                page.query_one("#pf-pairs", DataTable).row_count, page._cap_pairs)
+
+    before, caps, pairs, kept = run_tui(body, _manifest(tmp_path))
+    assert before == (2, 3)
+    assert (caps, pairs, kept) == (0, 0, {})
