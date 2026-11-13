@@ -1677,8 +1677,10 @@ schemas and the `paramify` CLI — not the internal code.
   linked solution capabilities, the artifacts, and whether the fetcher is
   ready. Under the grid, a line counts each column. The highlighted fetcher
   shows its validators and the capabilities that its validator pairs prove.
-  `/` filters the grid and `w` shows only the fetchers that need work. `s`
-  syncs the scripts, `v` syncs the validators and `u` uploads the newest run,
+  `/` filters the grid. `w` hides the fetchers that are ready, so the grid
+  lists only what needs work, and shows them again; the footer reads
+  `w hide ready` or `w show all`. The validators count is out of the
+  fetchers that have validators in the registry. `s` syncs the scripts, `v` syncs the validators and `u` uploads the newest run,
   each after a preview and a confirm, and the grid then reads the workspace
   again. Without an API token, a bar says how to set one, and the three keys
   are off. A cell or count whose read failed shows `?`, as in `paramify

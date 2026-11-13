@@ -138,7 +138,8 @@ def test_title_and_totals(tmp_path, monkeypatch, run_tui):
     title, totals, summary = run_tui(body, _manifest(tmp_path))
     assert title == "evidence sets (3)  ·  1 ready"
     assert "evidence sets 2/3" in totals and "scripts 1/3" in totals
-    assert "validators 2/3" in totals and "uploaded 1/3" in totals
+    # charlie has no validators in the registry: out of the two that do, alpha's are paired
+    assert "validators 1/2" in totals and "uploaded 1/3" in totals
     assert "https://app.paramify.com/api/v0" in summary and "1/3 ready" in summary
 
 
@@ -372,19 +373,62 @@ def test_filter_matches_name_and_reference_id(tmp_path, monkeypatch, run_tui):
     assert focused == "pf-filter" and by_name == ["bravo"] and by_ref == ["charlie"]
 
 
+def _w_hint(page) -> str:
+    return dict(page.HINTS)["w"]
+
+
 def test_w_hides_ready_rows_and_totals_say_so(tmp_path, monkeypatch, run_tui):
     _stub(monkeypatch, _status())
 
     async def body(app, pilot):
         page = await _open(app, pilot)
+        before = _w_hint(page)
         await pilot.press("w")
         await pilot.pause()
-        return _keys(page), _text(page.query_one("#pf-totals", Static).content)
+        hidden = _keys(page), _text(page.query_one("#pf-totals", Static).content), _w_hint(page)
+        await pilot.press("w")
+        await pilot.pause()
+        return before, hidden, _keys(page), _w_hint(page)
 
-    keys, totals = run_tui(body, _manifest(tmp_path))
+    before, (keys, totals, hint), again, after = run_tui(body, _manifest(tmp_path))
+    assert before == "hide ready", "the footer must say what w does"
     assert keys == ["bravo", "charlie"]
     assert totals.rstrip().endswith("showing 2 of 3")
     assert "scripts 1/3" in totals  # the totals still count every fetcher
+    assert hint == "show all"
+    assert again == ["alpha", "bravo", "charlie"] and after == "hide ready"
+
+
+def test_a_filter_that_matches_nothing_clears_the_detail(tmp_path, monkeypatch, run_tui):
+    _stub(monkeypatch, _status())
+
+    async def body(app, pilot):
+        page = await _open(app, pilot)
+        before = _text(page.query_one("#pf-set", Static).content)
+        await pilot.press("slash", *"zzz")
+        await pilot.pause()
+        return (before, _keys(page), _text(page.query_one("#pf-set", Static).content),
+                page.query_one("#pf-caps", DataTable).row_count)
+
+    before, keys, detail, caps = run_tui(body, _manifest(tmp_path))
+    assert "alpha" in before
+    assert keys == []
+    assert "No fetcher matches “zzz”." in detail and "alpha" not in detail
+    assert caps == 0
+
+
+def test_hiding_every_ready_fetcher_says_so(tmp_path, monkeypatch, run_tui):
+    _stub(monkeypatch, _status([_row("alpha", validators=_validators(True), ready=True)]))
+
+    async def body(app, pilot):
+        page = await _open(app, pilot)
+        await pilot.press("w")
+        await pilot.pause()
+        return _keys(page), _text(page.query_one("#pf-set", Static).content)
+
+    keys, detail = run_tui(body, _manifest(tmp_path))
+    assert keys == []
+    assert "Every fetcher is ready. w shows them all." in detail
 
 
 def test_refresh_keeps_the_cursor_on_the_same_fetcher(tmp_path, monkeypatch, run_tui):

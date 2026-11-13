@@ -197,17 +197,22 @@ def totals_text(rows: list, shown: int, errors: dict | None = None) -> Text:
     sets_known = "evidence_sets" not in errors
     text = Text()
 
-    def part(label: str, have: int, known: bool = True) -> None:
+    def part(label: str, have: int, known: bool = True, of: int | None = None) -> None:
+        total = n if of is None else of
         text.append(f"{label} ", style=palette.MUTED)
         if not known:
-            text.append(f"?/{n}", style=palette.WARN)
+            text.append(f"?/{total}", style=palette.WARN)
         else:
-            text.append_text(_fraction(have, n) if n else Text("0/0"))
+            text.append_text(_fraction(have, total) if total else Text("0/0"))
         text.append("     ")
 
     part("evidence sets", sum(r["evidence_set"].get("exists") is True for r in rows), sets_known)
     part("scripts", sum(r["script"] == "in_sync" for r in rows), "scripts" not in errors)
-    part("validators", sum(all(v["paired"] is True for v in r["validators"]) for r in rows), sets_known)
+    # Out of the fetchers with validators in the registry: one with none has
+    # nothing to pair, so it is neither done nor left to do.
+    with_validators = [r for r in rows if r["validators"]]
+    part("validators", sum(all(v["paired"] is True for v in r["validators"]) for r in with_validators),
+         sets_known, of=len(with_validators))
     text.append("capabilities ", style=palette.MUTED)
     if sets_known and "capabilities" not in errors:
         text.append(f"{sum(len(r['pairs']) for r in rows)} links")
@@ -224,7 +229,7 @@ class ParamifyPage(ParamifyWriter, Vertical):
     BINDINGS = [
         Binding("ctrl+r", "refresh_status", "Refresh"),
         Binding("slash", "focus_filter", "Filter"),
-        Binding("w", "needs_work", "Needs work"),
+        Binding("w", "hide_ready", "Hide ready / show all"),
         Binding("s", "sync_scripts", "Sync scripts"),
         Binding("v", "sync_validators", "Sync validators"),
         Binding("u", "upload_run", "Upload run"),
@@ -267,7 +272,7 @@ class ParamifyPage(ParamifyWriter, Vertical):
         self._newest: dict = {}
         self._rows: dict = {}
         self._filter = ""
-        self._needs_work = False
+        self._hide_ready = False
         self._planning = False
         self._acting = False
         activity = self.query_one("#pf-activity-panel", Vertical)
@@ -353,7 +358,7 @@ class ParamifyPage(ParamifyWriter, Vertical):
 
     @property
     def HINTS(self) -> list:  # noqa: N802 — the workspace reads HINTS off every page
-        hints = [("↑↓", "fetcher"), ("/", "filter"), ("w", "needs work")]
+        hints = [("↑↓", "fetcher"), ("/", "filter"), ("w", "show all" if self._hide_ready else "hide ready")]
         if self._actions_on():
             hints += [("s", "sync scripts"), ("v", "sync validators"), ("u", "upload run")]
         return hints + [("ctrl+r", "refresh")]
@@ -525,7 +530,7 @@ class ParamifyPage(ParamifyWriter, Vertical):
         text = self._filter
         return [
             r for r in rows
-            if not (self._needs_work and r["ready"])
+            if not (self._hide_ready and r["ready"])
             and (not text or text in r["name"].lower() or text in r["evidence_set"]["reference_id"].lower())
         ]
 
@@ -583,9 +588,12 @@ class ParamifyPage(ParamifyWriter, Vertical):
     def action_focus_filter(self) -> None:
         self.query_one("#pf-filter", Input).focus()
 
-    def action_needs_work(self) -> None:
-        self._needs_work = not self._needs_work
+    def action_hide_ready(self) -> None:
+        """Hide the fetchers that are ready, so the grid lists what needs work;
+        press again to show them all. The footer names what the next press does."""
+        self._hide_ready = not self._hide_ready
         self._draw_grid()
+        self._refresh_hints()
 
     def on_input_changed(self, event: Input.Changed) -> None:
         if event.input.id == "pf-filter":
@@ -618,6 +626,8 @@ class ParamifyPage(ParamifyWriter, Vertical):
     def _show(self, key: str | None) -> None:
         row = self._rows.get(key) if key else None
         if row is None:
+            if self._rows:  # fetchers, but none shown: the detail must not keep the last one
+                self._show_no_match()
             return
         online = self._online()
         self.query_one("#pf-set", Static).update(self._set_info(row, online))
@@ -625,6 +635,17 @@ class ParamifyPage(ParamifyWriter, Vertical):
         set_id = row["evidence_set"]["id"]
         if online and set_id and (row["evidence_set"]["artifact_count"] or 0) and set_id not in self._newest:
             self._artifacts_worker(set_id)
+
+    def _show_no_match(self) -> None:
+        """The filter or w hides every fetcher: say so where the detail was."""
+        if self._filter:
+            why = f"No fetcher matches “{self._filter}”."
+        else:
+            why = "Every fetcher is ready. w shows them all."
+        self.query_one("#pf-set", Static).update(_dim(why))
+        self.query_one("#pf-caps", DataTable).clear(columns=True)
+        self.query_one("#pf-caps-panel", Vertical).add_class("empty")
+        self.query_one("#pf-caps-empty", Static).update("")
 
     def _set_info(self, row: dict, online: bool) -> Group:
         info = Table.grid(padding=(0, 2))
