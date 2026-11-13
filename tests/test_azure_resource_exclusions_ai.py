@@ -256,6 +256,11 @@ def test_services_without_patterns_adds_only_empty_exclusion_fields(monkeypatch,
     }
 
 
+def test_services_summary_matches_the_instructions(monkeypatch, tmp_path, assert_summary_documented):
+    _, evidence, *_ = run_services(monkeypatch, tmp_path, "rg:rg-out")
+    assert_summary_documented("azure/ai_services_configuration", evidence["summary"])
+
+
 def test_services_exclude_by_group_and_region_and_skip_account_reads(monkeypatch, tmp_path):
     code, evidence, calls, paths, diag = run_services(monkeypatch, tmp_path, "rg:rg-out, location:regioneast, rg:typo")
     summary, results = evidence["summary"], evidence["results"]

@@ -1,7 +1,6 @@
 name: azure_entra_sign_in_logs
 version: 0.3.0
-description: >-
-  Shows from the workspace's Entra sign-in logs whether successful sign-ins required MFA and phishing-resistant methods, the changes made to the authentication and Conditional Access policies, and, as counts only, the non-interactive user sign-ins and the service-principal (application) sign-ins that detections and least-privilege reviews depend on.
+description: Shows from Entra sign-in logs whether successful sign-ins required MFA and phishing-resistant methods, what changed in authentication and Conditional Access policies, and counts of non-interactive and service-principal sign-ins.
 category: azure
 
 supports_targets: true

@@ -1,14 +1,6 @@
 name: azure_entra_app_registrations
 version: 0.2.1
-description: >
-  Every Microsoft Entra ID app registration with each of its client secrets and
-  certificate credentials and that credential's expiry date, so credential rotation
-  is evidenceable per credential. Three expiry states are kept distinct — already
-  expired, inside the 30-day rotation window, and no expiry date at all — because a
-  never-expiring credential never appears in an "expiring soon" report by
-  construction. Rotation compliance is reported over credentials, excluding apps that
-  hold none. Each credential also carries the lifetime it was issued for, its end
-  date minus its start date.
+description: Lists every Microsoft Entra ID app registration with each client secret and certificate, its expiry state and issued lifetime, so credential rotation can be shown per credential.
 category: azure
 
 supports_targets: true
@@ -96,8 +88,8 @@ evidence_set:
 
     Do credentials expire and get rotated?
     - total_credentials — Number of secrets and certificates across all app registrations; null if the applications read failed or stopped part-way
-    - password_credentials — Number of those that are client secrets; null if the applications read failed or stopped part-way
-    - certificate_credentials — Number of those that are certificates; null if the applications read failed or stopped part-way
+    - password_credentials — Number of credentials that are client secrets; null if the applications read failed or stopped part-way
+    - certificate_credentials — Number of credentials that are certificates; null if the applications read failed or stopped part-way
     - expired_credentials — Number of credentials whose end date has passed; null if the applications read failed or stopped part-way
     - credentials_expiring_soon — Number of credentials that expire within rotation_threshold_days days and haven't expired; null if the applications read failed or stopped part-way
     - credentials_without_expiry — Number of credentials with no end date; null if the applications read failed or stopped part-way
