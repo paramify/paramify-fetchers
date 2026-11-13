@@ -60,7 +60,7 @@ If you have a question about this repo, ask DeepWiki. It answers in plain Englis
     <td align="center" width="128"><a href="fetchers/qualys/"><img src="fetchers/logos/qualys.svg" alt="Qualys" width="48" height="48"></a><br><sub>Qualys</sub></td>
   </tr>
   <tr>
-    <td align="center" width="128"><a href="fetchers/nist_cmvp/"><b>NIST CMVP</b></a></td>
+    <td align="center" width="128"><a href="fetchers/nist_cmvp/"><picture><source media="(prefers-color-scheme: dark)" srcset="fetchers/logos/nist_cmvp-dark.svg"><img src="fetchers/logos/nist_cmvp.svg" alt="NIST CMVP" width="48" height="48"></picture></a><br><sub>NIST CMVP</sub></td>
   </tr>
 </table>
 
