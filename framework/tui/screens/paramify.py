@@ -480,9 +480,17 @@ class ParamifyPage(ParamifyWriter, Vertical):
         self._rows = {r["name"]: r for r in rows}
         keep = self._cursor_key()
         shown = self._shown(rows)
-        grid.clear()
-        for row in shown:
-            grid.add_row(*grid_cells(row, online, status["errors"]), key=row["name"])
+        target = self._landing(keep, rows, shown)
+        # clear() moves the cursor to row 0 and the rows come back one by one,
+        # each move posting a RowHighlighted. Those are the redraw, not the user
+        # moving off the row an action's log opened on, so they must not hide it;
+        # the cursor goes back to its fetcher, and _show below draws its detail.
+        with self.prevent(DataTable.RowHighlighted):
+            grid.clear()
+            for row in shown:
+                grid.add_row(*grid_cells(row, online, status["errors"]), key=row["name"])
+            if target is not None:
+                grid.move_cursor(row=grid.get_row_index(target))
         empty = not rows
         panel.set_class(empty, "empty")
         detail.display = not empty and not self.query_one("#pf-activity-panel").display
@@ -495,9 +503,6 @@ class ParamifyPage(ParamifyWriter, Vertical):
         ready = sum(r["ready"] for r in rows)
         panel.border_title = f"evidence sets ({len(rows)})" + (f"  ·  {ready} ready" if online else "")
         self.query_one("#pf-totals", Static).update(totals_text(rows, len(shown), status["errors"]))
-        target = self._landing(keep, rows, shown)
-        if target is not None:
-            grid.move_cursor(row=grid.get_row_index(target))
         self._show(self._cursor_key())
 
     @staticmethod

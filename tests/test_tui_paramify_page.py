@@ -603,6 +603,30 @@ def test_the_activity_log_takes_the_detail_row_until_the_cursor_moves(tmp_path, 
     assert after == (False, True)
 
 
+@pytest.mark.parametrize("key", ["s", "v"])
+def test_the_result_of_an_action_stays_off_the_first_row(tmp_path, monkeypatch, run_tui, key):
+    """The re-read after an action redraws the grid; that redraw must not count
+    as the user moving off the row, or the result vanishes unless the cursor
+    was on the first row."""
+    _stub(monkeypatch, _status())
+    monkeypatch.setattr(api, "scripts_sync", lambda root, config_path=None, **kw: {"ok": True})
+    monkeypatch.setattr(api, "sync_validators", lambda root, manifest_path=None, **kw: {"ok": True})
+
+    async def body(app, pilot):
+        page = await _open(app, pilot)
+        await pilot.press("down", "down")   # the third row: charlie
+        await _settle(app, pilot)
+        await pilot.press(key)              # nothing to do: the log shows the result
+        await _settle(app, pilot)
+        return (page.query_one("#pf-activity-panel").display, page.query_one("#pf-detail").display,
+                _cursor(page), _text(page.query_one("#pf-activity", Static).content))
+
+    shown, detail, cursor, activity = run_tui(body, _manifest(tmp_path))
+    assert (shown, detail) == (True, False), "the action's result vanished after the re-read"
+    assert cursor == "charlie"
+    assert activity.strip()
+
+
 def test_v_says_when_sets_do_not_exist_yet(tmp_path, monkeypatch, run_tui):
     from framework.tui.modals import ConfirmModal
 
