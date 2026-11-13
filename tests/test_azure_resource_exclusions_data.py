@@ -115,8 +115,10 @@ def run_config(monkeypatch, tmp_path, patterns, fail=()):
     return (*_run(config, monkeypatch, tmp_path, patterns, "azure_key_vault_configuration"), read)
 
 
-def test_key_vault_configuration_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_path):
+def test_key_vault_configuration_without_patterns_adds_only_empty_exclusion_fields(
+        monkeypatch, tmp_path, assert_summary_documented):
     code, evidence, read = run_config(monkeypatch, tmp_path, None)
+    assert_summary_documented("azure/key_vault_configuration", evidence["summary"])
     assert code == 0 and len(read) == 3
     vaults = _unfiltered(config.collect_key_vaults)
     assert evidence["results"] == _json({"key_vaults": vaults, "provider_registration_status": "registered",
@@ -291,9 +293,10 @@ def run_storage(monkeypatch, tmp_path, patterns, fail=()):
     return (*_run(storage, monkeypatch, tmp_path, patterns, "azure_storage_encryption_status"), read)
 
 
-def test_storage_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_path):
+def test_storage_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_path, assert_summary_documented):
     code, evidence, read = run_storage(monkeypatch, tmp_path, None)
     assert code == 0 and len(read) == 14
+    assert_summary_documented("azure/storage_encryption_status", evidence["summary"])
     accounts = _unfiltered(storage.collect_storage_accounts)
     assert evidence["results"] == _json({"storage_accounts": accounts, "provider_registration_status": "registered",
                                          "excluded": []})
