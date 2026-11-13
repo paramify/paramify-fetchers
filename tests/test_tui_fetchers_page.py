@@ -317,6 +317,7 @@ def _sizes(path: Path, size: tuple) -> dict:
         app = FetcherApp(manifest_path=str(path), root_override=str(REPO_ROOT))
         async with app.run_test(size=size) as pilot:
             await _settle(app, pilot)
+            await pilot.pause()  # a short page re-fits once its blank rows are gone
             q = app.screen.query_one
             page = q("#fetchers-page")
             panel = q("#manifest-panel")
@@ -332,6 +333,9 @@ def _sizes(path: Path, size: tuple) -> dict:
                 "tree_h": q("#catalog-tree", Tree).region.height,
                 "buttons_right": max(q(f"#{b}").region.right for b in ("manifest-stack", "manifest-owner", "btn-save")),
                 "dir_w": q("#manifest-output-dir").region.width,
+                "hint_h": q("#manifest-empty-hint").region.height,
+                "issues_bottom": q("#manifest-issues").region.bottom,
+                "page_bottom": page.region.bottom,
             }
 
     return asyncio.run(main())
@@ -354,6 +358,47 @@ def test_the_settings_row_fits_the_page(tmp_path):
 def test_a_short_manifest_still_gets_twelve_rows(tmp_path):
     s = _sizes(_manifest_with(tmp_path, "demo_hello"), (180, 50))
     assert s["table_h"] >= 13, s  # twelve rows and the header
+
+
+def test_an_empty_manifest_takes_only_its_hint(tmp_path):
+    s = _sizes(_manifest_with(tmp_path), (180, 50))
+    assert s["hint_h"] <= 3, s  # the hint and its padding, not twelve hatched rows
+    assert s["tree_h"] >= 25, s
+
+
+@pytest.mark.parametrize("size", [(80, 24), (100, 30)], ids=["80x24", "100x30"])
+@pytest.mark.parametrize("names", [(), ("demo_hello",)], ids=["empty", "one-entry"])
+def test_a_short_page_keeps_the_catalog(tmp_path, size, names):
+    """On a short page the manifest's twelve-row floor gives way, and nothing runs off the page."""
+    s = _sizes(_manifest_with(tmp_path, *names), size)
+    assert s["issues_bottom"] <= s["page_bottom"], f"the manifest runs off the page: {s}"
+    if names:
+        assert s["table_h"] >= 3, s  # the header and at least two rows
+        assert s["tree_h"] >= 5, s
+    else:
+        assert s["hint_h"] >= 1, s
+        assert s["tree_h"] >= 7, s
+    assert s["tree_h"] >= s["panel_h"] - 6, f"the catalog is squeezed: {s}"
+
+
+def test_the_short_layout_goes_when_the_page_grows(tmp_path):
+    path = _manifest_with(tmp_path, "demo_hello")
+
+    async def main():
+        app = FetcherApp(manifest_path=str(path), root_override=str(REPO_ROOT))
+        async with app.run_test(size=(80, 24)) as pilot:
+            await _settle(app, pilot)
+            page = app.screen.query_one("#fetchers-page")
+            short = page.has_class("short")
+            await pilot.resize_terminal(180, 50)
+            await _settle(app, pilot)
+            await pilot.pause()
+            table = app.screen.query_one("#manifest-entries", DataTable)
+            return short, page.has_class("short"), table.region.height
+
+    short, still_short, table_h = asyncio.run(main())
+    assert short and not still_short
+    assert table_h >= 13, "the twelve-row floor did not come back on a tall page"
 
 
 def test_a_long_manifest_takes_at_most_sixty_five_percent(tmp_path):

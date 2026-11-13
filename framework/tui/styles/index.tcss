@@ -153,6 +153,11 @@ FetchersPage { height: 1fr; padding: 1 1 0 1; }
 /* Buttons fit their labels, so the output dir keeps room to show a path. */
 #manifest-panel #manifest-top Button { width: auto; min-width: 7; }
 #manifest-panel #manifest-output-dir { min-width: 16; }
+/* A short page drops its blank rows, so the catalog and the manifest
+   keep more of their rows (FetchersPage.SHORT_PAGE). */
+FetchersPage.short #catalog-search { margin: 0; }
+FetchersPage.short #manifest-panel #manifest-top { padding: 0; }
+FetchersPage.short #manifest-empty-hint { padding: 0 4; }
 
 /* Manifest editor */
 ManifestPanel {

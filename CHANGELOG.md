@@ -1655,7 +1655,12 @@ schemas and the `paramify` CLI — not the internal code.
   first fetcher it shows. Tab moves from the catalog to the manifest list,
   the output dir, the stack, owner and Save row, and the detail pane. Escape
   stays in the list you were in. The footer shows the keys of the list that
-  has focus. The add-fetchers picker is removed.
+  has focus. The manifest list shows at least twelve rows on a tall terminal
+  and at most 65% of the page. On a short terminal, such as 80×24, the
+  twelve-row floor gives way so the catalog keeps half the page, and the
+  blank rows around the filter and the settings row are dropped. An empty
+  manifest takes only the rows of its hint. The add-fetchers picker is
+  removed.
 - **Each batch the upload creates is approved on submission by default.** The
   upload now sends the entry's `approval` (default `SUBMISSION`) when it creates
   a batch. Before, a batch took the evidence set's mode, so a set made `MANUAL`

@@ -45,9 +45,15 @@ class FetchersPage(Vertical):
     _active: Optional[Widget] = None
 
     # The manifest list fits its entries: at least MIN_ROWS table rows, at most
-    # MAX_SHARE of the page. The catalog and the detail take the rest.
+    # MAX_SHARE of the page. The catalog and the detail take the rest. On a page
+    # too short for that floor, the floor gives way so the catalog keeps half
+    # of it, and never less than MIN_CATALOG rows (#fetchers-top's min-height).
+    # An empty manifest takes only what its hint needs.
     MIN_ROWS = 12
     MAX_SHARE = 0.65
+    MIN_CATALOG = 8
+    # Below this page height the page drops its blank rows (the .short CSS).
+    SHORT_PAGE = 30
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="fetchers-top"):
@@ -121,19 +127,43 @@ class FetchersPage(Vertical):
     def _fit_manifest(self) -> None:
         """Size the manifest panel to its rows, between MIN_ROWS and MAX_SHARE of the page.
 
+        On a short page the MIN_ROWS floor gives way, so the catalog keeps half
+        the page, and an empty manifest takes only the rows of its hint.
+
         Done here, not in CSS: a table sized to its content never scrolls, so a
         CSS max-height would cut rows off instead of letting the table scroll.
         Everything in the panel but the table (or its empty hint) has a fixed
         height, so that overhead is the panel's height less the table slot's.
         """
         panel = self._manifest
-        table = panel.query_one("#manifest-entries", DataTable)
-        slot = table if table.display else panel.query_one("#manifest-empty-hint")
         if not self.size.height or not panel.size.height:
             return
+        short = self.size.height < self.SHORT_PAGE
+        if self.has_class("short") != short:
+            # The blank rows change the overhead, so measure again once they are
+            # gone: the new styles apply on the next refresh, the layout on the
+            # one after.
+            self.set_class(short, "short")
+            self.call_after_refresh(self.call_after_refresh, self._fit_manifest)
+            return
+        table = panel.query_one("#manifest-entries", DataTable)
+        if table.display:
+            slot = table
+            want = table.row_count + 1  # + the header row
+            floor = self.MIN_ROWS + 1
+        else:
+            # The hint's own width is 0 until it has been laid out once; it
+            # fills the entries panel, so wrap it to that.
+            slot = panel.query_one("#manifest-empty-hint")
+            width = panel.query_one("#manifest-entries-panel").content_region.width
+            want = floor = slot.styles.gutter.height + slot.get_content_height(
+                self.size, self.app.size, max(width - slot.styles.gutter.width, 1)
+            )
         overhead = panel.outer_size.height - slot.outer_size.height
-        rows = max(self.MIN_ROWS, table.row_count) + 1  # + the header row
-        height = min(overhead + rows, int(self.size.height * self.MAX_SHARE))
+        page = self.content_region.height  # less the page's padding
+        floor = min(floor, max(page // 2 - overhead, 1))
+        cap = min(int(self.size.height * self.MAX_SHARE), page - self.MIN_CATALOG)
+        height = max(min(overhead + max(want, floor), cap), overhead + 1)
         if panel.styles.height is None or panel.styles.height.cells != height:
             panel.styles.height = height
 
