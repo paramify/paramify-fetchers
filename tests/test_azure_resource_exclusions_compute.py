@@ -159,10 +159,11 @@ def run_acr(monkeypatch, tmp_path, patterns):
     return code, evidence, reads
 
 
-def test_acr_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_path):
+def test_acr_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_path, assert_summary_documented):
     code, evidence, _ = run_acr(monkeypatch, tmp_path, None)
     summary = evidence["summary"]
     assert code == 0 and evidence["results"]["excluded"] == []
+    assert_summary_documented("azure/container_registry_configuration", evidence["summary"])
     assert _added(summary) == _empty(("registries", 3))
     assert _rest(summary) == {**acr.summarize(evidence["results"]["registries"]), "provider_registration_status": "registered"}
     assert summary["admin_user_enabled_registries"] == 2
@@ -228,10 +229,11 @@ def run_workloads(monkeypatch, tmp_path, patterns, extra_envs=(), extra_apps=())
     return code, evidence, auth_reads, diag_reads
 
 
-def test_workloads_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_path):
+def test_workloads_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_path, assert_summary_documented):
     code, evidence, _, _ = run_workloads(monkeypatch, tmp_path, None)
     summary, results = evidence["summary"], evidence["results"]
     assert code == 0 and results["excluded"] == []
+    assert_summary_documented("azure/container_workloads_configuration", evidence["summary"])
     assert _added(summary) == {
         "resource_exclusion_patterns": [], "resource_exclusion_patterns_unmatched": [],
         "excluded_environments": 0, "excluded_container_apps": 0, "excluded_jobs": 0, "excluded_container_groups": 0,
@@ -302,10 +304,11 @@ def run_functions(monkeypatch, tmp_path, patterns):
     return code, evidence, reads
 
 
-def test_functions_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_path):
+def test_functions_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_path, assert_summary_documented):
     code, evidence, _ = run_functions(monkeypatch, tmp_path, None)
     summary = evidence["summary"]
     assert code == 0 and evidence["results"]["excluded"] == []
+    assert_summary_documented("azure/function_app_configuration", evidence["summary"])
     assert _added(summary) == _empty(("function_apps", 3))
     assert _rest(summary) == {**functions.summarize(evidence["results"]["function_apps"]),
                               "provider_registration_status": "registered"}
@@ -497,10 +500,11 @@ def run_apim(monkeypatch, tmp_path, patterns):
     return code, evidence, reads
 
 
-def test_apim_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_path):
+def test_apim_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_path, assert_summary_documented):
     code, evidence, _ = run_apim(monkeypatch, tmp_path, None)
     summary = evidence["summary"]
     assert code == 0 and evidence["results"]["excluded"] == []
+    assert_summary_documented("azure/api_management_configuration", evidence["summary"])
     assert _added(summary) == _empty(("services", 3))
     assert _rest(summary) == {**apim.summarize(evidence["results"]["services"]), "provider_registration_status": "registered"}
     assert (summary["total_services"], summary["total_apis"]) == (3, 6)

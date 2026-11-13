@@ -120,10 +120,11 @@ def _run_gateway_fetcher(m, monkeypatch, tmp_path, patterns, name, gateways=None
     return code, _read(tmp_path, name)
 
 
-def test_backend_tls_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_path):
+def test_backend_tls_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_path, assert_summary_documented):
     code, evidence = _run_gateway_fetcher(backend, monkeypatch, tmp_path, None, "azure_app_gateway_backend_tls")
     results = evidence["results"]
     assert code == 0 and results["excluded"] == []
+    assert_summary_documented("azure/app_gateway_backend_tls", evidence["summary"])
     assert evidence["summary"] == {
         **backend.summarize(results["application_gateways"], results["backend_settings"]),
         "completeness_match": True, "provider_registration_status": "registered",
@@ -159,10 +160,11 @@ def test_backend_tls_excludes_a_gateway_by_id(monkeypatch, tmp_path):
     assert evidence["summary"]["total_application_gateways"] == 2
 
 
-def test_tls_listeners_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_path):
+def test_tls_listeners_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_path, assert_summary_documented):
     code, evidence = _run_gateway_fetcher(listeners, monkeypatch, tmp_path, None, "azure_app_gateway_tls_listeners")
     results = evidence["results"]
     assert code == 0 and results["excluded"] == []
+    assert_summary_documented("azure/app_gateway_tls_listeners", evidence["summary"])
     assert evidence["summary"] == {
         **listeners.summarize(results["application_gateways"], results["listeners"]),
         "completeness_match": True, "provider_registration_status": "registered",
@@ -208,17 +210,35 @@ def _waf_scenario(monkeypatch):
     return gateways, fetched
 
 
-def test_waf_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_path):
+def test_waf_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_path, assert_summary_documented):
     gateways, _ = _waf_scenario(monkeypatch)
     code, evidence = _run_gateway_fetcher(waf, monkeypatch, tmp_path, None, "azure_app_gateway_waf", gateways)
     results = evidence["results"]
     assert code == 0 and results["excluded"] == []
+    assert_summary_documented("azure/app_gateway_waf", evidence["summary"])
     assert evidence["summary"] == {
         **waf.summarize(results["application_gateways"], results["listeners"], results["waf_policies"]),
         "completeness_match": True, "provider_registration_status": "registered",
         **_added({"application_gateways": 2, "listeners": 3, "waf_policies": 3}, ("application_gateways",)),
         "excluded_waf_policies": 0,
     }
+
+
+def test_waf_total_policies_is_null_when_the_policy_list_fails(monkeypatch, tmp_path):
+    gateways, _ = _waf_scenario(monkeypatch)
+
+    def failed_list(subscription_id, cred, collector):
+        collector.record("network.web_application_firewall_policies.list_all", RuntimeError("request timed out"))
+
+    monkeypatch.setattr(waf, "collect_policies", failed_list)
+    pol_out = _policy("pol-out", NET_OUT, "Enabled", "Prevention")
+    monkeypatch.setattr(waf, "fetch_policy", lambda pid, cred, collector: (
+        (pol_out, None) if pid.endswith("/pol-out") else (None, waf.unresolved_policy(pid))))
+    code, evidence = _run_gateway_fetcher(waf, monkeypatch, tmp_path, None, "azure_app_gateway_waf", gateways)
+    summary = evidence["summary"]
+    assert code == 1 and summary["total_waf_policies"] is None
+    # The referenced policies are still read one by one and judged.
+    assert (summary["policies_prevention"], summary["unresolved_waf_policies"]) == (1, 1)
 
 
 def test_waf_excluded_policy_leaves_the_list_but_an_in_scope_listener_keeps_its_verdict(monkeypatch, tmp_path):
@@ -284,9 +304,10 @@ def _run_ddos(monkeypatch, tmp_path, patterns):
     return ddos.main(), _read(tmp_path, "azure_ddos_protection")
 
 
-def test_ddos_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_path):
+def test_ddos_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_path, assert_summary_documented):
     code, evidence = _run_ddos(monkeypatch, tmp_path, None)
     assert code == 0 and evidence["results"]["excluded"] == []
+    assert_summary_documented("azure/ddos_protection", evidence["summary"])
     assert evidence["summary"] == {
         **ddos.summarize(*ddos.build_records(*_ddos_raw())), "provider_registration_status": "registered",
         **_added({"ddos_protection_plans": 2, "virtual_networks": 2, "public_ips": 3},
@@ -535,10 +556,11 @@ def _run_wan(monkeypatch, tmp_path, patterns):
     return vwan.main(), _read(tmp_path, "azure_virtual_wan_configuration")
 
 
-def test_virtual_wan_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_path):
+def test_virtual_wan_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_path, assert_summary_documented):
     code, evidence = _run_wan(monkeypatch, tmp_path, None)
     results = evidence["results"]
     assert code == 0 and results["excluded"] == []
+    assert_summary_documented("azure/virtual_wan_configuration", evidence["summary"])
     assert evidence["summary"] == {
         **vwan.summarize(results), "provider_registration_status": "registered",
         **_added({"virtual_wans": 2, "virtual_hubs": 3, "vpn_gateways": 3, "vpn_sites": 2, "p2s_vpn_gateways": 2,
@@ -629,10 +651,11 @@ def _run_vpn(monkeypatch, tmp_path, patterns):
     return vpn.main(), _read(tmp_path, "azure_vpn_gateway_configuration"), reads
 
 
-def test_vpn_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_path):
+def test_vpn_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_path, assert_summary_documented):
     code, evidence, reads = _run_vpn(monkeypatch, tmp_path, None)
     results = evidence["results"]
     assert code == 0 and results["excluded"] == [] and len(reads) == 3
+    assert_summary_documented("azure/vpn_gateway_configuration", evidence["summary"])
     assert evidence["summary"] == {
         **vpn.summarize(results["virtual_network_gateways"], results["connections"], results["local_network_gateways"]),
         "provider_registration_status": "registered",
