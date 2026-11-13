@@ -3657,14 +3657,21 @@ def paramify_status(root: Path, manifest_path: Path, config_path: Optional[Path]
 
         {"workspace": {"base_url", "base_url_source", "token"},
          "fetchers": [{"name", "kind",
-                       "evidence_set": {"reference_id", "name", "id" | None, "artifact_count"},
+                       "evidence_set": {"reference_id", "name", "id" | None,
+                                        "exists": bool | None, "artifact_count": int | None},
                        "script": "in_sync" | "update" | "create" | "drift" | "error" | None,
-                       "validators": [{"key", "role", "name", "paired"}],
+                       "validators": [{"key", "role", "name", "paired": bool | None}],
                        "pairs": [{"pair_id", "validator_key", "capability_id", "function"}],
                        "ready": bool}],
          "capabilities": [{"id", "reference_id", "name",
                            "functions": [{"type", "pairs": [{"pair_id", "validator_id", "evidence_id"}]}]}],
          "pipelines_count": int, "skipped": [str], "errors": {part: message}}
+
+    None means unknown: the evidence sets were not read (no token) or the read
+    failed. Then `exists`, `artifact_count` and each validator's `paired` are
+    None, never a value that looks read; `exists` False with `artifact_count` 0
+    means the read found no such set. `script` is None when the dry run did not
+    report the fetcher. A row is `ready` only on known values.
 
     Scan-report fetchers are only counted (they go to Pipelines); discovery
     fetchers are left out; a fetcher named twice is one row; a name discovery
@@ -3673,7 +3680,8 @@ def paramify_status(root: Path, manifest_path: Path, config_path: Optional[Path]
     is read on its own: a failure sets `errors[part]` and leaves the rest.
     Every read goes to the base URL `upload_readiness` resolves, with the
     uploader config, which is the one the scripts dry run uses.
-    Raises ValueError for setup errors (an unreadable manifest or registry).
+    Raises ValueError for setup errors (an unreadable manifest, registry or
+    uploader config).
     """
     from framework import validators as _registry  # local: keeps CLI startup light
 
@@ -3683,6 +3691,11 @@ def paramify_status(root: Path, manifest_path: Path, config_path: Optional[Path]
     registry = list(_registry.discover_validators(root).values())
     config_path = _upload_config(root, config_path)
     readiness = upload_readiness(root, config_path=config_path)
+    if readiness.get("base_url") is None:
+        # Only an unreadable uploader config leaves it unresolved. Its base URL
+        # and overrides are unknown then, so nothing below would be right.
+        raise ValueError("; ".join(readiness.get("errors") or ["could not read the uploader config"]))
+    base_url = readiness["base_url"]
     token = bool(readiness["token_present"])
     # The uploader config can send a fetcher to another set (overrides.<name>);
     # the scripts sync and the upload both follow it, so the status does too.
@@ -3692,7 +3705,7 @@ def paramify_status(root: Path, manifest_path: Path, config_path: Optional[Path]
             loaded = yaml_io.load_path(Path(config_path))
             overrides = (loaded.get("overrides") or {}) if isinstance(loaded, dict) else {}
         except (OSError, yaml.YAMLError):
-            overrides = {}  # upload_readiness already reports an unreadable config
+            overrides = {}  # upload_readiness read it just now; a race at most
 
     rows: List[dict] = []
     seen: set = set()
@@ -3720,10 +3733,10 @@ def paramify_status(root: Path, manifest_path: Path, config_path: Optional[Path]
             "kind": fetcher.kind,
             "evidence_set": {"reference_id": override.get("reference_id") or ref,
                              "name": override.get("name") or fetcher.evidence_set.name,
-                             "id": None, "artifact_count": 0},
+                             "id": None, "exists": None, "artifact_count": None},
             "script": None,
             "validators": [
-                {"key": v.key, "role": v.role or "", "name": v.name, "paired": False}
+                {"key": v.key, "role": v.role or "", "name": v.name, "paired": None}
                 for v in registry if ref in v.evidence_sets
             ],
             "pairs": [],
@@ -3743,9 +3756,9 @@ def paramify_status(root: Path, manifest_path: Path, config_path: Optional[Path]
         return status
     errors = status["errors"]
 
-    sets: Dict[str, dict] = {}
+    sets: Optional[Dict[str, dict]] = None  # None: not read
     try:
-        sets = {s["reference_id"]: s for s in list_evidence_sets(base_url=readiness["base_url"])}
+        sets = {s["reference_id"]: s for s in list_evidence_sets(base_url=base_url)}
     except Exception as exc:  # noqa: BLE001 — shown where the data would be
         errors["evidence_sets"] = str(exc)
 
@@ -3761,7 +3774,7 @@ def paramify_status(root: Path, manifest_path: Path, config_path: Optional[Path]
         errors["scripts"] = str(exc)
 
     try:
-        capabilities = list_capabilities(base_url=readiness["base_url"])
+        capabilities = list_capabilities(base_url=base_url)
     except Exception as exc:  # noqa: BLE001
         errors["capabilities"] = str(exc)
         capabilities = []
@@ -3775,10 +3788,16 @@ def paramify_status(root: Path, manifest_path: Path, config_path: Optional[Path]
 
     lock = _validator_lock(root, config_path)
     for row in rows:
-        found = sets.get(row["evidence_set"]["reference_id"])
         if outcomes.get(row["name"]) is not None:
             row["script"] = _SCRIPT_STATES.get(outcomes[row["name"]], "error")
+        if sets is None:
+            continue  # unknown: leave exists, artifact_count and paired None
+        found = sets.get(row["evidence_set"]["reference_id"])
+        row["evidence_set"]["exists"] = found is not None
         if found is None:
+            row["evidence_set"]["artifact_count"] = 0
+            for v in row["validators"]:
+                v["paired"] = False
             continue
         row["evidence_set"]["id"] = found["id"]
         row["evidence_set"]["artifact_count"] = found.get("artifact_count") or 0

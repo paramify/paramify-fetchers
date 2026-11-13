@@ -90,6 +90,9 @@ def test_ready_needs_set_script_validators_and_an_artifact(tmp_path, workspace):
     workspace["sets"] = []
     row = _row(api.paramify_status(REPO_ROOT, path), "demo_hello")
     assert row["evidence_set"]["id"] is None and row["ready"] is False
+    # Read and not found: a known "no", not an unknown.
+    assert row["evidence_set"]["exists"] is False and row["evidence_set"]["artifact_count"] == 0
+    assert [v["paired"] for v in row["validators"]] == [False, False]
 
 
 def test_script_outcomes_map_to_states(tmp_path, workspace):
@@ -147,7 +150,9 @@ def test_no_token_reads_nothing(tmp_path, workspace, monkeypatch):
     assert status["workspace"]["token"] is False
     assert status["capabilities"] == []
     assert row["script"] is None and row["evidence_set"]["id"] is None
-    assert [v["paired"] for v in row["validators"]] == [False, False]
+    # Not read: unknown, not "no set, no artifacts, nothing paired".
+    assert row["evidence_set"]["exists"] is None and row["evidence_set"]["artifact_count"] is None
+    assert [v["paired"] for v in row["validators"]] == [None, None]
     assert row["ready"] is False
 
 
@@ -197,6 +202,28 @@ def test_an_uploader_override_names_the_set(tmp_path, workspace):
     # The registry still names the shipped set, so its validators still apply.
     assert [v["key"] for v in row["validators"]] == ["hello_complete", "hello_greets"]
     assert row["ready"] is True
+
+
+def test_a_failed_evidence_read_leaves_the_set_unknown(tmp_path, workspace, monkeypatch):
+    """A failed /evidence read must not look like "no set yet, no artifacts":
+    the row would say `create` and `0`, and those look read."""
+    def expired(base_url=None):
+        raise RuntimeError("Paramify rejected the token (HTTP 401)")
+
+    monkeypatch.setattr(api, "list_evidence_sets", expired)
+    status = api.paramify_status(REPO_ROOT, _manifest(tmp_path, "demo_hello"))
+    row = _row(status, "demo_hello")
+    assert status["errors"] == {"evidence_sets": "Paramify rejected the token (HTTP 401)"}
+    assert row["evidence_set"] == {"reference_id": "EVD-DEMO-HELLO", "name": row["evidence_set"]["name"],
+                                   "id": None, "exists": None, "artifact_count": None}
+    assert [v["paired"] for v in row["validators"]] == [None, None]
+    assert row["pairs"] == [] and row["script"] == "in_sync"
+    assert row["ready"] is False
+
+
+def test_an_unreadable_uploader_config_is_a_setup_error(tmp_path, workspace):
+    with pytest.raises(ValueError, match="Could not read uploader config"):
+        api.paramify_status(REPO_ROOT, _manifest(tmp_path, "demo_hello"), tmp_path / "typo.yaml")
 
 
 # ---- the raw API shape --------------------------------------------------------- #
@@ -259,8 +286,7 @@ def test_pairs_are_found_in_the_raw_api_shape(tmp_path, raw_api):
     status = api.paramify_status(REPO_ROOT, _manifest(tmp_path, "demo_hello", "demo_policy_check"))
     assert status["errors"] == {}
     hello = _row(status, "demo_hello")
-    assert hello["evidence_set"]["id"] == "0a6f1c2e-5b7d-4e3a-9c81-2f4d6b8a0e11"
-    assert hello["evidence_set"]["artifact_count"] == 3
+    assert hello["evidence_set"]["exists"] is True and hello["evidence_set"]["artifact_count"] == 3
     assert {v["key"]: v["paired"] for v in hello["validators"]} == {"hello_complete": True, "hello_greets": True}
     assert sorted((p["function"], p["validator_key"]) for p in hello["pairs"]) == [
         ("END_USER", "hello_greets"), ("PROVIDER", "hello_complete")]
@@ -269,7 +295,7 @@ def test_pairs_are_found_in_the_raw_api_shape(tmp_path, raw_api):
     # The capability has no referenceId; the template's stands in.
     assert status["capabilities"][0]["reference_id"] == "SC-AC-06"
     policy = _row(status, "demo_policy_check")
-    assert policy["evidence_set"]["id"] is not None and policy["ready"] is False  # no artifact yet
+    assert policy["evidence_set"]["exists"] is True and policy["ready"] is False  # no artifact yet
 
 
 def test_every_read_goes_to_the_uploader_configs_host(tmp_path, raw_api):

@@ -58,7 +58,7 @@ paramify runs                  # past runs under an output dir (newest first)
 paramify evidence <file>       # read one evidence file, or an issue-report sidecar
 paramify upload   [run-dir]    # push a run's evidence to Paramify (default: latest run)
 paramify stacks                # list the workspace's stacks (name, id)
-paramify status   <manifest>   # what each fetcher has in Paramify; exit 1 until all are ready
+paramify status   <manifest>   # what each fetcher has in Paramify; exit 1 until all are ready, 2 on errors
 paramify issues   <sub>        # send a run's issue reports into assessment pipelines; list/close their jobs
 paramify programs <sub>        # list workspace programs; turn them into targets
 paramify assessments <sub>     # list workspace assessments; point issue reports at one
@@ -310,10 +310,34 @@ paramify status manifests/acme.yaml
 A line under the table counts each column across the fetchers. Scan-report
 fetchers go to an assessment, not to an evidence set, so the table leaves them out.
 
-The command exits 0 when every fetcher is ready and 1 when some are not. A
-deployment can use it as a check before it runs headless. It exits 2 on a setup
-error. `--json` prints the full status. Without an API token, it reads nothing
-from the workspace and shows only what the manifest and the registry hold.
+Every read goes to one workspace: the base URL from `paramify.base_url` in the
+uploader config (`upload.yaml` or `--config`), else `PARAMIFY_API_BASE_URL`,
+else app.paramify.com. The first line of the output names it.
+
+`?` in a cell means the read for it failed, so the value is unknown. The error
+is shown under the table. `-` means nothing was read, because there is no API
+token. Without a token, the command shows only what the manifest and the
+registry hold, and leaves out the line of counts.
+
+`--json` prints the full status. In it, an unknown value is `null`: the
+evidence set's `exists` and `artifact_count`, and each validator's `paired`.
+
+### Exit codes
+
+| Code | Meaning |
+|---|---|
+| 0 | Every fetcher is ready. |
+| 1 | Some fetchers are not ready yet. A sync, a validator pair or an upload can fix it. |
+| 2 | The command cannot tell, and waiting will not change that: the manifest or the uploader config cannot be read, there is no API token, a workspace read failed (for example, an expired token gets HTTP 401), the manifest names a fetcher that does not exist, or the manifest has no evidence fetchers. |
+
+A deployment can wait for 0 before it runs headless, and stop on 2:
+
+```bash
+until paramify status manifests/acme.yaml >/dev/null; do
+  [ $? -eq 2 ] && exit 2
+  sleep 60
+done
+```
 
 ## Scan results, not evidence
 

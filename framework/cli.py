@@ -1486,39 +1486,74 @@ def stacks_cmd(
 _SCRIPT_LABELS = {"in_sync": "ok", "update": "update", "create": "create", "drift": "drift", "error": "error"}
 
 
-def _status_cells(row: dict, online: bool) -> List[str]:
-    """One status row as text cells: fetcher, set, script, validators, capabilities, artifacts, ready."""
+def _status_cells(row: dict, online: bool, errors: Optional[dict] = None) -> List[str]:
+    """One status row as text cells: fetcher, set, script, validators, capabilities, artifacts, ready.
+
+    Offline, a workspace cell is "-" (not read). Online, a cell whose read
+    failed is "?" (unknown), never a value that looks read.
+    """
+    errors = errors or {}
+    evidence_set = row["evidence_set"]
+    sets_unknown = evidence_set.get("exists") is None
     validators = row["validators"]
-    paired = sum(v["paired"] for v in validators)
+    paired = sum(v["paired"] is True for v in validators)
     if not validators:
         val = "none"
-    elif online:
-        val = f"{paired}/{len(validators)}"
-    else:
+    elif not online:
         val = f"{len(validators)} in registry"
+    elif any(v["paired"] is None for v in validators):
+        val = f"?/{len(validators)}"
+    else:
+        val = f"{paired}/{len(validators)}"
     caps = len({p["capability_id"] for p in row["pairs"]})
-    return [
-        row["name"],
-        ("ok" if row["evidence_set"]["id"] else "create") if online else "-",
-        _SCRIPT_LABELS.get(row["script"] or "", "-"),
-        val,
-        str(caps) if caps else "-",
-        str(row["evidence_set"]["artifact_count"]) if online else "-",
-        "READY" if row["ready"] else "",
-    ]
+    if not online:
+        set_cell, script, cap_cell, arts = "-", "-", "-", "-"
+    else:
+        set_cell = "?" if sets_unknown else ("ok" if evidence_set["exists"] else "create")
+        script = "?" if row["script"] is None and "scripts" in errors else _SCRIPT_LABELS.get(row["script"] or "", "-")
+        cap_cell = "?" if "capabilities" in errors or sets_unknown else (str(caps) if caps else "-")
+        arts = "?" if evidence_set["artifact_count"] is None else str(evidence_set["artifact_count"])
+    return [row["name"], set_cell, script, val, cap_cell, arts, "READY" if row["ready"] else ""]
 
 
 def status_totals(status: dict) -> str:
-    """The grid's totals line: how far each setup step has come, across the fetchers."""
+    """The grid's totals line: how far each setup step has come, across the fetchers.
+
+    A count whose read failed is "?". Empty when nothing was read (no token):
+    0/n would look like a count.
+    """
+    if not status["workspace"]["token"]:
+        return ""
     rows = status["fetchers"]
+    errors = status.get("errors") or {}
     n = len(rows)
-    sets = sum(r["evidence_set"]["id"] is not None for r in rows)
+    sets_known = "evidence_sets" not in errors
+
+    def count(known: bool, value: int) -> str:
+        return f"{value}/{n}" if known else f"?/{n}"
+
+    sets = sum(r["evidence_set"].get("exists") is True for r in rows)
     scripts = sum(r["script"] == "in_sync" for r in rows)
-    validators = sum(all(v["paired"] for v in r["validators"]) for r in rows)
+    validators = sum(all(v["paired"] is True for v in r["validators"]) for r in rows)
     links = sum(len(r["pairs"]) for r in rows)
-    uploaded = sum(r["evidence_set"]["artifact_count"] > 0 for r in rows)
-    return (f"evidence sets {sets}/{n}  scripts {scripts}/{n}  validators {validators}/{n}  "
-            f"capabilities {links} links  uploaded {uploaded}/{n}")
+    uploaded = sum((r["evidence_set"]["artifact_count"] or 0) > 0 for r in rows)
+    links_cell = f"{links}" if sets_known and "capabilities" not in errors else "?"
+    return (f"evidence sets {count(sets_known, sets)}  scripts {count('scripts' not in errors, scripts)}  "
+            f"validators {count(sets_known, validators)}  capabilities {links_cell} links  "
+            f"uploaded {count(sets_known, uploaded)}")
+
+
+def status_exit_code(status: dict) -> int:
+    """`paramify status`'s exit code: 0 ready, 1 not ready yet, 2 cannot tell.
+
+    2 is for what waiting will not fix, so a wait-until-ready loop stops on it:
+    no token, a failed read (an expired token is a 401), a manifest entry that
+    names no fetcher, or no evidence fetcher to check at all.
+    """
+    rows = status["fetchers"]
+    if not status["workspace"]["token"] or status.get("errors") or status.get("skipped") or not rows:
+        return 2
+    return 0 if all(r["ready"] for r in rows) else 1
 
 
 @app.command("status")
@@ -1530,7 +1565,9 @@ def status_cmd(
     """What each manifest fetcher has in Paramify: evidence set, script,
     validators, capabilities, artifacts. Read-only.
 
-    Exit 0 when every fetcher is ready, 1 when some are not, 2 on a setup error.
+    Exit 0 when every fetcher is ready, 1 when some are not yet, 2 when it
+    cannot tell: a setup error, no token, a failed read, an unknown fetcher,
+    or no evidence fetcher in the manifest.
     """
     try:
         root = api.find_repo_root()
@@ -1542,32 +1579,36 @@ def status_cmd(
         else:
             _err(str(e))
         raise typer.Exit(2)
-    ready = all(r["ready"] for r in status["fetchers"])
+    code = status_exit_code(status)
     if json_out:
         typer.echo(json.dumps(status, indent=2))
-        raise typer.Exit(0 if ready else 1)
+        raise typer.Exit(code)
 
     ws = status["workspace"]
     online = ws["token"]
+    errors = status["errors"]
     typer.echo(f"{ws['base_url']}  " + (style.ok("token set") if online else style.warn("no API token")))
     header = ["fetcher", "evidence set", "script", "validators", "capabilities", "artifacts", "ready"]
-    table = [header] + [_status_cells(r, online) for r in status["fetchers"]]
+    table = [header] + [_status_cells(r, online, errors) for r in status["fetchers"]]
     widths = [max(len(row[i]) for row in table) for i in range(len(header))]
     for i, cells in enumerate(table):
         line = "  ".join(c.ljust(w) for c, w in zip(cells, widths)).rstrip()
         typer.echo(style.head(line) if i == 0 else line)
-    if status["fetchers"]:
+    totals = status_totals(status) if status["fetchers"] else ""
+    if totals:
         typer.echo("")
-        typer.echo(status_totals(status))
+        typer.echo(totals)
     if status["pipelines_count"]:
         typer.echo(style.dim(f"{status['pipelines_count']} scan-report fetcher(s): see `paramify issues`"))
+    if not status["fetchers"]:
+        typer.echo(style.warn("no evidence fetchers in the manifest to check"))
     for name in status["skipped"]:
         typer.echo(style.warn(f"skipped {name}: no such fetcher"))
-    for part, message in status["errors"].items():
+    for part, message in errors.items():
         typer.echo(style.warn(f"could not read {part.replace('_', ' ')}: {message}"))
     if not online:
         typer.echo(style.warn("Set PARAMIFY_UPLOAD_API_TOKEN (or PARAMIFY_API_TOKEN) to read the workspace."))
-    raise typer.Exit(0 if ready else 1)
+    raise typer.Exit(code)
 
 
 @validators_app.command("check")

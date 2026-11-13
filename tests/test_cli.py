@@ -1939,7 +1939,8 @@ def test_no_tags_flag_on_every_tagging_command(path):
 def _status_fixture(second_ready: bool = False) -> dict:
     def row(name, ref, set_id, arts, script, validators, ready):
         return {"name": name, "kind": "evidence",
-                "evidence_set": {"reference_id": ref, "name": name, "id": set_id, "artifact_count": arts},
+                "evidence_set": {"reference_id": ref, "name": name, "id": set_id,
+                                 "exists": set_id is not None, "artifact_count": arts},
                 "script": script, "validators": validators, "pairs": [], "ready": ready}
     return {
         "workspace": {"base_url": "https://app.paramify.com/api/v0", "base_url_source": "default", "token": True},
@@ -1984,6 +1985,62 @@ def test_status_table_has_the_totals_line(monkeypatch, status_manifest):
     out = runner.invoke(app, ["status", status_manifest]).output
     assert "demo_policy_check" in out
     assert "scripts 1/2" in out and "uploaded 1/2" in out
+
+
+def test_status_exits_2_when_it_cannot_tell(monkeypatch, status_manifest):
+    """2 is what waiting will not fix, so a wait-until-ready loop stops on it."""
+    def status_with(**changes):
+        s = _status_fixture(second_ready=True)
+        for key, value in changes.items():
+            if key == "token":
+                s["workspace"]["token"] = value
+            else:
+                s[key] = value
+        return s
+
+    cases = {
+        "a 401 on a read": status_with(errors={"evidence_sets": "Paramify rejected the token (HTTP 401)"}),
+        "no token": status_with(token=False),
+        "only an unknown fetcher": status_with(fetchers=[], skipped=["no_such_fetcher"]),
+        "an unknown fetcher beside ready ones": status_with(skipped=["no_such_fetcher"]),
+        "only scan reports": status_with(fetchers=[], pipelines_count=2),
+        "nothing at all": status_with(fetchers=[]),
+    }
+    for case, status in cases.items():
+        monkeypatch.setattr(api, "paramify_status", lambda *a, _s=status, **k: _s)
+        for args in ([], ["--json"]):
+            result = runner.invoke(app, ["status", status_manifest, *args])
+            assert result.exit_code == 2, (case, args, result.output)
+
+
+def test_status_shows_an_unreadable_config(monkeypatch, status_manifest, tmp_path):
+    """`--config typo.yaml` is a setup error, shown, not a bare "no API token"."""
+    monkeypatch.setattr("dotenv.load_dotenv", lambda *a, **k: True)
+    result = runner.invoke(app, ["status", status_manifest, "--config", str(tmp_path / "typo.yaml")])
+    out = result.output + str(result.stderr_bytes or b"")
+    assert result.exit_code == 2
+    assert "Could not read uploader config" in out and "typo.yaml" in out
+
+
+def test_status_shows_unknown_when_the_evidence_read_failed(monkeypatch, status_manifest):
+    s = _status_fixture()
+    s["errors"] = {"evidence_sets": "HTTP 401"}
+    row = s["fetchers"][1]
+    row["evidence_set"].update(exists=None, artifact_count=None)
+    monkeypatch.setattr(api, "paramify_status", lambda *a, **k: s)
+    out = runner.invoke(app, ["status", status_manifest]).output
+    line = next(ln for ln in out.splitlines() if ln.startswith("demo_policy_check"))
+    assert line.split() == ["demo_policy_check", "?", "create", "none", "?", "?"]
+    assert "evidence sets ?/2" in out and "uploaded ?/2" in out
+
+
+def test_status_leaves_the_totals_out_offline(monkeypatch, status_manifest):
+    s = _status_fixture()
+    s["workspace"]["token"] = False
+    monkeypatch.setattr(api, "paramify_status", lambda *a, **k: s)
+    out = runner.invoke(app, ["status", status_manifest]).output
+    assert "evidence sets" not in out and "uploaded" not in out
+    assert "PARAMIFY_UPLOAD_API_TOKEN" in out
 
 
 def test_status_exits_2_for_a_manifest_that_does_not_exist(monkeypatch, tmp_path):

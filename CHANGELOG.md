@@ -76,7 +76,11 @@ schemas and the `paramify` CLI — not the internal code.
   each evidence fetcher in the manifest, it shows the evidence set, the script
   state, the paired validators, the solution capabilities, the artifacts, and
   whether the fetcher is ready. It changes nothing in the workspace. It exits 1
-  until every fetcher is ready, so a deployment can use it as a check. The
+  until every fetcher is ready, so a deployment can use it as a check, and 2
+  when it cannot tell: no token, a failed read such as an expired token, an
+  unreadable manifest or uploader config, an unknown fetcher, or no evidence
+  fetchers. A value it could not read shows as `?` (`null` in `--json`). Every
+  read goes to the uploader config's `paramify.base_url` when it sets one. The
   evidence-set and capability reads now keep each validator pair.
 - **`aws_route53_resolver_dns_security`** (`EVD-R53-RESOLVER-DNS-SECURITY`) —
   one record per VPC in the region with its Route 53 Resolver DNSSEC validation
