@@ -15,11 +15,17 @@ from framework.tui.app import FetcherApp  # noqa: E402
 SMALL = (160, 50)
 
 
+def _shown(widget) -> bool:
+    """Shown on screen: the widget and every container around it display. A
+    ContentSwitcher hides the view it does not show, not the panels in it."""
+    return all(getattr(w, "display", True) for w in widget.ancestors_with_self)
+
+
 def _problems(pane) -> list:
     """Panels squeezed to their border or off the page, controls outside their panel,
     tables that need sideways scrolling."""
     problems = []
-    panels = [p for p in pane.query(".panel") if p.display and all(a.display for a in p.ancestors)]
+    panels = [p for p in pane.query(".panel") if _shown(p)]
     for panel in panels:
         if panel.content_region.height < 1:
             problems.append(f"#{panel.id} is squeezed to its border: {panel.region}")
@@ -27,10 +33,10 @@ def _problems(pane) -> list:
             problems.append(f"#{panel.id} runs off the page: {panel.region} not in {pane.region}")
     for control in [*pane.query(Button), *pane.query(Checkbox)]:
         box = next((a for a in control.ancestors if a in panels), pane)
-        if control.display and not box.content_region.contains_region(control.region):
+        if _shown(control) and not box.content_region.contains_region(control.region):
             problems.append(f"#{control.id} sits outside #{box.id}: {control.region}")
     for table in pane.query(DataTable):
-        if table.display and table.max_scroll_x > 0:
+        if _shown(table) and table.max_scroll_x > 0:
             problems.append(f"#{table.id} is {table.max_scroll_x} column(s) too wide")
     return problems
 
@@ -154,4 +160,27 @@ def test_paramify_detail_comes_back_on_100x30(demo_workspace, no_network, monkey
     rows, shown, problems = _paramify_at((100, 30), monkeypatch, demo_workspace)
     assert "pf-detail" in shown and shown["pf-detail"].height >= 5
     assert rows >= 7
+    assert [p for p in problems if "too wide" not in p] == []
+
+
+@pytest.mark.parametrize("size", [SMALL, (120, 35)], ids=["160x50", "120x35"])
+def test_capability_view_holds_fifty_fetchers(size, demo_workspace, no_network, monkeypatch):
+    from framework import api
+
+    monkeypatch.setattr(api, "paramify_status", lambda *a, **k: _fifty())
+    monkeypatch.setattr(api, "list_artifacts", lambda set_id: [])
+
+    async def drive():
+        app = FetcherApp(manifest_path="manifests/demo.yaml", root_override=str(demo_workspace.root))
+        async with app.run_test(size=size) as pilot:
+            await pilot.press("4")
+            await asyncio.wait_for(app.workers.wait_for_complete(), 30)
+            await pilot.pause()
+            await pilot.press("right_square_bracket")
+            await pilot.pause()
+            pane = app.screen.query_one(TabbedContent).active_pane
+            return pane.query_one("#pf-cap-grid", DataTable).size.height - 1, _problems(pane)
+
+    rows, problems = asyncio.run(asyncio.wait_for(drive(), 60))
+    assert rows >= 4, f"the capability grid shows only {rows} rows"
     assert [p for p in problems if "too wide" not in p] == []

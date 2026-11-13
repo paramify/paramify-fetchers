@@ -185,5 +185,11 @@ def test_paramify_by_fetcher(shot, monkeypatch):
     assert shot("4")
 
 
+def test_paramify_by_capability(shot, monkeypatch):
+    monkeypatch.setattr(api, "paramify_status", lambda *a, **k: _setup_status())
+    monkeypatch.setattr(api, "list_artifacts", lambda set_id: [])
+    assert shot("4", "right_square_bracket")
+
+
 def test_pipelines(shot):
     assert shot("5")

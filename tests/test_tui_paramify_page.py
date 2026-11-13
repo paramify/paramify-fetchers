@@ -570,6 +570,124 @@ def test_an_empty_manifest_keeps_focus_in_the_page(tmp_path, monkeypatch, run_tu
     assert inside and focused == "pf-grid-empty"
 
 
+def _linked(name: str, *keys: str, cap: str = "c1", function: str = "PROVIDER") -> dict:
+    return _row(name, validators=_validators(True, True, True),
+                pairs=[{"pair_id": f"{name}-{k}", "validator_key": k, "capability_id": cap, "function": function}
+                       for k in keys])
+
+
+def _cap_status(**kw) -> dict:
+    return _status(
+        [_linked("alpha", "k0", "k1"), _linked("bravo", "k0", function="INTEGRATOR"), _linked("charlie", "k2"),
+         _row("delta")],
+        capabilities=[{"id": "c1", "reference_id": "SC-AC-06", "name": "Least privilege", "functions": []},
+                      {"id": "c2", "reference_id": "SC-AU-02", "name": "Audit logging", "functions": []}],
+        **kw)
+
+
+async def _capability_lens(app, pilot) -> ParamifyPage:
+    page = await _open(app, pilot)
+    await pilot.press("right_square_bracket")
+    await pilot.pause()
+    return page
+
+
+def _cap_rows(page) -> dict:
+    grid = page.query_one("#pf-cap-grid", DataTable)
+    rows = {}
+    for i in range(grid.row_count):
+        cells = [_text(c).strip() for c in grid.get_row_at(i)]
+        rows[cells[0]] = cells
+    return rows
+
+
+def test_capability_rows_and_title(tmp_path, monkeypatch, run_tui):
+    _stub(monkeypatch, _cap_status())
+
+    async def body(app, pilot):
+        page = await _capability_lens(app, pilot)
+        return str(page.query_one("#pf-cap-panel").border_title), _cap_rows(page)
+
+    title, rows = run_tui(body, _manifest(tmp_path))
+    assert title == "capabilities (2)  ·  1 with pairs"
+    assert rows["SC-AC-06"][1:] == ["Least privilege", "3", "alpha, bravo  +1 more"]
+    assert rows["SC-AU-02"][2:] == ["—", "no pairs yet"]
+
+
+def test_pairs_pane_lists_fetcher_function_and_validator_names(tmp_path, monkeypatch, run_tui):
+    _stub(monkeypatch, _cap_status())
+
+    async def body(app, pilot):
+        page = await _capability_lens(app, pilot)
+        pairs = page.query_one("#pf-pairs", DataTable)
+        return [[_text(c).strip() for c in pairs.get_row_at(i)] for i in range(pairs.row_count)]
+
+    rows = run_tui(body, _manifest(tmp_path))
+    assert rows == [["alpha", "provider", "check 0 + check 1"],
+                    ["bravo", "integrator", "check 0"],
+                    ["charlie", "provider", "check 2"]]
+
+
+def test_brackets_switch_lenses(tmp_path, monkeypatch, run_tui):
+    _stub(monkeypatch, _cap_status())
+
+    async def body(app, pilot):
+        page = await _open(app, pilot)
+        switcher = page.query_one("#pf-lens")
+        seen = [switcher.current]
+        await pilot.press("right_square_bracket")
+        await pilot.pause()
+        seen += [switcher.current, app.focused.id]
+        await pilot.press("left_square_bracket")
+        await pilot.pause()
+        return seen + [switcher.current, app.focused.id]
+
+    assert run_tui(body, _manifest(tmp_path)) == [
+        "pf-by-fetcher", "pf-by-capability", "pf-cap-grid", "pf-by-fetcher", "pf-grid"]
+
+
+def test_capability_filter(tmp_path, monkeypatch, run_tui):
+    _stub(monkeypatch, _cap_status())
+
+    async def body(app, pilot):
+        page = await _capability_lens(app, pilot)
+        await pilot.press("slash")
+        await pilot.pause()
+        focused = app.focused.id
+        await pilot.press(*"audit")
+        await pilot.pause()
+        return focused, list(_cap_rows(page))
+
+    focused, rows = run_tui(body, _manifest(tmp_path))
+    assert focused == "pf-cap-filter" and rows == ["SC-AU-02"]
+
+
+def test_a_capabilities_error_shows_in_its_lens(tmp_path, monkeypatch, run_tui):
+    _stub(monkeypatch, _cap_status(errors={"capabilities": "HTTP 403"}))
+
+    async def body(app, pilot):
+        page = await _capability_lens(app, pilot)
+        return (page.query_one("#pf-cap-grid").display,
+                _text(page.query_one("#pf-cap-error", Static).content),
+                page.query_one("#pf-pairs-panel").display)
+
+    grid_shown, error, pairs_shown = run_tui(body, _manifest(tmp_path))
+    assert not grid_shown and not pairs_shown
+    assert "Could not list the workspace's solution capabilities: HTTP 403." in error
+    assert "The by-fetcher lens still works." in error
+
+
+def test_w_belongs_to_the_fetcher_view(tmp_path, monkeypatch, run_tui):
+    _stub(monkeypatch, _cap_status())
+
+    async def body(app, pilot):
+        page = await _capability_lens(app, pilot)
+        footer = _text(app.screen.query_one("#app-footer", Static).content)
+        return page.check_action("hide_ready", ()), "hide ready" in footer
+
+    assert run_tui(body, _manifest(tmp_path)) == (False, False)
+
+
 # ---- review fixes ------------------------------------------------------------ #
 
 def _second_manifest(tmp_path: Path) -> Path:

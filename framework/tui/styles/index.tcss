@@ -308,6 +308,12 @@ ParamifyPage { height: 1fr; padding: 0 1; }
 #pf-caps-panel { width: 1fr; margin-left: 1; }
 #pf-caps { height: 1fr; }
 .panel.empty > #pf-totals, .panel.empty > #pf-filter { display: none; }
+#pf-cap-panel { height: 1fr; min-height: 8; }
+#pf-cap-filter { margin-bottom: 1; }
+#pf-cap-grid { height: 1fr; }
+#pf-cap-error { height: 1fr; padding: 1 2; }
+#pf-pairs-panel { height: 11; margin-top: 1; }
+#pf-pairs { height: 1fr; }
 /* A short terminal drops the blank rows, so the list keeps its rows (the row
    under it gives way, sized from Python). */
 ParamifyPage.short #pf-summary, ParamifyPage.short #pf-lens-tabs { margin-top: 0; }
@@ -315,6 +321,9 @@ ParamifyPage.short #pf-filter { margin-bottom: 0; }
 ParamifyPage.short #pf-totals { height: 1; border-top: none; }
 ParamifyPage.short #pf-detail, ParamifyPage.short #pf-activity-panel { margin-top: 0; }
 ParamifyPage.short #pf-grid-panel { min-height: 0; }
+/* The view bar gives its two rows to the list; [ and ] still switch views,
+   and the list's title says which one shows. */
+ParamifyPage.short #pf-lens-tabs { display: none; }
 
 /* Pipelines: the scan-report fetchers, the send panel and its log. */
 PipelinesPage {

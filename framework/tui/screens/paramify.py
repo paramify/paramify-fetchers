@@ -233,6 +233,8 @@ class ParamifyPage(ParamifyWriter, Vertical):
         Binding("s", "sync_scripts", "Sync scripts"),
         Binding("v", "sync_validators", "Sync validators"),
         Binding("u", "upload_run", "Upload run"),
+        Binding("left_square_bracket", "lens(-1)", "Previous view", show=False),
+        Binding("right_square_bracket", "lens(1)", "Next view", show=False),
     ]
 
     def compose(self) -> ComposeResult:
@@ -258,7 +260,12 @@ class ParamifyPage(ParamifyWriter, Vertical):
                     yield Static("", id="pf-activity")
                     yield RichLog(id="pf-log", markup=False, wrap=True, highlight=False)
             with Vertical(id="pf-by-capability"):
-                yield Static(_dim("Capabilities come in the next step."), id="pf-cap-placeholder")
+                with Vertical(id="pf-cap-panel", classes="panel"):
+                    yield Input(placeholder="/ filter capabilities…", id="pf-cap-filter")
+                    yield DataTable(id="pf-cap-grid", cursor_type="row")
+                    yield Static("", id="pf-cap-error")
+                with Vertical(id="pf-pairs-panel", classes="panel"):
+                    yield DataTable(id="pf-pairs", cursor_type="row")
 
     def on_mount(self) -> None:
         self._status: dict | None = None
@@ -278,12 +285,7 @@ class ParamifyPage(ParamifyWriter, Vertical):
         activity = self.query_one("#pf-activity-panel", Vertical)
         activity.border_title = "activity"
         activity.display = False
-        lens_tabs = self.query_one("#pf-lens-tabs", Tabs)
-        lens_tabs.can_focus = False
-        # Only the by-fetcher view works yet: a bar with a tab that opens an
-        # empty view would only be a dead click, so it stays hidden until the
-        # by-capability view is filled in.
-        lens_tabs.display = False
+        self.query_one("#pf-lens-tabs", Tabs).can_focus = False
         # The empty-manifest hint takes focus, so the page keys still work.
         self.query_one("#pf-grid-empty", Static).can_focus = True
         grid = self.query_one("#pf-grid", DataTable)
@@ -292,6 +294,12 @@ class ParamifyPage(ParamifyWriter, Vertical):
         self.query_one("#pf-set-panel").border_title = "evidence set"
         self.query_one("#pf-caps-panel").border_title = "linked capabilities"
         self._detail_rows = self.DETAIL_ROWS
+        self._cap_filter = ""
+        caps = self.query_one("#pf-cap-grid", DataTable)
+        caps.add_columns("capability", "", "pairs", "from fetchers")
+        self.query_one("#pf-cap-panel").border_title = "capabilities"
+        self.query_one("#pf-pairs", DataTable).add_columns("fetcher", "function", "validators in the pair")
+        self.query_one("#pf-pairs-panel").border_title = "pairs that prove it"
         self._draw()
 
     # -- layout ----------------------------------------------------------- #
@@ -335,6 +343,8 @@ class ParamifyPage(ParamifyWriter, Vertical):
             self.call_after_refresh(self.call_after_refresh, self._fit)
             return
         view = self.query_one("#pf-lens", ContentSwitcher).current or "pf-by-fetcher"
+        if view not in self._VIEW_LAYOUT:
+            return
         panel_id, list_id, slots = self._VIEW_LAYOUT[view]
         panel, table = self.query_one(panel_id), self.query_one(list_id)
         rows = self.DETAIL_ROWS_TALL if self.app.size.height >= self.TALL_TERMINAL else self.DETAIL_ROWS
@@ -358,7 +368,10 @@ class ParamifyPage(ParamifyWriter, Vertical):
 
     @property
     def HINTS(self) -> list:  # noqa: N802 — the workspace reads HINTS off every page
-        hints = [("↑↓", "fetcher"), ("/", "filter"), ("w", "show all" if self._hide_ready else "hide ready")]
+        hints = [("↑↓", "row"), ("/", "filter")]
+        if self._by_fetcher():
+            hints.append(("w", "show all" if self._hide_ready else "hide ready"))
+        hints.append(("[ ]", "view"))
         if self._actions_on():
             hints += [("s", "sync scripts"), ("v", "sync validators"), ("u", "upload run")]
         return hints + [("ctrl+r", "refresh")]
@@ -372,9 +385,14 @@ class ParamifyPage(ParamifyWriter, Vertical):
     def _own_busy(self) -> bool:
         return self._planning or self._acting
 
+    def _by_fetcher(self) -> bool:
+        return self.query_one("#pf-lens", ContentSwitcher).current != "pf-by-capability"
+
     def check_action(self, action: str, parameters) -> bool | None:
         if action in ("sync_scripts", "sync_validators", "upload_run"):
             return self._actions_on()
+        if action == "hide_ready":
+            return self._by_fetcher()
         return True
 
     def _refresh_hints(self) -> None:
@@ -481,6 +499,7 @@ class ParamifyPage(ParamifyWriter, Vertical):
     def _draw(self) -> None:
         self._draw_summary()
         self._draw_grid()
+        self._draw_capabilities()
         self.call_after_refresh(self._fit)  # the summary can wrap to more rows, or fewer
 
     def _online(self) -> bool:
@@ -586,7 +605,116 @@ class ParamifyPage(ParamifyWriter, Vertical):
         return names[0]
 
     def action_focus_filter(self) -> None:
-        self.query_one("#pf-filter", Input).focus()
+        by_capability = self.query_one("#pf-lens", ContentSwitcher).current == "pf-by-capability"
+        self.query_one("#pf-cap-filter" if by_capability else "#pf-filter", Input).focus()
+
+    # -- views ------------------------------------------------------------ #
+
+    _LENSES = ("pf-by-fetcher", "pf-by-capability")
+    _LENS_TABS = {"pf-by-fetcher": "lens-fetcher", "pf-by-capability": "lens-capability"}
+
+    def action_lens(self, step: int) -> None:
+        current = self.query_one("#pf-lens", ContentSwitcher).current or self._LENSES[0]
+        target = self._LENSES[(self._LENSES.index(current) + step) % len(self._LENSES)]
+        self._show_lens(target, focus=True)
+
+    def on_tabs_tab_activated(self, event: Tabs.TabActivated) -> None:
+        if event.tabs.id != "pf-lens-tabs" or event.tab is None:
+            return
+        event.stop()  # the workspace's own tab bar must not see this
+        target = next(k for k, v in self._LENS_TABS.items() if v == event.tab.id)
+        if self.query_one("#pf-lens", ContentSwitcher).current != target:
+            self._show_lens(target, focus=True)
+
+    def _show_lens(self, target: str, *, focus: bool) -> None:
+        self.query_one("#pf-lens", ContentSwitcher).current = target
+        self.query_one("#pf-lens-tabs", Tabs).active = self._LENS_TABS[target]
+        self._refresh_hints()
+        if focus:  # only on a key or click on this page, so never from another tab
+            if target == "pf-by-capability":
+                grid = self.query_one("#pf-cap-grid", DataTable)
+                (grid if grid.display else self.query_one("#pf-cap-filter", Input)).focus()
+            else:
+                self._focus_target().focus()
+
+    def _draw_capabilities(self) -> None:
+        status = self._status
+        grid = self.query_one("#pf-cap-grid", DataTable)
+        error = self.query_one("#pf-cap-error", Static)
+        pairs_panel = self.query_one("#pf-pairs-panel", Vertical)
+        panel = self.query_one("#pf-cap-panel", Vertical)
+        if status is None:
+            return
+        problem = (status.get("errors") or {}).get("capabilities")
+        if not self._online() or problem:
+            grid.display = False
+            pairs_panel.display = False
+            error.display = True
+            error.update(Text(CAPS_OFFLINE) if not self._online() else Text(
+                f"Could not list the workspace's solution capabilities: {problem}.\n"
+                "The by-fetcher lens still works. ctrl+r to try again.", style=palette.WARN))
+            panel.border_title = "capabilities"
+            return
+        grid.display = True
+        pairs_panel.display = True
+        error.display = False
+        self._cap_pairs = self._pairs_by_capability(status)
+        keep = None
+        if grid.row_count:
+            try:
+                keep = grid.coordinate_to_cell_key(grid.cursor_coordinate).row_key.value
+            except Exception:  # noqa: BLE001
+                keep = None
+        grid.clear()
+        text = self._cap_filter
+        for cap in status["capabilities"]:
+            ref = cap.get("reference_id") or cap["id"]
+            if text and text not in ref.lower() and text not in (cap.get("name") or "").lower():
+                continue
+            pairs = self._cap_pairs.get(cap["id"], [])
+            names = sorted({p[0] for p in pairs})
+            shown = ", ".join(names[:2]) + (f"  +{len(names) - 2} more" if len(names) > 2 else "")
+            grid.add_row(Text(ref, style=palette.INFO), cap.get("name") or "",
+                         Text(str(len(pairs))) if pairs else _dim("—"),
+                         Text(shown) if shown else _dim("no pairs yet"), key=cap["id"])
+        covered = sum(1 for cap in status["capabilities"] if self._cap_pairs.get(cap["id"]))
+        panel.border_title = f"capabilities ({len(status['capabilities'])})  ·  {covered} with pairs"
+        if keep is not None and keep in {c["id"] for c in status["capabilities"]}:
+            try:
+                grid.move_cursor(row=grid.get_row_index(keep))
+            except Exception:  # noqa: BLE001 — filtered out
+                pass
+        self._show_pairs(self._cap_cursor())
+
+    @staticmethod
+    def _pairs_by_capability(status: dict) -> dict:
+        """{capability id: [(fetcher, function, validator names)]}, one entry per
+        fetcher and function: the set plus the validators that prove it."""
+        out: dict = {}
+        for row in status["fetchers"]:
+            names = {v["key"]: v["name"] for v in row["validators"]}
+            groups: dict = {}
+            for pair in row["pairs"]:
+                key = (pair["capability_id"], pair["function"])
+                groups.setdefault(key, []).append(names.get(pair["validator_key"] or "", "(not in the registry)"))
+            for (cap_id, function), validators in groups.items():
+                out.setdefault(cap_id, []).append((row["name"], function, validators))
+        return out
+
+    def _cap_cursor(self) -> str | None:
+        grid = self.query_one("#pf-cap-grid", DataTable)
+        if grid.row_count == 0:
+            return None
+        try:
+            return grid.coordinate_to_cell_key(grid.cursor_coordinate).row_key.value
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _show_pairs(self, cap_id: str | None) -> None:
+        table = self.query_one("#pf-pairs", DataTable)
+        table.clear()
+        for fetcher, function, validators in getattr(self, "_cap_pairs", {}).get(cap_id, []):
+            table.add_row(fetcher, _dim(function.lower().replace("_", " ")), " + ".join(validators))
 
     def action_hide_ready(self) -> None:
         """Hide the fetchers that are ready, so the grid lists what needs work;
@@ -599,10 +727,15 @@ class ParamifyPage(ParamifyWriter, Vertical):
         if event.input.id == "pf-filter":
             self._filter = event.value.strip().lower()
             self._draw_grid()
+        elif event.input.id == "pf-cap-filter":
+            self._cap_filter = event.value.strip().lower()
+            self._draw_capabilities()
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         if event.input.id == "pf-filter":
             self.query_one("#pf-grid", DataTable).focus()
+        elif event.input.id == "pf-cap-filter":
+            self.query_one("#pf-cap-grid", DataTable).focus()
 
     def _cursor_key(self) -> str | None:
         grid = self.query_one("#pf-grid", DataTable)
@@ -614,12 +747,16 @@ class ParamifyPage(ParamifyWriter, Vertical):
             return None
 
     def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
-        if event.data_table.id == "pf-grid" and event.row_key is not None:
+        if event.row_key is None:
+            return
+        if event.data_table.id == "pf-grid":
             # The user moved off the row the log opened on: the detail comes back.
             if (self.query_one("#pf-activity-panel").display and not self._own_busy
                     and event.row_key.value != getattr(self, "_activity_key", None)):
                 self._show_activity(False)
             self._show(event.row_key.value)
+        elif event.data_table.id == "pf-cap-grid":
+            self._show_pairs(event.row_key.value)
 
     # -- detail ----------------------------------------------------------- #
 

@@ -1672,6 +1672,13 @@ schemas and the `paramify` CLI — not the internal code.
   catalog keeps half the page, and the blank rows around the filter and the
   settings row are dropped. An empty manifest takes only the rows of its
   hint. The add-fetchers picker is removed.
+- **The Paramify tab in the TUI can show the solution capabilities.** `[` and `]`
+  switch between the view by fetcher and the view by capability. The view by
+  capability lists each capability in the workspace with its pairs and the
+  fetchers they come from. Under it, the highlighted capability shows each
+  pair: the fetcher, the function, and the validators in the pair. `/`
+  filters by capability id or name. If the token cannot read the
+  capabilities, the view tells you. The view by fetcher still works.
 - **The TUI's Paramify tab is a setup grid.** It has one row for each evidence
   fetcher in the manifest: the evidence set, the script, the validators, the
   linked solution capabilities, the artifacts, and whether the fetcher is
