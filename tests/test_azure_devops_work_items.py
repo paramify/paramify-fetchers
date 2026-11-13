@@ -885,39 +885,51 @@ def test_with_both_an_approval_of_unknown_time_comes_after_one_of_known_time(tmp
     assert work_item(evidence, 104)["approval"]["source"] == "state"
 
 
-@pytest.mark.parametrize("before, approved_105, left_out", [
-    (None, False, 0), ("states_and_comments", False, 0), ("both", True, 0), ("exclude", None, 4)])
-def test_items_created_before_the_field_follow_approval_before_field(tmp_path, monkeypatch, before, approved_105,
-                                                                     left_out):
+@pytest.mark.parametrize("before", [None, "states_and_comments", "both", "exclude"])
+def test_items_finished_before_the_field_follow_approval_before_field(tmp_path, monkeypatch, before):
     monkeypatch.setenv(mod.APPROVAL_FIELD_ENV, FIELD)
     monkeypatch.setenv(mod.APPROVAL_SOURCE_ENV, "field")
-    monkeypatch.setenv(mod.APPROVAL_FIELD_FROM_ENV, (NOW - timedelta(days=30)).strftime("%Y-%m-%d"))
+    since = (NOW - timedelta(days=2)).replace(hour=0, minute=0, second=0, microsecond=0)
+    monkeypatch.setenv(mod.APPROVAL_FIELD_FROM_ENV, since.strftime("%Y-%m-%d"))
     if before:
         monkeypatch.setenv(mod.APPROVAL_BEFORE_FIELD_ENV, before)
-    # 104 is new and approved by the field; 105 is old (created 50 days ago) and approved by the field since.
+    old, closed = {"System.CreatedDate": ago(days=50)}, "Microsoft.VSTS.Common.ClosedDate"
+    # Every extra item was created before the date. 104 finished after it, 107 exactly at it, 106 and 109 are open
+    # (109 in a state its type no longer defines): the field judges them. 105 finished before the date, and 108 too,
+    # by when it entered its state, though it changed after.
     fake = with_items(FakeADO(), {
-        104: item(104, "Change Request", "Closed", **{FIELD: FRANK, "System.CreatedDate": ago(days=5)}),
-        105: item(105, "Change Request", "Closed", **{FIELD: FRANK, "System.CreatedDate": ago(days=50)})},
-        updates={104: [filled(1, ago(days=4), FRANK)], 105: [filled(1, ago(days=3), FRANK)]})
+        104: item(104, "Change Request", "Closed", **old, **{FIELD: FRANK, closed: ago(days=1)}),
+        105: item(105, "Change Request", "Closed", **old, **{FIELD: FRANK, closed: ago(days=5)}),
+        106: item(106, "Change Request", "Active", **old, **{FIELD: FRANK}),
+        107: item(107, "Change Request", "Closed", **old, **{
+            FIELD: FRANK, closed: since.strftime("%Y-%m-%dT%H:%M:%SZ")}),
+        108: item(108, "Change Request", "Closed", **old),
+        109: item(109, "Change Request", "Retired", **old, **{"System.ChangedDate": ago(days=5)})},
+        updates={104: [filled(1, ago(days=4), FRANK)], 105: [filled(1, ago(days=3), FRANK)],
+                 106: [filled(1, ago(days=3), FRANK)], 107: [filled(1, ago(days=6), FRANK)],
+                 108: [update(1, "Proposed", "Closed", ago(days=5))]})
     code, evidence, _, _, _ = run(tmp_path, with_field_types(fake))
     assert code == 0
-    old = work_item(evidence, 101)
-    assert work_item(evidence, 104)["approval_route"] == "field" and work_item(evidence, 104)["approval"]
-    assert old["approval_route"] == (before or "states_and_comments")
+    route = {w: work_item(evidence, w)["approval_route"] for w in (101, 102, 103, 104, 105, 106, 107, 108, 109)}
+    older = before or "states_and_comments"
+    # 101 closed 3 days ago, 103 a day ago, and 102 is open.
+    assert route == {101: older, 102: "field", 103: "field", 104: "field", 105: older, 106: "field", 107: "field",
+                     108: older, 109: "field"}
+    for w in (104, 106, 107):
+        assert work_item(evidence, w)["approval"]["source"] == "field"
     s = evidence["summary"]
-    assert s["approval_field_from"] == (NOW - timedelta(days=30)).strftime("%Y-%m-%dT00:00:00Z")
-    assert s["approval_before_field"] == (before or "states_and_comments")
-    assert s["change_items_left_out_of_approval"] == left_out
+    assert s["approval_field_from"] == since.strftime("%Y-%m-%dT00:00:00Z") and s["approval_before_field"] == older
+    assert s["change_items_left_out_of_approval"] == (3 if before == "exclude" else 0)
     if before == "exclude":
-        # 101, 102, 103 and 105 were created 40 or 50 days ago, so only 104 is judged.
-        assert old["approval"] is None and work_item(evidence, 105)["approval"] is None
-        assert s["finished_change_items_without_approval"] == [] and s["change_items_approved"] == 1
-        assert (s["finished_change_items_needing_approval"], s["finished_change_items_approved_percentage"]) == (1, 100)
+        assert all(work_item(evidence, w)["approval"] is None for w in (101, 105, 108))
+        # Judged finished items: 103, 104 and 107.
+        assert s["finished_change_items_without_approval"] == [103]
+        assert (s["finished_change_items_needing_approval"], s["finished_change_items_approved_percentage"]) == (3, 66)
     else:
-        # Old items keep their state and comment approvals.
-        assert old["approval"]["source"] == "state" and work_item(evidence, 102)["approval"]["source"] == "comment"
-        assert bool(work_item(evidence, 105)["approval"]) is approved_105
-        assert s["finished_change_items_without_approval"] == ([103] if approved_105 else [103, 105])
+        # Items finished before the date keep their state approvals, and the field counts on them only with both.
+        assert work_item(evidence, 101)["approval"]["source"] == "state"
+        assert bool(work_item(evidence, 105)["approval"]) is (before == "both")
+        assert s["finished_change_items_without_approval"] == ([103, 108] if before == "both" else [103, 105, 108])
 
 
 def test_without_approval_field_from_every_item_follows_approval_source(tmp_path, monkeypatch):

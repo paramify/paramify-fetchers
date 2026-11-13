@@ -181,7 +181,7 @@ def choice(env: str, allowed: Sequence[str]) -> str:
 
 def approval_field_settings() -> Tuple[Optional[str], str, Optional[datetime], str]:
     """The approval field's reference name, the approval source, the date the field counts from, and the route for
-    items created before it."""
+    items finished before it."""
     field = (os.environ.get(APPROVAL_FIELD_ENV) or "").strip() or None
     if field and not REFERENCE_NAME.fullmatch(field):
         raise ValueError(f"{APPROVAL_FIELD_ENV} must be a field's reference name, such as Custom.ChangeApprover, not its "
@@ -376,11 +376,23 @@ def field_approval(updates: Optional[List[Dict[str, Any]]], ref: str, value: Any
     return {"at": iso(at), "by": by, "source": "field", "state": None}
 
 
-def approval_route(created: Optional[str], selection: "Selection") -> str:
-    """How an item's approval is judged: approval_source, or approval_before_field if created before field_from."""
-    born = when(created)
-    if selection.field_from and born and born < selection.field_from:
-        return selection.before_field
+def finished_at(item: Dict[str, Any]) -> Optional[datetime]:
+    """When a finished item reached its current state, as azure_change_work_items reads it."""
+    entered = [when(h.get("at")) for h in item.get("state_history") or [] if h.get("to") == item.get("state")]
+    for at in (when(item.get("closed_date")), when(item.get("resolved_date")),
+               max((t for t in entered if t), default=None), when(item.get("changed_date"))):
+        if at:
+            return at
+    return None
+
+
+def approval_route(item: Dict[str, Any], selection: "Selection") -> str:
+    """How an item's approval is judged: approval_before_field if it finished before field_from, else approval_source
+    (an open item, or one in a state its type no longer defines, included)."""
+    if selection.field_from and item.get("open") is False:
+        done = finished_at(item)
+        if done and done < selection.field_from:
+            return selection.before_field
     return selection.approval_source
 
 
@@ -564,7 +576,7 @@ def collect_project(client: DevOpsClient, collector: DevOpsCollector, project: D
         history = current_approval(item["state_history"], comments, selection.approval_states, ranks)
         item["field_approval"] = None if not selection.approval_field else field_approval(
             updates, selection.approval_field, field_value(raw.get("fields"), selection.approval_field))
-        item["approval_route"] = approval_route(item["created_date"], selection)
+        item["approval_route"] = approval_route(item, selection)
         item["approval"] = chosen_approval(item["approval_route"], history, item["field_approval"])
         item["approval_read"] = updates is not None and comments is not None
         item["approved_by_requester"] = None if not item["approval"] else \

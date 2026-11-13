@@ -61,9 +61,10 @@ schemas and the `paramify` CLI — not the internal code.
     withdraws its approval; a move back or a rejection doesn't.
   - **`approval_field_from`** (`AZURE_DEVOPS_APPROVAL_FIELD_FROM`, a date) and
     **`approval_before_field`** (`AZURE_DEVOPS_APPROVAL_BEFORE_FIELD`,
-    `states_and_comments` by default): an item created before the date is judged
-    by states and comments, by `both`, or left out of every approval figure
-    (`exclude`). Each item records the route that judged it (`approval_route`).
+    `states_and_comments` by default): an item that finished before the date (by
+    its closed date, else its resolved date, else when it entered its current
+    state) is judged by states and comments, by `both`, or left out of every
+    approval figure (`exclude`); an open item follows `approval_source`. Each item records the route that judged it (`approval_route`).
     `both` or `exclude` without a date is `bad_config`.
   - **`emergency_types`** (`AZURE_DEVOPS_EMERGENCY_TYPES`, none by default):
     types whose approval may come after the change, as the comparator's
@@ -79,7 +80,7 @@ schemas and the `paramify` CLI — not the internal code.
 
 - **`azure_change_work_items` 0.3.0: a record left out of approval judging isn't
   read as unapproved.** When `azure_devops_work_items` left a record out
-  (`approval_route` `exclude`: created before its `approval_field_from` while its
+  (`approval_route` `exclude`: finished before its `approval_field_from` while its
   `approval_before_field` is `exclude`), the record's `approved` is `null`, its new
   `approval_judged` is `false`, and it counts as approved, as a record of a type
   that needs no approval does. It no longer adds to
