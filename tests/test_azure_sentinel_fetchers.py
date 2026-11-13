@@ -1535,6 +1535,26 @@ def test_analytics_rules_unknown_confirmed_kind_is_a_config_error(azure, tmp_pat
     assert ws["enabled_rules_quiet"] == [] and "enabled_rules_confirmed_quiet" not in ws  # none used
 
 
+def _config_failures(ev):
+    return [f for f in ev["metadata"]["api_failures"] if CONFIRMED in f["message"]]
+
+
+def test_analytics_rules_bad_confirmed_setting_is_reported_once_for_many_workspaces(azure, tmp_path, monkeypatch):
+    onboard_second_workspace(azure)
+    incident_rules_workspace(azure, [incident_rule("mdc", "Azure Security Center")])
+    monkeypatch.setenv(CONFIRMED, "AzureSecurityCentre")
+    _, ev = run("sentinel_analytics_rules", tmp_path)
+    assert len(ev["results"]["workspaces"]) == 2 and len(_config_failures(ev)) == 1
+
+
+def test_analytics_rules_bad_confirmed_setting_fails_a_run_with_no_sentinel_workspace(azure, tmp_path, monkeypatch):
+    azure.arm[(f"{SI_A}/onboardingStates", "2025-09-01")] = {"value": []}
+    monkeypatch.setenv(CONFIRMED, "AzureSecurityCentre")
+    code, ev = run("sentinel_analytics_rules", tmp_path)
+    assert ev["results"]["workspaces"] == [] and len(_config_failures(ev)) == 1
+    assert code == 1 and json.loads((tmp_path / "status.json").read_text())["code"] == "bad_config"
+
+
 def test_analytics_rules_without_alert_only_rules_missing_data_skip_the_connector_listing(azure, tmp_path):
     incident_rules_workspace(azure, [incident_rule("mde", "Microsoft Defender Advanced Threat Protection")])
     code, ev = run("sentinel_analytics_rules", tmp_path)

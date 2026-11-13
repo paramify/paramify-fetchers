@@ -299,16 +299,17 @@ def alert_connections(product: Optional[str], connections: List[Dict[str, Any]])
     return sorted({c["kind"] for c in connections if kind and c.get("kind") in feeds and sends_alerts(c)})
 
 
-def confirmed_connections(collector) -> Set[str]:
-    """Connection kinds named in CONFIRMED_ENV. A kind that sends no product's alerts fails the run as bad_config and
-    the whole setting is ignored, so nothing reads as confirmed on a typo."""
+def confirmed_connections(collector=None) -> Set[str]:
+    """Connection kinds named in CONFIRMED_ENV. A kind that sends no product's alerts is recorded on `collector`, when
+    given, which fails the run as bad_config; the whole setting is ignored, so nothing reads as confirmed on a typo."""
     raw = [k.strip() for k in (os.environ.get(CONFIRMED_ENV) or "").split(",") if k.strip()]
     known = {k.lower(): k for k in ALERT_PRODUCT_KINDS.values()}
     unknown = [k for k in raw if k.lower() not in known]
     if unknown:
-        collector.record(f"config {CONFIRMED_ENV}", ValueError(
-            f"invalid setting {CONFIRMED_ENV}: {', '.join(repr(k) for k in unknown)} not a kind of connection that sends "
-            f"an incident-creation product's alerts; expected any of {', '.join(sorted(known.values()))}; none used"))
+        if collector is not None:
+            collector.record(f"config {CONFIRMED_ENV}", ValueError(
+                f"invalid setting {CONFIRMED_ENV}: {', '.join(repr(k) for k in unknown)} not a kind of connection that "
+                f"sends an incident-creation product's alerts; expected any of {', '.join(sorted(known.values()))}; none used"))
         return set()
     return {known[k.lower()] for k in raw}
 
@@ -511,7 +512,7 @@ def collect(client, ws: Dict[str, Any], collector) -> Dict[str, Any]:
             r["tables_without_data"] = tables_without_data(r, ingested, products)
     covered = coverage(rules, ingested, products is not None) if rules is not None and listed_tables is not None else {}
     quiet = None
-    confirmed = confirmed_connections(collector)
+    confirmed = confirmed_connections()
     if covered.get("enabled_rules_missing_data") is not None:
         quiet = quiet_rules(client, path, ws, rules, collector, notes, confirmed)
 
@@ -579,7 +580,7 @@ def summarize(workspaces: List[Dict[str, Any]]) -> Dict[str, Any]:
 
 def main() -> int:
     return run_workspaces(fetcher=NAME, logger=logger, collect=collect, summarize=summarize,
-                          resource_exclusions=True)
+                          resource_exclusions=True, validate=confirmed_connections)
 
 
 if __name__ == "__main__":

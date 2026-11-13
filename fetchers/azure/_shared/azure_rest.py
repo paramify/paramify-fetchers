@@ -516,15 +516,19 @@ def run_workspaces(
     sentinel_only: bool = True,
     resource_exclusions: bool = False,
     session: Any = None,
+    validate: Optional[Callable[[Collector], None]] = None,
 ) -> int:
     """Find the subscription's (Sentinel) workspaces and collect each into one evidence file. With
-    resource_exclusions, workspaces its patterns match are listed under excluded and not read."""
+    resource_exclusions, workspaces its patterns match are listed under excluded and not read. `validate`
+    runs once, before any workspace is read, to record a bad setting."""
 
     def per_workspace(client: AzureRestClient, subscription_id: str, collector: Collector) -> tuple:
         exclusions = ResourceExclusions.from_env() if resource_exclusions else None
         excluded: List[Dict[str, Any]] = []
         if exclusions is not None:
             exclusions.record_invalid(collector)
+        if validate is not None:
+            validate(collector)
         found = find_workspaces(client, subscription_id, collector, exclusions, excluded)
         listed = found is not None
         found = found or []
