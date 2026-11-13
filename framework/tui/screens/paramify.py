@@ -272,6 +272,7 @@ class ParamifyPage(ParamifyWriter, Vertical):
                 with Vertical(id="pf-cap-panel", classes="panel"):
                     yield Input(placeholder="/ filter capabilities…", id="pf-cap-filter")
                     yield DataTable(id="pf-cap-grid", cursor_type="row")
+                    yield Static("", id="pf-cap-hint")
                     yield Static("", id="pf-cap-error")
                 with Vertical(id="pf-pairs-panel", classes="panel"):
                     yield DataTable(id="pf-pairs", cursor_type="row")
@@ -467,6 +468,7 @@ class ParamifyPage(ParamifyWriter, Vertical):
         self._reading = True
         self._stale = False
         self._draw_summary()
+        self._draw_cap_hint()
         self._status_worker(self.app.root_path, path)
 
     # Not exclusive: _reading already keeps one read at a time, and an exclusive
@@ -664,6 +666,7 @@ class ParamifyPage(ParamifyWriter, Vertical):
         error = self.query_one("#pf-cap-error", Static)
         panel = self.query_one("#pf-cap-panel", Vertical)
         if status is None:
+            self._draw_cap_hint()
             return
         problem = (status.get("errors") or {}).get("capabilities")
         if not self._online() or problem:
@@ -720,12 +723,32 @@ class ParamifyPage(ParamifyWriter, Vertical):
             except Exception:  # noqa: BLE001 — filtered out
                 pass
         self._show_pairs(self._cap_cursor())
+        self._draw_cap_hint()
 
     def _cap_view_parts(self, shown: bool) -> None:
         """The capability grid, its filter and the pairs pane, or the text in their place."""
         for part in ("#pf-cap-grid", "#pf-cap-filter", "#pf-pairs-panel"):
             self.query_one(part).display = shown
         self.query_one("#pf-cap-error", Static).display = not shown
+        self._draw_cap_hint()
+
+    def _draw_cap_hint(self) -> None:
+        """Why the capability grid has no rows: a read is running, the filter
+        matches nothing, or the workspace has none."""
+        hint = self.query_one("#pf-cap-hint", Static)
+        status = self._status
+        text = ""
+        if self.query_one("#pf-cap-grid", DataTable).row_count == 0 and self.query_one("#pf-cap-grid").display:
+            if self._reading:
+                text = READING
+            elif status is None:
+                text = "Could not read the workspace. ctrl+r to try again." if self._error else ""
+            elif self._cap_filter and status["capabilities"]:
+                text = f"No capability matches “{self._cap_filter}”."
+            elif not status["capabilities"]:
+                text = "The workspace has no solution capabilities yet."
+        hint.update(_dim(text))
+        hint.display = bool(text)
 
     @staticmethod
     def _pairs_by_capability(status: dict) -> dict:

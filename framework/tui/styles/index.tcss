@@ -312,6 +312,7 @@ ParamifyPage { height: 1fr; padding: 0 1; }
 #pf-cap-filter { margin-bottom: 1; }
 #pf-cap-grid { height: 1fr; }
 #pf-cap-error { height: 1fr; padding: 1 2; }
+#pf-cap-hint { height: auto; padding: 0 1; }
 #pf-pairs-panel { height: 11; margin-top: 1; }
 #pf-pairs { height: 1fr; }
 /* A short terminal drops the blank rows, so the list keeps its rows (the row

@@ -1022,3 +1022,46 @@ def test_a_manifest_switch_clears_the_old_capabilities(tmp_path, monkeypatch, ru
     before, caps, pairs, kept = run_tui(body, _manifest(tmp_path))
     assert before == (2, 3)
     assert (caps, pairs, kept) == (0, 0, {})
+
+
+def test_the_capability_view_says_it_is_reading(tmp_path, monkeypatch, run_tui):
+    """Opened on the capability view before the first read lands, the grid is
+    empty: a line says the workspace is being read, and goes when it lands."""
+    gate = threading.Event()
+
+    def slow():
+        gate.wait(5)
+        return _cap_status()
+
+    _stub(monkeypatch, slow)
+
+    async def body(app, pilot):
+        await pilot.press("4")
+        await pilot.pause()
+        page = app.screen.query_one(ParamifyPage)
+        await pilot.press("right_square_bracket")
+        await pilot.pause()
+        hint = page.query_one("#pf-cap-hint", Static)
+        during = hint.display, _text(hint.content)
+        gate.set()
+        await _settle(app, pilot)
+        return during, hint.display
+
+    (shown, text), after = run_tui(body, _manifest(tmp_path))
+    assert shown and "reading the workspace…" in text
+    assert not after
+
+
+def test_a_capability_filter_that_matches_nothing_says_so(tmp_path, monkeypatch, run_tui):
+    _stub(monkeypatch, _cap_status())
+
+    async def body(app, pilot):
+        page = await _capability_lens(app, pilot)
+        await pilot.press("slash", *"zzz")
+        await pilot.pause()
+        hint = page.query_one("#pf-cap-hint", Static)
+        return _cap_rows(page), hint.display, _text(hint.content)
+
+    rows, shown, text = run_tui(body, _manifest(tmp_path))
+    assert rows == {} and shown
+    assert "No capability matches “zzz”." in text
