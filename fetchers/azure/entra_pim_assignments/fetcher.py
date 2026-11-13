@@ -4,6 +4,7 @@
 import asyncio
 import logging
 import os
+import re
 import sys
 from datetime import timedelta
 from pathlib import Path
@@ -42,6 +43,8 @@ POLICY_FILTER = "scopeId eq '/' and scopeType eq 'DirectoryRole'"
 # Without Entra ID P2 (or ID Governance) Graph refuses with this code, a state not a failure; reported on a 400 as well as a 403.
 LICENCE_ERROR_CODE = "AadPremiumLicenseRequired"
 LICENCE_STATUSES = (400, 403)
+APPROVED_ENV = "AZURE_ENTRA_APPROVED_PRINCIPAL_IDS"
+_OBJECT_ID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 MFA, JUSTIFICATION, TICKETING = "MultiFactorAuthentication", "Justification", "Ticketing"
 # Summary fields that turn on whether a privileged grant is tenant-wide, by the kind of grant.
 ELIGIBLE_SCOPED = (
@@ -50,6 +53,7 @@ ELIGIBLE_SCOPED = (
     "principals_eligible_for_privileged_roles",
     "privileged_roles_with_eligible_holders",
     "global_administrator_eligible",
+    "unapproved_eligible_privileged_principals",
 )
 ACTIVE_SCOPED = (
     "active_privileged_assignments",
@@ -280,7 +284,37 @@ def privileged(record: Dict[str, Any]) -> bool:
     return record["is_privileged"] and record["tenant_wide"]
 
 
-def summarize(eligible: List[Dict[str, Any]], active: List[Dict[str, Any]], policies: List[Dict[str, Any]]) -> Dict[str, Any]:
+def parse_approved_ids(raw: Optional[str]) -> tuple:
+    """The approved object ids, lower-cased and sorted (None when there is no entry), and how many aren't object ids."""
+    ids = sorted({part.lower() for part in re.split(r"[,\s]+", raw or "") if part})
+    if not ids:
+        return None, 0
+    return ids, sum(1 for i in ids if not _OBJECT_ID.fullmatch(i))
+
+
+def unapproved_eligible(eligible: List[Dict[str, Any]], approved: Optional[List[str]],
+                        invalid: int = 0) -> Optional[List[Dict[str, Any]]]:
+    """Principals eligible for a privileged role whose object id isn't approved, each with those roles; None without a usable list."""
+    if approved is None or invalid:
+        return None
+    allowed, holders = set(approved), {}
+    for e in eligible:
+        principal = (e.get("principal_id") or "").lower()
+        if counted(e) and privileged(e) and principal not in allowed:
+            holders.setdefault(principal, {
+                **{k: e.get(k) for k in ("principal_id", "principal_type", "principal_display_name",
+                                         "principal_user_principal_name")},
+                "privileged_roles": set(),
+            })["privileged_roles"].add(e["role_name"] or e["role_definition_id"] or "")
+    return sorted(
+        ({**h, "privileged_roles": sorted(h["privileged_roles"])} for h in holders.values()),
+        key=lambda h: ((h["principal_user_principal_name"] or h["principal_display_name"] or "").lower(),
+                       h["principal_id"] or ""),
+    )
+
+
+def summarize(eligible: List[Dict[str, Any]], active: List[Dict[str, Any]], policies: List[Dict[str, Any]],
+              approved: Optional[List[str]] = None, unapproved: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
     # Any holder, direct or through a group, at any scope: its role's activation rules are in the tenant-wide policy.
     held = [r for r in eligible + active if r["is_privileged"]]
     with_policy = {str(p["role_template_id"] or "").lower() for p in policies}
@@ -342,6 +376,8 @@ def summarize(eligible: List[Dict[str, Any]], active: List[Dict[str, Any]], poli
             "permanent_eligible_assignment_allowed", True
         ),
         "max_privileged_activation_hours": None if without_policy or None in hours else max(hours, default=None),
+        "approved_principals_configured": approved is not None,
+        "unapproved_eligible_privileged_principals": None if unapproved is None else len(unapproved),
     }
     unknown = {
         **dict.fromkeys(ELIGIBLE_SCOPED, eligible_unknown),
@@ -434,7 +470,7 @@ async def _collect(collector: Collector, cred) -> tuple:
     return result if result is not None else ({"tenant_source": "unresolved"}, None, None, None, None, [])
 
 
-def build(definitions, eligible, active, policies, unlicensed) -> tuple:
+def build(definitions, eligible, active, policies, unlicensed, approved=None, invalid=0) -> tuple:
     index = None if definitions is None else role_index(definitions)
     eligible_records = None if eligible is None else sorted((assignment_record(i, index, False) for i in eligible), key=_sort_key)
     active_records = None if active is None else sorted((assignment_record(i, index, True) for i in active), key=_sort_key)
@@ -456,10 +492,15 @@ def build(definitions, eligible, active, policies, unlicensed) -> tuple:
     }
     if unlicensed:
         results["notes"] = ["PIM is not available in this tenant (Entra ID P2 or ID Governance is required)", *unlicensed]
+    results["approved_principal_ids"], results["unapproved_eligible_principals"] = approved, None
     # A failed read would turn into zero standing admins, so no figures are given unless every read succeeded.
     if not complete or eligible_records is None or active_records is None or policy_records is None:
         return results, {"pim_available": available, "collection_complete": False}
-    return results, {"collection_complete": True, **summarize(eligible_records, active_records, policy_records)}
+    unapproved = unapproved_eligible(eligible_records, approved, invalid)
+    summary = summarize(eligible_records, active_records, policy_records, approved, unapproved)
+    if summary["unapproved_eligible_privileged_principals"] is not None:
+        results["unapproved_eligible_principals"] = unapproved
+    return results, {"collection_complete": True, **summary}
 
 
 def main() -> int:
@@ -470,6 +511,10 @@ def main() -> int:
 
     output_dir = Path(os.environ.get("EVIDENCE_DIR", "./evidence"))
     collector = Collector(logger)
+    approved, invalid = parse_approved_ids(os.environ.get(APPROVED_ENV))
+    if invalid:
+        collector.record(f"config {APPROVED_ENV}", ValueError(
+            f"invalid setting {APPROVED_ENV}: {invalid} entry(ies) are not object ids (GUIDs)"))
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
     if cred is None:
         tenant: Dict[str, Any] = {"tenant_source": "unresolved"}
@@ -477,7 +522,7 @@ def main() -> int:
         summary: Dict[str, Any] = {"pim_available": None, "collection_complete": False}
     else:
         tenant, definitions, eligible, active, policies, unlicensed = asyncio.run(_collect(collector, cred))
-        results, summary = build(definitions, eligible, active, policies, unlicensed)
+        results, summary = build(definitions, eligible, active, policies, unlicensed, approved, invalid)
 
     scoping = tenant_scoping()
     evidence = tenant_payload(
