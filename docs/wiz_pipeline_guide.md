@@ -147,4 +147,5 @@ close it ([pipelines guide, step 5](pipelines_guide.md#5-watch-jobs-and-close-cy
 | HTTP 400 or 409, or a failed job | [Pipelines guide troubleshooting](pipelines_guide.md#troubleshooting). |
 
 **More detail:** [STIG report columns](../fetchers/wiz/stig_compliance_report/README.md#columns) ·
+[vulnerability CSV columns](../fetchers/wiz/vulnerability_findings/README.md#columns) ·
 [the issues uploader](../uploaders/paramify_issues/README.md)

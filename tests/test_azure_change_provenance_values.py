@@ -294,13 +294,14 @@ def test_no_fake_secret_reaches_the_evidence_even_with_every_path_allowed(monkey
     assert evidence["results"]["property_value_paths_added"] == ["path:*"]
 
 
-def test_run_counts_and_settings(monkeypatch, tmp_path):
+def test_run_counts_and_settings(monkeypatch, tmp_path, assert_summary_documented):
     rows = [row(f"c{i}", f"2026-11-01T0{i}:00:00Z", raw({"tags.a": str(i)})) for i in range(1, 4)]
     code, _, evidence = _run(monkeypatch, tmp_path, rows, env={"AZURE_CHANGE_MAX_VALUE_CHANGES": "2"})
     assert code == 0
     summary = evidence["summary"]
     assert (summary["changes_with_property_values"], summary["changes_property_values_capped"],
             summary["property_values_shown"]) == (2, 1, 2)
+    assert_summary_documented("azure/change_provenance", summary)
     assert summary["property_values_withheld_by_reason"] == {"not_allowlisted": 0, "secret": 0}
     assert evidence["results"]["max_property_value_changes"] == 2
     assert evidence["results"]["property_value_paths_added"] == []

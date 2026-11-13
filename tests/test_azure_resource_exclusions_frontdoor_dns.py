@@ -246,9 +246,10 @@ def run_waf(monkeypatch, tmp_path, patterns):
     return _run(waf, monkeypatch, tmp_path, patterns, "azure_front_door_waf_policies")
 
 
-def test_waf_policies_without_patterns_add_only_empty_exclusion_fields(monkeypatch, tmp_path):
+def test_waf_policies_without_patterns_add_only_empty_exclusion_fields(monkeypatch, tmp_path, assert_summary_documented):
     code, evidence = run_waf(monkeypatch, tmp_path, None)
     assert code == 0 and evidence["results"]["excluded"] == []
+    assert_summary_documented("azure/front_door_waf_policies", evidence["summary"])
     records = sorted((fd.waf_policy_record(p) for p in WAF_POLICIES[:3]), key=lambda r: r["id"].lower())
     assert evidence["results"]["waf_policies"] == records
     assert evidence["summary"] == {
@@ -723,6 +724,7 @@ def test_a_list_that_wasnt_read_leaves_its_exclusion_counts_null(run, unread, re
     code, evidence = run(monkeypatch, tmp_path)
     summary = evidence["summary"]
     assert code == 1
+    assert summary["resource_exclusion_patterns_unmatched"] is None
     # in_scope_production_apps doesn't exist: in_scope_apps counts the apps left after both kinds of exclusion.
     assert {k: (summary.get(f"in_scope_{k}"), summary[f"excluded_{k}"]) for k in unread} == dict.fromkeys(
         unread, (None, None))

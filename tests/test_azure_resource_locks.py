@@ -326,6 +326,14 @@ def test_resources_and_groups_are_paged_and_resource_group_names_are_case_insens
     assert summary["resource_groups_delete_locked"] == 1
 
 
+def test_unmatched_patterns_are_null_when_the_resource_list_was_refused(caplog) -> None:
+    _, summary, _ = _collect(_Arm(resources_fail=True), ResourceExclusions(["rg:typo"]))
+    assert summary["resource_exclusion_patterns_unmatched"] is None
+    assert "matched nothing" not in caplog.text
+    _, summary, _ = _collect(_Arm(), ResourceExclusions(["rg:typo"]))
+    assert summary["resource_exclusion_patterns_unmatched"] == ["rg:typo"]
+
+
 def test_an_invalid_exclusion_pattern_fails_the_run() -> None:
     _, _, collector = _collect(_Arm(), ResourceExclusions(["not-a-pattern"]))
     assert not collector.ok

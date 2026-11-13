@@ -817,6 +817,8 @@ def collect(client, subscription_id: str, collector) -> tuple:
     # Not read, but counted, so the exclusions apply to them too.
     other_cdn_in_scope, other_cdn_out = scope.split(other_cdn_profiles or [], CDN_PROFILE_KIND)
     excluded += other_cdn_out
+    if other_cdn_profiles is None or any(v is None for v in listed.values()):
+        scope.mark_unread()
     scope.warn_unmatched(logger)
 
     registration = health_registration(client, subscription_id)

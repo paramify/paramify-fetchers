@@ -510,6 +510,8 @@ def collect(client, subscription_id: str, collector: Collector, exclusions: Opti
         excluded += out
         vaults = [collect_vault(client, api, v, settings, now, collector, exclusions, excluded) for v in vaults]
     exclusions.record_invalid(collector)
+    if not vaults_listed or not all(v["instances_read"] for v in vaults):
+        exclusions.mark_unread()
     exclusions.warn_unmatched(logger)
     results = {
         "backup_vaults": vaults,

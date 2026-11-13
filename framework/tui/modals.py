@@ -54,11 +54,14 @@ class FormModal(ButtonRowNav, ModalScreen[dict]):
         *BUTTON_ROW_BINDINGS,
     ]
 
-    def __init__(self, title: str, groups: Dict[str, List[dict]], subtitle: str = "") -> None:
+    def __init__(self, title: str, groups: Dict[str, List[dict]], subtitle: str = "",
+                 save_label: str = "Save") -> None:
         super().__init__()
         self._title = title
         self._subtitle = subtitle
         self._groups = groups
+        # "Next" where another step follows, so the form does not promise a save it does not make.
+        self._save_label = save_label
 
     def compose(self) -> ComposeResult:
         with Vertical(id="modal-card"):
@@ -77,7 +80,7 @@ class FormModal(ButtonRowNav, ModalScreen[dict]):
                 if not any_fields:
                     yield Static("Nothing to configure for this fetcher.", classes="dim")
             with Horizontal(id="modal-buttons"):
-                yield Button("Save", variant="primary", id="save")
+                yield Button(self._save_label, variant="primary", id="save")
                 yield Button("Cancel", id="cancel")
 
     def on_mount(self) -> None:
@@ -115,24 +118,39 @@ class PickerModal(FilterListNav, ModalScreen[str]):
     BINDINGS = [Binding("escape", "cancel", "Cancel"), *FILTER_NAV_BINDINGS]
     FILTER_NAV = ("#picker-filter", "#picker-list")
 
-    def __init__(self, title: str, options: List[Tuple[str, str]], subtitle: str = "") -> None:
-        # options: list of (id, label)
+    def __init__(self, title: str, options: List[Tuple[str, str]], subtitle: str = "",
+                 notice: str = "") -> None:
+        # options: list of (id, label). notice: why the list is short or empty
+        # (no token, an API error), shown as a warning above it.
         super().__init__()
         self._title = title
         self._subtitle = subtitle
         self._options = options
+        self._notice = notice
 
     def compose(self) -> ComposeResult:
         with Vertical(id="modal-card"):
             yield Label(self._title, id="modal-title")
             if self._subtitle:
                 yield Label(self._subtitle, id="modal-subtitle")
+            if self._notice:
+                # Plain text: it can carry an API error body, and a "[" there is not markup.
+                yield Static(Text(self._notice), id="picker-notice")
             yield Input(placeholder="filter…", id="picker-filter")
             yield OptionList(id="picker-list")
 
     def on_mount(self) -> None:
         self._populate("")
-        self.query_one("#picker-filter", Input).focus()
+        if not (self._notice and len(self._options) <= 1):
+            self.query_one("#picker-filter", Input).focus()
+            return
+        # A notice with one fallback choice: nothing to filter, so hide the box
+        # and put enter on the choice.
+        self.query_one("#picker-filter", Input).display = False
+        ol = self.query_one("#picker-list", OptionList)
+        ol.add_class("fallback")
+        ol.highlighted = 0
+        ol.focus()
 
     def _populate(self, flt: str) -> None:
         ol = self.query_one("#picker-list", OptionList)

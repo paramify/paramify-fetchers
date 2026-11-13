@@ -297,6 +297,14 @@ def test_main_reports_restore_jobs_with_their_details(monkeypatch, tmp_path):
             evidence["summary"]["in_scope_restore_jobs"], evidence["summary"]["excluded_restore_jobs"]) == (90, 1, 1, 0)
 
 
+def test_main_summary_matches_the_instructions(monkeypatch, tmp_path, assert_summary_documented):
+    statuses = ("Completed", "CompletedWithWarnings", "Failed", "InProgress", "Cancelled")
+    jobs = [_job(f"j{i}", status=s) for i, s in enumerate(statuses)]
+    code, evidence = _run(monkeypatch, tmp_path, lambda **_: jobs, lambda **_: _details({}))
+    assert code == 0
+    assert_summary_documented("azure/backup_recovery_status", evidence["summary"])
+
+
 @pytest.mark.parametrize("window, used, requested, code, slices", [
     ("9O", 365, None, 1, 13), ("0", 365, 0, 1, 13), ("3650", 365, 3650, 0, 13), ("60", 60, 60, 0, 2),
 ])

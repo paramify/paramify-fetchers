@@ -399,6 +399,8 @@ def collect_subscription(client, subscription_id: str, collector: Collector) -> 
     # Fires were counted against every rule, so an in-scope alert of an excluded rule doesn't read as an unlisted rule.
     rules, excluded_rules = exclusions.split(rules, "alert_rule")
     excluded += excluded_rules
+    if not (alerts_read and rules_read):
+        exclusions.mark_unread()
     exclusions.warn_unmatched(logger)
     alerts.sort(key=lambda a: (a["fired_at"] or "", arm_id_key(a["id"])))
     logger.info("%d alerts, %d alert rules", len(alerts), len(rules))

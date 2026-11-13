@@ -348,6 +348,8 @@ def collect(client, subscription_id: str, collector: Collector, exclusions: Opti
     resources = [resource_record(r, public_ips, regions) for r in rows]
     resources, excluded = exclusions.split(resources, "resource")
     exclusions.record_invalid(collector)
+    if result is None:
+        exclusions.mark_unread()
     exclusions.warn_unmatched(logger)
     summary, region_list = summarize(resources, regions)
     if result is None:

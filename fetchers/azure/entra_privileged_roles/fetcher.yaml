@@ -1,12 +1,7 @@
 name: azure_entra_privileged_roles
 version: 0.2.0
-description: >
-  Every activated Microsoft Entra ID directory role and the principals holding it,
-  with the Global Administrator count broken out and each role flagged for whether
-  it grants tenant-wide administrative power. Members are reported with their
-  principal kind, so a role held by a group or a service principal is
-  distinguishable from one held by a user, and both raw assignment counts and
-  distinct-principal counts are given.
+description: >-
+  Lists every activated directory role and who holds it, counting Global Administrators and the users, groups and apps holding privileged admin roles.
 category: azure
 
 supports_targets: true
@@ -58,12 +53,40 @@ ksis:
 evidence_set:
   reference_id: EVD-AZURE-ENTRA-PRIV-ROLES
   name: Microsoft Entra ID Privileged Directory Roles
-  instructions: >
-    Script: azure/entra_privileged_roles/fetcher.py. Microsoft Graph calls: GET /directoryRoles; GET
-    /directoryRoles/{id}/members and /directoryRoles/{id}/members/microsoft.graph.servicePrincipal
-    per role (v1.0 members can leave service principals out; the cast lists them); GET
-    /organization. Collections paged via @odata.nextLink. A failed role list leaves every figure
-    null, and a failed members or cast read the figures over that role (users_in_privileged_roles
-    and groups_in_privileged_roles need only the members); service_principals_in_privileged_roles
-    is null when a privileged role's service principals can't be read. Each role record says
-    which reads succeeded (members_read, service_principal_members_read).
+  instructions: |
+    Script: azure/entra_privileged_roles/fetcher.py
+
+    Access: Microsoft Graph application permission RoleManagement.Read.Directory (Directory.Read.All also covers it). Optional: Organization.Read.All; without it, the tenant's name and domain read null, and a target must name its tenant_id or the run fails.
+
+    Commands Executed:
+    - GET /organization — the tenant's name and domain
+    - GET /directoryRoles — the directory roles activated in the tenant
+    - GET /directoryRoles/{id}/members (per role) — who holds each role
+    - GET /directoryRoles/{id}/members/microsoft.graph.servicePrincipal (per role) — the service principals holding each role, which the members list can leave out
+
+    Output: azure_entra_privileged_roles_<tenant>.json — each activated directory role, whether it is privileged or Global Administrator, whether its reads succeeded, and the users, groups and apps holding it, plus the list of role names counted as privileged.
+
+    Summary fields:
+
+    What was checked?
+    - total_directory_roles_activated — Number of directory roles activated in the tenant (a role is activated the first time anyone is assigned it; a role never assigned isn't listed and has no holders); null if the role list couldn't be read
+    - roles_with_no_members — Number of activated roles nobody holds now (assigned once, then removed); null if the role list or any role's members or service principals couldn't be read
+    - total_role_assignments — Number of active role assignments across all activated roles, one per role per holder (user, group, app or other account); PIM-eligible holders who haven't activated aren't listed; null if the role list or any role's members or service principals couldn't be read
+    - distinct_principals_with_a_directory_role — Number of distinct users, groups, apps and other accounts holding at least one directory role; null if the role list or any role's members or service principals couldn't be read
+
+    How many Global Administrators are there?
+    - global_administrator_count — Number of users, groups and apps holding Global Administrator directly; a group counts once, not its members; null if the role list or the Global Administrator role's members or service principals couldn't be read
+    - global_administrator_role_activated — True if the Global Administrator role is activated in the tenant; false if not, and global_administrator_count is 0; null if the role list couldn't be read
+
+    Who holds privileged roles?
+    - privileged_roles_activated — Number of activated privileged roles: the 24 built-in roles treated as tenant-wide admin power, such as Global Administrator, Privileged Role Administrator, User Administrator, Security Administrator and Global Reader (the full list is in the output); null if the role list couldn't be read
+    - privileged_roles_with_members — Number of privileged roles at least one user, group or app holds; null if the role list or any privileged role's members or service principals couldn't be read
+    - privileged_role_names_assigned — List of the privileged role names at least one user, group or app holds; null if the role list or any privileged role's members or service principals couldn't be read
+    - privileged_role_assignments — Number of assignments to privileged roles, one per role per holder; null if the role list or any privileged role's members or service principals couldn't be read
+    - distinct_privileged_principals — Number of distinct users, groups, apps and other accounts holding at least one privileged role; null if the role list or any privileged role's members or service principals couldn't be read
+    - privileged_assignment_percentage — Percentage of role assignments that are to privileged roles = privileged_role_assignments / total_role_assignments × 100 (a whole number, 0–100); 0 when total_role_assignments is 0; null if the role list or any role's members or service principals couldn't be read
+
+    What kind of account holds privileged power?
+    - users_in_privileged_roles — Number of privileged-role assignments held by users; a user holding two privileged roles counts twice; null if the role list or any privileged role's members couldn't be read
+    - groups_in_privileged_roles — Number of privileged-role assignments held by groups; members of the group aren't counted; null if the role list or any privileged role's members couldn't be read
+    - service_principals_in_privileged_roles — Number of privileged-role assignments held by service principals (apps and managed identities); null if the role list or any privileged role's service principals couldn't be read

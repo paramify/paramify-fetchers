@@ -55,7 +55,7 @@ def _adds(group_id: str) -> dict:
     return {"actionType": "AddActionGroups", "actionGroupIds": [group_id]}
 
 
-def run_alert_rules_reads(monkeypatch, tmp_path, patterns, extra_rules=(), processing=(), failing=()):
+def run_alert_rules_reads(monkeypatch, tmp_path, patterns, extra_rules=(), processing=(), failing=(), refuse_rules=False):
     """GETs of other subscriptions' groups append the group's name to fetched; a name in failing raises."""
     out_group = _group(OUT_RG, "ag-out")
     in_group = _group(IN_RG, "ag-in")
@@ -77,8 +77,12 @@ def run_alert_rules_reads(monkeypatch, tmp_path, patterns, extra_rules=(), proce
     monkeypatch.setattr(m, "credential", lambda: object())
     monkeypatch.setattr(m, "provider_registration_status", lambda *a: "registered")
     monkeypatch.setattr(m, "arm_rest_client", lambda cred: object())
-    monkeypatch.setattr(m, "list_all", lambda rest, path, api: {
-        "items": rules if path.endswith("metricAlerts") else [], "pages": 1})
+    def list_all(rest, path, api):
+        if refuse_rules and path.endswith("metricAlerts"):
+            raise PermissionError("(AuthorizationFailed) 403")
+        return {"items": rules if path.endswith("metricAlerts") else [], "pages": 1}
+
+    monkeypatch.setattr(m, "list_all", list_all)
     monkeypatch.setattr(m, "collect_action_groups", lambda rest, sub: {"groups": [in_group, out_group]})
     monkeypatch.setattr(m, "collect_processing_rules", lambda rest, sub, now: {
         "rules": [routing.processing_rule_record(p, now) for p in processing]})
@@ -192,6 +196,14 @@ def test_alert_rules_failed_group_reads_for_excluded_rules_leave_the_run_ok(monk
     assert code == 0
     assert evidence["summary"] == clean["summary"]
     assert _without_clock(evidence["results"]) == _without_clock(clean["results"])
+
+
+def test_alert_rules_unmatched_is_null_and_not_warned_when_a_rule_list_was_refused(monkeypatch, tmp_path, caplog):
+    code, evidence = run_alert_rules(monkeypatch, tmp_path, "rg:typo", refuse_rules=True)
+    assert code == 1
+    assert evidence["summary"]["resource_exclusion_patterns"] == ["rg:typo"]
+    assert evidence["summary"]["resource_exclusion_patterns_unmatched"] is None
+    assert "matched nothing" not in caplog.text
 
 
 def test_alert_rules_bare_pattern_fails_the_run(monkeypatch, tmp_path):

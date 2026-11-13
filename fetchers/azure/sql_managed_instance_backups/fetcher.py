@@ -504,8 +504,13 @@ def collect(subscription_id, cred, collector: Collector, exclusions: ResourceExc
     """Failover groups are listed and matched across every instance; excluded instances get no database reads."""
     client = sql_client(subscription_id, cred, collector)
     if client is None:
+        if exclusions is not None:
+            exclusions.mark_unread()
         return [], [], set()
+    failures = len(collector.failures)
     projected = list_instances(client, collector, project_instance)
+    if exclusions is not None and len(collector.failures) > failures:
+        exclusions.mark_unread()
     in_scope, out = exclusions.split(projected, "managed_instance") if exclusions else (projected, [])
     in_scope_pairs = {(i["resource_group"], i.get("location")) for i in in_scope}
 
@@ -632,6 +637,8 @@ def main() -> int:
         None if events is None else failover_records(events), instances, groups, excluded, exclusions)
     excluded += out
     groups = [group_failover_fields(g, failovers) for g in groups]
+    if failovers is None or not (subscription_id and cred is not None):
+        exclusions.mark_unread()
     exclusions.warn_unmatched(logger)
     boundary = exclusions.summary(excluded, ("managed_instance", "instance_failover_group", "failover"), {
         "managed_instances": len(instances), "instance_failover_groups": len(groups),

@@ -356,6 +356,18 @@ def test_empty_groups_compare_names_case_insensitively():
     assert [r["name"] for r in rr.empty_groups(groups, [{"id": "rg-a", "resources": 3}])] == ["rg-b"]
 
 
+def test_residual_summary_fields_match_the_instructions(assert_summary_documented):
+    kinds = [*rr.ORPHAN_QUERIES, "empty_resource_group", "stale_deployment_slot", "unused_identity"]
+    resources = [rr.resource_record({"id": f"{RG}/{kind}", "name": kind}, kind) for kind in kinds]
+    deleted = rr.assignment_record(assignment(), {}, set())
+    summary = {
+        **rr.summarize(resources, [deleted], "complete", {"identities": 1, "slots": 1, "stale_slot_days": 90}),
+        **rr.ResourceExclusions().summary([], ("orphaned_resource", "role_assignment"),
+                                          {"orphaned_resources": len(resources), "role_assignments": 1}),
+    }
+    assert_summary_documented("azure/residual_resources", summary)
+
+
 # --- residual_resources principal lookup --------------------------------------
 
 class FakeGraph:

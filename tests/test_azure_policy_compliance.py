@@ -720,6 +720,24 @@ def test_collect_remediation_deployments_uses_the_task_scope_and_the_limit(monke
 
 
 @needs_sdk
+def test_later_task_whose_deployments_fail_goes_to_the_callers_unread_list():
+    def at_subscription(name):
+        if name == "t2":
+            raise RuntimeError("403 Forbidden")
+        return [NS(remediated_resource_id=VM, deployment_id=None, status="Succeeded", resource_location=None,
+                   error=None, created_on=None, last_updated_on=None)]
+
+    client = fake_client(policy_states={"list_query_results_for_subscription": lambda *a, **k: []},
+                         remediations={"list_deployments_at_subscription": at_subscription})
+    tasks = [{"id": f"{SUB}/providers/Microsoft.PolicyInsights/remediations/{name}", "name": name,
+              "policy_assignment_id": ASSIGN} for name in ("t1", "t2")]
+    unread: list = []
+    rows, _, _ = fx.collect_remediation_deployments(client, "s1", tasks, 10, fx.Collector(logging.getLogger("t")),
+                                                    unread=unread)
+    assert len(rows) == 1 and unread == [tasks[1]["id"]]
+
+
+@needs_sdk
 def test_collect_remediation_deployments_at_management_group_and_resource():
     listed = []
 
@@ -841,3 +859,24 @@ def test_main_writes_the_new_results_and_summary(monkeypatch, tmp_path):
         assert key in summary
     # Nothing was read, so the history counts are unknown rather than 0.
     assert summary["history_collected"] is False and summary["history_non_compliant_pairs"] is None
+
+
+def test_summary_fields_match_the_instructions(monkeypatch, tmp_path, assert_summary_documented):
+    monkeypatch.setattr(fx, "load_dotenv", lambda: None)
+    monkeypatch.setenv("EVIDENCE_DIR", str(tmp_path))
+    monkeypatch.setattr(fx, "resolve_subscription", lambda c: {"subscription_id": "s1", "subscription_source": "env"})
+    monkeypatch.setattr(fx, "credential", lambda: object())
+    monkeypatch.setattr(fx, "provider_registration_status", lambda *a: "registered")
+    statuses = (fx.DETAILS_COLLECTED, fx.DETAILS_NOT_RETURNED, fx.DETAILS_NOT_IN_RESULT, fx.DETAILS_NOT_REQUESTED,
+                fx.DETAILS_UNSUPPORTED_SCOPE, fx.DETAILS_NOT_AUTHORIZED, fx.DETAILS_FAILED)
+
+    def collect(subscription_id, cred, collector, limits, exclusions=None):
+        collected = fx.empty_collection()
+        collected["states"] = [{**state(VM), "evaluation_details_status": s} for s in statuses]
+        return collected
+
+    monkeypatch.setattr(fx, "collect_compliance", collect)
+    monkeypatch.setenv("AZURE_RESOURCE_EXCLUSIONS", "rg:other")
+    assert fx.main() == 0
+    summary = json.loads((tmp_path / "azure_policy_compliance_s1.json").read_text())["summary"]
+    assert_summary_documented("azure/policy_compliance", summary)
