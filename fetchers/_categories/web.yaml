@@ -1,0 +1,9 @@
+display_name: Web
+description: >-
+  Public web pages. Fetches a page by URL and records the text it served, so a
+  published policy, legal or trust-center page can be read and validated like
+  any other evidence.
+
+# No secrets and no `auth:` block: these fetchers read only what a URL serves to
+# an anonymous client. No `requires:` block either: `requests` is a core
+# dependency (pyproject.toml), and HTML is parsed with the standard library.

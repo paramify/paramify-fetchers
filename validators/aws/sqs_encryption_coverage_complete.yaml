@@ -1,0 +1,21 @@
+key: sqs_encryption_coverage_complete
+name: SQS Encryption Coverage Is Total
+type: AUTOMATED
+role: configuration
+statement: Every SQS queue in the account reports server-side encryption.
+
+# Reads a value, so it guards itself: the MATCH_COUNT rule proves the rollup was
+# present before the threshold rule reads it. No exit_code anchor — collection
+# health is asserted once for the set by `collection_succeeded`.
+regex: '"encryption_percentage":\s*(?<encryption_percentage>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 100
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "100" }
+
+evidence_sets:
+  - EVD-SQS-ENC

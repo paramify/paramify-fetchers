@@ -30,7 +30,7 @@ _TARGET_ID="$(aws_target_id)"
 OUTPUT_JSON="$OUTPUT_DIR/aws_resource_inventory_${_TARGET_ID}.json"
 _FETCHER_TMP_JSON="$(mktemp -t aws_resource_inventory.XXXXXX.json)"
 _FAILURE_LOG="$(mktemp -t aws_resource_inventory_fail.XXXXXX)"
-trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG"' EXIT
+trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG" "$_AWS_ERR_LOG"' EXIT
 
 log_info() { printf '%s INFO aws_resource_inventory %s\n' "$(date -u +'%Y-%m-%d %H:%M:%S')" "$*" >&2; }
 log_error() { printf '%s ERROR aws_resource_inventory %s\n' "$(date -u +'%Y-%m-%d %H:%M:%S')" "$*" >&2; }
@@ -58,7 +58,7 @@ jq -n \
 #    exit 0 rather than logging a collection failure.
 log_info "Listing Resource Explorer indexes"
 _ERR="$(mktemp -t aws_resource_inventory_err.XXXXXX)"
-trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG" "$_ERR"' EXIT
+trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG" "$_ERR" "$_AWS_ERR_LOG"' EXIT
 indexes=$(aws resource-explorer-2 list-indexes --query 'Indexes[*].{Arn:Arn,Region:Region,Type:Type}' --output json 2>"$_ERR")
 if [ $? -ne 0 ]; then
     if aws_service_unavailable "$_ERR"; then
@@ -123,11 +123,4 @@ if [ "$index_count" -eq 0 ]; then
     fi
 fi
 
-failure_count=$(wc -l < "$_FAILURE_LOG" 2>/dev/null | tr -d ' ')
-failure_count=${failure_count:-0}
-if [ "$failure_count" -gt 0 ]; then
-    log_error "Encountered $failure_count AWS API failures during collection"
-    exit 1
-fi
-
-log_info "Evidence saved to $OUTPUT_JSON"
+aws_finish

@@ -25,7 +25,7 @@ _TARGET_ID="$(aws_target_id "$REGION")"
 OUTPUT_JSON="$OUTPUT_DIR/aws_macie_data_discovery_${_TARGET_ID}.json"
 _FETCHER_TMP_JSON="$(mktemp -t aws_macie_data_discovery.XXXXXX.json)"
 _FAILURE_LOG="$(mktemp -t aws_macie_data_discovery_fail.XXXXXX)"
-trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG"' EXIT
+trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG" "$_AWS_ERR_LOG"' EXIT
 
 log_info() { printf '%s INFO aws_macie_data_discovery %s\n' "$(date -u +'%Y-%m-%d %H:%M:%S')" "$*" >&2; }
 log_error() { printf '%s ERROR aws_macie_data_discovery %s\n' "$(date -u +'%Y-%m-%d %H:%M:%S')" "$*" >&2; }
@@ -92,7 +92,8 @@ if [ "$macie_enabled" = true ]; then
     if [ $ec -ne 0 ] || [ -z "$jobs" ] || ! echo "$jobs" | jq . >/dev/null 2>&1; then
         echo "aws macie2 list-classification-jobs failed (exit=$ec)" >> "$_FAILURE_LOG"
     else
-        jq --argjson jobs "$jobs" '.results.classification_jobs = ($jobs // [])' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
+        # On stdin: an account with hundreds of jobs overflows the argv limit.
+        printf '%s' "$jobs" | jq --slurpfile jobs /dev/stdin '.results.classification_jobs = ($jobs[0] // [])' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
     fi
 
     # Sensitive-data findings summary, grouped by finding type.
@@ -107,11 +108,4 @@ else
     log_info "Macie session not ENABLED in $REGION — skipping discovery/jobs/findings collection"
 fi
 
-failure_count=$(wc -l < "$_FAILURE_LOG" 2>/dev/null | tr -d ' ')
-failure_count=${failure_count:-0}
-if [ "$failure_count" -gt 0 ]; then
-    log_error "Encountered $failure_count AWS API failures during collection"
-    exit 1
-fi
-
-log_info "Evidence saved to $OUTPUT_JSON"
+aws_finish

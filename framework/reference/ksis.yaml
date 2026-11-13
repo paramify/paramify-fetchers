@@ -96,7 +96,7 @@ ksis:
     statement: "Logical networking and related capabilities are used and persistently reviewed to enforce traffic flow controls."
     controls: [ac-12, ac-17.3, ca-9, sc-4, sc-7, sc-7.7, sc-8, sc-10]
 
-  # --- SVC: Service Configuration (8 indicators, 6 evidenceable) ---
+  # --- SVC: Service Configuration (8 indicators, 7 evidenceable) ---
   - id: KSI-SVC-ACM
     family: SVC
     name: "Automating Configuration Management"
@@ -118,7 +118,7 @@ ksis:
   - id: KSI-SVC-PRR
     family: SVC
     name: "Preventing Residual Risk"
-    evidenceable: false
+    evidenceable: true
     optional_for_class_b: true
     statement: "Plans, procedures, and the state of information resources are persistently reviewed after making changes to limit and remove unwanted residual elements that would likely negatively affect the confidentiality, integrity, or availability of federal customer data."
     controls: [sc-4]

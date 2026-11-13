@@ -1,0 +1,4537 @@
+"""Pin the Azure SDK surface the fetchers actually read.
+
+Every azure-mgmt major that has broken this category broke it SILENTLY — wrong or
+empty evidence rather than an exception. requirements.txt lists six such changes,
+and not one of them would have been caught here: CI installs `.[dev]` and
+`.[dev,tui]` but never `.[azure]`, so no test in this suite has ever imported an
+Azure SDK. A Dependabot PR widening an azure pin therefore goes green on evidence
+that proves nothing about Azure — see PR #59, which relaxed the load-bearing
+`azure-mgmt-monitor<7` and passed all twelve checks.
+
+This module is that missing gate. It asserts the surface in the three shapes a
+major bump actually takes it away:
+
+    client import      the client class moved package       (PolicyClient)
+    operation group    a group vanished off the client      (monitor 7)
+    method             a method vanished off a group        (postgres 2)
+
+plus the model-field renames that produce *wrong* rather than empty evidence
+(sql 4, keyvault 14).
+
+No credentials, no network: azure-mgmt clients build their operation groups
+during __init__, so a fake credential that raises on use is enough to introspect
+the entire surface. The whole module skips unless the azure extra is installed,
+so the ordinary `.[dev]` jobs are unaffected. The `azure-sdk (surface)` CI job
+installs `.[dev,azure]` and runs it — that job is what gates azure bumps.
+
+This is deliberately NOT a return to the fixture-driven Azure fetcher tests
+dropped in 65d59f3. Those pinned the shape of transforms, which live verification
+covers directly. This pins the shape of the *vendor SDK*, which live verification
+does not cover at all: a fetcher can only be verified against the one SDK version
+that happens to be installed. Same intent as tools/crowdstrike_schema_check.py,
+one rung lower — operation groups rather than response fields.
+
+Adding a fetcher that reads a new operation group or model field? Add a row. The
+cost of a row is one line; the cost of a missing row is a silently empty evidence
+set in a customer's package.
+"""
+
+from __future__ import annotations
+
+import importlib
+import inspect
+
+import pytest
+
+# The whole module is meaningless without the azure extra.
+pytest.importorskip(
+    "azure.mgmt.monitor",
+    reason="azure extra not installed; run `pip install -e '.[dev,azure]'`",
+)
+
+SUBSCRIPTION_ID = "00000000-0000-0000-0000-000000000000"
+
+
+class _FakeCredential:
+    """Satisfies construction, refuses to be used.
+
+    If anything here tries to authenticate, that is a bug in the test — the
+    surface is meant to be readable without a tenant.
+    """
+
+    def get_token(self, *scopes: str, **kwargs: object) -> object:  # noqa: D102
+        raise AssertionError("test_azure_sdk_surface must not make network calls")
+
+    def close(self) -> None:  # noqa: D102
+        pass
+
+
+def _import(module: str, name: str) -> object:
+    """`name` may be dotted, for a class nested inside another (kiota's query params)."""
+    obj: object = importlib.import_module(module)
+    for part in name.split("."):
+        obj = getattr(obj, part)
+    return obj
+
+
+def _build(module: str, client_name: str) -> object:
+    """Instantiate a management client offline.
+
+    Two signatures are in play: most ARM clients take (credential,
+    subscription_id), while Graph is tenant-scoped and takes (credential) alone.
+
+    Data-plane clients (KeyClient) are deliberately NOT constructed here — they
+    require a real vault URL, and their methods are plain class attributes, so
+    the class itself is the honest thing to introspect: a `group` of None in
+    REQUIRED_SURFACE introspects the class rather than an instance.
+    """
+    client_cls = _import(module, client_name)
+    last: Exception | None = None
+    for args in ((_FakeCredential(), SUBSCRIPTION_ID), (_FakeCredential(),)):
+        try:
+            return client_cls(*args)  # type: ignore[operator]
+        except TypeError as exc:
+            last = exc
+    raise AssertionError(f"could not construct {client_name} offline: {last}")
+
+
+def _model_fields(model: type) -> set[str]:
+    """Declared field names, across both Azure model generations.
+
+    msrest-era models carry `_attribute_map`; newer TypeSpec models carry
+    `_attr_to_rest_field` plus plain annotations. Reading only one of them makes
+    this check silently vacuous on half the SDKs.
+    """
+    found: set[str] = set()
+    for attr in ("_attribute_map", "_attr_to_rest_field"):
+        found |= set(getattr(model, attr, {}) or {})
+    for klass in getattr(model, "__mro__", ()):
+        found |= set(getattr(klass, "__annotations__", {}) or {})
+    return {f for f in found if not f.startswith("_")}
+
+
+# ---------------------------------------------------------------------------
+# Client imports
+# ---------------------------------------------------------------------------
+# Several fetchers already do a lazy try/except across two homes; the candidate
+# lists mirror that exactly, so a client living in either place passes. At least
+# one must resolve.
+#
+# (label, [(module, class), ...], needed by)
+CLIENT_IMPORTS: list[tuple[str, list[tuple[str, str]], str]] = [
+    (
+        "PolicyClient",
+        [
+            ("azure.mgmt.resource.policy", "PolicyClient"),
+            ("azure.mgmt.resource", "PolicyClient"),
+        ],
+        "azure/policy_assignments — PolicyClient left azure-mgmt-resource for "
+        "its own distribution (pinned ==1.0.0b3, pre-release only)",
+    ),
+    (
+        "ResourceManagementClient",
+        [
+            ("azure.mgmt.resource.resources", "ResourceManagementClient"),
+            ("azure.mgmt.resource", "ResourceManagementClient"),
+        ],
+        "_shared/azure_common — azure-mgmt-resource 26 dropped the root "
+        "re-export; provider registration is how 'not in use' is told from "
+        "'in use but empty'",
+    ),
+    (
+        "RecoveryServicesBackupClient",
+        [
+            ("azure.mgmt.recoveryservicesbackup", "RecoveryServicesBackupClient"),
+            (
+                "azure.mgmt.recoveryservicesbackup.activestamp",
+                "RecoveryServicesBackupClient",
+            ),
+        ],
+        "azure/backup_recovery_status",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    "label,candidates,needed_by", CLIENT_IMPORTS, ids=[c[0] for c in CLIENT_IMPORTS]
+)
+def test_client_is_importable(
+    label: str, candidates: list[tuple[str, str]], needed_by: str
+) -> None:
+    """A client with a relocated home must resolve from one of them."""
+    tried = []
+    for module, name in candidates:
+        try:
+            assert _import(module, name) is not None
+            return
+        except (ImportError, AttributeError) as exc:
+            tried.append(f"{module}.{name}: {type(exc).__name__}")
+    pytest.fail(
+        f"{label} is not importable from any known home.\n"
+        f"  tried: {'; '.join(tried)}\n"
+        f"  needed by: {needed_by}\n"
+        f"  A bump probably moved it again. Add the new home to this row and to "
+        f"the fetcher's lazy import before widening the pin."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Operation groups and their methods
+# ---------------------------------------------------------------------------
+# The heart of the gate. Each row is one operation group a fetcher reads, with
+# the methods it calls on it. A plain string is required; a TUPLE means "any of
+# these", mirroring a fallback the fetcher already implements (postgres resolves
+# servers.list vs servers.list_by_subscription at runtime).
+#
+# A group of None means the methods live on the client itself, not a group.
+#
+# (module, client, group | None, methods, affected fetchers)
+Method = str | tuple[str, ...]
+REQUIRED_SURFACE: list[tuple[str, str, str | None, list[Method], str]] = [
+    # --- shared plumbing: every azure fetcher depends on these two -----------
+    (
+        "azure.mgmt.subscription",
+        "SubscriptionClient",
+        "subscriptions",
+        ["list"],
+        "_shared/azure_common — subscription discovery for every subscription-scoped "
+        "fetcher, the _shared/azure_rest ones (sentinel_*, log_*) included, and "
+        "visible_subscription_ids (not_found vs not_visible)",
+    ),
+    (
+        "azure.mgmt.resource.resources",
+        "ResourceManagementClient",
+        "providers",
+        ["get"],
+        "_shared/azure_common — provider registration state (NOT_REGISTERED)",
+    ),
+    (
+        "azure.mgmt.resource.resources",
+        "ResourceManagementClient",
+        "resource_groups",
+        ["list"],
+        "azure/vpn_gateway_configuration — VNet gateways, connections and local "
+        "gateways have no subscription-wide list; azure/change_provenance — the "
+        "resource groups whose deployment history is read",
+    ),
+    # --- monitor: the PR #59 regression -------------------------------------
+    (
+        "azure.mgmt.monitor",
+        "MonitorManagementClient",
+        "diagnostic_settings",
+        ["list"],
+        "azure/diagnostic_settings, azure/container_registry_configuration, "
+        "azure/redis_cache_configuration, "
+        "azure/app_service_configuration, azure/key_vault_configuration, "
+        "azure/sql_managed_instance_configuration, "
+        "azure/resource_diagnostic_settings",
+    ),
+    (
+        "azure.mgmt.monitor",
+        "MonitorManagementClient",
+        "diagnostic_settings_category",
+        ["list"],
+        "azure/resource_diagnostic_settings — which resources emit logs",
+    ),
+    (
+        "azure.mgmt.monitor",
+        "MonitorManagementClient",
+        "activity_logs",
+        ["list"],
+        "azure/app_service_deployments — without it no slot swap or publish-profile download is seen; "
+        "azure/sql_managed_instance_backups — failover history",
+    ),
+    (
+        "azure.mgmt.monitor",
+        "MonitorManagementClient",
+        "activity_log_alerts",
+        ["list_by_subscription_id"],
+        "azure/activity_log_alerts",
+    ),
+    (
+        "azure.mgmt.monitor",
+        "MonitorManagementClient",
+        "metrics",
+        ["list"],
+        "azure/front_door_origins — hourly origin health and request counts",
+    ),
+    # --- network: PR #57 widens this to <33 ---------------------------------
+    (
+        "azure.mgmt.network",
+        "NetworkManagementClient",
+        "network_security_groups",
+        ["list_all"],
+        "azure/network_security_groups",
+    ),
+    (
+        "azure.mgmt.network",
+        "NetworkManagementClient",
+        "virtual_networks",
+        ["list_all"],
+        "azure/network_security_groups, azure/vnet_egress_routing",
+    ),
+    (
+        "azure.mgmt.network",
+        "NetworkManagementClient",
+        "network_interfaces",
+        ["list_all"],
+        "azure/network_security_groups — NIC-level NSG association; "
+        "azure/vnet_egress_routing — appliance next-hop ownership",
+    ),
+    (
+        "azure.mgmt.network",
+        "NetworkManagementClient",
+        "route_tables",
+        ["list_all"],
+        "azure/vnet_egress_routing",
+    ),
+    (
+        "azure.mgmt.network",
+        "NetworkManagementClient",
+        "subnets",
+        ["get"],
+        "azure/sql_managed_instance_configuration — the instance's subnet, NSG and route table",
+    ),
+    (
+        "azure.mgmt.network",
+        "NetworkManagementClient",
+        "network_security_groups",
+        ["get"],
+        "azure/sql_managed_instance_configuration — the instance subnet's NSG rules",
+    ),
+    (
+        "azure.mgmt.network",
+        "NetworkManagementClient",
+        "route_tables",
+        ["get"],
+        "azure/sql_managed_instance_configuration — the instance subnet's routes",
+    ),
+    (
+        "azure.mgmt.network",
+        "NetworkManagementClient",
+        "virtual_network_peerings",
+        ["list"],
+        "azure/vnet_egress_routing — peered prefixes that bypass the appliance",
+    ),
+    (
+        "azure.mgmt.network",
+        "NetworkManagementClient",
+        "azure_firewalls",
+        ["list_all"],
+        "azure/vnet_egress_routing — resolves appliance next hops to Azure Firewalls",
+    ),
+    (
+        "azure.mgmt.network",
+        "NetworkManagementClient",
+        "firewall_policies",
+        ["list_all"],
+        "azure/vnet_egress_routing — a policy-managed firewall's threat-intel mode",
+    ),
+    (
+        "azure.mgmt.network",
+        "NetworkManagementClient",
+        "virtual_hubs",
+        ["list"],
+        "azure/vnet_egress_routing — Virtual WAN hubs",
+    ),
+    (
+        "azure.mgmt.network",
+        "NetworkManagementClient",
+        "routing_intent",
+        ["list"],
+        "azure/vnet_egress_routing — forced tunnelling through a hub firewall",
+    ),
+    (
+        "azure.mgmt.network",
+        "NetworkManagementClient",
+        "hub_virtual_network_connections",
+        ["list"],
+        "azure/vnet_egress_routing — which spokes learn the hub's default route",
+    ),
+    (
+        "azure.mgmt.network",
+        "NetworkManagementClient",
+        "hub_route_tables",
+        ["list"],
+        "azure/vnet_egress_routing — secured hubs without routing intent",
+    ),
+    (
+        "azure.mgmt.network",
+        "NetworkManagementClient",
+        "ddos_protection_plans",
+        ["list"],
+        "azure/ddos_protection",
+    ),
+    (
+        "azure.mgmt.network",
+        "NetworkManagementClient",
+        "public_ip_addresses",
+        ["list_all"],
+        "azure/ddos_protection — every Internet entry point",
+    ),
+    (
+        "azure.mgmt.network",
+        "NetworkManagementClient",
+        "load_balancers",
+        ["list_all"],
+        "azure/ddos_protection — a public load balancer's backend VNet",
+    ),
+    (
+        "azure.mgmt.network",
+        "NetworkManagementClient",
+        "network_watchers",
+        ["list_all"],
+        "azure/network_flow_logs",
+    ),
+    (
+        "azure.mgmt.network",
+        "NetworkManagementClient",
+        "flow_logs",
+        ["list"],
+        "azure/network_flow_logs — a missing group reads as 'no traffic is logged'",
+    ),
+    # --- AI services ---------------------------------------------------------
+    (
+        "azure.mgmt.cognitiveservices",
+        "CognitiveServicesManagementClient",
+        "accounts",
+        ["list"],
+        "azure/ai_services_configuration",
+    ),
+    (
+        "azure.mgmt.cognitiveservices",
+        "CognitiveServicesManagementClient",
+        "deployments",
+        ["list"],
+        "azure/ai_services_configuration — model deployments",
+    ),
+    (
+        "azure.mgmt.cognitiveservices",
+        "CognitiveServicesManagementClient",
+        "rai_policies",
+        ["list"],
+        "azure/ai_services_configuration — content filter policies",
+    ),
+    (
+        "azure.mgmt.cognitiveservices",
+        "CognitiveServicesManagementClient",
+        "projects",
+        ["list"],
+        "azure/ai_services_configuration — Foundry projects",
+    ),
+    # --- managed identities ----------------------------------------------------
+    (
+        "azure.mgmt.msi",
+        "ManagedServiceIdentityClient",
+        "user_assigned_identities",
+        ["list_by_subscription"],
+        "azure/managed_identity_configuration",
+    ),
+    (
+        "azure.mgmt.resource.resources",
+        "ResourceManagementClient",
+        "resources",
+        ["list"],
+        "azure/managed_identity_configuration — which resources hold each identity",
+    ),
+    # --- API Management --------------------------------------------------------
+    (
+        "azure.mgmt.apimanagement",
+        "ApiManagementClient",
+        "api_management_service",
+        ["list"],
+        "azure/api_management_configuration",
+    ),
+    (
+        "azure.mgmt.apimanagement",
+        "ApiManagementClient",
+        "sign_up_settings",
+        ["get"],
+        "azure/api_management_configuration — developer portal self sign-up",
+    ),
+    (
+        "azure.mgmt.apimanagement",
+        "ApiManagementClient",
+        "policy",
+        ["get"],
+        "azure/api_management_configuration — global gateway policy",
+    ),
+    (
+        "azure.mgmt.apimanagement",
+        "ApiManagementClient",
+        "api_policy",
+        ["get"],
+        "azure/api_management_configuration — per-API policy",
+    ),
+    (
+        "azure.mgmt.apimanagement",
+        "ApiManagementClient",
+        "api",
+        ["list_by_service"],
+        "azure/api_management_configuration",
+    ),
+    (
+        "azure.mgmt.apimanagement",
+        "ApiManagementClient",
+        "product",
+        ["list_by_service"],
+        "azure/api_management_configuration",
+    ),
+    (
+        "azure.mgmt.apimanagement",
+        "ApiManagementClient",
+        "backend",
+        ["list_by_service"],
+        "azure/api_management_configuration",
+    ),
+    (
+        "azure.mgmt.apimanagement",
+        "ApiManagementClient",
+        "identity_provider",
+        ["list_by_service"],
+        "azure/api_management_configuration",
+    ),
+    (
+        "azure.mgmt.apimanagement",
+        "ApiManagementClient",
+        "named_value",
+        ["list_by_service"],
+        "azure/api_management_configuration — secrets held outside Key Vault",
+    ),
+    (
+        "azure.mgmt.apimanagement",
+        "ApiManagementClient",
+        "certificate",
+        ["list_by_service"],
+        "azure/api_management_configuration",
+    ),
+    (
+        "azure.mgmt.apimanagement",
+        "ApiManagementClient",
+        "logger",
+        ["list_by_service"],
+        "azure/api_management_configuration",
+    ),
+    (
+        "azure.mgmt.apimanagement",
+        "ApiManagementClient",
+        "subscription",
+        ["list"],
+        "azure/api_management_configuration — all-access subscriptions and tracing",
+    ),
+    (
+        "azure.mgmt.apimanagement",
+        "ApiManagementClient",
+        "product_policy",
+        ["get"],
+        "azure/api_management_configuration — product-level token validation",
+    ),
+    (
+        "azure.mgmt.apimanagement",
+        "ApiManagementClient",
+        "product_api",
+        ["list_by_product"],
+        "azure/api_management_configuration — which products an API is in",
+    ),
+    (
+        "azure.mgmt.apimanagement",
+        "ApiManagementClient",
+        "api_operation",
+        ["list_by_api"],
+        "azure/api_management_configuration",
+    ),
+    (
+        "azure.mgmt.apimanagement",
+        "ApiManagementClient",
+        "api_operation_policy",
+        ["get"],
+        "azure/api_management_configuration — operation-level policies",
+    ),
+    (
+        "azure.mgmt.apimanagement",
+        "ApiManagementClient",
+        "policy_fragment",
+        ["list_by_service", "get"],
+        "azure/api_management_configuration",
+    ),
+    # --- Azure Cache for Redis (classic) ------------------------------------
+    (
+        "azure.mgmt.redis",
+        "RedisManagementClient",
+        "redis",
+        ["list_by_subscription"],
+        "azure/redis_cache_configuration",
+    ),
+    (
+        "azure.mgmt.redis",
+        "RedisManagementClient",
+        "firewall_rules",
+        ["list"],
+        "azure/redis_cache_configuration",
+    ),
+    (
+        "azure.mgmt.redis",
+        "RedisManagementClient",
+        "access_policy",
+        ["list"],
+        "azure/redis_cache_configuration",
+    ),
+    (
+        "azure.mgmt.redis",
+        "RedisManagementClient",
+        "access_policy_assignment",
+        ["list"],
+        "azure/redis_cache_configuration — who holds Entra data access",
+    ),
+    (
+        "azure.mgmt.redis",
+        "RedisManagementClient",
+        "patch_schedules",
+        ["list_by_redis_resource"],
+        "azure/redis_cache_configuration",
+    ),
+    (
+        "azure.mgmt.redis",
+        "RedisManagementClient",
+        "linked_server",
+        ["list"],
+        "azure/redis_cache_configuration — geo-replication",
+    ),
+    # --- Managed Redis, DNS, VPN Gateway, Virtual WAN ------------------------
+    (
+        "azure.mgmt.redisenterprise",
+        "RedisEnterpriseManagementClient",
+        "redis_enterprise",
+        ["list"],
+        "azure/managed_redis_configuration",
+    ),
+    (
+        "azure.mgmt.redisenterprise",
+        "RedisEnterpriseManagementClient",
+        "databases",
+        ["list_by_cluster"],
+        "azure/managed_redis_configuration — client protocol and access-key auth live here",
+    ),
+    (
+        "azure.mgmt.dns",
+        "DnsManagementClient",
+        "zones",
+        ["list"],
+        "azure/dns_configuration",
+    ),
+    (
+        "azure.mgmt.dns",
+        "DnsManagementClient",
+        "record_sets",
+        ["list_all_by_dns_zone"],
+        "azure/dns_configuration — every public record set with its targets and alias",
+    ),
+    (
+        "azure.mgmt.privatedns",
+        "PrivateDnsManagementClient",
+        None,
+        ["send_request"],
+        "azure/dns_configuration — the ARM pipeline for the dnssecConfigs GET; "
+        "azure-mgmt-dns has no DNSSEC operation",
+    ),
+    (
+        "azure.mgmt.network",
+        "NetworkManagementClient",
+        "virtual_network_gateways",
+        ["list"],
+        "azure/vpn_gateway_configuration",
+    ),
+    (
+        "azure.mgmt.network",
+        "NetworkManagementClient",
+        "virtual_network_gateway_connections",
+        ["list", "get"],
+        "azure/vpn_gateway_configuration — get is the only call that fills connection_status",
+    ),
+    (
+        "azure.mgmt.network",
+        "NetworkManagementClient",
+        "local_network_gateways",
+        ["list"],
+        "azure/vpn_gateway_configuration",
+    ),
+    (
+        "azure.mgmt.network",
+        "NetworkManagementClient",
+        "virtual_wans",
+        ["list"],
+        "azure/virtual_wan_configuration",
+    ),
+    (
+        "azure.mgmt.network",
+        "NetworkManagementClient",
+        "virtual_hubs",
+        ["list"],
+        "azure/virtual_wan_configuration",
+    ),
+    (
+        "azure.mgmt.network",
+        "NetworkManagementClient",
+        "vpn_gateways",
+        ["list"],
+        "azure/virtual_wan_configuration — site-link connections are read off each gateway",
+    ),
+    (
+        "azure.mgmt.network",
+        "NetworkManagementClient",
+        "vpn_sites",
+        ["list"],
+        "azure/virtual_wan_configuration",
+    ),
+    (
+        "azure.mgmt.network",
+        "NetworkManagementClient",
+        "p2_svpn_gateways",
+        ["list"],
+        "azure/virtual_wan_configuration — note the SDK spells it p2_svpn_gateways",
+    ),
+    (
+        "azure.mgmt.network",
+        "NetworkManagementClient",
+        "vpn_server_configurations",
+        ["list"],
+        "azure/virtual_wan_configuration — P2S protocols and auth types",
+    ),
+    (
+        "azure.mgmt.network",
+        "NetworkManagementClient",
+        "private_endpoints",
+        ["list_by_subscription"],
+        "azure/private_endpoint_configuration",
+    ),
+    (
+        "azure.mgmt.network",
+        "NetworkManagementClient",
+        "application_gateways",
+        ["list_all"],
+        "azure/app_gateway_tls_listeners, azure/app_gateway_backend_tls, azure/app_gateway_waf",
+    ),
+    (
+        "azure.mgmt.network",
+        "NetworkManagementClient",
+        "private_dns_zone_groups",
+        ["list"],
+        "azure/private_endpoint_configuration — which private DNS zones publish each endpoint; "
+        "azure/private_dns_zone_configuration — the zone-group proof that backs a record",
+    ),
+    # --- private DNS ---------------------------------------------------------
+    (
+        "azure.mgmt.privatedns",
+        "PrivateDnsManagementClient",
+        "private_zones",
+        ["list"],
+        "azure/private_dns_zone_configuration, azure/dns_configuration",
+    ),
+    (
+        "azure.mgmt.privatedns",
+        "PrivateDnsManagementClient",
+        "virtual_network_links",
+        ["list"],
+        "azure/private_dns_zone_configuration, azure/dns_configuration",
+    ),
+    (
+        "azure.mgmt.privatedns",
+        "PrivateDnsManagementClient",
+        "record_sets",
+        ["list"],
+        "azure/private_dns_zone_configuration — the privatelink record check",
+    ),
+    (
+        "azure.mgmt.network",
+        "NetworkManagementClient",
+        "web_application_firewall_policies",
+        ["list_all", "get"],
+        "azure/app_gateway_waf",
+    ),
+    # --- backup: PR #58 widens this to <12 ----------------------------------
+    (
+        "azure.mgmt.recoveryservices",
+        "RecoveryServicesClient",
+        "vaults",
+        ["list_by_subscription_id"],
+        "azure/backup_recovery_status",
+    ),
+    (
+        "azure.mgmt.recoveryservicesbackup",
+        "RecoveryServicesBackupClient",
+        "backup_policies",
+        ["list"],
+        "azure/backup_recovery_status",
+    ),
+    (
+        "azure.mgmt.recoveryservicesbackup",
+        "RecoveryServicesBackupClient",
+        "backup_protected_items",
+        ["list"],
+        "azure/backup_recovery_status",
+    ),
+    (
+        "azure.mgmt.recoveryservicesbackup",
+        "RecoveryServicesBackupClient",
+        "backup_jobs",
+        ["list"],
+        "azure/backup_recovery_status — restore jobs, with a $filter",
+    ),
+    (
+        "azure.mgmt.recoveryservicesbackup",
+        "RecoveryServicesBackupClient",
+        "job_details",
+        ["get"],
+        "azure/backup_recovery_status — the property bag the job list leaves out",
+    ),
+    # --- storage -------------------------------------------------------------
+    (
+        "azure.mgmt.storage",
+        "StorageManagementClient",
+        "storage_accounts",
+        ["list", "get_properties"],
+        "azure/storage_encryption_status — get_properties expands geoReplicationStats",
+    ),
+    (
+        "azure.mgmt.storage",
+        "StorageManagementClient",
+        "blob_containers",
+        ["list"],
+        "azure/storage_encryption_status — container access level and immutability",
+    ),
+    (
+        "azure.mgmt.storage",
+        "StorageManagementClient",
+        "blob_services",
+        ["get_service_properties"],
+        "azure/storage_encryption_status",
+    ),
+    (
+        "azure.mgmt.storage",
+        "StorageManagementClient",
+        "file_services",
+        ["get_service_properties"],
+        "azure/storage_encryption_status",
+    ),
+    # --- Defender for Cloud --------------------------------------------------
+    (
+        "azure.mgmt.security",
+        "SecurityCenter",
+        "pricings",
+        ["list"],
+        "azure/defender_plans",
+    ),
+    (
+        "azure.mgmt.security",
+        "SecurityCenter",
+        "assessments",
+        ["list"],
+        "azure/defender_assessments",
+    ),
+    (
+        "azure.mgmt.security",
+        "SecurityCenter",
+        "regulatory_compliance_standards",
+        ["list"],
+        "azure/defender_regulatory_compliance",
+    ),
+    (
+        "azure.mgmt.security",
+        "SecurityCenter",
+        "assessments_metadata",
+        ["list_by_subscription"],
+        "azure/defender_assessments — categories, type and fallback severity; "
+        "assessments.list returns no metadata",
+    ),
+    (
+        "azure.mgmt.security",
+        "SecurityCenter",
+        "regulatory_compliance_controls",
+        ["list"],
+        "azure/defender_regulatory_compliance",
+    ),
+    (
+        "azure.mgmt.security",
+        "SecurityCenter",
+        "regulatory_compliance_assessments",
+        ["list"],
+        "azure/defender_regulatory_compliance",
+    ),
+    # --- RBAC ----------------------------------------------------------------
+    (
+        "azure.mgmt.authorization",
+        "AuthorizationManagementClient",
+        "role_definitions",
+        ["list"],
+        "azure/rbac_custom_roles, azure/rbac_role_assignments, "
+        "azure/managed_identity_configuration",
+    ),
+    (
+        "azure.mgmt.authorization",
+        "AuthorizationManagementClient",
+        "role_assignments",
+        ["list_for_subscription"],
+        "azure/rbac_role_assignments, azure/managed_identity_configuration",
+    ),
+    (
+        "azure.mgmt.authorization",
+        "AuthorizationManagementClient",
+        "role_assignment_schedule_instances",
+        ["list_for_scope"],
+        "azure/rbac_role_assignments — standing (permanent / time_bound / pim_activated)",
+    ),
+    (
+        "azure.mgmt.authorization",
+        "AuthorizationManagementClient",
+        "role_eligibility_schedule_instances",
+        ["list_for_scope"],
+        "azure/rbac_role_assignments — eligible_role_assignments",
+    ),
+    (
+        "azure.mgmt.authorization",
+        "AuthorizationManagementClient",
+        "role_management_policy_assignments",
+        ["list_for_scope"],
+        "azure/rbac_role_assignments — pim_role_policies",
+    ),
+    # --- compute -------------------------------------------------------------
+    (
+        "azure.mgmt.compute",
+        "ComputeManagementClient",
+        "disks",
+        ["list"],
+        "azure/disk_encryption_status",
+    ),
+    (
+        "azure.mgmt.compute",
+        "ComputeManagementClient",
+        "virtual_machines",
+        ["list_all"],
+        "azure/vm_hardening_status",
+    ),
+    (
+        "azure.mgmt.compute",
+        "ComputeManagementClient",
+        "virtual_machine_extensions",
+        ["list"],
+        "azure/vm_hardening_status",
+    ),
+    (
+        "azure.mgmt.compute",
+        "ComputeManagementClient",
+        "virtual_machine_scale_sets",
+        ["list_all"],
+        "azure/vm_hardening_status",
+    ),
+    (
+        "azure.mgmt.compute",
+        "ComputeManagementClient",
+        "virtual_machine_scale_set_vms",
+        ["list"],
+        "azure/vm_hardening_status",
+    ),
+    # --- containers ----------------------------------------------------------
+    (
+        "azure.mgmt.containerservice",
+        "ContainerServiceClient",
+        "managed_clusters",
+        ["list"],
+        "azure/aks_cluster_configuration",
+    ),
+    (
+        "azure.mgmt.containerregistry",
+        "ContainerRegistryManagementClient",
+        "registries",
+        ["list"],
+        "azure/container_registry_configuration",
+    ),
+    # --- SQL: the `status` -> `state` rename lives in the model table below --
+    (
+        "azure.mgmt.sql",
+        "SqlManagementClient",
+        "servers",
+        ["list"],
+        "azure/sql_encryption_status, azure/sql_server_configuration",
+    ),
+    (
+        "azure.mgmt.sql",
+        "SqlManagementClient",
+        "encryption_protectors",
+        ["get"],
+        "azure/sql_encryption_status",
+    ),
+    (
+        "azure.mgmt.sql",
+        "SqlManagementClient",
+        "databases",
+        ["list_by_server"],
+        "azure/sql_encryption_status",
+    ),
+    (
+        "azure.mgmt.sql",
+        "SqlManagementClient",
+        "transparent_data_encryptions",
+        ["get"],
+        "azure/sql_encryption_status",
+    ),
+    (
+        "azure.mgmt.sql",
+        "SqlManagementClient",
+        "firewall_rules",
+        ["list_by_server"],
+        "azure/sql_server_configuration",
+    ),
+    (
+        "azure.mgmt.sql",
+        "SqlManagementClient",
+        "server_blob_auditing_policies",
+        ["list_by_server"],
+        "azure/sql_server_configuration",
+    ),
+    (
+        "azure.mgmt.sql",
+        "SqlManagementClient",
+        "server_security_alert_policies",
+        ["get"],
+        "azure/sql_server_configuration",
+    ),
+    (
+        "azure.mgmt.sql",
+        "SqlManagementClient",
+        "server_vulnerability_assessments",
+        ["get"],
+        "azure/sql_server_configuration",
+    ),
+    (
+        "azure.mgmt.sql",
+        "SqlManagementClient",
+        "managed_instances",
+        ["list"],
+        "azure/sql_managed_instance_backups, azure/sql_managed_instance_configuration, "
+        "azure/sql_managed_instance_encryption",
+    ),
+    (
+        "azure.mgmt.sql",
+        "SqlManagementClient",
+        "managed_databases",
+        ["list_by_instance"],
+        "azure/sql_managed_instance_backups, azure/sql_managed_instance_encryption",
+    ),
+    (
+        "azure.mgmt.sql",
+        "SqlManagementClient",
+        "managed_backup_short_term_retention_policies",
+        ["get"],
+        "azure/sql_managed_instance_backups",
+    ),
+    (
+        "azure.mgmt.sql",
+        "SqlManagementClient",
+        "managed_instance_long_term_retention_policies",
+        ["get"],
+        "azure/sql_managed_instance_backups",
+    ),
+    (
+        "azure.mgmt.sql",
+        "SqlManagementClient",
+        "instance_failover_groups",
+        ["list_by_location"],
+        "azure/sql_managed_instance_backups",
+    ),
+    (
+        "azure.mgmt.sql",
+        "SqlManagementClient",
+        "managed_instance_administrators",
+        ["list_by_instance"],
+        "azure/sql_managed_instance_configuration",
+    ),
+    (
+        "azure.mgmt.sql",
+        "SqlManagementClient",
+        "managed_instance_azure_ad_only_authentications",
+        ["list_by_instance"],
+        "azure/sql_managed_instance_configuration",
+    ),
+    (
+        "azure.mgmt.sql",
+        "SqlManagementClient",
+        "managed_instance_encryption_protectors",
+        ["get"],
+        "azure/sql_managed_instance_encryption",
+    ),
+    (
+        "azure.mgmt.sql",
+        "SqlManagementClient",
+        "managed_database_transparent_data_encryption",
+        ["get"],
+        "azure/sql_managed_instance_encryption",
+    ),
+    (
+        "azure.mgmt.sql",
+        "SqlManagementClient",
+        "managed_database_sensitivity_labels",
+        ["list_current_by_database"],
+        "azure/sql_managed_instance_configuration — classified columns per user database",
+    ),
+    # --- MySQL / PostgreSQL --------------------------------------------------
+    (
+        "azure.mgmt.rdbms.mysql_flexibleservers",
+        "MySQLManagementClient",
+        "servers",
+        ["list"],
+        "azure/mysql_configuration",
+    ),
+    (
+        "azure.mgmt.rdbms.mysql_flexibleservers",
+        "MySQLManagementClient",
+        "configurations",
+        ["list_by_server"],
+        "azure/mysql_configuration",
+    ),
+    (
+        "azure.mgmt.postgresqlflexibleservers",
+        "PostgreSQLManagementClient",
+        "servers",
+        # postgres 2 dropped `list`; the fetcher resolves either at runtime.
+        [("list", "list_by_subscription")],
+        "azure/postgresql_configuration",
+    ),
+    (
+        "azure.mgmt.postgresqlflexibleservers",
+        "PostgreSQLManagementClient",
+        "configurations",
+        ["get"],
+        "azure/postgresql_configuration",
+    ),
+    (
+        "azure.mgmt.postgresqlflexibleservers",
+        "PostgreSQLManagementClient",
+        "firewall_rules",
+        ["list_by_server"],
+        "azure/postgresql_configuration",
+    ),
+    # --- Cosmos DB -----------------------------------------------------------
+    (
+        "azure.mgmt.cosmosdb",
+        "CosmosDBManagementClient",
+        "database_accounts",
+        ["list"],
+        "azure/cosmosdb_configuration",
+    ),
+    # --- Key Vault (control plane) ------------------------------------------
+    (
+        "azure.mgmt.keyvault",
+        "KeyVaultManagementClient",
+        "vaults",
+        ["list_by_subscription"],
+        "azure/key_vault_configuration, azure/key_vault_key_rotation",
+    ),
+    (
+        "azure.mgmt.keyvault",
+        "KeyVaultManagementClient",
+        "keys",
+        ["list", "get"],
+        "azure/key_vault_key_rotation",
+    ),
+    (
+        "azure.mgmt.keyvault",
+        "KeyVaultManagementClient",
+        "secrets",
+        ["list"],
+        "azure/key_vault_key_rotation",
+    ),
+    # --- Key Vault (data plane): methods sit on the client itself -----------
+    (
+        "azure.keyvault.keys",
+        "KeyClient",
+        None,
+        ["list_properties_of_keys", "get_key_rotation_policy"],
+        "azure/key_vault_key_rotation — rotation policy is data-plane only",
+    ),
+    (
+        "azure.keyvault.certificates",
+        "CertificateClient",
+        None,
+        ["list_properties_of_certificates", "get_certificate_policy"],
+        "azure/key_vault_key_rotation — certificates and their auto-renew policy are data-plane only",
+    ),
+    # --- Log Analytics ---------------------------------------------------------
+    (
+        "azure.mgmt.loganalytics",
+        "LogAnalyticsManagementClient",
+        "workspaces",
+        ["list"],
+        "azure/log_analytics_workspaces",
+    ),
+    (
+        "azure.mgmt.loganalytics",
+        "LogAnalyticsManagementClient",
+        "tables",
+        ["list_by_workspace"],
+        "azure/log_analytics_workspaces — per-table retention",
+    ),
+    (
+        "azure.mgmt.loganalytics",
+        "LogAnalyticsManagementClient",
+        "data_exports",
+        ["list_by_workspace"],
+        "azure/log_analytics_workspaces",
+    ),
+    (
+        "azure.mgmt.loganalytics",
+        "LogAnalyticsManagementClient",
+        "intelligence_packs",
+        ["list"],
+        "azure/log_analytics_workspaces — Sentinel onboarding (SecurityInsights)",
+    ),
+    # --- raw ARM GETs for what azure-mgmt-monitor 6.x pages or models wrong ----
+    (
+        "azure.mgmt.core",
+        "ARMPipelineClient",
+        None,
+        ["send_request"],
+        "_shared/arm_rest — azure/alert_rules, azure/activity_log_alerts "
+        "(action groups, alert processing rules), azure/residual_resources "
+        "(federated identity credentials)",
+    ),
+    # --- Resource Graph: the inventory query sits on the client itself --------
+    (
+        "azure.mgmt.resourcegraph",
+        "ResourceGraphClient",
+        None,
+        ["resources"],
+        "azure/resource_inventory, azure/front_door_origins (origin regions), "
+        "azure/resource_diagnostic_settings, azure/change_provenance, azure/residual_resources, "
+        "azure/app_service_backups, "
+        "azure/defender_assessments (each assessment's own severity), "
+        "azure/private_endpoint_configuration and azure/private_dns_zone_configuration lookups",
+    ),
+    # --- deployment history: left azure-mgmt-resource for its own distribution -
+    (
+        "azure.mgmt.resource.deployments",
+        "DeploymentsMgmtClient",
+        "deployments",
+        ["list_at_subscription_scope", "list_by_resource_group"],
+        "azure/change_provenance — without it no change can be attributed to a "
+        "deployment, so every change reads as a direct edit",
+    ),
+    # --- app platform --------------------------------------------------------
+    (
+        "azure.mgmt.web",
+        "WebSiteManagementClient",
+        "web_apps",
+        [
+            "list_deployments",
+            "list_deployments_slot",
+            "get_source_control",
+            "get_source_control_slot",
+            "list_slots",
+            "get_configuration_slot",
+        ],
+        "azure/app_service_deployments — without these every app reads as having no deployment history",
+    ),
+    (
+        "azure.mgmt.web",
+        "WebSiteManagementClient",
+        "web_apps",
+        [
+            "list",
+            "get_configuration",
+            "get_auth_settings_v2_without_secrets",
+            "list_host_keys",
+            "list_application_settings",
+        ],
+        "azure/app_service_configuration, azure/function_app_configuration, "
+        "azure/app_service_plans",
+    ),
+    (
+        "azure.mgmt.web",
+        "WebSiteManagementClient",
+        "web_apps",
+        ["get", "list_snapshots", "list_backups", "get_backup_configuration"],
+        "azure/app_service_backups — automatic backups, custom backup history and "
+        "schedule, and apps Resource Graph lists that web_apps.list() did not",
+    ),
+    (
+        "azure.mgmt.web",
+        "WebSiteManagementClient",
+        "web_apps",
+        ["get_configuration", "get_configuration_slot"],
+        "azure/front_door_origins — access restrictions on each App Service origin, slots included",
+    ),
+    (
+        "azure.mgmt.web",
+        "WebSiteManagementClient",
+        "app_service_plans",
+        ["list"],
+        "azure/app_service_plans",
+    ),
+    (
+        "azure.mgmt.web",
+        "WebSiteManagementClient",
+        "certificates",
+        ["list"],
+        "azure/key_vault_key_rotation — App Service certificates",
+    ),
+    (
+        "azure.mgmt.web",
+        "WebSiteManagementClient",
+        "web_apps",
+        [
+            "get_scm_allowed",
+            "get_ftp_allowed",
+            "get_app_settings_key_vault_references",
+            "get_site_connection_string_key_vault_references",
+            "list_connection_strings",
+        ],
+        "azure/app_service_configuration — basic-auth publishing, Key Vault references and the "
+        "opt-in literal-secret scan",
+    ),
+    (
+        "azure.mgmt.web",
+        "WebSiteManagementClient",
+        "provider",
+        ["get_web_app_stacks"],
+        "azure/app_service_configuration — runtime end of support",
+    ),
+    (
+        "azure.mgmt.databricks",
+        "AzureDatabricksManagementClient",
+        "workspaces",
+        ["list_by_subscription"],
+        "azure/databricks_workspace_configuration",
+    ),
+    # --- policy --------------------------------------------------------------
+    (
+        "azure.mgmt.resource.policy",
+        "PolicyClient",
+        "policy_assignments",
+        ["list"],
+        "azure/policy_assignments",
+    ),
+    (
+        "azure.mgmt.resource.policy",
+        "PolicyClient",
+        "policy_definitions",
+        ["get_built_in", "get_at_management_group", "get", "list_built_in"],
+        "azure/policy_assignments — definition names are resolved for display, and "
+        "initiative members' effects from one list_built_in",
+    ),
+    (
+        "azure.mgmt.resource.policy",
+        "PolicyClient",
+        "policy_set_definitions",
+        ["get_built_in", "get_at_management_group", "get"],
+        "azure/policy_assignments",
+    ),
+    # --- policy compliance ---------------------------------------------------
+    (
+        "azure.mgmt.policyinsights",
+        "PolicyInsightsClient",
+        "policy_states",
+        ["summarize_for_subscription", "list_query_results_for_subscription",
+         "list_query_results_for_resource"],
+        "azure/policy_compliance — evaluation details need the per-resource query",
+    ),
+    (
+        "azure.mgmt.policyinsights",
+        "PolicyInsightsClient",
+        "remediations",
+        ["list_for_subscription", "list_deployments_at_subscription",
+         "list_deployments_at_resource_group", "list_deployments_at_resource",
+         "list_deployments_at_management_group"],
+        "azure/policy_compliance — per-resource remediation deployments",
+    ),
+    # --- Front Door WAF ------------------------------------------------------
+    (
+        "azure.mgmt.frontdoor",
+        "FrontDoorManagementClient",
+        "policies",
+        ["list_by_subscription"],
+        "azure/front_door_waf_policies, azure/front_door_waf_coverage",
+    ),
+    (
+        "azure.mgmt.frontdoor",
+        "FrontDoorManagementClient",
+        "managed_rule_sets",
+        ["list"],
+        "azure/front_door_waf_policies — rule-set definitions, the denominator of enabled_rules",
+    ),
+    (
+        "azure.mgmt.cdn",
+        "CdnManagementClient",
+        "profiles",
+        ["list", "get"],
+        "azure/front_door_waf_coverage, azure/front_door_origins — get reads the frontDoorId each App Service "
+        "origin's X-Azure-FDID rule must name",
+    ),
+    (
+        "azure.mgmt.cdn",
+        "CdnManagementClient",
+        "afd_endpoints",
+        ["list_by_profile"],
+        "azure/front_door_waf_coverage",
+    ),
+    (
+        "azure.mgmt.cdn",
+        "CdnManagementClient",
+        "routes",
+        ["list_by_endpoint"],
+        "azure/front_door_waf_coverage",
+    ),
+    (
+        "azure.mgmt.cdn",
+        "CdnManagementClient",
+        "afd_custom_domains",
+        ["list_by_profile"],
+        "azure/front_door_waf_coverage, azure/front_door_tls, azure/front_door_origins (scope exclusions)",
+    ),
+    (
+        "azure.mgmt.cdn",
+        "CdnManagementClient",
+        "security_policies",
+        ["list_by_profile"],
+        "azure/front_door_waf_coverage — on a client pinned to api-version 2026-07-01",
+    ),
+    (
+        "azure.mgmt.cdn",
+        "CdnManagementClient",
+        "secrets",
+        ["list_by_profile"],
+        "azure/front_door_tls — certificate type, issuer and expiry behind each custom domain",
+    ),
+    (
+        "azure.mgmt.cdn",
+        "CdnManagementClient",
+        "rule_sets",
+        ["list_by_profile"],
+        "azure/front_door_tls, azure/front_door_origins — rule-set redirects and origin overrides",
+    ),
+    (
+        "azure.mgmt.cdn",
+        "CdnManagementClient",
+        "rules",
+        ["list_by_rule_set"],
+        "azure/front_door_tls, azure/front_door_origins",
+    ),
+    (
+        "azure.mgmt.cdn",
+        "CdnManagementClient",
+        "afd_origin_groups",
+        ["list_by_profile"],
+        "azure/front_door_origins — on a client pinned to api-version 2026-07-01",
+    ),
+    (
+        "azure.mgmt.cdn",
+        "CdnManagementClient",
+        "afd_origins",
+        ["list_by_origin_group"],
+        "azure/front_door_origins — on a client pinned to api-version 2026-07-01",
+    ),
+    (
+        "azure.mgmt.monitor",
+        "MonitorManagementClient",
+        "diagnostic_settings_category",
+        ["list"],
+        "azure/front_door_waf_coverage — which log categories a profile emits, and their groups",
+    ),
+    # --- container workloads ---------------------------------------------------
+    (
+        "azure.mgmt.appcontainers",
+        "ContainerAppsAPIClient",
+        "managed_environments",
+        ["list_by_subscription"],
+        "azure/container_workloads_configuration",
+    ),
+    (
+        "azure.mgmt.appcontainers",
+        "ContainerAppsAPIClient",
+        "container_apps",
+        ["list_by_subscription"],
+        "azure/container_workloads_configuration",
+    ),
+    (
+        "azure.mgmt.appcontainers",
+        "ContainerAppsAPIClient",
+        "jobs",
+        ["list_by_subscription"],
+        "azure/container_workloads_configuration",
+    ),
+    (
+        "azure.mgmt.appcontainers",
+        "ContainerAppsAPIClient",
+        "container_apps_auth_configs",
+        ["list_by_container_app"],
+        "azure/container_workloads_configuration — Easy Auth; a missing group reads every "
+        "app as unauthenticated-unknown, never as protected",
+    ),
+    (
+        "azure.mgmt.containerinstance",
+        "ContainerInstanceManagementClient",
+        "container_groups",
+        ["list"],
+        "azure/container_workloads_configuration",
+    ),
+    # --- data services -----------------------------------------------------------
+    (
+        "azure.mgmt.mongocluster",
+        "MongoClusterMgmtClient",
+        "mongo_clusters",
+        ["list"],
+        "azure/data_services_configuration",
+    ),
+    (
+        "azure.mgmt.mongocluster",
+        "MongoClusterMgmtClient",
+        "firewall_rules",
+        ["list_by_mongo_cluster"],
+        "azure/data_services_configuration — allow-all firewall rules",
+    ),
+    (
+        "azure.mgmt.kusto",
+        "KustoManagementClient",
+        "clusters",
+        ["list", "list_callout_policies"],
+        "azure/data_services_configuration",
+    ),
+    (
+        "azure.mgmt.kusto",
+        "KustoManagementClient",
+        "databases",
+        ["list_by_cluster"],
+        "azure/data_services_configuration",
+    ),
+    (
+        "azure.mgmt.kusto",
+        "KustoManagementClient",
+        "cluster_principal_assignments",
+        ["list"],
+        "azure/data_services_configuration — who can administer the cluster",
+    ),
+    (
+        "azure.mgmt.kusto",
+        "KustoManagementClient",
+        "database_principal_assignments",
+        ["list"],
+        "azure/data_services_configuration",
+    ),
+    (
+        "azure.mgmt.eventhub",
+        "EventHubManagementClient",
+        "namespaces",
+        ["list", "get_network_rule_set", "list_authorization_rules"],
+        "azure/data_services_configuration — a missing rule-set read makes exposure unknown",
+    ),
+    (
+        "azure.mgmt.eventhub",
+        "EventHubManagementClient",
+        "event_hubs",
+        ["list_by_namespace", "list_authorization_rules"],
+        "azure/data_services_configuration",
+    ),
+]
+
+
+def _surface_id(row: tuple[str, str, str | None, list[Method], str]) -> str:
+    _, client, group, _, _ = row
+    return f"{client}.{group}" if group else client
+
+
+@pytest.mark.parametrize(
+    "module,client,group,methods,affects",
+    REQUIRED_SURFACE,
+    ids=[_surface_id(r) for r in REQUIRED_SURFACE],
+)
+def test_operation_group_surface(
+    module: str,
+    client: str,
+    group: str | None,
+    methods: list[Method],
+    affects: str,
+) -> None:
+    """Every operation group and method a fetcher calls must still exist."""
+    if group is None:
+        # Methods on the client itself: introspect the class, so data-plane
+        # clients needing a real endpoint are never constructed.
+        holder: object = _import(module, client)
+        where = client
+    else:
+        holder = getattr(_build(module, client), group, None)
+        where = f"{client}.{group}"
+        assert holder is not None, (
+            f"{where} is gone.\n"
+            f"  affected fetchers: {affects}\n"
+            f"  This is the azure-mgmt-monitor 7.0.0 failure mode: the client "
+            f"still constructs, so the fetcher records an empty evidence set "
+            f"instead of raising. Do not widen the pin to reach this version."
+        )
+
+    missing = []
+    for method in methods:
+        names = (method,) if isinstance(method, str) else method
+        if not any(callable(getattr(holder, n, None)) for n in names):
+            missing.append(" or ".join(names))
+
+    available = sorted(
+        a for a in dir(holder) if not a.startswith("_") and callable(getattr(holder, a, None))
+    )
+    assert not missing, (
+        f"{where} no longer exposes: {'; '.join(missing)}\n"
+        f"  affected fetchers: {affects}\n"
+        f"  available methods: {', '.join(available)}\n"
+        f"  azure-mgmt-postgresqlflexibleservers 2 dropped `servers.list` this "
+        f"way. If a method was renamed rather than removed, add the new name as "
+        f"a tuple on this row and teach the fetcher to resolve both."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Model fields
+# ---------------------------------------------------------------------------
+# The worst class: the call succeeds and returns objects, but the field the
+# fetcher reads was renamed or pushed down a level, so the evidence says "not
+# encrypted" about a database that is encrypted.
+#
+# (module, model, required fields, affected fetchers)
+REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
+    (
+        "azure.mgmt.compute.models",
+        "PatchSettings",
+        ["patch_mode", "assessment_mode", "automatic_by_platform_settings"],
+        "azure/vm_hardening_status — Windows patch settings; a rename reads every VM as patch mode unknown",
+    ),
+    (
+        "azure.mgmt.compute.models",
+        "LinuxPatchSettings",
+        ["patch_mode", "assessment_mode", "automatic_by_platform_settings"],
+        "azure/vm_hardening_status — Linux patch settings",
+    ),
+    (
+        "azure.mgmt.compute.models",
+        "LinuxConfiguration",
+        ["patch_settings", "disable_password_authentication"],
+        "azure/vm_hardening_status — os_profile.linux_configuration",
+    ),
+    (
+        "azure.mgmt.compute.models",
+        "WindowsConfiguration",
+        ["patch_settings"],
+        "azure/vm_hardening_status — os_profile.windows_configuration",
+    ),
+    (
+        "azure.mgmt.containerservice.models",
+        "ManagedClusterAgentPoolProfile",
+        ["enable_fips", "node_image_version", "security_profile"],
+        "azure/aks_cluster_configuration — a renamed enable_fips reads every pool as FIPS unknown",
+    ),
+    (
+        "azure.mgmt.containerservice.models",
+        "AgentPoolSecurityProfile",
+        ["enable_secure_boot", "enable_vtpm", "ssh_access"],
+        "azure/aks_cluster_configuration — node pool Trusted Launch and SSH access",
+    ),
+    (
+        "azure.mgmt.authorization.v2020_10_01.models",
+        "RoleAssignmentScheduleInstance",
+        ["origin_role_assignment_id", "assignment_type", "member_type", "status", "end_date_time"],
+        "azure/rbac_role_assignments — a renamed origin id leaves every grant unmatched, i.e. 'permanent'",
+    ),
+    (
+        "azure.mgmt.authorization.v2020_10_01.models",
+        "RoleEligibilityScheduleInstance",
+        ["principal_id", "role_definition_id", "scope", "status", "end_date_time"],
+        "azure/rbac_role_assignments — eligible_role_assignments",
+    ),
+    (
+        "azure.mgmt.authorization.v2020_10_01.models",
+        "RoleManagementPolicyAssignment",
+        ["role_definition_id", "effective_rules"],
+        "azure/rbac_role_assignments — pim_role_policies",
+    ),
+    (
+        "azure.mgmt.authorization.v2020_10_01.models",
+        "RoleManagementPolicyExpirationRule",
+        ["is_expiration_required", "maximum_duration"],
+        "azure/rbac_role_assignments — maximum activation and assignment durations",
+    ),
+    (
+        "azure.mgmt.authorization.v2020_10_01.models",
+        "RoleManagementPolicyEnablementRule",
+        ["enabled_rules"],
+        "azure/rbac_role_assignments — MFA and justification on activation",
+    ),
+    (
+        "azure.mgmt.authorization.v2020_10_01.models",
+        "ApprovalSettings",
+        ["is_approval_required", "approval_stages"],
+        "azure/rbac_role_assignments — approval on activation",
+    ),
+    (
+        "azure.mgmt.authorization.v2020_10_01.models",
+        "RoleManagementPolicyApprovalRule",
+        ["setting"],
+        "azure/rbac_role_assignments — approval on activation",
+    ),
+    (
+        "azure.mgmt.authorization.v2020_10_01.models",
+        "ApprovalStage",
+        ["primary_approvers"],
+        "azure/rbac_role_assignments — activation_approver_sets",
+    ),
+    (
+        "azure.mgmt.authorization.v2020_10_01.models",
+        "RoleManagementPolicyAuthenticationContextRule",
+        ["is_enabled", "claim_value"],
+        "azure/rbac_role_assignments — an authentication context in place of MFA on activation",
+    ),
+    (
+        "azure.mgmt.sql.models",
+        "TransparentDataEncryptionProperties",
+        ["state"],
+        "azure/sql_encryption_status — azure-mgmt-sql 4 renamed `status` to "
+        "`state`; reading the old name yields None, i.e. 'not encrypted'",
+    ),
+    (
+        "azure.mgmt.sql.models",
+        "ManagedInstanceProperties",
+        [
+            "state",
+            "provisioning_state",
+            "pricing_model",
+            "requested_backup_storage_redundancy",
+            "current_backup_storage_redundancy",
+            "zone_redundant",
+        ],
+        "azure/sql_managed_instance_backups — a lost redundancy field reads as "
+        "'not zone-redundant'",
+    ),
+    (
+        "azure.mgmt.sql.models",
+        "ManagedInstanceProperties",
+        ["subnet_id", "maintenance_configuration_id"],
+        "azure/sql_managed_instance_configuration — a lost field reads the subnet and "
+        "maintenance window as unknown",
+    ),
+    (
+        "azure.mgmt.sql.models",
+        "SensitivityLabelProperties",
+        ["label_name", "information_type"],
+        "azure/sql_managed_instance_configuration — a lost field drops a column's "
+        "label from the counts",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "SubnetPropertiesFormat",
+        ["route_table", "delegations"],
+        "azure/sql_managed_instance_configuration — a renamed field reads the instance "
+        "subnet as having no route table",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "RouteTablePropertiesFormat",
+        ["routes", "disable_bgp_route_propagation"],
+        "azure/sql_managed_instance_configuration — the instance subnet's routes",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "RoutePropertiesFormat",
+        ["address_prefix", "next_hop_type", "next_hop_ip_address"],
+        "azure/sql_managed_instance_configuration — each route's destination and next hop",
+    ),
+    (
+        "azure.mgmt.sql.models",
+        "ManagedDatabaseProperties",
+        ["status", "creation_date", "earliest_restore_point", "failover_group_id"],
+        "_shared/sql_managed_instance (sql_managed_instance_backups, "
+        "sql_managed_instance_encryption)",
+    ),
+    (
+        "azure.mgmt.sql.models",
+        "ManagedBackupShortTermRetentionPolicyProperties",
+        ["retention_days"],
+        "azure/sql_managed_instance_backups — a lost field reads as 'no retention'",
+    ),
+    (
+        "azure.mgmt.sql.models",
+        "ManagedInstanceLongTermRetentionPolicyProperties",
+        ["weekly_retention", "monthly_retention", "yearly_retention", "week_of_year"],
+        "azure/sql_managed_instance_backups — a lost field reads as 'no long-term "
+        "retention'",
+    ),
+    (
+        "azure.mgmt.sql.models",
+        "InstanceFailoverGroupProperties",
+        [
+            "managed_instance_pairs",
+            "partner_regions",
+            "read_write_endpoint",
+            "replication_role",
+            "replication_state",
+            "secondary_type",
+        ],
+        "azure/sql_managed_instance_backups — a lost `managed_instance_pairs` reads "
+        "every instance as in no failover group",
+    ),
+    (
+        "azure.mgmt.sql.models",
+        "InstanceFailoverGroupReadWriteEndpoint",
+        ["failover_policy", "failover_with_data_loss_grace_period_minutes"],
+        "azure/sql_managed_instance_backups",
+    ),
+    (
+        "azure.mgmt.sql.models",
+        "ManagedInstancePairInfo",
+        ["primary_managed_instance_id", "partner_managed_instance_id"],
+        "azure/sql_managed_instance_backups — the instance-to-group match",
+    ),
+    (
+        "azure.mgmt.sql.models",
+        "PartnerRegionInfo",
+        ["location", "replication_role"],
+        "azure/sql_managed_instance_backups",
+    ),
+    (
+        "azure.mgmt.sql.models",
+        "ManagedInstanceProperties",
+        [
+            "fully_qualified_domain_name",
+            "public_data_endpoint_enabled",
+            "proxy_override",
+            "minimal_tls_version",
+            "private_endpoint_connections",
+        ],
+        "azure/sql_managed_instance_configuration — a lost field reads as 'private' "
+        "or 'no TLS floor'",
+    ),
+    (
+        "azure.mgmt.sql.models",
+        "ManagedInstancePecProperty",
+        ["properties"],
+        "azure/sql_managed_instance_configuration — the connection's fields are "
+        "nested under `properties`, not flattened",
+    ),
+    (
+        "azure.mgmt.sql.models",
+        "ManagedInstancePrivateEndpointConnectionProperties",
+        ["private_endpoint", "private_link_service_connection_state", "provisioning_state"],
+        "azure/sql_managed_instance_configuration",
+    ),
+    (
+        "azure.mgmt.sql.models",
+        "ManagedInstancePrivateEndpointProperty",
+        ["id"],
+        "azure/sql_managed_instance_configuration",
+    ),
+    (
+        "azure.mgmt.sql.models",
+        "ManagedInstancePrivateLinkServiceConnectionStateProperty",
+        ["status"],
+        "azure/sql_managed_instance_configuration — a lost field reads every "
+        "private endpoint as unapproved",
+    ),
+    (
+        "azure.mgmt.sql.models",
+        "ManagedInstanceAdministratorProperties",
+        ["administrator_type", "login", "sid", "tenant_id"],
+        "azure/sql_managed_instance_configuration — a lost `administrator_type` "
+        "reads as 'no Entra admin'",
+    ),
+    (
+        "azure.mgmt.sql.models",
+        "ManagedInstanceAzureADOnlyAuthProperties",
+        ["azure_ad_only_authentication"],
+        "azure/sql_managed_instance_configuration",
+    ),
+    (
+        "azure.mgmt.sql.models",
+        "ManagedInstanceEncryptionProtectorProperties",
+        ["server_key_type", "server_key_name", "uri", "thumbprint", "auto_rotation_enabled"],
+        "azure/sql_managed_instance_encryption",
+    ),
+    (
+        "azure.mgmt.sql.models",
+        "ManagedTransparentDataEncryptionProperties",
+        ["state"],
+        "azure/sql_managed_instance_encryption — a lost field reads as 'not encrypted'",
+    ),
+    (
+        "azure.mgmt.storage.models",
+        "StorageAccountProperties",
+        [
+            "key_creation_time",
+            "geo_replication_stats",
+            "primary_location",
+            "secondary_location",
+            "status_of_primary",
+            "status_of_secondary",
+            "last_geo_failover_time",
+        ],
+        "azure/storage_encryption_status — a renamed key_creation_time reads every "
+        "access key's age as unknown",
+    ),
+    (
+        "azure.mgmt.storage.models",
+        "GeoReplicationStats",
+        ["status", "last_sync_time", "can_failover", "can_planned_failover",
+         "post_failover_redundancy", "post_planned_failover_redundancy"],
+        "azure/storage_encryption_status — geo-replication health",
+    ),
+    (
+        "azure.mgmt.storage.models",
+        "KeyCreationTime",
+        ["key1", "key2"],
+        "azure/storage_encryption_status — access-key age",
+    ),
+    (
+        "azure.mgmt.storage.models",
+        "ContainerProperties",
+        ["public_access", "metadata", "has_immutability_policy", "has_legal_hold",
+         "immutable_storage_with_versioning"],
+        "azure/storage_encryption_status — a renamed public_access reads a public "
+        "container as private",
+    ),
+    (
+        "azure.mgmt.storage.models",
+        "NetworkRuleSet",
+        ["default_action", "ip_rules", "ipv6_rules", "virtual_network_rules"],
+        "azure/storage_encryption_status — a renamed ipv6_rules reads an account "
+        "that admits IPv6 clients as closed to the internet",
+    ),
+    (
+        "azure.mgmt.keyvault.models",
+        "Vault",
+        ["properties"],
+        "azure/key_vault_configuration — azure-mgmt-keyvault 14 stopped "
+        "flattening `properties` onto the vault",
+    ),
+    # azure-mgmt-network 31 is a TypeSpec SDK: these fields are declared on the
+    # nested *PropertiesFormat model and flattened onto the resource for attribute
+    # access, so the properties model is where a rename would show.
+    (
+        "azure.mgmt.network.models",
+        "NetworkSecurityGroupPropertiesFormat",
+        ["security_rules", "default_security_rules"],
+        "azure/network_security_groups — default rules carry the platform's "
+        "AllowInternetOutBound; losing them reads as 'no egress allowed'",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "SecurityRulePropertiesFormat",
+        ["priority", "destination_address_prefix", "destination_address_prefixes"],
+        "azure/network_security_groups — outbound rules are evaluated in "
+        "priority order against their destination",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "SecurityRulePropertiesFormat",
+        ["source_address_prefix", "source_address_prefixes", "destination_port_range",
+         "destination_port_ranges", "protocol", "access", "direction",
+         "source_application_security_groups", "destination_application_security_groups"],
+        "azure/network_security_groups — east-west pairs; a renamed ASG field reads "
+        "an ASG-scoped allow as a plain one and claims segmentation it cannot see",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "SubnetPropertiesFormat",
+        ["network_security_group", "address_prefix", "address_prefixes"],
+        "azure/network_security_groups — a subnet's NSG and range decide its east-west "
+        "verdict; a renamed NSG field reads as 'no NSG, unfiltered'",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "LoadBalancerPropertiesFormat",
+        ["backend_address_pools"],
+        "azure/ddos_protection — a renamed field reads every load balancer IP as 'unknown'",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "BackendAddressPoolPropertiesFormat",
+        ["backend_ip_configurations", "load_balancer_backend_addresses", "virtual_network"],
+        "azure/ddos_protection — the backend pool's VNet decides a frontend IP's protection",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "LoadBalancerBackendAddressPropertiesFormat",
+        ["virtual_network", "subnet", "network_interface_ip_configuration"],
+        "azure/ddos_protection — pools configured by IP address",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "FirewallPolicyPropertiesFormat",
+        ["base_policy", "threat_intel_mode"],
+        "azure/vnet_egress_routing — a child policy's threat-intel mode is at least its parent's",
+    ),
+    (
+        "azure.mgmt.redis.models",
+        "RedisResource",
+        [
+            "minimum_tls_version",
+            "enable_non_ssl_port",
+            "public_network_access",
+            "disable_access_key_authentication",
+            "private_endpoint_connections",
+            "subnet_id",
+            "redis_configuration",
+            "zones",
+            "zonal_allocation_policy",
+        ],
+        "azure/redis_cache_configuration — a renamed enable_non_ssl_port reads as the "
+        "non-TLS port off, i.e. TLS-only",
+    ),
+    (
+        "azure.mgmt.redis.models",
+        "RedisCommonPropertiesRedisConfiguration",
+        ["aad_enabled", "authnotrequired"],
+        "azure/redis_cache_configuration — a renamed authnotrequired reads every cache "
+        "as requiring auth",
+    ),
+    (
+        "azure.mgmt.redis.models",
+        "RedisCacheAccessPolicyAssignment",
+        ["access_policy_name", "object_id", "object_id_alias"],
+        "azure/redis_cache_configuration",
+    ),
+    (
+        "azure.mgmt.redis.models",
+        "ScheduleEntry",
+        ["day_of_week", "start_hour_utc", "maintenance_window"],
+        "azure/redis_cache_configuration",
+    ),
+    (
+        "azure.mgmt.redis.models",
+        "RedisFirewallRule",
+        ["start_ip", "end_ip"],
+        "azure/redis_cache_configuration",
+    ),
+    (
+        "azure.mgmt.redisenterprise.models",
+        "Cluster",
+        ["minimum_tls_version", "public_network_access", "private_endpoint_connections", "encryption"],
+        "azure/managed_redis_configuration — a renamed TLS field reads as no TLS floor",
+    ),
+    (
+        "azure.mgmt.redisenterprise.models",
+        "Database",
+        ["client_protocol", "access_keys_authentication"],
+        "azure/managed_redis_configuration — a renamed client_protocol reads every "
+        "database as Plaintext",
+    ),
+    (
+        "azure.mgmt.dns.models",
+        "Zone",
+        ["name_servers", "number_of_record_sets", "zone_type"],
+        "azure/dns_configuration",
+    ),
+    (
+        "azure.mgmt.dns.models",
+        "RecordSet",
+        ["ttl", "fqdn", "target_resource", "a_records", "aaaa_records", "cname_record", "mx_records",
+         "ns_records", "ptr_records", "srv_records", "txt_records", "caa_records", "soa_record"],
+        "azure/dns_configuration — a renamed record list reads that type's records as empty",
+    ),
+    (
+        "azure.mgmt.dns.models",
+        "SubResource",
+        ["id"],
+        "azure/dns_configuration — an alias record's target",
+    ),
+    (
+        "azure.mgmt.dns.models",
+        "ARecord",
+        ["ipv4_address"],
+        "azure/dns_configuration",
+    ),
+    (
+        "azure.mgmt.dns.models",
+        "AaaaRecord",
+        ["ipv6_address"],
+        "azure/dns_configuration",
+    ),
+    (
+        "azure.mgmt.dns.models",
+        "CnameRecord",
+        ["cname"],
+        "azure/dns_configuration — a renamed cname reads every CNAME as empty and its failover method is lost",
+    ),
+    (
+        "azure.mgmt.dns.models",
+        "MxRecord",
+        ["preference", "exchange"],
+        "azure/dns_configuration",
+    ),
+    (
+        "azure.mgmt.dns.models",
+        "NsRecord",
+        ["nsdname"],
+        "azure/dns_configuration",
+    ),
+    (
+        "azure.mgmt.dns.models",
+        "PtrRecord",
+        ["ptrdname"],
+        "azure/dns_configuration",
+    ),
+    (
+        "azure.mgmt.dns.models",
+        "TxtRecord",
+        ["value"],
+        "azure/dns_configuration",
+    ),
+    (
+        "azure.mgmt.dns.models",
+        "SrvRecord",
+        ["priority", "weight", "port", "target"],
+        "azure/dns_configuration",
+    ),
+    (
+        "azure.mgmt.dns.models",
+        "CaaRecord",
+        ["flags", "tag", "value"],
+        "azure/dns_configuration",
+    ),
+    (
+        "azure.mgmt.dns.models",
+        "SoaRecord",
+        ["host", "email"],
+        "azure/dns_configuration",
+    ),
+    (
+        "azure.mgmt.privatedns.models",
+        "VirtualNetworkLinkProperties",
+        ["virtual_network", "registration_enabled", "resolution_policy"],
+        "azure/dns_configuration",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "VirtualNetworkGatewayConnectionPropertiesFormat",
+        ["connection_type", "connection_protocol", "ipsec_policies", "connection_status"],
+        "azure/vpn_gateway_configuration — a renamed ipsec_policies reads every tunnel "
+        "as on Azure's default policy",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "IpsecPolicy",
+        ["ike_encryption", "ike_integrity", "dh_group", "ipsec_encryption", "ipsec_integrity", "pfs_group"],
+        "_shared/vpn_crypto — weak-algorithm detection for both VPN fetchers",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "VirtualNetworkGatewayPropertiesFormat",
+        ["gateway_type", "active_active", "vpn_client_configuration"],
+        "azure/vpn_gateway_configuration",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "VpnClientConfiguration",
+        ["vpn_client_address_pool", "vpn_client_protocols", "vpn_authentication_types"],
+        "azure/vpn_gateway_configuration — the address pool is what tells real P2S "
+        "from the placeholder the list call returns",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "VirtualWanProperties",
+        ["disable_vpn_encryption", "type"],
+        "azure/virtual_wan_configuration — a renamed flag reads as encryption on",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "VirtualHubProperties",
+        ["azure_firewall", "security_partner_provider"],
+        "azure/virtual_wan_configuration — secured-hub detection",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "VpnConnectionProperties",
+        ["vpn_link_connections"],
+        "azure/virtual_wan_configuration",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "VpnSiteLinkConnectionProperties",
+        ["vpn_connection_protocol_type", "ipsec_policies", "connection_status"],
+        "azure/virtual_wan_configuration — IKE version and policy per site link",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "VpnServerConfigurationProperties",
+        ["vpn_protocols", "vpn_authentication_types"],
+        "azure/virtual_wan_configuration",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "DeploymentProperties",
+        ["status", "active", "author", "deployer", "message", "start_time", "end_time"],
+        "azure/app_service_deployments — a renamed field reads as an unattributed deployment",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "SiteSourceControlProperties",
+        ["repo_url", "branch", "is_manual_integration", "is_git_hub_action", "deployment_rollback_enabled"],
+        "azure/app_service_deployments — a renamed repo_url reads as 'no source control'",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "SiteConfig",
+        ["min_tls_version", "scm_min_tls_version", "min_tls_cipher_suite", "ftps_state", "http20_enabled",
+         "remote_debugging_enabled", "linux_fx_version", "windows_fx_version", "net_framework_version",
+         "java_version", "java_container", "java_container_version", "php_version", "python_version",
+         "node_version"],
+        "azure/app_service_deployments — a renamed field reads as None on both sides, so every slot matches production",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "SiteProperties",
+        ["https_only", "client_cert_enabled", "public_network_access"],
+        "azure/app_service_deployments — a renamed field reads as None on both sides, so every slot matches production",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "IpSecurityRestriction",
+        ["subnet_mask"],
+        "azure/app_service_deployments — compared rule by rule between a slot and production",
+    ),
+    # SiteConfigResource (get_configuration) nests these under `properties`,
+    # a SiteConfig; the resource flattens it for attribute access.
+    (
+        "azure.mgmt.web.models",
+        "SiteConfig",
+        [
+            "ip_security_restrictions",
+            "ip_security_restrictions_default_action",
+            "scm_ip_security_restrictions",
+            "scm_ip_security_restrictions_default_action",
+            "scm_ip_security_restrictions_use_main",
+        ],
+        "azure/app_service_configuration — a renamed restriction field reads as "
+        "'no rules', which evaluates to 'allows all traffic'",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "IpSecurityRestriction",
+        ["ip_address", "action", "priority", "vnet_subnet_resource_id", "headers"],
+        "azure/app_service_configuration — access-restriction rule evaluation",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "SiteConfig",
+        ["min_tls_cipher_suite", "scm_min_tls_version", "java_container", "java_container_version"],
+        "azure/app_service_configuration — a renamed min_tls_cipher_suite reads as 'no minimum set'",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "CsmPublishingCredentialsPoliciesEntityProperties",
+        ["allow"],
+        "azure/app_service_configuration — a renamed allow reads as 'basic auth off'",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "ApiKVReferenceProperties",
+        ["status", "source", "vault_name", "secret_name", "secret_version", "identity_type", "details"],
+        "azure/app_service_configuration — Key Vault reference status",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "StringDictionary",
+        ["properties"],
+        "azure/app_service_configuration — a renamed properties reads every scanned app as holding no settings",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "ConnectionStringDictionary",
+        ["properties"],
+        "azure/app_service_configuration — a renamed properties reads every app as holding no connection strings",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "ConnStringValueTypePair",
+        ["value"],
+        "azure/app_service_configuration — a renamed value reads every connection string as empty",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "WebAppStackProperties",
+        ["major_versions"],
+        "azure/app_service_configuration — runtime end of support (a rename reads every runtime unknown)",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "WebAppMajorVersion",
+        ["minor_versions"],
+        "azure/app_service_configuration — runtime end of support",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "WebAppMinorVersion",
+        ["value", "stack_settings"],
+        "azure/app_service_configuration — runtime end of support",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "WebAppRuntimeSettings",
+        ["runtime_version", "end_of_life_date", "is_deprecated"],
+        "azure/app_service_configuration — a renamed end_of_life_date reads as 'supported'",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "WebAppRuntimes",
+        ["linux_runtime_settings", "windows_runtime_settings", "linux_container_settings",
+         "windows_container_settings"],
+        "azure/app_service_configuration — runtime end of support",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "WindowsJavaContainerSettings",
+        ["java_container", "java_container_version", "end_of_life_date", "is_deprecated"],
+        "azure/app_service_configuration — Windows Java container end of support",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "LinuxJavaContainerSettings",
+        ["end_of_life_date", "is_deprecated"],
+        "azure/app_service_configuration — Linux Java container end of support",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "SiteConfig",
+        ["public_network_access", "ip_security_restrictions", "ip_security_restrictions_default_action",
+         "scm_ip_security_restrictions", "scm_ip_security_restrictions_default_action",
+         "scm_ip_security_restrictions_use_main"],
+        "azure/front_door_origins — a renamed field reads as 'no rules', so a locked origin reads as open",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "IpSecurityRestriction",
+        ["name", "tag", "ip_address", "headers"],
+        "azure/front_door_origins — the AzureFrontDoor.Backend service tag and its X-Azure-FDID header",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "AppServicePlanProperties",
+        ["zone_redundant", "number_of_workers", "per_site_scaling", "elastic_scale_enabled"],
+        "azure/app_service_plans — a renamed zone_redundant reads as 'not zone "
+        "redundant' on a plan that is",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "SkuDescription",
+        ["name", "tier", "capacity"],
+        "azure/app_service_plans — sku.capacity is the plan's instance count",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "SiteProperties",
+        ["server_farm_id", "redundancy_mode"],
+        "azure/app_service_plans — server_farm_id is how sites join their plan",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "SiteProperties",
+        ["sku"],
+        "azure/app_service_backups — a renamed sku reads as an unknown plan tier",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "SnapshotProperties",
+        ["time"],
+        "azure/app_service_backups — automatic backup times",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "BackupItemProperties",
+        ["name", "status", "scheduled", "created", "finished_time_stamp", "last_restore_time_stamp",
+         "storage_account_url", "log"],
+        "azure/app_service_backups — custom backup history; a renamed created reads as 'no restore point'",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "BackupRequestProperties",
+        ["enabled", "storage_account_url", "backup_schedule", "databases"],
+        "azure/app_service_backups — a renamed field reads as 'no custom backup configured'",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "BackupSchedule",
+        ["frequency_interval", "frequency_unit", "retention_period_in_days", "keep_at_least_one_backup"],
+        "azure/app_service_backups — custom backup interval and retention",
+    ),
+    (
+        "azure.mgmt.web.models",
+        "CertificateProperties",
+        [
+            "expiration_date",
+            "key_vault_id",
+            "key_vault_secret_name",
+            "key_vault_secret_status",
+            "canonical_name",
+            "domain_validation_method",
+            "thumbprint",
+            "host_names",
+            "issuer",
+            "subject_name",
+        ],
+        "azure/key_vault_key_rotation — a renamed key_vault_id or canonical_name "
+        "reads a Key Vault or managed certificate as an uploaded one",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "NetworkInterfacePropertiesFormat",
+        ["network_security_group", "virtual_machine", "ip_configurations"],
+        "azure/network_security_groups — a renamed NSG field would read as "
+        "'NIC unprotected'",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "SubnetPropertiesFormat",
+        ["address_prefix", "address_prefixes", "route_table", "nat_gateway",
+         "default_outbound_access", "service_endpoints", "delegations"],
+        "azure/vnet_egress_routing — a renamed default_outbound_access reads as "
+        "null, i.e. 'default outbound on'; a renamed route_table as 'no appliance'",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "VirtualNetworkPropertiesFormat",
+        ["address_space", "subnets", "default_public_nat_gateway"],
+        "azure/vnet_egress_routing",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "RouteTablePropertiesFormat",
+        ["routes", "subnets", "disable_bgp_route_propagation"],
+        "azure/vnet_egress_routing — a renamed `subnets` reads every route table "
+        "as unassociated",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "RoutePropertiesFormat",
+        ["address_prefix", "next_hop_type", "next_hop_ip_address", "next_hop"],
+        "azure/vnet_egress_routing — the 0.0.0.0/0 next hop is the egress path",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "RouteNextHopEcmp",
+        ["next_hop_ip_addresses"],
+        "azure/vnet_egress_routing — VirtualApplianceEcmp next-hop IPs",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "NetworkInterfacePropertiesFormat",
+        ["enable_ip_forwarding", "default_outbound_connectivity_enabled"],
+        "azure/vnet_egress_routing — per-NIC default outbound and NVA forwarding",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "VirtualNetworkPeeringPropertiesFormat",
+        ["peering_state", "remote_virtual_network", "remote_address_space",
+         "remote_virtual_network_address_space"],
+        "azure/vnet_egress_routing — only Connected peers' prefixes are checked",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "AzureFirewallPropertiesFormat",
+        ["sku", "threat_intel_mode", "firewall_policy", "ip_configurations", "hub_ip_addresses", "virtual_hub"],
+        "azure/vnet_egress_routing — a renamed ip_configurations reads every "
+        "firewall-routed subnet as 'not_in_subscription'",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "AzureFirewallIPConfigurationPropertiesFormat",
+        ["private_ip_address", "subnet"],
+        "azure/vnet_egress_routing",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "HubIPAddresses",
+        ["private_ip_address"],
+        "azure/vnet_egress_routing — Virtual WAN hub firewalls",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "FirewallPolicyPropertiesFormat",
+        ["sku", "threat_intel_mode", "intrusion_detection", "base_policy"],
+        "azure/vnet_egress_routing — effective threat-intel mode comes from the policy",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "FirewallPolicyIntrusionDetection",
+        ["mode"],
+        "azure/vnet_egress_routing — Premium IDPS mode",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "RoutingPolicy",
+        ["destinations", "next_hop"],
+        "azure/vnet_egress_routing — a renamed field reads every hub spoke as default outbound",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "HubVirtualNetworkConnectionProperties",
+        ["remote_virtual_network", "enable_internet_security", "routing_configuration"],
+        "azure/vnet_egress_routing — enable_internet_security gates the hub's default route",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "HubRoute",
+        ["destinations", "next_hop_type", "next_hop"],
+        "azure/vnet_egress_routing",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "PublicIPAddressPropertiesFormat",
+        ["ip_address", "ip_configuration", "nat_gateway", "ddos_settings"],
+        "azure/ddos_protection — a renamed ip_configuration reads every IP as unattached",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "DdosSettings",
+        ["protection_mode", "ddos_protection_plan"],
+        "azure/ddos_protection — a renamed protection_mode reads every IP as inherited",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "DdosProtectionPlanPropertiesFormat",
+        ["virtual_networks", "public_ip_addresses"],
+        "azure/ddos_protection",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "VirtualNetworkPropertiesFormat",
+        ["enable_ddos_protection", "ddos_protection_plan"],
+        "azure/ddos_protection — a renamed field reads every VNet as unprotected",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "SubnetPropertiesFormat",
+        ["ip_configurations", "application_gateway_ip_configurations"],
+        "azure/ddos_protection — the back-references that place a public IP in a VNet",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "ApplicationGatewayPropertiesFormat",
+        [
+            "http_listeners", "listeners", "ssl_policy", "default_predefined_ssl_policy",
+            "ssl_profiles", "enable_fips", "frontend_ports", "frontend_ip_configurations",
+            "request_routing_rules", "routing_rules", "url_path_maps", "redirect_configurations",
+            "operational_state", "sku",
+        ],
+        "azure/app_gateway_tls_listeners — a missing listener list reads as "
+        "'no plaintext listeners'",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "ApplicationGatewayHttpListenerPropertiesFormat",
+        ["protocol", "frontend_port", "frontend_ip_configuration", "ssl_profile", "ssl_certificate", "host_names"],
+        "azure/app_gateway_tls_listeners",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "ApplicationGatewayListenerPropertiesFormat",
+        ["protocol", "frontend_port", "frontend_ip_configuration", "ssl_profile"],
+        "azure/app_gateway_tls_listeners — L4 listeners",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "ApplicationGatewaySslPolicy",
+        ["policy_type", "policy_name", "min_protocol_version", "cipher_suites", "disabled_ssl_protocols"],
+        "azure/app_gateway_tls_listeners — a renamed field reads as "
+        "'default_not_reported' instead of the real minimum TLS version",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "ApplicationGatewaySslProfilePropertiesFormat",
+        ["ssl_policy"],
+        "azure/app_gateway_tls_listeners — per-listener policy override",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "ApplicationGatewayRequestRoutingRulePropertiesFormat",
+        ["rule_type", "http_listener", "redirect_configuration", "url_path_map"],
+        "azure/app_gateway_tls_listeners — redirect-only detection",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "ApplicationGatewayUrlPathMapPropertiesFormat",
+        ["default_redirect_configuration", "path_rules"],
+        "azure/app_gateway_tls_listeners — redirect-only detection",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "ApplicationGatewayPathRulePropertiesFormat",
+        ["redirect_configuration"],
+        "azure/app_gateway_tls_listeners — redirect-only detection",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "ApplicationGatewayRedirectConfigurationPropertiesFormat",
+        ["target_listener", "target_url"],
+        "azure/app_gateway_tls_listeners — redirect target is HTTPS",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "ApplicationGatewayFrontendIPConfigurationPropertiesFormat",
+        ["public_ip_address"],
+        "azure/app_gateway_tls_listeners — public vs private frontend",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "ApplicationGatewayPropertiesFormat",
+        ["backend_http_settings_collection", "backend_settings_collection", "probes", "trusted_root_certificates", "firewall_policy", "web_application_firewall_configuration"],
+        "azure/app_gateway_backend_tls, azure/app_gateway_waf",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "ApplicationGatewayBackendHttpSettingsPropertiesFormat",
+        ["protocol", "port", "validate_cert_chain_and_expiry", "validate_sni", "sni_name", "trusted_root_certificates", "probe"],
+        "azure/app_gateway_backend_tls — a renamed toggle reads as 'default_enabled' on a backend whose validation is off",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "ApplicationGatewayBackendSettingsPropertiesFormat",
+        ["protocol", "port", "trusted_root_certificates"],
+        "azure/app_gateway_backend_tls — L4 backend settings",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "ApplicationGatewayProbePropertiesFormat",
+        ["protocol"],
+        "azure/app_gateway_backend_tls — probe protocol",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "ApplicationGatewayUrlPathMapPropertiesFormat",
+        ["default_backend_http_settings"],
+        "azure/app_gateway_backend_tls — which settings are in use",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "ApplicationGatewayPathRulePropertiesFormat",
+        ["backend_http_settings", "firewall_policy"],
+        "azure/app_gateway_backend_tls, azure/app_gateway_waf — per-path settings and WAF",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "ApplicationGatewayHttpListenerPropertiesFormat",
+        ["firewall_policy"],
+        "azure/app_gateway_waf — per-listener WAF policy",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "WebApplicationFirewallPolicyPropertiesFormat",
+        ["policy_settings", "managed_rules", "custom_rules", "application_gateways", "http_listeners", "path_based_rules"],
+        "azure/app_gateway_waf",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "PolicySettings",
+        ["state", "mode"],
+        "azure/app_gateway_waf — a renamed mode reads every WAF as not enforcing",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "ManagedRuleSet",
+        ["rule_set_type", "rule_set_version", "rule_group_overrides", "computed_disabled_rules"],
+        "azure/app_gateway_waf",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "ManagedRuleOverride",
+        ["rule_id", "state", "action"],
+        "azure/app_gateway_waf — disabled managed rules",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "WebApplicationFirewallCustomRule",
+        ["name", "priority", "rule_type", "action", "state", "rate_limit_threshold", "rate_limit_duration"],
+        "azure/app_gateway_waf — rate-limit rules",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "ApplicationGatewayWebApplicationFirewallConfiguration",
+        ["enabled", "firewall_mode", "rule_set_type", "rule_set_version", "disabled_rule_groups", "exclusions"],
+        "azure/app_gateway_waf — legacy in-gateway WAF",
+    ),
+    # --- policy effects: a missing field reads as an unresolved effect ------
+    # The model_base generation declares these on the *Properties models and
+    # flattens them onto PolicyDefinition / PolicySetDefinition for attribute
+    # access, so the Properties models are the honest thing to pin.
+    (
+        "azure.mgmt.resource.policy.models",
+        "PolicyDefinitionProperties",
+        ["policy_rule", "parameters", "display_name", "policy_type"],
+        "azure/policy_assignments — the effect is policyRule.then.effect, often a "
+        "parameter reference resolved against `parameters`",
+    ),
+    (
+        "azure.mgmt.resource.policy.models",
+        "PolicySetDefinitionProperties",
+        ["policy_definitions", "parameters", "display_name", "policy_type"],
+        "azure/policy_assignments — initiative members and the defaults they inherit",
+    ),
+    (
+        "azure.mgmt.resource.policy.models",
+        "PolicyDefinitionReference",
+        ["policy_definition_id", "policy_definition_reference_id", "parameters"],
+        "azure/policy_assignments — the value an initiative passes each member",
+    ),
+    (
+        "azure.mgmt.resource.policy.models",
+        "ParameterDefinitionsValue",
+        ["default_value"],
+        "azure/policy_assignments — the default an unset effect parameter falls back to",
+    ),
+    # --- Defender plans: a renamed field reads as "no sub-plan" or "not inherited" ---
+    (
+        "azure.mgmt.security.models",
+        "Pricing",
+        ["pricing_tier", "sub_plan", "free_trial_remaining_time", "enablement_time",
+         "enforce", "inherited", "inherited_from", "resources_coverage_status",
+         "deprecated", "replaced_by", "extensions"],
+        "azure/defender_plans",
+    ),
+    # --- Defender regulatory compliance: a renamed count reads as 0 failed ---
+    (
+        "azure.mgmt.security.models",
+        "RegulatoryComplianceStandard",
+        ["name", "state", "passed_controls", "failed_controls", "skipped_controls",
+         "unsupported_controls"],
+        "azure/defender_regulatory_compliance",
+    ),
+    (
+        "azure.mgmt.security.models",
+        "RegulatoryComplianceControl",
+        ["name", "description", "state", "passed_assessments", "failed_assessments",
+         "skipped_assessments"],
+        "azure/defender_regulatory_compliance",
+    ),
+    (
+        "azure.mgmt.security.models",
+        "RegulatoryComplianceAssessment",
+        ["name", "description", "state", "passed_resources", "failed_resources",
+         "skipped_resources", "unsupported_resources"],
+        "azure/defender_regulatory_compliance",
+    ),
+    # --- policy compliance: a renamed count reads as "0 non-compliant" -------
+    (
+        "azure.mgmt.policyinsights.models",
+        "SummaryResults",
+        ["non_compliant_resources", "non_compliant_policies", "resource_details",
+         "policy_details", "query_results_uri"],
+        "azure/policy_compliance — the headline counts",
+    ),
+    (
+        "azure.mgmt.policyinsights.models",
+        "PolicyAssignmentSummary",
+        ["policy_assignment_id", "policy_set_definition_id", "results", "policy_definitions"],
+        "azure/policy_compliance — per-assignment compliance",
+    ),
+    (
+        "azure.mgmt.policyinsights.models",
+        "PolicyDefinitionSummary",
+        ["policy_definition_id", "policy_definition_reference_id", "effect", "results"],
+        "azure/policy_compliance — non-compliant initiative members",
+    ),
+    (
+        "azure.mgmt.policyinsights.models",
+        "ComplianceDetail",
+        ["compliance_state", "count"],
+        "azure/policy_compliance",
+    ),
+    (
+        "azure.mgmt.policyinsights.models",
+        "PolicyState",
+        ["resource_id", "compliance_state", "policy_assignment_id",
+         "policy_definition_id", "policy_definition_action", "timestamp"],
+        "azure/policy_compliance — the itemized non-compliant records",
+    ),
+    (
+        "azure.mgmt.policyinsights.models",
+        "Remediation",
+        ["policy_assignment_id", "provisioning_state", "deployment_status"],
+        "azure/policy_compliance",
+    ),
+    (
+        "azure.mgmt.policyinsights.models",
+        "RemediationDeploymentSummary",
+        ["total_deployments", "successful_deployments", "failed_deployments"],
+        "azure/policy_compliance",
+    ),
+    (
+        "azure.mgmt.policyinsights.models",
+        "QueryOptions",
+        ["filter", "top", "expand", "apply", "from_property", "to", "select", "order_by"],
+        "azure/policy_compliance — a dropped option silently widens or empties a query",
+    ),
+    (
+        "azure.mgmt.policyinsights.models",
+        "PolicyState",
+        ["policy_evaluation_details", "policy_definition_reference_id", "additional_properties"],
+        "azure/policy_compliance — evaluation details, and the grouped history count",
+    ),
+    (
+        "azure.mgmt.policyinsights.models",
+        "PolicyEvaluationDetails",
+        ["evaluated_expressions", "if_not_exists_details"],
+        "azure/policy_compliance — expected vs actual values",
+    ),
+    (
+        "azure.mgmt.policyinsights.models",
+        "ExpressionEvaluationDetails",
+        ["expression", "expression_kind", "path", "operator", "expression_value",
+         "target_value", "result"],
+        "azure/policy_compliance — expected vs actual values",
+    ),
+    (
+        "azure.mgmt.policyinsights.models",
+        "IfNotExistsEvaluationDetails",
+        ["resource_id", "total_resources"],
+        "azure/policy_compliance",
+    ),
+    (
+        "azure.mgmt.policyinsights.models",
+        "RemediationDeployment",
+        ["remediated_resource_id", "deployment_id", "status", "resource_location", "error",
+         "created_on", "last_updated_on"],
+        "azure/policy_compliance — per-resource remediation deployments",
+    ),
+    (
+        "msgraph.generated.models.service_principal",
+        "ServicePrincipal",
+        [
+            "service_principal_type",
+            "app_owner_organization_id",
+            "alternative_names",
+            "password_credentials",
+            "key_credentials",
+        ],
+        "azure/entra_service_principals — a missing field reads as None, so every "
+        "principal would look credential-free or of unknown ownership",
+    ),
+    (
+        "msgraph.generated.models.application",
+        "Application",
+        ["federated_identity_credentials"],
+        "azure/entra_service_principals — the $expand target; without it every "
+        "application reads as non-federated",
+    ),
+    (
+        "msgraph.generated.applications.applications_request_builder",
+        "ApplicationsRequestBuilder.ApplicationsRequestBuilderGetQueryParameters",
+        ["select", "expand"],
+        "azure/entra_service_principals — federated credentials arrive only via $expand",
+    ),
+    (
+        "msgraph.generated.models.service_principal",
+        "ServicePrincipal",
+        ["owners", "app_role_assignments", "app_roles"],
+        "azure/entra_service_principals — the $expand targets and the resource's role "
+        "names; without them every principal reads as ownerless and permission-free",
+    ),
+    (
+        "msgraph.generated.models.user",
+        "User",
+        ["odata_type", "display_name", "user_principal_name", "account_enabled"],
+        "azure/entra_service_principals — an owner's name and account state; without "
+        "them owner_details_readable reads false and the disabled-owner count null",
+    ),
+    (
+        "msgraph.generated.models.service_principal",
+        "ServicePrincipal",
+        ["odata_type", "display_name", "account_enabled"],
+        "azure/entra_service_principals — a service principal owner's name and account state",
+    ),
+    (
+        "msgraph.generated.models.application",
+        "Application",
+        ["owners"],
+        "azure/entra_service_principals — every app registration would read as ownerless",
+    ),
+    (
+        "msgraph.generated.models.app_role_assignment",
+        "AppRoleAssignment",
+        ["app_role_id", "resource_id", "resource_display_name", "created_date_time"],
+        "azure/entra_service_principals — the application permissions a principal holds",
+    ),
+    (
+        "msgraph.generated.models.app_role",
+        "AppRole",
+        ["id", "value"],
+        "azure/entra_service_principals — names each application permission",
+    ),
+    (
+        "msgraph.generated.models.o_auth2_permission_grant",
+        "OAuth2PermissionGrant",
+        ["client_id", "consent_type", "principal_id", "resource_id", "scope"],
+        "azure/entra_service_principals — the delegated grants a principal holds",
+    ),
+    (
+        "msgraph.generated.service_principals.service_principals_request_builder",
+        "ServicePrincipalsRequestBuilder.ServicePrincipalsRequestBuilderGetQueryParameters",
+        ["select", "expand"],
+        "azure/entra_service_principals — owners and app role assignments arrive via $expand",
+    ),
+    (
+        "msgraph.generated.service_principals.item.owners.owners_request_builder",
+        "OwnersRequestBuilder.OwnersRequestBuilderGetQueryParameters",
+        ["select"],
+        "azure/entra_service_principals — owners past the 20-item $expand limit",
+    ),
+    (
+        "msgraph.generated.applications.item.owners.owners_request_builder",
+        "OwnersRequestBuilder.OwnersRequestBuilderGetQueryParameters",
+        ["select"],
+        "azure/entra_service_principals — owners past the 20-item $expand limit",
+    ),
+    (
+        "msgraph.generated.service_principals.item.service_principal_item_request_builder",
+        "ServicePrincipalItemRequestBuilder.ServicePrincipalItemRequestBuilderGetQueryParameters",
+        ["select"],
+        "azure/entra_service_principals — the resource principal's app roles",
+    ),
+    (
+        "msgraph.generated.models.group",
+        "Group",
+        [
+            "group_types",
+            "security_enabled",
+            "mail_enabled",
+            "is_assignable_to_role",
+            "membership_rule",
+            "membership_rule_processing_state",
+            "on_premises_sync_enabled",
+            "visibility",
+            "members",
+            "owners",
+        ],
+        "azure/entra_groups — a missing field reads as None, so every group would look "
+        "assigned, cloud-only and not role-assignable, or empty and ownerless",
+    ),
+    (
+        "msgraph.generated.groups.groups_request_builder",
+        "GroupsRequestBuilder.GroupsRequestBuilderGetQueryParameters",
+        ["select", "expand"],
+        "azure/entra_groups — members and owners arrive via $expand",
+    ),
+    (
+        "msgraph.generated.models.user",
+        "User",
+        ["odata_type", "user_principal_name", "user_type", "account_enabled"],
+        "azure/entra_groups — a missing field reads as None, so guest and disabled-user "
+        "figures read unknown; without odata_type no member is a user and they read 0",
+    ),
+    (
+        "msgraph.generated.models.service_principal",
+        "ServicePrincipal",
+        ["odata_type", "account_enabled"],
+        "azure/entra_groups — service principal members and owners; without account_enabled "
+        "groups_with_only_disabled_owners reads unknown",
+    ),
+    (
+        "msgraph.generated.models.conditional_access_condition_set",
+        "ConditionalAccessConditionSet",
+        ["devices", "authentication_flows", "insider_risk_levels", "service_principal_risk_levels"],
+        "azure/entra_conditional_access_policies — a missing field reads as no condition, so a "
+        "device filter, flow or risk condition would not stop a policy counting for MFA coverage",
+    ),
+    (
+        "msgraph.generated.models.conditional_access_devices",
+        "ConditionalAccessDevices",
+        ["device_filter"],
+        "azure/entra_conditional_access_policies — without it a device filter reads as absent",
+    ),
+    (
+        "msgraph.generated.models.conditional_access_applications",
+        "ConditionalAccessApplications",
+        ["application_filter"],
+        "azure/entra_conditional_access_policies — without it an application filter reads as "
+        "absent, so a policy that filters apps would count for MFA coverage",
+    ),
+    (
+        "msgraph.generated.models.authentication_strength_policy",
+        "AuthenticationStrengthPolicy",
+        ["id", "display_name", "requirements_satisfied"],
+        "azure/entra_conditional_access_policies — without id a policy's strength can't be "
+        "matched to its combinations; without requirements_satisfied a strength never counts as MFA",
+    ),
+    (
+        "msgraph.generated.models.authentication_methods_policy",
+        "AuthenticationMethodsPolicy",
+        ["authentication_method_configurations", "policy_migration_state", "registration_enforcement"],
+        "azure/entra_authentication_policy — a missing field reads as no methods "
+        "configured, i.e. SMS looks disabled",
+    ),
+    (
+        "msgraph.generated.models.authentication_method_configuration",
+        "AuthenticationMethodConfiguration",
+        ["state", "exclude_targets"],
+        "azure/entra_authentication_policy — `state` is the enabled/disabled fact",
+    ),
+    (
+        "msgraph.generated.models.x509_certificate_authentication_mode_configuration",
+        "X509CertificateAuthenticationModeConfiguration",
+        ["x509_certificate_authentication_default_mode"],
+        "azure/entra_authentication_policy — without the default mode no X.509 "
+        "method is counted as phishing-resistant",
+    ),
+    (
+        "msgraph.generated.models.certificate_authority",
+        "CertificateAuthority",
+        ["certificate", "certificate_revocation_list_url", "is_root_authority", "issuer", "issuer_ski"],
+        "azure/entra_authentication_policy — trusted CAs; a missing certificate leaves every expiry unknown",
+    ),
+    (
+        "msgraph.generated.models.certificate_authority_detail",
+        "CertificateAuthorityDetail",
+        ["certificate", "certificate_authority_type", "certificate_revocation_list_url", "expiration_date_time",
+         "issuer", "issuer_subject_key_identifier", "thumbprint"],
+        "azure/entra_authentication_policy — CAs in the PKI-based trust store",
+    ),
+    (
+        "msgraph.generated.models.certificate_based_auth_configuration",
+        "CertificateBasedAuthConfiguration",
+        ["certificate_authorities"],
+        "azure/entra_authentication_policy — a missing list reads as no trusted CA",
+    ),
+    (
+        "msgraph.generated.models.x509_certificate_user_binding",
+        "X509CertificateUserBinding",
+        ["user_property", "x509_certificate_field", "priority", "trust_affinity_level"],
+        "azure/entra_authentication_policy — which user property matches a certificate",
+    ),
+    (
+        "msgraph.generated.models.authorization_info",
+        "AuthorizationInfo",
+        ["certificate_user_ids"],
+        "azure/entra_authentication_policy — a missing field reads as no certificate user ids",
+    ),
+    (
+        "msgraph.generated.models.identity_security_defaults_enforcement_policy",
+        "IdentitySecurityDefaultsEnforcementPolicy",
+        ["is_enabled"],
+        "azure/entra_authentication_policy — security defaults on/off",
+    ),
+    (
+        "msgraph.generated.models.group_setting",
+        "GroupSetting",
+        ["template_id", "values"],
+        "azure/entra_authentication_policy — password protection settings",
+    ),
+    (
+        "msgraph.generated.models.service_plan_info",
+        "ServicePlanInfo",
+        ["service_plan_name", "provisioning_status"],
+        "azure/entra_authentication_policy — the Entra ID P1/P2 licence check",
+    ),
+    (
+        "azure.mgmt.resourcegraph.models",
+        "QueryRequestOptions",
+        ["skip_token", "top", "result_format"],
+        "azure/resource_inventory, azure/resource_diagnostic_settings — paging; "
+        "without skip_token the inventory stops at the first 1000 resources",
+    ),
+    (
+        "azure.mgmt.resourcegraph.models",
+        "QueryResponse",
+        ["skip_token", "total_records", "result_truncated", "data"],
+        "azure/resource_inventory, azure/resource_diagnostic_settings — the page "
+        "loop and its completeness check",
+    ),
+    (
+        "msgraph.generated.directory_objects.get_by_ids.get_by_ids_post_request_body",
+        "GetByIdsPostRequestBody",
+        ["ids"],
+        "azure/residual_resources — the principal ids looked up in the directory",
+    ),
+    (
+        "azure.mgmt.resource.deployments.models",
+        "DeploymentPropertiesExtended",
+        ["correlation_id", "timestamp", "duration", "output_resources", "provisioning_state", "template_hash"],
+        "azure/change_provenance — correlation_id and output_resources are the two "
+        "joins from a change to the deployment that made it",
+    ),
+    (
+        "azure.mgmt.loganalytics.models",
+        "Workspace",
+        ["properties"],
+        "azure/log_analytics_workspaces — azure-mgmt-loganalytics 14 keeps "
+        "`properties` nested, as keyvault 14 does",
+    ),
+    (
+        "azure.mgmt.loganalytics.models",
+        "WorkspaceProperties",
+        [
+            "sku",
+            "retention_in_days",
+            "workspace_capping",
+            "public_network_access_for_ingestion",
+            "public_network_access_for_query",
+            "features",
+        ],
+        "azure/log_analytics_workspaces",
+    ),
+    (
+        "azure.mgmt.loganalytics.models",
+        "WorkspaceFeatures",
+        ["enable_log_access_using_only_resource_permissions", "disable_local_auth"],
+        "azure/log_analytics_workspaces — the access control mode; a rename "
+        "reads every workspace as 'workspace permissions only'",
+    ),
+    (
+        "azure.mgmt.loganalytics.models",
+        "TableProperties",
+        [
+            "plan",
+            "retention_in_days",
+            "total_retention_in_days",
+            "retention_in_days_as_default",
+            "total_retention_in_days_as_default",
+        ],
+        "azure/log_analytics_workspaces — per-table retention",
+    ),
+    (
+        "azure.mgmt.monitor.models",
+        "EventData",
+        ["claims", "caller", "correlation_id", "event_data_id", "resource_id", "operation_name", "status",
+         "event_timestamp"],
+        "azure/app_service_deployments — a renamed caller reads as an unattributed swap or download; "
+        "azure/sql_managed_instance_backups — failover history",
+    ),
+    (
+        "azure.mgmt.monitor.models",
+        "LocalizableString",
+        ["value"],
+        "azure/app_service_deployments — operation_name and status; a rename reads every event as unclassified",
+    ),
+    (
+        "azure.mgmt.monitor.models",
+        "Response",
+        ["value"],
+        "azure/front_door_origins — origin health and traffic metrics",
+    ),
+    (
+        "azure.mgmt.monitor.models",
+        "TimeSeriesElement",
+        ["metadatavalues", "data"],
+        "azure/front_door_origins — a renamed field reads as no metric data, so every origin looks idle",
+    ),
+    (
+        "azure.mgmt.monitor.models",
+        "MetadataValue",
+        ["name", "value"],
+        "azure/front_door_origins — the Origin and OriginGroup dimensions that tie a series to an origin",
+    ),
+    (
+        "azure.mgmt.monitor.models",
+        "MetricValue",
+        ["time_stamp", "average", "minimum", "total"],
+        "azure/front_door_origins",
+    ),
+    (
+        "azure.mgmt.monitor.models",
+        "DiagnosticSettingsResource",
+        ["storage_account_id", "workspace_id", "event_hub_authorization_rule_id", "event_hub_name", "logs"],
+        "azure/key_vault_configuration, azure/diagnostic_settings, "
+        "azure/sql_managed_instance_configuration — monitor 6.x flattens "
+        "`properties`; an unflattened release reads every vault as having no "
+        "audit-log destination",
+    ),
+    (
+        "azure.mgmt.monitor.models",
+        "DiagnosticSettingsCategoryResource",
+        ["category_type", "category_groups"],
+        "azure/resource_diagnostic_settings — Logs vs Metrics decides the coverage "
+        "denominator; category_groups decides which categories `audit` covers",
+    ),
+    (
+        "azure.mgmt.monitor.models",
+        "LogSettings",
+        ["category", "category_group", "enabled"],
+        "azure/key_vault_configuration, azure/sql_managed_instance_configuration "
+        "— the AuditEvent / SQLSecurityAuditEvents / audit-group match",
+    ),
+    (
+        "azure.mgmt.frontdoor.models",
+        "WebApplicationFirewallPolicy",
+        ["properties", "sku"],
+        "azure/front_door_waf_policies — 2.0.0 moved every policy field under `properties`",
+    ),
+    (
+        "azure.mgmt.frontdoor.models",
+        "WebApplicationFirewallPolicyProperties",
+        ["policy_settings", "managed_rules", "custom_rules", "security_policy_links",
+         "provisioning_state", "resource_state"],
+        "azure/front_door_waf_policies",
+    ),
+    (
+        "azure.mgmt.frontdoor.models",
+        "PolicySettings",
+        ["enabled_state", "mode", "request_body_check"],
+        "azure/front_door_waf_policies — `mode` decides the blocking verdict",
+    ),
+    (
+        "azure.mgmt.frontdoor.models",
+        "ManagedRuleSet",
+        ["rule_set_type", "rule_set_version", "rule_set_action", "exclusions", "rule_group_overrides"],
+        "azure/front_door_waf_policies",
+    ),
+    (
+        "azure.mgmt.frontdoor.models",
+        "ManagedRuleGroupOverride",
+        ["rule_group_name", "rules", "exclusions"],
+        "azure/front_door_waf_policies — an override with no `rules` disables the whole group",
+    ),
+    (
+        "azure.mgmt.frontdoor.models",
+        "ManagedRuleOverride",
+        ["rule_id", "enabled_state", "action", "exclusions"],
+        "azure/front_door_waf_policies",
+    ),
+    (
+        "azure.mgmt.frontdoor.models",
+        "CustomRule",
+        ["name", "priority", "enabled_state", "rule_type", "action", "rate_limit_threshold",
+         "rate_limit_duration_in_minutes", "match_conditions", "group_by"],
+        "azure/front_door_waf_policies — rate-limit rules",
+    ),
+    (
+        "azure.mgmt.frontdoor.models",
+        "MatchCondition",
+        ["match_variable", "selector", "operator", "negate_condition", "match_value"],
+        "azure/front_door_waf_policies — an Allow rule matching every request makes the policy not blocking",
+    ),
+    (
+        "azure.mgmt.frontdoor.models",
+        "ManagedRuleSetDefinitionProperties",
+        ["rule_set_type", "rule_set_version", "rule_groups"],
+        "azure/front_door_waf_policies",
+    ),
+    (
+        "azure.mgmt.frontdoor.models",
+        "ManagedRuleGroupDefinition",
+        ["rule_group_name", "rules"],
+        "azure/front_door_waf_policies",
+    ),
+    (
+        "azure.mgmt.frontdoor.models",
+        "ManagedRuleDefinition",
+        ["rule_id", "default_state", "default_action"],
+        "azure/front_door_waf_policies — default_state decides a rule nobody overrode",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "Profile",
+        ["properties", "sku"],
+        "azure/front_door_waf_coverage — sku separates Front Door from classic CDN",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "ProfileProperties",
+        ["front_door_id"],
+        "azure/front_door_origins — without it no App Service origin can be proven locked to its profile",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "AFDEndpointProperties",
+        ["host_name", "enabled_state", "deployment_status"],
+        "azure/front_door_waf_coverage",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "RouteProperties",
+        ["custom_domains", "supported_protocols", "patterns_to_match", "link_to_default_domain",
+         "https_redirect", "enabled_state"],
+        "azure/front_door_waf_coverage — which hosts a route serves",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "AFDDomainProperties",
+        ["host_name", "domain_validation_state"],
+        "azure/front_door_waf_coverage",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "RouteProperties",
+        ["forwarding_protocol", "origin_group", "origin_path", "rule_sets"],
+        "azure/front_door_tls, azure/front_door_origins",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "AFDDomainProperties",
+        ["tls_settings"],
+        "azure/front_door_tls",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "AFDDomainHttpsParameters",
+        ["certificate_type", "minimum_tls_version", "cipher_suite_set_type", "customized_cipher_suite_set", "secret"],
+        "azure/front_door_tls — minimum_tls_version applies only when the cipher-suite set is Customized",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "AFDDomainHttpsCustomizedCipherSuiteSet",
+        ["cipher_suite_set_for_tls12", "cipher_suite_set_for_tls13"],
+        "azure/front_door_tls",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "SecretProperties",
+        ["parameters"],
+        "azure/front_door_tls",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "CustomerCertificateParameters",
+        ["subject", "subject_alternative_names", "certificate_authority", "thumbprint", "expiration_date",
+         "secret_source", "secret_version", "use_latest_version"],
+        "azure/front_door_tls — a customer certificate's expiry and Key Vault source",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "ManagedCertificateParameters",
+        ["subject", "expiration_date"],
+        "azure/front_door_tls — a managed certificate's expiry",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "RuleProperties",
+        ["order", "match_processing_behavior", "conditions", "actions"],
+        "azure/front_door_tls, azure/front_door_origins — evaluation order and Stop",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "RequestSchemeMatchConditionParameters",
+        ["operator", "negate_condition", "match_values"],
+        "azure/front_door_tls — a redirect limited to HTTP requests",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "UrlRedirectActionParameters",
+        ["redirect_type", "destination_protocol"],
+        "azure/front_door_tls — a rule-set HTTP→HTTPS redirect",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "RouteConfigurationOverrideActionParameters",
+        ["origin_group_override"],
+        "azure/front_door_origins — a rule that changes the origin group or forwarding protocol",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "OriginGroupOverride",
+        ["origin_group", "forwarding_protocol"],
+        "azure/front_door_origins",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "AFDOriginGroupProperties",
+        ["load_balancing_settings", "health_probe_settings", "session_affinity_state", "authentication"],
+        "azure/front_door_origins",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "AFDOriginProperties",
+        ["azure_origin", "host_name", "http_port", "https_port", "origin_host_header", "priority", "weight",
+         "shared_private_link_resource", "enabled_state", "enforce_certificate_name_check"],
+        "azure/front_door_origins",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "SharedPrivateLinkResourceProperties",
+        ["private_link", "private_link_location", "group_id", "status"],
+        "azure/front_door_origins",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "LoadBalancingSettingsParameters",
+        ["sample_size", "successful_samples_required", "additional_latency_in_milliseconds"],
+        "azure/front_door_origins",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "HealthProbeParameters",
+        ["probe_path", "probe_request_type", "probe_protocol", "probe_interval_in_seconds"],
+        "azure/front_door_origins",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "OriginAuthenticationProperties",
+        ["type", "scope", "user_assigned_identity"],
+        "azure/front_door_origins — managed-identity origin authentication",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "SecurityPolicyWebApplicationFirewallParameters",
+        ["waf_policy", "associations"],
+        "azure/front_door_waf_coverage — isProfileLevel is read by wire key, not modeled in 14.x",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "SecurityPolicyWebApplicationFirewallAssociation",
+        ["domains", "patterns_to_match"],
+        "azure/front_door_waf_coverage — routes is read by wire key, not modeled in 14.x",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "ActivatedResourceReference",
+        ["id", "is_active"],
+        "azure/front_door_waf_coverage",
+    ),
+    (
+        "azure.mgmt.monitor.models",
+        "DiagnosticSettingsCategoryResource",
+        ["category_type", "category_groups"],
+        "azure/front_door_waf_coverage — a category captured through its group (allLogs, audit)",
+    ),
+    (
+        "azure.mgmt.monitor.models",
+        "DiagnosticSettingsResource",
+        ["event_hub_name", "marketplace_partner_id"],
+        "azure/front_door_waf_coverage — the remaining WAF-log destinations",
+    ),
+    # --- Front Door: the `properties` pivots azure-mgmt-cdn 14 / frontdoor 2 moved fields under
+    (
+        "azure.mgmt.frontdoor.models",
+        "WebApplicationFirewallPolicy",
+        ["location"],
+        "azure/front_door_waf_policies",
+    ),
+    (
+        "azure.mgmt.frontdoor.models",
+        "ManagedRuleSetList",
+        ["managed_rule_sets"],
+        "azure/front_door_waf_policies — exceptionsList is read by wire key beside it",
+    ),
+    (
+        "azure.mgmt.frontdoor.models",
+        "ManagedRuleExclusion",
+        ["match_variable", "selector_match_operator", "selector"],
+        "azure/front_door_waf_policies — exclusions",
+    ),
+    (
+        "azure.mgmt.frontdoor.models",
+        "CustomRuleList",
+        ["rules"],
+        "azure/front_door_waf_policies — custom and rate-limit rules",
+    ),
+    (
+        "azure.mgmt.frontdoor.models",
+        "GroupByVariable",
+        ["variable_name"],
+        "azure/front_door_waf_policies",
+    ),
+    (
+        "azure.mgmt.frontdoor.models",
+        "ManagedRuleSetDefinition",
+        ["properties"],
+        "azure/front_door_waf_policies — rule-set definitions",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "ProfileProperties",
+        ["resource_state"],
+        "azure/front_door_*",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "Sku",
+        ["name"],
+        "azure/front_door_* — the SKU that separates Front Door from classic CDN",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "AFDEndpoint",
+        ["properties"],
+        "azure/front_door_*",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "Route",
+        ["properties"],
+        "azure/front_door_*",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "ResourceReference",
+        ["id"],
+        "azure/front_door_* — route origin group, rule sets, certificate secret, private link target",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "AFDDomain",
+        ["properties"],
+        "azure/front_door_tls, azure/front_door_waf_coverage",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "SecurityPolicy",
+        ["properties"],
+        "azure/front_door_waf_coverage",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "SecurityPolicyProperties",
+        ["parameters", "deployment_status", "provisioning_state"],
+        "azure/front_door_waf_coverage",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "SecurityPolicyWebApplicationFirewallParameters",
+        ["type"],
+        "azure/front_door_waf_coverage — only WebApplicationFirewall policies attach a WAF",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "Secret",
+        ["properties"],
+        "azure/front_door_tls",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "CustomerCertificateParameters",
+        ["type"],
+        "azure/front_door_tls",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "ManagedCertificateParameters",
+        ["type"],
+        "azure/front_door_tls",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "AzureFirstPartyManagedCertificateParameters",
+        ["type", "subject", "subject_alternative_names", "certificate_authority", "thumbprint",
+         "expiration_date", "secret_source"],
+        "azure/front_door_tls — a first-party managed certificate's expiry",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "RuleSet",
+        ["id", "name"],
+        "azure/front_door_tls, azure/front_door_origins — the join from a route's ruleSets",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "Rule",
+        ["properties"],
+        "azure/front_door_tls, azure/front_door_origins",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "DeliveryRuleRequestSchemeCondition",
+        ["name", "parameters"],
+        "azure/front_door_tls",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "UrlRedirectAction",
+        ["name", "parameters"],
+        "azure/front_door_tls",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "DeliveryRuleRouteConfigurationOverrideAction",
+        ["name", "parameters"],
+        "azure/front_door_origins",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "AFDOriginGroup",
+        ["properties"],
+        "azure/front_door_origins",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "AFDOriginGroupProperties",
+        ["provisioning_state", "deployment_status"],
+        "azure/front_door_origins",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "AFDOrigin",
+        ["properties"],
+        "azure/front_door_origins",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "AFDOriginProperties",
+        ["provisioning_state", "deployment_status"],
+        "azure/front_door_origins",
+    ),
+    # --- private endpoints: network is TypeSpec, so pin the Properties models -----
+    (
+        "azure.mgmt.network.models",
+        "PrivateEndpointProperties",
+        [
+            "subnet",
+            "network_interfaces",
+            "private_link_service_connections",
+            "manual_private_link_service_connections",
+            "custom_dns_configs",
+        ],
+        "azure/private_endpoint_configuration — a renamed connections field reads "
+        "as 'endpoint connects to nothing'",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "PrivateLinkServiceConnectionProperties",
+        ["private_link_service_id", "group_ids", "private_link_service_connection_state"],
+        "azure/private_endpoint_configuration — the target resource and slot detection",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "PrivateLinkServiceConnectionState",
+        ["status", "description", "actions_required"],
+        "azure/private_endpoint_configuration — a renamed status reads as no "
+        "endpoint approved",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "PrivateDnsZoneGroupPropertiesFormat",
+        ["private_dns_zone_configs"],
+        "azure/private_endpoint_configuration — a rename reads as 'no private DNS'",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "PrivateDnsZonePropertiesFormat",
+        ["private_dns_zone_id", "record_sets"],
+        "azure/private_endpoint_configuration, azure/private_dns_zone_configuration",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "RecordSet",
+        ["fqdn", "ip_addresses", "record_type"],
+        "azure/private_dns_zone_configuration — a rename leaves every zone-group proof false, "
+        "so zone-group-backed records drop to the network match",
+    ),
+    # --- private DNS ---------------------------------------------------------
+    (
+        "azure.mgmt.privatedns.models",
+        "VirtualNetworkLinkProperties",
+        ["virtual_network", "registration_enabled", "resolution_policy", "virtual_network_link_state"],
+        "azure/private_dns_zone_configuration, azure/dns_configuration — a renamed "
+        "virtual_network reads every link as pointing at a deleted VNet",
+    ),
+    (
+        "azure.mgmt.privatedns.models",
+        "RecordSetProperties",
+        ["a_records", "aaaa_records", "cname_record", "fqdn", "ttl", "is_auto_registered"],
+        "azure/private_dns_zone_configuration — a renamed a_records reads every "
+        "privatelink record as having no IP",
+    ),
+    (
+        "azure.mgmt.privatedns.models",
+        "ARecord",
+        ["ipv4_address"],
+        "azure/private_dns_zone_configuration — the IP matched to private endpoints",
+    ),
+    (
+        "azure.mgmt.privatedns.models",
+        "PrivateZoneProperties",
+        ["number_of_record_sets", "number_of_virtual_network_links", "provisioning_state"],
+        "azure/private_dns_zone_configuration, azure/dns_configuration",
+    ),
+    (
+        "azure.mgmt.resourcegraph.models",
+        "QueryRequest",
+        ["subscriptions", "query", "options"],
+        "_shared/resource_graph query_all — an unscoped request "
+        "(subscriptions=None) is how cross-subscription lookups resolve",
+    ),
+    # --- network flow logs -----------------------------------------------------
+    (
+        "azure.mgmt.network.models",
+        "FlowLogPropertiesFormat",
+        ["enabled", "target_resource_id", "retention_policy", "storage_id", "format", "flow_analytics_configuration"],
+        "azure/network_flow_logs — a renamed target_resource_id reads every subnet as unlogged",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "RetentionPolicyParameters",
+        ["days", "enabled"],
+        "azure/network_flow_logs",
+    ),
+    (
+        "azure.mgmt.network.models",
+        "TrafficAnalyticsConfigurationProperties",
+        ["enabled", "workspace_resource_id", "traffic_analytics_interval"],
+        "azure/network_flow_logs — Traffic Analytics",
+    ),
+    # --- AI services -------------------------------------------------------------
+    (
+        "azure.mgmt.cognitiveservices.models",
+        "AccountProperties",
+        [
+            "public_network_access",
+            "network_acls",
+            "private_endpoint_connections",
+            "disable_local_auth",
+            "encryption",
+            "restrict_outbound_network_access",
+        ],
+        "azure/ai_services_configuration — a renamed disable_local_auth reads every "
+        "account as accepting API keys",
+    ),
+    (
+        "azure.mgmt.cognitiveservices.models",
+        "NetworkRuleSet",
+        ["default_action", "ip_rules", "virtual_network_rules"],
+        "azure/ai_services_configuration — network_exposure",
+    ),
+    (
+        "azure.mgmt.cognitiveservices.models",
+        "Encryption",
+        ["key_source", "key_vault_properties"],
+        "azure/ai_services_configuration — customer-managed keys",
+    ),
+    (
+        "azure.mgmt.cognitiveservices.models",
+        "DeploymentProperties",
+        ["model", "rai_policy_name", "version_upgrade_option"],
+        "azure/ai_services_configuration — the content filter each deployment runs under",
+    ),
+    (
+        "azure.mgmt.cognitiveservices.models",
+        "RaiPolicyContentFilter",
+        ["name", "source", "enabled", "blocking", "severity_threshold"],
+        "azure/ai_services_configuration — a renamed blocking reads every filter as "
+        "annotate-only",
+    ),
+    # --- managed identities --------------------------------------------------------
+    (
+        "azure.mgmt.msi.models",
+        "Identity",
+        ["principal_id", "client_id"],
+        "azure/managed_identity_configuration — principal_id joins identities to roles",
+    ),
+    (
+        "azure.mgmt.authorization.models",
+        "RoleDefinition",
+        ["role_name", "permissions"],
+        "azure/managed_identity_configuration — role capabilities come from permissions",
+    ),
+    (
+        "azure.mgmt.authorization.models",
+        "Permission",
+        ["actions", "not_actions", "data_actions", "not_data_actions"],
+        "azure/managed_identity_configuration — a renamed not_actions would read Contributor "
+        "as able to grant access",
+    ),
+    (
+        "azure.mgmt.authorization.models",
+        "RoleAssignment",
+        ["principal_id", "role_definition_id", "scope"],
+        "azure/managed_identity_configuration",
+    ),
+    # --- API Management --------------------------------------------------------------
+    (
+        "azure.mgmt.apimanagement.models",
+        "ApiManagementServiceResource",
+        [
+            "public_network_access",
+            "virtual_network_type",
+            "private_endpoint_connections",
+            "custom_properties",
+            "created_at_utc",
+            "hostname_configurations",
+            "developer_portal_status",
+        ],
+        "azure/api_management_configuration — a renamed custom_properties reads every "
+        "legacy protocol as its default",
+    ),
+    (
+        "azure.mgmt.apimanagement.models",
+        "ApiContract",
+        ["protocols", "subscription_required", "authentication_settings", "service_url"],
+        "azure/api_management_configuration",
+    ),
+    (
+        "azure.mgmt.apimanagement.models",
+        "BackendTlsProperties",
+        ["validate_certificate_chain", "validate_certificate_name"],
+        "azure/api_management_configuration",
+    ),
+    (
+        "azure.mgmt.apimanagement.models",
+        "NamedValueContract",
+        ["secret", "key_vault"],
+        "azure/api_management_configuration — secrets held outside Key Vault",
+    ),
+    (
+        "azure.mgmt.apimanagement.models",
+        "SubscriptionContract",
+        ["scope", "state", "allow_tracing"],
+        "azure/api_management_configuration — a renamed scope hides the all-access subscription",
+    ),
+    (
+        "azure.mgmt.apimanagement.models",
+        "BackendCredentialsContract",
+        ["header", "query", "authorization", "certificate", "certificate_ids"],
+        "azure/api_management_configuration — backend auth_configured",
+    ),
+    (
+        "azure.mgmt.apimanagement.models",
+        "ApiVersionConstraint",
+        ["min_api_version"],
+        "azure/api_management_configuration — legacy management API versions",
+    ),
+    # --- container workloads: TypeSpec SDKs, so pin the *Properties models -----------
+    (
+        "azure.mgmt.appcontainers.models",
+        "ManagedEnvironmentProperties",
+        ["vnet_configuration", "public_network_access", "peer_authentication", "peer_traffic_configuration", "app_logs_configuration", "zone_redundant"],
+        "azure/container_workloads_configuration — a renamed vnet_configuration reads every "
+        "environment as public",
+    ),
+    (
+        "azure.mgmt.appcontainers.models",
+        "VnetConfiguration",
+        ["internal", "infrastructure_subnet_id"],
+        "azure/container_workloads_configuration",
+    ),
+    (
+        "azure.mgmt.appcontainers.models",
+        "JobProperties",
+        ["configuration", "template", "environment_id"],
+        "azure/container_workloads_configuration",
+    ),
+    (
+        "azure.mgmt.appcontainers.models",
+        "ContainerAppProperties",
+        ["configuration", "template", "environment_id"],
+        "azure/container_workloads_configuration",
+    ),
+    (
+        "azure.mgmt.appcontainers.models",
+        "Secret",
+        ["name", "key_vault_url", "identity"],
+        "azure/container_workloads_configuration — a renamed key_vault_url reads every secret as "
+        "stored in the app",
+    ),
+    (
+        "azure.mgmt.appcontainers.models",
+        "RegistryCredentials",
+        ["server", "identity", "password_secret_ref"],
+        "azure/container_workloads_configuration",
+    ),
+    (
+        "azure.mgmt.appcontainers.models",
+        "EnvironmentVar",
+        ["name", "secret_ref"],
+        "azure/container_workloads_configuration — secret-like plain variables",
+    ),
+    (
+        "azure.mgmt.appcontainers.models",
+        "Ingress",
+        ["external", "allow_insecure", "ip_security_restrictions", "client_certificate_mode"],
+        "azure/container_workloads_configuration — internet-facing apps",
+    ),
+    (
+        "azure.mgmt.appcontainers.models",
+        "AuthConfigProperties",
+        ["platform", "global_validation", "identity_providers"],
+        "azure/container_workloads_configuration — Easy Auth",
+    ),
+    (
+        "azure.mgmt.appcontainers.models",
+        "AuthPlatform",
+        ["enabled"],
+        "azure/container_workloads_configuration — a renamed enabled reads every app as unauthenticated",
+    ),
+    (
+        "azure.mgmt.appcontainers.models",
+        "GlobalValidation",
+        ["unauthenticated_client_action"],
+        "azure/container_workloads_configuration",
+    ),
+    (
+        "azure.mgmt.containerinstance.models",
+        "ContainerGroupProperties",
+        ["ip_address", "subnet_ids", "containers", "image_registry_credentials", "encryption_properties", "diagnostics", "volumes"],
+        "azure/container_workloads_configuration",
+    ),
+    (
+        "azure.mgmt.containerinstance.models",
+        "IpAddress",
+        ["type", "ports", "dns_name_label"],
+        "azure/container_workloads_configuration — a renamed type reads every group as private",
+    ),
+    (
+        "azure.mgmt.containerinstance.models",
+        "EnvironmentVariable",
+        ["name", "value", "secure_value"],
+        "azure/container_workloads_configuration — secure variables are told by the absence of both",
+    ),
+    (
+        "azure.mgmt.containerinstance.models",
+        "ImageRegistryCredential",
+        ["server", "username", "identity"],
+        "azure/container_workloads_configuration",
+    ),
+    # --- data services -------------------------------------------------------------
+    (
+        "azure.mgmt.mongocluster.models",
+        "MongoClusterProperties",
+        ["public_network_access", "auth_config", "high_availability", "encryption", "data_api", "private_endpoint_connections"],
+        "azure/data_services_configuration",
+    ),
+    (
+        "azure.mgmt.mongocluster.models",
+        "AuthConfigProperties",
+        ["allowed_modes"],
+        "azure/data_services_configuration — native vs Entra authentication",
+    ),
+    (
+        "azure.mgmt.mongocluster.models",
+        "FirewallRuleProperties",
+        ["start_ip_address", "end_ip_address"],
+        "azure/data_services_configuration — a renamed range reads allow-all as restricted",
+    ),
+    (
+        "azure.mgmt.kusto.models",
+        "ClusterProperties",
+        ["public_network_access", "allowed_ip_range_list", "restrict_outbound_network_access", "enable_disk_encryption", "enable_double_encryption", "key_vault_properties", "trusted_external_tenants", "virtual_network_configuration", "private_endpoint_connections", "enable_purge"],
+        "azure/data_services_configuration — a renamed trusted_external_tenants hides trust of any tenant",
+    ),
+    (
+        "azure.mgmt.kusto.models",
+        "CalloutPolicy",
+        ["callout_type", "callout_uri_regex", "outbound_access"],
+        "azure/data_services_configuration — outbound callouts",
+    ),
+    (
+        "azure.mgmt.kusto.models",
+        "TrustedExternalTenant",
+        ["value"],
+        "azure/data_services_configuration",
+    ),
+    (
+        "azure.mgmt.kusto.models",
+        "ReadWriteDatabaseProperties",
+        ["soft_delete_period", "hot_cache_period"],
+        "azure/data_services_configuration — database retention",
+    ),
+    (
+        "azure.mgmt.kusto.models",
+        "ClusterPrincipalProperties",
+        ["role", "principal_type", "principal_name", "principal_id"],
+        "azure/data_services_configuration — admin assignments",
+    ),
+    (
+        "azure.mgmt.kusto.models",
+        "DatabasePrincipalProperties",
+        ["role", "principal_type", "principal_name", "principal_id"],
+        "azure/data_services_configuration — admin assignments",
+    ),
+    (
+        "azure.mgmt.eventhub.models",
+        "EHNamespaceProperties",
+        ["minimum_tls_version", "public_network_access", "disable_local_auth", "zone_redundant", "encryption", "private_endpoint_connections", "geo_data_replication"],
+        "azure/data_services_configuration — a renamed disable_local_auth reads every namespace as "
+        "accepting shared keys",
+    ),
+    (
+        "azure.mgmt.eventhub.models",
+        "GeoDataReplicationProperties",
+        ["locations"],
+        "azure/data_services_configuration — geo-replica regions",
+    ),
+    (
+        "azure.mgmt.eventhub.models",
+        "Encryption",
+        ["key_source", "require_infrastructure_encryption"],
+        "azure/data_services_configuration — customer-managed keys",
+    ),
+    (
+        "azure.mgmt.eventhub.models",
+        "NetworkRuleSetProperties",
+        ["default_action", "public_network_access", "trusted_service_access_enabled", "ip_rules", "virtual_network_rules"],
+        "azure/data_services_configuration — network exposure",
+    ),
+    (
+        "azure.mgmt.eventhub.models",
+        "AuthorizationRuleProperties",
+        ["rights"],
+        "azure/data_services_configuration — Manage rights on shared keys",
+    ),
+    (
+        "azure.mgmt.eventhub.models",
+        "EventhubProperties",
+        ["message_retention_in_days", "retention_description", "capture_description", "status", "partition_count"],
+        "azure/data_services_configuration",
+    ),
+    (
+        "azure.mgmt.recoveryservicesbackup.models",
+        "Job",
+        ["entity_friendly_name", "backup_management_type", "operation", "status", "start_time", "end_time"],
+        "azure/backup_recovery_status — restore_jobs",
+    ),
+    (
+        "azure.mgmt.recoveryservicesbackup.models",
+        "AzureWorkloadJob",
+        ["workload_type", "duration", "error_details", "extended_info"],
+        "azure/backup_recovery_status — restore_jobs",
+    ),
+    (
+        "azure.mgmt.recoveryservicesbackup.models",
+        "AzureIaaSVMJob",
+        ["duration", "error_details", "extended_info", "container_name", "is_user_triggered"],
+        "azure/backup_recovery_status — restore_jobs",
+    ),
+    (
+        "azure.mgmt.recoveryservicesbackup.models",
+        "AzureWorkloadJobExtendedInfo",
+        ["property_bag"],
+        "azure/backup_recovery_status — the recovery point time and restore target",
+    ),
+    (
+        "azure.mgmt.recoveryservicesbackup.models",
+        "AzureIaaSVMJobExtendedInfo",
+        ["property_bag"],
+        "azure/backup_recovery_status — the recovery point time and restore target",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    "module,model,fields,affects",
+    REQUIRED_MODEL_FIELDS,
+    ids=[f"{c[1]}.{'+'.join(c[2])}" for c in REQUIRED_MODEL_FIELDS],
+)
+def test_model_fields_present(
+    module: str, model: str, fields: list[str], affects: str
+) -> None:
+    """A model field a fetcher reads must still be declared."""
+    declared = _model_fields(_import(module, model))  # type: ignore[arg-type]
+    missing = [f for f in fields if f not in declared]
+    assert not missing, (
+        f"{model} no longer declares: {', '.join(missing)}\n"
+        f"  declared fields: {', '.join(sorted(declared))}\n"
+        f"  affected fetchers: {affects}\n"
+        f"  This produces WRONG evidence rather than empty evidence, which is "
+        f"worse — the control reads as unimplemented."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Front Door: wire-key reads, polymorphic models, the pinned api-version
+# ---------------------------------------------------------------------------
+# Fields azure-mgmt-cdn 14 / azure-mgmt-frontdoor 2 do not model are read by their
+# wire key through the dict-backed hybrid models (`_shared/frontdoor.wire`). If a
+# release drops that backing, `.get` vanishes and the read returns None: WAF scope
+# reads as "none" and the coverage verdict is wrong with no error.
+#
+# (module, model, body, wire-key path, expected value, affected fetchers)
+WIRE_KEY_READS: list[tuple[str, str, dict, list[str], object, str]] = [
+    (
+        "azure.mgmt.cdn.models",
+        "SecurityPolicyWebApplicationFirewallParameters",
+        {"type": "WebApplicationFirewall", "isProfileLevel": True},
+        ["isProfileLevel"],
+        True,
+        "azure/front_door_waf_coverage — profile-level WAF scope",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "SecurityPolicyWebApplicationFirewallAssociation",
+        {"domains": [], "routes": [{"id": "/r1"}]},
+        ["routes"],
+        [{"id": "/r1"}],
+        "azure/front_door_waf_coverage — route-level WAF scope",
+    ),
+    (
+        "azure.mgmt.frontdoor.models",
+        "ManagedRuleSetList",
+        {"managedRuleSets": [], "exceptionsList": {"exceptions": [{"matchVariable": "RequestUri"}]}},
+        ["exceptionsList", "exceptions"],
+        [{"matchVariable": "RequestUri"}],
+        "azure/front_door_waf_policies — WAF exceptions",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "AFDOriginProperties",
+        {"hostName": "o.example.net", "certificateNameCheckValidationMode": "OriginHostname"},
+        ["certificateNameCheckValidationMode"],
+        "OriginHostname",
+        "azure/front_door_origins",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "AFDOriginProperties",
+        {"hostName": "o.example.net", "customCertificateSubjects": ["o.example.net"]},
+        ["customCertificateSubjects"],
+        ["o.example.net"],
+        "azure/front_door_origins",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "OriginAuthenticationProperties",
+        {"type": "SystemAssignedIdentity", "tokenDestinationHeader": "X-Azure-Authorization"},
+        ["tokenDestinationHeader"],
+        "X-Azure-Authorization",
+        "azure/front_door_origins",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    "module,model,body,path,expected,affects",
+    WIRE_KEY_READS,
+    ids=[f"{c[1]}.{'.'.join(c[3])}" for c in WIRE_KEY_READS],
+)
+def test_front_door_wire_key_reads(
+    module: str, model: str, body: dict, path: list[str], expected: object, affects: str
+) -> None:
+    """An unmodeled wire key must stay readable with `.get` on the deserialized model."""
+    value: object = _import(module, model)(body)  # type: ignore[operator]
+    for key in path:
+        assert hasattr(value, "get"), (
+            f"{model} no longer supports .get('{key}') — the hybrid model lost its dict backing.\n"
+            f"  affected fetchers: {affects}\n"
+            f"  _shared/frontdoor.wire() would return None and the field would read as absent."
+        )
+        value = value.get(key)  # type: ignore[attr-defined]
+    assert value == expected, f"{model} wire key {'.'.join(path)} read {value!r}, expected {expected!r} ({affects})"
+
+
+# A discriminated field must still deserialize to the subclass that carries the
+# fields the fetcher reads; the base class has none of them, so every read is None.
+#
+# (module, model, body, attribute path, expected class, affected fetchers)
+POLYMORPHIC_READS: list[tuple[str, str, dict, list[object], str, str]] = [
+    (
+        "azure.mgmt.cdn.models",
+        "SecretProperties",
+        {"parameters": {"type": "CustomerCertificate", "expirationDate": "2027-01-01T00:00:00+00:00"}},
+        ["parameters"],
+        "CustomerCertificateParameters",
+        "azure/front_door_tls — certificate expiry",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "SecretProperties",
+        {"parameters": {"type": "ManagedCertificate", "expirationDate": "2027-01-01T00:00:00+00:00"}},
+        ["parameters"],
+        "ManagedCertificateParameters",
+        "azure/front_door_tls — certificate expiry",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "SecretProperties",
+        {"parameters": {"type": "AzureFirstPartyManagedCertificate"}},
+        ["parameters"],
+        "AzureFirstPartyManagedCertificateParameters",
+        "azure/front_door_tls — certificate expiry",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "RuleProperties",
+        {"conditions": [{"name": "RequestScheme", "parameters": {
+            "typeName": "DeliveryRuleRequestSchemeConditionParameters", "operator": "Equal", "matchValues": ["HTTP"]}}]},
+        ["conditions", 0],
+        "DeliveryRuleRequestSchemeCondition",
+        "azure/front_door_tls — rule-set HTTP→HTTPS redirect",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "RuleProperties",
+        {"actions": [{"name": "UrlRedirect", "parameters": {
+            "typeName": "DeliveryRuleUrlRedirectActionParameters", "redirectType": "Moved", "destinationProtocol": "Https"}}]},
+        ["actions", 0],
+        "UrlRedirectAction",
+        "azure/front_door_tls — rule-set HTTP→HTTPS redirect",
+    ),
+    (
+        "azure.mgmt.cdn.models",
+        "RuleProperties",
+        {"actions": [{"name": "RouteConfigurationOverride", "parameters": {
+            "typeName": "DeliveryRuleRouteConfigurationOverrideActionParameters",
+            "originGroupOverride": {"originGroup": {"id": "/og"}, "forwardingProtocol": "HttpOnly"}}}]},
+        ["actions", 0],
+        "DeliveryRuleRouteConfigurationOverrideAction",
+        "azure/front_door_origins — a rule that changes the forwarding protocol",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    "module,model,body,path,expected,affects",
+    POLYMORPHIC_READS,
+    ids=[f"{c[1]}->{c[4]}" for c in POLYMORPHIC_READS],
+)
+def test_front_door_polymorphic_reads(
+    module: str, model: str, body: dict, path: list[object], expected: str, affects: str
+) -> None:
+    """A discriminated Front Door field must deserialize to the subclass the fetcher reads."""
+    value: object = _import(module, model)(body)  # type: ignore[operator]
+    for step in path:
+        value = value[step] if isinstance(step, int) else getattr(value, step)  # type: ignore[index]
+    assert type(value).__name__ == expected, (
+        f"{model}.{'.'.join(map(str, path))} deserialized to {type(value).__name__}, not {expected}.\n"
+        f"  affected fetchers: {affects}\n"
+        f"  The base class carries none of the fields read, so they would all be None."
+    )
+
+
+def test_cdn_client_honours_pinned_api_version() -> None:
+    """Security policies and origins are read on a client built with api_version=2026-07-01.
+
+    The per-call `api_version` kwarg is silently ignored by azure-mgmt-cdn 14; the
+    client-level one is what reaches the request. If the constructor stops honouring it,
+    isProfileLevel and associations[].routes stop coming back and WAF scope reads as none.
+    """
+    from azure.mgmt.cdn import CdnManagementClient
+
+    client = CdnManagementClient(_FakeCredential(), SUBSCRIPTION_ID, api_version="2026-07-01")
+    config = getattr(client, "_config", None)
+    assert getattr(config, "api_version", None) == "2026-07-01", (
+        "CdnManagementClient no longer records api_version from its constructor.\n"
+        "  affected fetchers: azure/front_door_waf_coverage, azure/front_door_origins"
+    )
+
+
+def test_arm_rest_requests_absolute_urls() -> None:
+    """ARMPipelineClient.send_request sends a relative path as given; the auth policy then refuses it as non-https."""
+    import sys
+    from pathlib import Path
+
+    from azure.core.pipeline.transport import HttpTransport
+    from azure.mgmt.core import ARMPipelineClient
+
+    shared = Path(__file__).resolve().parent.parent / "fetchers" / "azure" / "_shared"
+    sys.path[:0] = [str(shared.parent.parent / "_lib"), str(shared)]
+    import arm_rest
+
+    class _Response:
+        status_code = 200
+
+        def __init__(self, body):
+            self._body = body
+
+        def read(self):
+            return b""
+
+        def close(self):
+            pass
+
+        def json(self):
+            return self._body
+
+    class _Transport(HttpTransport):
+        def __init__(self, pages):
+            self.pages, self.urls = list(pages), []
+
+        def send(self, request, **kwargs):
+            self.urls.append(request.url)
+            return _Response(self.pages.pop(0))
+
+        def open(self):
+            pass
+
+        def close(self):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+    next_link = "https://management.azure.com/subscriptions/s/next?api-version=1&$skiptoken=a"
+    transport = _Transport([{"value": [1], "nextLink": next_link}, {"value": [2]}])
+    client = ARMPipelineClient(base_url="https://management.azure.com", policies=[], transport=transport)
+
+    assert arm_rest.list_all(client, "/subscriptions/s/providers/P/things", "1") == {"items": [1, 2], "pages": 2}
+    assert transport.urls == [
+        "https://management.azure.com/subscriptions/s/providers/P/things?api-version=1",
+        next_link,
+    ], "affected fetchers: azure/alert_rules, azure/activity_log_alerts"
+
+
+# ---------------------------------------------------------------------------
+# Microsoft Graph
+# ---------------------------------------------------------------------------
+GRAPH_BUILDERS = [
+    ("organization", "_shared/entra_graph — tenant name resolution; azure/residual_resources — tenant check"),
+    ("applications", "azure/entra_app_registrations"),
+    ("users", "azure/entra_mfa_status"),
+    ("directory_roles", "azure/entra_privileged_roles, azure/entra_mfa_status — admins"),
+    ("groups", "azure/entra_mfa_status — users holding an admin role through a group"),
+    ("identity", "azure/entra_conditional_access_policies"),
+    ("service_principals", "azure/entra_service_principals, azure/managed_identity_configuration"),
+    ("policies", "azure/entra_authentication_policy"),
+    ("group_settings", "azure/entra_authentication_policy"),
+    ("group_setting_templates", "azure/entra_authentication_policy"),
+    ("subscribed_skus", "azure/entra_authentication_policy"),
+    ("directory_objects", "azure/residual_resources — getByIds; without it no deleted principal is found"),
+    ("oauth2_permission_grants", "azure/entra_service_principals — delegated grants"),
+]
+
+
+@pytest.mark.parametrize(
+    "builder,affects", GRAPH_BUILDERS, ids=[b[0] for b in GRAPH_BUILDERS]
+)
+def test_graph_request_builders_present(builder: str, affects: str) -> None:
+    """The Graph request builders the entra_* fetchers walk must still exist."""
+    client = _build("msgraph", "GraphServiceClient")
+    assert getattr(client, builder, None) is not None, (
+        f"GraphServiceClient.{builder} is gone.\n"
+        f"  affected fetchers: {affects}\n"
+        f"  msgraph-sdk is pinned <2; a major bump restructures the builders."
+    )
+
+
+def test_graph_authentication_strength_builder_present() -> None:
+    """azure/entra_conditional_access_policies reads the strengths raw through this builder."""
+    client = _build("msgraph", "GraphServiceClient")
+    builder = getattr(client.policies, "authentication_strength_policies", None)
+    assert builder is not None and callable(getattr(builder, "to_get_request_information", None)), (
+        "policies.authentication_strength_policies (or its to_get_request_information) is gone.\n"
+        "  affected fetchers: azure/entra_conditional_access_policies — phishing-resistant MFA reads null"
+    )
+    assert callable(getattr(builder.request_adapter, "send_primitive_async", None)), (
+        "the request adapter's send_primitive_async is gone.\n"
+        "  affected fetchers: azure/entra_conditional_access_policies — the raw strength read fails"
+    )
+
+
+def test_graph_admin_membership_builders_present() -> None:
+    """The per-item builders azure/entra_mfa_status walks to find every admin."""
+    client = _build("msgraph", "GraphServiceClient")
+    role = client.directory_roles.by_directory_role_id("00000000-0000-0000-0000-000000000000")
+    group = client.groups.by_group_id("00000000-0000-0000-0000-000000000000")
+    assert getattr(role, "members", None) is not None, (
+        "directory_roles.by_directory_role_id(...).members is gone.\n"
+        "  affected fetchers: azure/entra_privileged_roles, azure/entra_mfa_status"
+    )
+    assert getattr(role.members, "graph_service_principal", None) is not None, (
+        "directory_roles.by_directory_role_id(...).members.graph_service_principal is gone.\n"
+        "  affected fetchers: azure/entra_privileged_roles — v1.0 members leaves service principals out"
+    )
+    assert getattr(group, "transitive_members", None) is not None, (
+        "groups.by_group_id(...).transitive_members is gone.\n"
+        "  affected fetchers: azure/entra_mfa_status — admins via a group would be missed"
+    )
+
+
+@pytest.mark.parametrize(
+    "path,params",
+    [
+        ("role_management.directory.role_definitions", []),
+        ("role_management.directory.role_eligibility_schedule_instances", ["expand"]),
+        ("role_management.directory.role_assignment_schedule_instances", ["expand"]),
+        ("policies.role_management_policy_assignments", ["filter", "expand"]),
+    ],
+)
+def test_graph_pim_builders_present(path: str, params: list[str]) -> None:
+    """azure/entra_pim_assignments walks these and builds each query from `<Builder>GetQueryParameters`."""
+    builder: object = _build("msgraph", "GraphServiceClient")
+    for part in path.split("."):
+        builder = getattr(builder, part, None)
+        assert builder is not None, f"GraphServiceClient.{path} is gone.\n  affected fetchers: azure/entra_pim_assignments"
+    query = getattr(type(builder), f"{type(builder).__name__}GetQueryParameters", None)
+    assert query is not None, f"{type(builder).__name__}GetQueryParameters is gone (azure/entra_pim_assignments)"
+    assert set(params) <= set(inspect.signature(query).parameters), (
+        f"{type(builder).__name__}GetQueryParameters lost one of {params} (azure/entra_pim_assignments)"
+    )
+
+
+def test_graph_pim_rule_models_present() -> None:
+    """The policy-rule fields azure/entra_pim_assignments reads; a rename reads as an unknown rule, not an error."""
+    for module, name, fields in [
+        ("unified_role_management_policy_expiration_rule", "UnifiedRoleManagementPolicyExpirationRule",
+         ["is_expiration_required", "maximum_duration"]),
+        ("unified_role_management_policy_enablement_rule", "UnifiedRoleManagementPolicyEnablementRule", ["enabled_rules"]),
+        ("unified_role_management_policy_approval_rule", "UnifiedRoleManagementPolicyApprovalRule", ["setting"]),
+        ("unified_role_management_policy_authentication_context_rule",
+         "UnifiedRoleManagementPolicyAuthenticationContextRule", ["is_enabled", "claim_value"]),
+        ("approval_settings", "ApprovalSettings", ["is_approval_required", "approval_stages"]),
+        ("unified_approval_stage", "UnifiedApprovalStage",
+         ["primary_approvers", "is_escalation_enabled", "approval_stage_time_out_in_days"]),
+        ("unified_role_assignment_schedule_instance", "UnifiedRoleAssignmentScheduleInstance",
+         ["assignment_type", "member_type", "start_date_time", "end_date_time", "principal", "directory_scope_id"]),
+        ("unified_role_eligibility_schedule_instance", "UnifiedRoleEligibilityScheduleInstance",
+         ["member_type", "start_date_time", "end_date_time", "principal"]),
+    ]:
+        model = _import(f"msgraph.generated.models.{module}", name)
+        missing = [f for f in fields if f not in getattr(model, "__dataclass_fields__", {})]
+        assert not missing, f"{name} lost {missing} (azure/entra_pim_assignments)"
+
+
+def test_graph_service_principal_access_builders_present() -> None:
+    """The per-item builders azure/entra_service_principals reads past the $expand limit."""
+    client = _build("msgraph", "GraphServiceClient")
+    oid = "00000000-0000-0000-0000-000000000000"
+    sp = client.service_principals.by_service_principal_id(oid)
+    for name in ("owners", "app_role_assignments"):
+        assert getattr(sp, name, None) is not None, (
+            f"service_principals.by_service_principal_id(...).{name} is gone.\n"
+            "  affected fetchers: azure/entra_service_principals"
+        )
+    assert getattr(client.applications.by_application_id(oid), "owners", None) is not None, (
+        "applications.by_application_id(...).owners is gone.\n"
+        "  affected fetchers: azure/entra_service_principals"
+    )
+
+
+def test_graph_access_review_builders_present() -> None:
+    """azure/entra_access_reviews walks definitions → instances → decisions by id."""
+    builder: object = _build("msgraph", "GraphServiceClient")
+    for part in ("identity_governance", "access_reviews", "definitions"):
+        builder = getattr(builder, part, None)
+        assert builder is not None, "GraphServiceClient.identity_governance.access_reviews.definitions is gone (azure/entra_access_reviews)"
+    lists = [builder]
+    for step in ("by_access_review_schedule_definition_id", "instances", "by_access_review_instance_id", "decisions"):
+        attr = getattr(type(builder), step, None)
+        assert attr is not None, f"{type(builder).__name__}.{step} is gone (azure/entra_access_reviews)"
+        builder = attr(builder, "x") if callable(attr) and step.startswith("by_") else getattr(builder, step)
+        if not step.startswith("by_"):
+            lists.append(builder)
+    # Each list is paged with $top/$skip when Graph sends a full page without a nextLink.
+    for listed in lists:
+        query = getattr(type(listed), f"{type(listed).__name__}GetQueryParameters", None)
+        assert query is not None and {"top", "skip"} <= set(inspect.signature(query).parameters), (
+            f"{type(listed).__name__} lost $top/$skip (azure/entra_access_reviews)"
+        )
+
+
+def test_graph_access_review_models_present() -> None:
+    """The fields azure/entra_access_reviews reads; a rename reads as a setting turned off, not an error."""
+    for module, name, fields in [
+        ("access_review_schedule_definition", "AccessReviewScheduleDefinition",
+         ["display_name", "status", "scope", "instance_enumeration_scope", "reviewers", "settings", "stage_settings"]),
+        ("access_review_schedule_settings", "AccessReviewScheduleSettings",
+         ["recurrence", "default_decision_enabled", "default_decision", "auto_apply_decisions_enabled",
+          "instance_duration_in_days", "apply_actions"]),
+        ("patterned_recurrence", "PatternedRecurrence", ["pattern", "range"]),
+        ("recurrence_pattern", "RecurrencePattern", ["type", "interval"]),
+        ("access_review_query_scope", "AccessReviewQueryScope", ["query", "query_type", "query_root"]),
+        ("access_review_instance", "AccessReviewInstance", ["status", "start_date_time", "end_date_time"]),
+        ("access_review_instance_decision_item", "AccessReviewInstanceDecisionItem",
+         ["decision", "apply_result", "reviewed_by", "principal", "resource"]),
+    ]:
+        model = _import(f"msgraph.generated.models.{module}", name)
+        missing = [f for f in fields if f not in getattr(model, "__dataclass_fields__", {})]
+        assert not missing, f"{name} lost {missing} (azure/entra_access_reviews)"
+
+
+def test_graph_certificate_sign_in_builders_present() -> None:
+    """The per-item builders azure/entra_authentication_policy walks for trusted CAs and X.509 targets."""
+    client = _build("msgraph", "GraphServiceClient")
+    organization = client.organization.by_organization_id("00000000-0000-0000-0000-000000000000")
+    group = client.groups.by_group_id("00000000-0000-0000-0000-000000000000")
+    assert getattr(organization, "certificate_based_auth_configuration", None) is not None, (
+        "organization.by_organization_id(...).certificate_based_auth_configuration is gone.\n"
+        "  affected fetchers: azure/entra_authentication_policy — trusted CAs read null"
+    )
+    pki = client.directory.public_key_infrastructure.certificate_based_auth_configurations
+    assert getattr(pki.by_certificate_based_auth_pki_id("p"), "certificate_authorities", None) is not None, (
+        "directory.public_key_infrastructure.certificate_based_auth_configurations...certificate_authorities is gone.\n"
+        "  affected fetchers: azure/entra_authentication_policy — the PKI trust store reads failed"
+    )
+    assert getattr(group.transitive_members, "graph_user", None) is not None, (
+        "groups.by_group_id(...).transitive_members.graph_user is gone.\n"
+        "  affected fetchers: azure/entra_authentication_policy — X.509 targets read null"
+    )
+    builder = type(group.transitive_members.graph_user)
+    params = getattr(builder, "GraphUserRequestBuilderGetQueryParameters", None)
+    assert params is not None and {"select", "top"} <= set(vars(params()).keys()) | set(dir(params)), (
+        "GraphUserRequestBuilder.GraphUserRequestBuilderGetQueryParameters (select, top) is gone.\n"
+        "  affected fetchers: azure/entra_authentication_policy — X.509 target groups read without their users"
+    )
+
+
+def test_graph_group_member_builders_present() -> None:
+    """The per-group builders azure/entra_groups reads past the $expand limit."""
+    client = _build("msgraph", "GraphServiceClient")
+    group = client.groups.by_group_id("00000000-0000-0000-0000-000000000000")
+    assert callable(getattr(group.owners, "with_url", None)), (
+        "groups.by_group_id(...).owners.with_url is gone; the beta owner read needs it.\n"
+        "  affected fetchers: azure/entra_groups"
+    )
+    assert callable(getattr(group.members, "with_url", None)), (
+        "groups.by_group_id(...).members.with_url is gone; the beta member read needs it.\n"
+        "  affected fetchers: azure/entra_groups"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Credentials: the whole SDK surface of the _shared/azure_rest fetchers
+# ---------------------------------------------------------------------------
+# These call ARM, Graph and the Log Analytics query API over plain HTTP with the
+# api-version pinned in code, so no azure-mgmt bump can reshape what they read.
+# What an azure-identity or azure-core bump CAN take away is the token: the
+# credential classes, the keyword that pins the CLI to the target subscription's
+# account, and the get_token -> AccessToken(token, expires_on) path the client
+# caches on.
+REST_FETCHERS = (
+    "azure/sentinel_data_sources, azure/sentinel_analytics_rules, "
+    "azure/sentinel_incidents, azure/sentinel_automation_rules, "
+    "azure/sentinel_playbooks, azure/log_analytics_query_audit, "
+    "azure/log_analytics_deletion_rights, azure/log_storage_immutability, "
+    "azure/entra_diagnostic_settings, azure/entra_risky_users"
+)
+
+# (class, constructor keywords, affected fetchers)
+CREDENTIAL_SURFACE: list[tuple[str, list[str], str]] = [
+    ("DefaultAzureCredential", [], REST_FETCHERS),
+    ("ChainedTokenCredential", [], REST_FETCHERS),
+    (
+        "AzureCliCredential",
+        ["subscription"],
+        f"{REST_FETCHERS} — without the pin the CLI asks its default account, "
+        f"and a subscription in another tenant refuses that token",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    "name,keywords,affects", CREDENTIAL_SURFACE, ids=[c[0] for c in CREDENTIAL_SURFACE]
+)
+def test_credential_surface(name: str, keywords: list[str], affects: str) -> None:
+    """The azure.identity classes _shared/azure_rest builds its token from."""
+    cls = _import("azure.identity", name)
+    assert callable(getattr(cls, "get_token", None)), (
+        f"azure.identity.{name}.get_token is gone.\n  affected fetchers: {affects}"
+    )
+    params = inspect.signature(cls.__init__).parameters  # type: ignore[misc]
+    missing = [k for k in keywords if k not in params]
+    assert not missing, (
+        f"azure.identity.{name} no longer accepts {missing}.\n"
+        f"  affected fetchers: {affects}"
+    )
+
+
+def test_access_token_fields() -> None:
+    """_shared/azure_rest caches on expires_on and sends .token."""
+    from azure.core.credentials import AccessToken
+
+    missing = {"token", "expires_on"} - set(AccessToken._fields)
+    assert not missing, (
+        f"azure.core AccessToken lost {sorted(missing)}.\n"
+        f"  affected fetchers: {REST_FETCHERS}"
+    )
+
+
+def test_monitor_pin_still_needed() -> None:
+    """Assert the *reason* for the azure-mgmt-monitor pin, not the pin itself.
+
+    If a future release restores `diagnostic_settings`, this starts failing and
+    says so — the `<7` ceiling in pyproject.toml/requirements.txt and the
+    Dependabot ignore rule can then be lifted together. A pin nobody revisits
+    becomes stale debt.
+    """
+    import azure.mgmt.monitor as monitor
+
+    version = str(getattr(monitor, "VERSION", "unknown"))
+    client = _build("azure.mgmt.monitor", "MonitorManagementClient")
+    has_group = getattr(client, "diagnostic_settings", None) is not None
+
+    if version.split(".")[0] not in {"6", "unknown"} and has_group:
+        pytest.fail(
+            f"azure-mgmt-monitor {version} exposes diagnostic_settings again. "
+            f"The <7 pin and the azure-mgmt-monitor ignore rule in "
+            f".github/dependabot.yml can both be lifted."
+        )
+    assert has_group, (
+        f"azure-mgmt-monitor {version} has no diagnostic_settings operation "
+        f"group, so the installed version violates the >=6.0.2,<7 pin."
+    )

@@ -18,19 +18,14 @@ from typing import Any, Dict, List, Optional
 import requests
 from dotenv import load_dotenv
 
+# The shared failure-reporting helper lives in fetchers/_lib/ — the same import
+# mechanism as a category `_shared` module, one directory up.
+SCRIPT_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(SCRIPT_DIR.parents[1] / "_lib"))
+
+from fetcher_status import report_failure  # noqa: E402
+
 logger = logging.getLogger("sentinelone_activities")
-
-
-def report_failure(reason: str, code: str | None = None) -> None:
-    """Report why this run failed; the runner puts it in the envelope's metadata.error.
-
-    Without it the runner falls back to the tail of stderr — which on the way out
-    is the "Evidence saved" line. See docs/fetcher_contract.md § Output.
-    """
-    path = os.environ.get("FETCHER_STATUS_FILE")
-    if not path:
-        return
-    Path(path).write_text(json.dumps({"error": reason} | ({"code": code} if code else {})))
 
 
 FEDRAMP_ACTIVITY_TYPE_IDS = [
@@ -144,7 +139,6 @@ def main() -> int:
         api_url = get_env("SENTINELONE_API_URL")
         api_token = get_env("SENTINELONE_API_TOKEN")
     except RuntimeError as e:
-        logger.error("%s", e)
         report_failure(str(e), "bad_config")
         return 1
 
@@ -158,7 +152,6 @@ def main() -> int:
 
     if result.get("api_failures"):
         failures = result["api_failures"]
-        logger.error("Encountered %d API failures during collection", len(failures))
         report_failure(f"{len(failures)} API failures during collection", "partial_failure")
         return 1
     # The api_failures branch above only fires when the paginator recorded one.
@@ -167,7 +160,6 @@ def main() -> int:
     # without this the last line is the "saved" INFO message.
     if result.get("status") not in {"success", "partial_or_empty"}:
         reason = result.get("message", "unknown error")
-        logger.error("collection failed: %s", reason)
         report_failure(reason)
         return 1
     return 0

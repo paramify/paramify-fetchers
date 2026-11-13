@@ -1,0 +1,142 @@
+name: azure_redis_cache_configuration
+version: 0.2.1
+description: >-
+  Shows each classic Azure Cache for Redis cache's transport, authentication, network, audit logging, maintenance and resilience posture, and which caches fail each expectation.
+category: azure
+
+config_schema:
+  resource_exclusions:
+    type: patterns
+    prefixes: [rg, location, id]
+    bare: false
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Resources outside the authorization boundary, to leave out of scope, as
+      case-insensitive glob patterns listed in the manifest, each with a
+      prefix: rg:<resource group> (read from the resource id), location:<region>
+      (the region's name without spaces, such as eastus2; a resource with no
+      location never matches one) or id:<resource id> (also matches that
+      resource's child resources). * matches any run of characters and ? one
+      character. A matching cache is listed under excluded with the pattern and left
+      out of every count and verdict; its firewall rules, access
+      policies, patch schedule, linked servers and diagnostic settings
+      are not read. A pattern
+      without one of these prefixes fails the run. Set it once under platforms.azure.config for every Azure
+      fetcher that has this field; fetchers without it ignore it. Each item is a
+      pattern, or a pattern with a reason. Empty: every
+      resource is in scope.
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_redis_cache_configuration.json
+  aggregation: per_target
+
+target_schema:
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id to collect from. Optional — omit to use the first
+      enabled subscription the ambient credential can see ("collect where
+      deployed"); set one target per subscription to fan out.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: >
+      Deployment environment label (e.g. prod / preprod) written into the evidence
+      metadata. Optional — set per target for multi-subscription runs.
+
+secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
+
+ksis:
+  - KSI-SVC-SIN   # minimum TLS version and the non-TLS port
+  - KSI-IAM-SNU   # authentication required; access keys disabled so only Entra ID can be used
+  - KSI-CNA-RNT   # public network access, private endpoints, VNet injection, firewall rules
+  - KSI-CNA-OFA   # replication, zones, geo-replication
+  - KSI-MLA-LET   # connection and Entra sign-in audit logs exported per cache
+
+evidence_set:
+  reference_id: EVD-AZURE-REDIS-CACHE-CONFIG
+  name: Azure Cache for Redis Configuration
+  instructions: |
+    Script: azure/redis_cache_configuration/fetcher.py
+
+    Access: Reader on the subscription. A per-cache read that is refused leaves that cache's field null (unknown, never compliant), lists the cache under exceptions unknown_state, and fails the run. Azure Managed Redis (redisEnterprise) is not read here. Access keys and storage connection strings are never requested or recorded.
+
+    Commands Executed:
+    - subscriptions.list() — picks a subscription when none is set
+    - providers.get("Microsoft.Cache") — tells "Redis not in use" from "no caches"
+    - redis.list_by_subscription() — every classic cache, with its TLS, port, authentication and network settings
+    - firewall_rules.list() (per in-scope cache) — the IP ranges the firewall admits
+    - access_policy.list() (per in-scope cache) — the data-access policies defined on the cache
+    - access_policy_assignment.list() (per in-scope cache) — the Microsoft Entra principals granted a data-access policy
+    - patch_schedules.list_by_redis_resource() (per in-scope cache) — the maintenance window; a 404 means none is set
+    - linked_server.list() (per in-scope cache) — geo-replication links
+    - diagnostic_settings.list() (per in-scope cache) — whether connection and Entra sign-in audit logs are exported
+
+    Output: azure_redis_cache_configuration_<subscription>.json — each cache with its posture verdicts and per-cache reads, plus the caches left out and why.
+
+    Summary fields:
+
+    Which resources are left out of scope?
+    - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every cache is in scope
+    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no cache, such as a mistyped name; null when the cache list could not be read
+    - excluded_redis_caches — Number of caches left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, gets no per-cache reads, and no other count includes it; null when the cache list could not be read
+    - in_scope_redis_caches — Number of caches read and in scope; null when the cache list could not be read; 0 means there are none or the patterns took out every cache, which a check can catch by requiring more than 0
+
+    Which caches exist?
+    - total_caches — Number of in-scope caches; every cache count below is out of this total; reads 0, not null, when the cache list could not be read, so read it together with in_scope_redis_caches
+    - provider_registration_status — Whether the Redis provider (Microsoft.Cache) is registered on the subscription: registered, not_registered or unknown
+    - caches_by_sku — Number of caches for each SKU name Azure reports (such as Basic, Standard or Premium), or unknown when it reports none
+    - caches_by_redis_version — Number of caches for each Redis version Azure reports, or unknown when it reports none
+
+    Is traffic encrypted?
+    - tls_only_caches — Number of caches with a minimum TLS version of 1.2 or higher and the non-TLS port disabled; a cache with no minimum version accepts TLS 1.0 and is not counted
+    - tls_only_percentage — Percentage of caches that are TLS-only = tls_only_caches / total_caches × 100 (a whole number, rounded down; reads 0 when total_caches is 0)
+    - recommended_minimum_tls_caches — Number of caches whose minimum TLS version is 1.2 or 1.3
+    - non_ssl_port_enabled_caches — Number of caches with the non-TLS port (6379) enabled; a cache that reports nothing counts as disabled, Azure's default
+
+    Who can authenticate?
+    - auth_not_required_caches — Number of caches that require no authentication (authnotrequired is true)
+    - access_keys_disabled_caches — Number of caches with access-key authentication disabled, so only Microsoft Entra ID can be used
+    - entra_auth_enabled_caches — Number of caches with Microsoft Entra authentication enabled
+    - access_policy_assignments — Number of Entra principals granted a data-access policy, summed over the caches; a cache whose assignments could not be read adds 0. They take effect only where Entra authentication is enabled
+
+    Who can reach the caches?
+    - public_network_access_disabled_caches — Number of caches with public network access set to Disabled
+    - public_network_access_unset_caches — Number of caches that report no public network access setting, which count as not disabled
+    - private_only_caches — Number of caches with public network access Disabled and either an Approved private endpoint or VNet injection (a subnet)
+    - vnet_injected_caches — Number of caches injected into a virtual network subnet
+    - firewall_allows_all_ips_caches — Number of caches whose firewall rules together admit every IPv4 address, even when split across several rules; caches whose rules could not be read are not counted
+
+    Are audit logs exported and maintenance scheduled?
+    - audit_logging_enabled_caches — Number of caches with a diagnostic setting that sends ConnectedClientList or MSEntraAuthenticationAuditLog logs (directly or through the audit or allLogs category group) to a destination; caches whose settings could not be read are not counted
+    - maintenance_window_caches — Number of caches with a patch schedule configured; a cache with none lets Azure pick the time, and one whose schedule could not be read is not counted
+
+    Are the caches resilient?
+    - replicated_caches — Number of caches not on the Basic SKU, which is a single node with no replica and no SLA
+    - zone_redundant_caches — Number of caches spread across more than one zone, or with the zonal allocation policy Automatic (Azure's default for Standard and Premium in zonal regions, which spreads nodes without listing the zones)
+    - geo_replicated_caches — Number of caches with at least one linked server; caches whose linked servers could not be read are not counted
+    - persistence_enabled_caches — Number of caches with RDB or AOF persistence enabled
+
+    Which caches fail an expectation?
+    - exceptions — List of cache names for each failed expectation, so a reviewer can sample them; each list covers in-scope caches only:
+      - not_tls_only (minimum TLS version below 1.2 or non-TLS port enabled)
+      - non_ssl_port_enabled (non-TLS port enabled)
+      - auth_not_required (no authentication required)
+      - access_keys_enabled (access-key authentication not disabled)
+      - public_network_access_not_disabled (public network access not Disabled, including unset)
+      - firewall_allows_all_ips (firewall rules together admit every IPv4 address)
+      - no_audit_logging (settings read and no audit log exported)
+      - no_maintenance_window (schedule read and none set)
+      - not_replicated (Basic SKU)
+      - unknown_state (a read failed: firewall rules, audit logging, maintenance window, access policies, access policy assignments or linked servers)

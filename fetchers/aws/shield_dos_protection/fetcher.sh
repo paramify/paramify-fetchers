@@ -30,7 +30,7 @@ OUTPUT_JSON="$OUTPUT_DIR/aws_shield_dos_protection_${_TARGET_ID}.json"
 _FETCHER_TMP_JSON="$(mktemp -t aws_shield_dos_protection.XXXXXX.json)"
 _FAILURE_LOG="$(mktemp -t aws_shield_dos_protection_fail.XXXXXX)"
 _ERR="$(mktemp -t aws_shield_dos_protection_err.XXXXXX)"
-trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG" "$_ERR"' EXIT
+trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG" "$_ERR" "$_AWS_ERR_LOG"' EXIT
 
 log_info() { printf '%s INFO aws_shield_dos_protection %s\n' "$(date -u +'%Y-%m-%d %H:%M:%S')" "$*" >&2; }
 log_error() { printf '%s ERROR aws_shield_dos_protection %s\n' "$(date -u +'%Y-%m-%d %H:%M:%S')" "$*" >&2; }
@@ -93,26 +93,17 @@ if [ "$subscription_active" = true ]; then
         protections='[]'
     fi
 
-    echo "$protections" | jq -c '.[]' | while read -r protection; do
-        [ -z "$protection" ] && continue
-        record=$(echo "$protection" | jq '{
+    # One pass, fed on stdin: two jq processes and a file rewrite per
+    # protection before.
+    printf '%s' "$protections" | jq --slurpfile p /dev/stdin '
+        .results.protections += [$p[0][]? | {
             id: .Id,
             name: .Name,
             resource_arn: .ResourceArn,
             protection_arn: .ProtectionArn
-        }')
-        jq --argjson p "$record" '.results.protections += [$p]' \
-           "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
-    done
+        }]' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
 else
     log_info "Shield Advanced not active (subscription_state=$subscription_state) — recording as not enabled"
 fi
 
-failure_count=$(wc -l < "$_FAILURE_LOG" 2>/dev/null | tr -d ' ')
-failure_count=${failure_count:-0}
-if [ "$failure_count" -gt 0 ]; then
-    log_error "Encountered $failure_count AWS API failures during collection"
-    exit 1
-fi
-
-log_info "Evidence saved to $OUTPUT_JSON"
+aws_finish

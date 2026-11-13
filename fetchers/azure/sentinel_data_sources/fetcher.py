@@ -1,0 +1,598 @@
+#!/usr/bin/env python3
+"""Microsoft Sentinel data sources per workspace: data connectors with their last data received, and which tables received data in the window."""
+
+import logging
+import re
+import sys
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(SCRIPT_DIR.parent / "_shared"))
+from azure_rest import (  # noqa: E402
+    LAW_API,
+    SI_API,
+    SI_PREVIEW_API,
+    QueryError,
+    int_config,
+    iso_duration_days,
+    parse_time,
+    run_workspaces,
+)
+from sentinel_ingestion import (  # noqa: E402
+    ALERT_PRODUCTS_QUERY,
+    ALERTS_TABLE,
+    DEFAULT_WINDOW_DAYS,
+    DEFENDER_XDR_CARRIES,
+    INGESTION_QUERY,
+    NON_SOURCE_TABLES,
+    WINDOW_ENV,
+)
+
+NAME = "azure_sentinel_data_sources"
+# Cloud Discovery logs are an opt-in extra on the Defender for Cloud Apps connector: table and the connection data type that turns it on.
+ALERT_ONLY_EXTRAS = {"McasShadowItReporting": "discoveryLogs"}
+SENTINEL_PRODUCTS = frozenset({"azure sentinel", "microsoft sentinel"})
+HEALTH_TABLE = "SentinelHealth"
+# Worst first for a connector fed by several connections; any other status, null included, sits between Warning and
+# Success. Only Warning and Failure count as unhealthy.
+HEALTH_RANK = {"failure": 3, "warning": 2, "success": 0}
+
+# A connector's status is its Data fetch status change (Success or Failure); the hourly Informational failure summary,
+# written only after polling errors, would otherwise hide a Failure.
+HEALTH_QUERY = (
+    "SentinelHealth "
+    "| where TimeGenerated > ago({days}d) and SentinelResourceType == 'Data connector' "
+    "and OperationName == 'Data fetch status change' "
+    "| summarize arg_max(TimeGenerated, Status, Reason, Description, SentinelResourceKind, SentinelResourceName) "
+    "by SentinelResourceId"
+)
+
+# Connector definitions installed from Content Hub come back from the preview listing as these kinds.
+UI_KINDS = frozenset({"StaticUI", "GenericUI"})
+LAST_DATA_SUFFIX = "\n| summarize Time = max(TimeGenerated)\n| where isnotempty(Time)"
+_BARE_TABLE = re.compile(
+    r"^\s*([A-Za-z_]\w*)\s*\|\s*summarize\s+Time\s*=\s*max\(\s*TimeGenerated\s*\)\s*\|\s*where\s+isnotempty\(\s*Time\s*\)\s*$"
+)
+_FIRST_NAME = re.compile(r"[A-Za-z_]\w*")
+# Words that open a query without naming its table.
+_KQL_OPENERS = frozenset({
+    "union", "let", "search", "find", "print", "range", "datatable", "table", "materialize", "evaluate",
+    "externaldata", "external_table",
+})
+QUERY_BATCH = 100
+# A let statement can't sit inside a parenthesised union operand, so these queries run alone.
+_LET = re.compile(r"\s*let\b")
+# Basic and Auxiliary tables answer only /search: union * on /query skips them, and naming one fails to resolve.
+QUERYABLE_PLAN = "Analytics"
+# Off (0) by default: /search bills per GB scanned over the time range, so each table is asked for nothing more than this.
+BASIC_LOOKBACK_ENV = "BASIC_LOGS_LOOKBACK_HOURS"
+SEARCH_QUERY = "['{table}'] | where TimeGenerated > ago({hours}h) | summarize LastIngested = max(TimeGenerated), Records = count()"
+# How far back /search reads a Basic table; older data needs a search job.
+SEARCH_MAX_HOURS = 30 * 24
+# A search spanning the date a table's Auxiliary (lake) data starts, after a create or a switch, warns that it may be partial.
+LAKE_WARNING = "PartialLakeDataWarning"
+_LAKE_START = re.compile(r"starting from (\d{4}-\d{2}-\d{2}T[\d:.]+Z)")
+
+# Connection kinds whose Content Hub definition has another id: this kind is Entra ID Protection, not the Entra ID logs connector.
+KIND_DEFINITION = {"AzureActiveDirectory": "AzureActiveDirectoryIdentityProtection"}
+DEFENDER_XDR_ALERT_PRODUCTS = (
+    '"Microsoft Defender Advanced Threat Protection", "Office 365 Advanced Threat Protection", '
+    '"Azure Advanced Threat Protection", "Microsoft Cloud App Security", "Microsoft 365 Defender", "Microsoft Defender XDR"'
+)
+# Built-in connection kinds and what they fill, for a connection whose connector definition isn't installed.
+BUILT_IN_DATA_TYPES: Dict[str, List[Tuple[str, str]]] = {
+    "AzureActiveDirectory": [("SecurityAlert (IPC)", 'SecurityAlert | where ProductName == "Azure Active Directory Identity Protection"')],
+    "AzureAdvancedThreatProtection": [("SecurityAlert (AATP)", 'SecurityAlert | where ProductName == "Azure Advanced Threat Protection"')],
+    "AzureSecurityCenter": [("SecurityAlert (ASC)", 'SecurityAlert | where ProductName == "Azure Security Center"')],
+    "IOT": [("SecurityAlert (ASC for IoT)", 'SecurityAlert | where ProductName == "Azure Security Center for IoT"')],
+    "MicrosoftCloudAppSecurity": [
+        ("SecurityAlert (MCAS)", 'SecurityAlert | where ProductName == "Microsoft Cloud App Security"'),
+        ("McasShadowItReporting", "McasShadowItReporting"),
+    ],
+    "MicrosoftDefenderAdvancedThreatProtection": [("SecurityAlert (MDATP)", 'SecurityAlert | where ProviderName == "MDATP"')],
+    "OfficeATP": [("SecurityAlert (OATP)", 'SecurityAlert | where ProviderName == "OATP"')],
+    "OfficeIRM": [("SecurityAlert (OfficeIRM)", 'SecurityAlert | where ProductName == "Microsoft 365 Insider Risk Management"')],
+    "Office365": [
+        ("OfficeActivity (Exchange)", 'OfficeActivity | where OfficeWorkload == "Exchange"'),
+        ("OfficeActivity (SharePoint)", 'OfficeActivity | where OfficeWorkload in ("SharePoint", "OneDrive")'),
+        ("OfficeActivity (Teams)", 'OfficeActivity | where OfficeWorkload == "MicrosoftTeams"'),
+    ],
+    "MicrosoftThreatProtection": [
+        ("SecurityIncident", 'SecurityIncident | where ProviderName in ("Microsoft 365 Defender", "Microsoft XDR")'),
+        ("SecurityAlert", f"SecurityAlert | where ProductName in ({DEFENDER_XDR_ALERT_PRODUCTS})"),
+    ],
+    "ThreatIntelligence": [("ThreatIntelligenceIndicator", "ThreatIntelligenceIndicator")],
+    "ThreatIntelligenceTaxii": [("ThreatIntelligenceIndicator", "ThreatIntelligenceIndicator")],
+    "MicrosoftThreatIntelligence": [("ThreatIntelligenceIndicator", "ThreatIntelligenceIndicator")],
+    "AmazonWebServicesCloudTrail": [("AWSCloudTrail", "AWSCloudTrail")],
+    "Dynamics365": [("Dynamics365Activity", "Dynamics365Activity")],
+    "OfficePowerBI": [("PowerBIActivity", "PowerBIActivity")],
+    "Office365Project": [("ProjectActivity", "ProjectActivity")],
+    "MicrosoftPurviewInformationProtection": [("MicrosoftPurviewInformationProtection", "MicrosoftPurviewInformationProtection")],
+}
+
+logger = logging.getLogger(NAME)
+
+
+def project_connector(connector: Dict[str, Any]) -> Dict[str, Any]:
+    props = connector.get("properties") or {}
+    data_types = {
+        name: (value or {}).get("state")
+        for name, value in sorted((props.get("dataTypes") or {}).items())
+        if isinstance(value, dict)
+    }
+    return {
+        "name": connector.get("name"),
+        "kind": connector.get("kind"),
+        "data_types": data_types,
+        "enabled_data_types": [n for n, s in data_types.items() if (s or "").lower() == "enabled"],
+        "is_active": props.get("isActive"),
+        "tenant_id": props.get("tenantId"),
+        "subscription_id": props.get("subscriptionId"),
+    }
+
+
+def project_tables(
+    rows: List[Dict[str, Any]], plans: Optional[Dict[str, str]] = None, searched: Optional[Dict[str, Any]] = None
+) -> List[Dict[str, Any]]:
+    """Tables that received data in the window: from union * on /query, and the Basic or Auxiliary ones from /search."""
+    found = {row["ParamifySourceTable"]: row for row in rows if row.get("ParamifySourceTable")}
+    found.update({name: s for name, s in (searched or {}).items() if s and (s["Records"] or s["LastIngested"])})
+    tables = [
+        {
+            "table": name,
+            "plan": (plans or {}).get(name),
+            "last_ingested": row.get("LastIngested"),
+            "records": row.get("Records"),
+            "lake_data_start": row.get("lake_data_start"),
+            "counts_as_source": name not in NON_SOURCE_TABLES | {ALERTS_TABLE},
+        }
+        for name, row in found.items()
+    ]
+    return sorted(tables, key=lambda t: t["table"].lower())
+
+
+def search_hours(days: int) -> int:
+    """Hours of each Basic or Auxiliary table to search, capped at the window and at what /search reaches; 0 is off."""
+    return min(int_config(BASIC_LOOKBACK_ENV, 0), days * 24, SEARCH_MAX_HOURS)
+
+
+def lake_warning_only(exc: BaseException) -> bool:
+    return isinstance(exc, QueryError) and exc.code == "PartialError" and bool(exc.details) and all(
+        code == LAKE_WARNING for code, _ in exc.details)
+
+
+def lake_start(exc: QueryError) -> Optional[str]:
+    """The one lake start date a warning names, exactly as written, so the split leaves no gap."""
+    dates = {m.group(1) for _, message in exc.details if (m := _LAKE_START.search(message or ""))}
+    return dates.pop() if len(dates) == 1 else None
+
+
+def first_row(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+    if not rows:  # summarize without by always answers one row, so none is a broken answer, not an empty table
+        raise LookupError("the search returned no result row")
+    return rows[0]
+
+
+def search_table(client, customer_id: str, name: str, hours: int, notes: List[str]) -> Dict[str, Any]:
+    """{} when not measured; a warning that the window spans the lake start is answered by searching each side of it."""
+    query = SEARCH_QUERY.format(table=name, hours=hours)
+    end = datetime.now(timezone.utc).replace(microsecond=0)  # per table, so a slow earlier search doesn't shift this one's halves
+    try:
+        row = first_row(client.search(customer_id, query, f"PT{hours}H"))
+        return {"LastIngested": row.get("LastIngested"), "Records": row.get("Records") or 0, "lake_data_start": None}
+    except QueryError as exc:
+        if not lake_warning_only(exc):
+            raise
+        warned = exc
+    start, cut = end - timedelta(hours=hours), lake_start(warned)
+    cut_time = parse_time(cut)
+    halves: List[Dict[str, Any]] = []
+    if cut and cut_time and start < cut_time < end:
+        for span in (f"{start:%Y-%m-%dT%H:%M:%SZ}/{cut}", f"{cut}/{end:%Y-%m-%dT%H:%M:%SZ}"):
+            try:
+                halves.append(first_row(client.search(customer_id, query, span)))
+            except QueryError as exc:
+                if not lake_warning_only(exc):
+                    raise
+                break
+    if len(halves) == 2:
+        times = [h.get("LastIngested") for h in halves if h.get("LastIngested")]
+        notes.append(f"{name}: searched in two parts, before and from its lake data start {cut}, since one search spanning it may be partial")
+        return {"LastIngested": max(times, key=parse_time) if times else None,
+                "Records": sum(h.get("Records") or 0 for h in halves), "lake_data_start": cut}
+    # The spanning answer is all there is: its newest record is real, its count may be short, and nothing found proves nothing.
+    last = (warned.rows or [{}])[0].get("LastIngested")
+    notes.append(f"{name}: a search spanning its lake data start {cut or 'date'} may be partial and couldn't be split cleanly, so "
+                 + ("its record count is unknown" if last else "it isn't measured"))
+    return {"LastIngested": last, "Records": None, "lake_data_start": cut} if last else {}
+
+
+def search_tables(client, ws: Dict[str, Any], names: List[str], hours: int, days: int, collector,
+                  notes: List[str]) -> Dict[str, Optional[Dict[str, Any]]]:
+    """Each Basic or Auxiliary table's last ingestion and count, None when its search failed; one not measured is left out."""
+    out: Dict[str, Optional[Dict[str, Any]]] = {}
+    for name in names:
+        result = collector.guard(
+            f"loganalytics.search({name}, {ws['name']})",
+            lambda name=name: search_table(client, ws["customer_id"], name, hours, notes),
+        )
+        if result is None:
+            out[name] = None
+        # An empty answer over less than the window doesn't prove the table had nothing in it.
+        elif result and (result["Records"] is None or result["Records"] or hours == days * 24):
+            out[name] = result
+    return out
+
+
+def project_alert_products(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    products = [
+        {
+            "product": row.get("ProductName") or "unknown",
+            "last_ingested": row.get("LastIngested"),
+            "records": row.get("Records"),
+            "counts_as_source": (row.get("ProductName") or "").lower() not in SENTINEL_PRODUCTS,
+        }
+        for row in rows
+    ]
+    return sorted(products, key=lambda p: p["product"].lower())
+
+
+def connections(stable: List[Dict[str, Any]], preview: Optional[List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
+    """Configured connections from both listings, merged by name; the stable listing omits kinds such as MicrosoftThreatProtection."""
+    merged: Dict[str, Dict[str, Any]] = {}
+    for listing, raw in (("stable", stable), ("preview", preview or [])):
+        for c in raw:
+            if c.get("kind") in UI_KINDS:
+                continue
+            key = (c.get("name") or "").lower()
+            if key in merged:
+                merged[key]["seen_in"].append(listing)
+            else:
+                merged[key] = {**project_connector(c), "seen_in": [listing], "_raw": c}
+    return sorted(merged.values(), key=lambda c: ((c["kind"] or ""), (c["name"] or "")))
+
+
+def query_table(query: str) -> Optional[str]:
+    first = _FIRST_NAME.search(query)
+    return first.group(0) if first and first.group(0).lower() not in _KQL_OPENERS else None
+
+
+def definition_of(kind: Optional[str]) -> Optional[str]:
+    return KIND_DEFINITION.get(kind or "", kind)
+
+
+def definition_data_types(ui: Dict[str, Any]) -> List[Tuple[str, str]]:
+    """(name, last-data query) per data type; a codeless definition's {{graphQueriesTableName}} is filled in."""
+    out = []
+    for dt in ui.get("dataTypes") or []:
+        query = (dt.get("lastDataReceivedQuery") or "").replace("\u200b", "")
+        query = query.replace("{{graphQueriesTableName}}", ui.get("graphQueriesTableName") or "{{graphQueriesTableName}}")
+        if dt.get("name") and query and "{{" not in query:
+            out.append((dt["name"], query))
+    return out
+
+
+def sends_alerts(conn: Dict[str, Any]) -> bool:
+    return "alerts" in conn["enabled_data_types"]
+
+
+def link(definition: Dict[str, Any], conns: List[Dict[str, Any]]) -> List[str]:
+    """Connections that feed a definition: one of its kind, one built from it, or Defender XDR carrying its alerts."""
+    name = (definition.get("name") or "").lower()
+    criteria = (definition.get("properties") or {}).get("connectorUiConfig") or {}
+    criteria = criteria.get("connectivityCriterias") or criteria.get("connectivityCriteria") or []
+    mtp_alerts = {v for c in criteria if isinstance(c, dict) and c.get("type") == "MtpAlerts" for v in c.get("value") or []}
+    via_xdr = bool(mtp_alerts) and mtp_alerts <= DEFENDER_XDR_CARRIES
+    linked = []
+    for c in conns:
+        props = (c["_raw"].get("properties") or {})
+        if (
+            (definition_of(c["kind"]) or "").lower() == name
+            or (props.get("connectorDefinitionName") or "").lower() == name
+            or (via_xdr and c["kind"] == "MicrosoftThreatProtection" and sends_alerts(c))
+        ):
+            linked.append(c["name"])
+    return sorted(linked)
+
+
+def connector_catalog(
+    preview: Optional[List[Dict[str, Any]]], definitions: List[Dict[str, Any]], conns: List[Dict[str, Any]]
+) -> List[Dict[str, Any]]:
+    """Every installed connector definition, plus each built-in connection whose definition isn't installed."""
+    catalog: List[Dict[str, Any]] = []
+    for source, raw in (("content_hub", [c for c in preview or [] if c.get("kind") in UI_KINDS]), ("codeless", definitions)):
+        for d in raw:
+            ui = (d.get("properties") or {}).get("connectorUiConfig") or {}
+            catalog.append({
+                "id": d.get("name"),
+                "title": ui.get("title"),
+                "definition": source,
+                "connections": link(d, conns),
+                "_data_types": definition_data_types(ui),
+            })
+    defined = {(c["id"] or "").lower() for c in catalog if c["id"]}
+    built_in: Dict[str, Dict[str, Any]] = {}
+    for c in conns:
+        definition = ((c["_raw"].get("properties") or {}).get("connectorDefinitionName") or "").lower()
+        kind_id = definition_of(c["kind"])
+        if (kind_id or "").lower() in defined or (definition and definition in defined):
+            continue
+        entry = built_in.setdefault((kind_id or "").lower(), {
+            "id": kind_id,
+            "title": None,
+            "definition": "built_in" if c["kind"] in BUILT_IN_DATA_TYPES else "unknown",
+            "connections": [],
+            "_data_types": [(n, q + LAST_DATA_SUFFIX) for n, q in BUILT_IN_DATA_TYPES.get(c["kind"] or "", [])],
+        })
+        entry["connections"].append(c["name"])
+    return sorted(catalog + list(built_in.values()), key=lambda c: (c["id"] or "").lower())
+
+
+Pending = List[Tuple[Tuple[int, int], str, str]]
+
+
+def last_data_queries(
+    catalog: List[Dict[str, Any]], ingested: Dict[str, Any], plans: Optional[Dict[str, str]], searched: frozenset = frozenset()
+) -> Tuple[Dict[Tuple[int, int], Any], Pending]:
+    """Answers taken from table ingestion, and the queries still to run; a filtered query on a Basic or Auxiliary table with data stays unmeasured, since /search would bill another scan."""
+    known: Dict[Tuple[int, int], Any] = {}
+    pending = []
+    for ci, c in enumerate(catalog):
+        for di, (name, query) in enumerate(c["_data_types"]):
+            table = query_table(query)
+            plan = (plans or {}).get(table or "")
+            if table in ingested and _BARE_TABLE.match(query):
+                known[(ci, di)] = ingested[table]
+            elif (plan == QUERYABLE_PLAN or table in searched) and table not in ingested:
+                known[(ci, di)] = None
+            elif plan in (None, QUERYABLE_PLAN):  # parser functions, union and let queries run as written
+                pending.append(((ci, di), query, f"{c['id']}: {name}"))
+    return known, pending
+
+
+def run_last_data(client, customer_id: str, pending: Pending, days: int, notes: List[str]) -> Dict[Tuple[int, int], Any]:
+    """One union per batch; let queries, and each query of a batch that answers 400, run alone and as written."""
+    found: Dict[Tuple[int, int], Any] = {key: None for key, _, _ in pending}
+
+    def union(batch):
+        parts = [f"({q}\n| extend ParamifyIndex = {i})" for i, (_, q, _) in enumerate(batch)]
+        rows = client.query(customer_id, "union isfuzzy=true " + ",\n".join(parts), iso_duration_days(days))
+        for row in rows:
+            found[batch[int(row["ParamifyIndex"])][0]] = row.get("Time")
+
+    def alone(item):
+        try:
+            rows = client.query(customer_id, item[1], iso_duration_days(days))
+        except QueryError as exc:
+            if not exc.code.startswith("(400)"):
+                raise
+            found.pop(item[0])
+            notes.append(f"last-data query for {item[2]} failed, so it reads as unmeasured: {exc}")
+            return
+        found[item[0]] = max((row["Time"] for row in rows if row.get("Time")), default=None)
+
+    for item in pending:
+        if _LET.match(item[1]):
+            alone(item)
+    unioned = [item for item in pending if not _LET.match(item[1])]
+    for start in range(0, len(unioned), QUERY_BATCH):
+        batch = unioned[start:start + QUERY_BATCH]
+        try:
+            union(batch)
+        except QueryError as exc:
+            if not exc.code.startswith("(400)"):
+                raise
+            for item in batch:
+                alone(item)
+    return found
+
+
+def health_rank(status: Optional[str]) -> int:
+    return HEALTH_RANK.get((status or "").lower(), 1)
+
+
+def finish_catalog(catalog: List[Dict[str, Any]], answers: Optional[Dict[Tuple[int, int], Any]], health: Dict[str, Dict[str, Any]], conns: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    ids = {c["name"]: (c["_raw"].get("id") or "").lower() for c in conns}
+    by_name = {c["name"]: c for c in conns}
+    out = []
+    for ci, c in enumerate(catalog):
+        data_types = [
+            {
+                "name": name,
+                "table": query_table(query),
+                "last_data_received": answers.get((ci, di)) if answers is not None else None,
+            }
+            for di, (name, query) in enumerate(c["_data_types"])
+        ]
+        times = [d["last_data_received"] for d in data_types if d["last_data_received"]]
+        tables = {d["table"] for d in data_types}
+        unmeasured = answers is None or any((ci, di) not in answers for di in range(len(data_types)))
+        rows = [health[ids[n]] for n in c["connections"] if ids.get(n) and ids[n] in health]
+        worst = max(rows, key=lambda r: health_rank(r["status"]), default=None)
+        turned_on = {t for n in c["connections"] for t in by_name[n]["enabled_data_types"]}
+        extras = {t for t, data_type in ALERT_ONLY_EXTRAS.items() if data_type not in turned_on}
+        out.append({
+            **{k: v for k, v in c.items() if not k.startswith("_")},
+            "data_types": data_types,
+            # No alert in the window is normal for these, so one fed by a connection sending alerts reads as quiet.
+            "alert_only": ALERTS_TABLE in tables and tables <= {ALERTS_TABLE} | extras,
+            "last_data_received": max(times) if times else None,
+            "connected": True if times else (None if unmeasured or not data_types else False),
+            "health_status": worst["status"] if worst else None,
+        })
+    return out
+
+
+def project_health(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    return sorted(
+        (
+            {
+                "resource_name": r.get("SentinelResourceName"),
+                "resource_id": r.get("SentinelResourceId"),
+                "kind": r.get("SentinelResourceKind"),
+                "status": r.get("Status"),
+                "reason": r.get("Reason"),
+                "description": r.get("Description"),
+                "status_time": r.get("TimeGenerated"),
+            }
+            for r in rows
+        ),
+        key=lambda h: (h["resource_name"] or "").lower(),
+    )
+
+
+def collect(client, ws: Dict[str, Any], collector) -> Dict[str, Any]:
+    days = int_config(WINDOW_ENV, DEFAULT_WINDOW_DAYS)
+    path = f"{ws['id']}/providers/Microsoft.SecurityInsights"
+    notes: List[str] = []
+    connectors = collector.guard(
+        f"securityinsights.dataConnectors.list({ws['name']})", lambda: client.list(f"{path}/dataConnectors", SI_API)
+    )
+    preview = None
+    try:
+        preview = client.list(f"{path}/dataConnectors", SI_PREVIEW_API)
+    except Exception as exc:  # noqa: BLE001 — adds Content Hub definitions and kinds the stable listing omits
+        notes.append(f"preview listing at {SI_PREVIEW_API} failed, so Content Hub connectors and preview-only kinds may be missing: {exc}")
+    definitions = collector.guard(
+        f"securityinsights.dataConnectorDefinitions.list({ws['name']})",
+        lambda: client.list(f"{path}/dataConnectorDefinitions", SI_API),
+    )
+    listed = collector.guard(
+        f"operationalinsights.tables.list({ws['name']})", lambda: client.list(f"{ws['id']}/tables", LAW_API)
+    )
+    plans = (
+        {t["name"]: (t.get("properties") or {}).get("plan") or QUERYABLE_PLAN for t in listed if t.get("name")}
+        if listed is not None else None
+    )
+    rows = None
+    if ws.get("customer_id"):
+        rows = collector.guard(
+            f"loganalytics.query(table ingestion, {ws['name']})",
+            lambda: client.query(ws["customer_id"], INGESTION_QUERY.format(days=days), iso_duration_days(days)),
+        )
+    else:
+        collector.record(f"workspace customerId ({ws['name']})", LookupError("workspace has no customerId to query"))
+
+    hours = search_hours(days)
+    other_plans = sorted(n for n, p in (plans or {}).items() if p != QUERYABLE_PLAN)
+    searched = search_tables(client, ws, other_plans, hours, days, collector, notes) if rows is not None and hours else {}
+    searched_ok = frozenset(n for n, s in searched.items() if s)
+    search_failed = sorted(n for n, s in searched.items() if s is None)
+    tables = project_tables(rows, plans, searched) if rows is not None else None
+    alert_rows = None
+    if any(t["table"] == ALERTS_TABLE for t in tables or []):
+        alert_rows = collector.guard(
+            f"loganalytics.query(SecurityAlert products, {ws['name']})",
+            lambda: client.query(ws["customer_id"], ALERT_PRODUCTS_QUERY.format(days=days), iso_duration_days(days)),
+        )
+    products = project_alert_products(alert_rows or [])
+    sources = [t["table"] for t in tables or [] if t["counts_as_source"]]
+    sources += [f"{ALERTS_TABLE} ({p['product']})" for p in products if p["counts_as_source"]]
+
+    conns = connections(connectors, preview) if connectors is not None else []
+    catalog = connector_catalog(preview, definitions or [], conns)
+    for c in catalog:
+        if c["definition"] in ("content_hub", "codeless") and not c["_data_types"]:
+            notes.append(f"connector {c['id']} has no data type with a usable last-data query, so it reads as unmeasured")
+    complete = connectors is not None and preview is not None and definitions is not None
+    answers = None
+    found: Optional[Dict[Tuple[int, int], Any]] = {}
+    if tables is not None:
+        ingested = {t["table"]: t["last_ingested"] for t in tables}
+        known, pending = last_data_queries(catalog, ingested, plans, searched_ok)
+        found = collector.guard(
+            f"loganalytics.query(connector last data, {ws['name']})",
+            lambda: run_last_data(client, ws["customer_id"], pending, days, notes),
+        ) if pending else {}
+        # Without the table plans, an empty answer may be a Basic table /query can't read.
+        answers = {k: v for k, v in {**known, **(found or {})}.items() if v or plans is not None}
+    # A failed last-data query leaves the counts unknown, not partial.
+    measured = answers is not None and found is not None and plans is not None and complete
+    health_on = any(t["table"] == HEALTH_TABLE for t in tables or []) if tables is not None else None
+    health_rows = None
+    if health_on:
+        health_rows = collector.guard(
+            f"loganalytics.query(SentinelHealth connectors, {ws['name']})",
+            lambda: client.query(ws["customer_id"], HEALTH_QUERY.format(days=days), iso_duration_days(days)),
+        )
+    health = project_health(health_rows) if health_rows is not None else None
+    by_id = {(h["resource_id"] or "").lower(): h for h in health or []}
+    finished = finish_catalog(catalog, answers, by_id, conns)
+    # Quiet needs a linked connection sending alerts; an alert-only connector without one isn't wired at all.
+    alerting = {c["name"] for c in conns if sends_alerts(c)}
+    quiet = [c["connected"] is False and c["alert_only"] and bool(alerting.intersection(c["connections"])) for c in finished]
+    projected = [{k: v for k, v in c.items() if k != "_raw"} for c in conns]
+    return {
+        "ingestion_window_days": days,
+        "data_connectors": projected,
+        "data_connectors_total": len(projected) if connectors is not None and preview is not None else None,
+        "connectors": finished,
+        "connectors_total": len(finished) if complete else None,
+        "connectors_connected": sum(1 for c in finished if c["connected"] is True) if measured else None,
+        "connectors_not_connected": (
+            [c["id"] for c, q in zip(finished, quiet) if c["connected"] is False and not q] if measured else None
+        ),
+        "connectors_quiet": [c["id"] for c, q in zip(finished, quiet) if q] if measured else None,
+        "connectors_configured_without_data": (
+            [c["id"] for c, q in zip(finished, quiet) if c["connected"] is False and c["connections"] and not q]
+            if measured else None
+        ),
+        "health_monitoring": health_on,
+        "connector_health": health,
+        "connectors_unhealthy": (
+            sum(1 for h in health if health_rank(h["status"]) >= HEALTH_RANK["warning"]) if health is not None else None
+        ),
+        "tables": tables,
+        "tables_searched": sorted(searched_ok) if plans is not None else None,
+        "tables_search_failed": search_failed if plans is not None else None,
+        "tables_not_measured": [n for n in other_plans if n not in searched_ok] if plans is not None else None,
+        "source_tables": sources if tables is not None else None,
+        # With the search on, a failed search or unread plans could hide a source.
+        "sources_ingesting": (
+            len(sources) if tables is not None and not (hours and (plans is None or search_failed)) else None
+        ),
+        "alert_products": products if tables is not None else None,
+        "non_source_tables": [t["table"] for t in tables or [] if not t["counts_as_source"] and t["table"] != ALERTS_TABLE],
+        "notes": notes,
+    }
+
+
+def _total(workspaces: List[Dict[str, Any]], field: str) -> Optional[int]:
+    """Sum over the workspaces that have the field; None when none does, so an unknown never reads as zero."""
+    values = [w[field] for w in workspaces if w.get(field) is not None]
+    return sum(len(v) if isinstance(v, list) else v for v in values) if values else None
+
+
+def _strict_total(workspaces: List[Dict[str, Any]], field: str) -> Optional[int]:
+    """Sum over every workspace; None when any lacks the field, so an unmeasured workspace never hides behind a 0."""
+    values: List[Any] = [w.get(field) for w in workspaces]
+    return sum(len(v) if isinstance(v, list) else v for v in values) if values and None not in values else None
+
+
+def summarize(workspaces: List[Dict[str, Any]]) -> Dict[str, Any]:
+    counts: List[int] = [w["sources_ingesting"] for w in workspaces if w.get("sources_ingesting") is not None]
+    return {
+        "basic_logs_lookback_hours": search_hours(int_config(WINDOW_ENV, DEFAULT_WINDOW_DAYS)),
+        "min_sources_ingesting": min(counts) if counts else None,
+        "workspaces_with_2plus_sources": sum(1 for c in counts if c >= 2),
+        "workspaces_with_no_sources": sum(1 for c in counts if c == 0),
+        "data_connectors_total": _total(workspaces, "data_connectors_total"),
+        "connectors_connected": _total(workspaces, "connectors_connected"),
+        "connectors_not_connected": _total(workspaces, "connectors_not_connected"),
+        "connectors_quiet": _total(workspaces, "connectors_quiet"),
+        "connectors_configured_without_data": _strict_total(workspaces, "connectors_configured_without_data"),
+        "workspaces_with_health_monitoring": sum(1 for w in workspaces if w.get("health_monitoring") is True),
+        "connectors_unhealthy": _total(workspaces, "connectors_unhealthy"),
+    }
+
+
+def main() -> int:
+    return run_workspaces(fetcher=NAME, logger=logger, collect=collect, summarize=summarize,
+                          resource_exclusions=True)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

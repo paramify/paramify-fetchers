@@ -45,19 +45,23 @@ log_info()  { printf '%s INFO %s %s\n'  "$(date -u +'%Y-%m-%d %H:%M:%S')" "$FETC
 log_warn()  { printf '%s WARN %s %s\n'  "$(date -u +'%Y-%m-%d %H:%M:%S')" "$FETCHER" "$*" >&2; }
 log_error() { printf '%s ERROR %s %s\n' "$(date -u +'%Y-%m-%d %H:%M:%S')" "$FETCHER" "$*" >&2; }
 
+# The shared failure path: report_failure logs the reason AND writes it to
+# $FETCHER_STATUS_FILE, so the runner reports why instead of the stderr tail.
+source "$(dirname "$0")/../../_lib/status.sh"
+
 if [ -z "${KNOWBE4_API_KEY:-}" ]; then
-    log_error "KNOWBE4_API_KEY is not set"
+    report_failure "KNOWBE4_API_KEY is not set" bad_config
     exit 1
 fi
 if [ -z "${KNOWBE4_REGION:-}" ]; then
-    log_error "KNOWBE4_REGION is not set"
+    report_failure "KNOWBE4_REGION is not set" bad_config
     exit 1
 fi
 
 RETRAINING_INTERVAL_DAYS="${KNOWBE4_RETRAINING_INTERVAL_DAYS:-365}"
 case "$RETRAINING_INTERVAL_DAYS" in
     ''|*[!0-9]*)
-        log_error "KNOWBE4_RETRAINING_INTERVAL_DAYS must be a whole number of days, got '$RETRAINING_INTERVAL_DAYS'"
+        report_failure "KNOWBE4_RETRAINING_INTERVAL_DAYS must be a whole number of days, got '$RETRAINING_INTERVAL_DAYS'" bad_config
         exit 1 ;;
 esac
 RETRAIN_CUTOFF_EPOCH=$(( $(date -u +%s) - RETRAINING_INTERVAL_DAYS * 86400 ))
@@ -247,7 +251,7 @@ jq -n \
 ' > "$OUTPUT_JSON"
 
 if [ ! -s "$OUTPUT_JSON" ]; then
-    log_error "failed to assemble the evidence document"
+    report_failure "failed to assemble the evidence document" internal_error
     exit 1
 fi
 
@@ -256,7 +260,7 @@ fi
 failure_count=$(wc -l < "$_FAILURE_LOG" 2>/dev/null | tr -d ' ')
 failure_count=${failure_count:-0}
 if [ "$failure_count" -gt 0 ]; then
-    log_error "encountered $failure_count API failure(s) during collection"
+    report_failure "encountered $failure_count API failure(s) during collection" partial_failure
     exit 1
 fi
 

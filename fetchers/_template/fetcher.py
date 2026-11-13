@@ -13,28 +13,32 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+SCRIPT_DIR = Path(__file__).resolve().parent
+
+# The shared failure-reporting helper. Import it, never paste a copy: printing
+# the nine-line version in this template is how 26 private copies under three
+# different names happened. See docs/fetcher_contract_guide.md, step 6.
+sys.path.insert(0, str(SCRIPT_DIR.parents[1] / "_lib"))
+
 # If this fetcher relies on a category-shared module, uncomment:
-# SCRIPT_DIR = Path(__file__).resolve().parent
 # sys.path.insert(0, str(SCRIPT_DIR.parent / "_shared"))
 # from <shared_module> import <EntryClass>
 
+from fetcher_status import report_failure  # noqa: E402
+
 logger = logging.getLogger("<category>_<short_name>")
 
-
-def report_failure(reason: str, code: str | None = None) -> None:
-    """Report why this run failed; the runner puts it in the envelope's metadata.error.
-
-    Call this on every path that returns non-zero. Without it the runner falls back
-    to the tail of stderr, which is whatever you logged last — and for most fetchers
-    that is the "Evidence saved" line, i.e. a success message reported as the reason
-    for a failure. `code` is a machine-readable category (auth_failed,
-    not_authorized, not_enabled, target_unreachable, rate_limited, bad_config,
-    partial_failure). See docs/fetcher_contract.md § Output.
-    """
-    path = os.environ.get("FETCHER_STATUS_FILE")
-    if not path:
-        return
-    Path(path).write_text(json.dumps({"error": reason} | ({"code": code} if code else {})))
+# report_failure(reason, code) on every path that returns non-zero. It logs the
+# reason AND writes $FETCHER_STATUS_FILE, so it is the whole failure path -- you
+# do not also need a logger.error. Call it AFTER any "Evidence saved" line: the
+# runner's fallback takes the tail of stderr, so a success message logged last
+# becomes the failure reason an operator reads.
+#
+# `code` is optional and must be one of exactly these:
+#     auth_failed, not_authorized, target_unreachable, rate_limited,
+#     bad_config, partial_failure, internal_error
+# Anything else is dropped with a warning. (There is no not_enabled: a service
+# that is not in use is valid evidence and exits 0, so it reports no failure.)
 
 
 def main():

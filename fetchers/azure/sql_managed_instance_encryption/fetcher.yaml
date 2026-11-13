@@ -1,0 +1,99 @@
+name: azure_sql_managed_instance_encryption
+version: 0.3.1
+description: >-
+  Shows whether each SQL Managed Instance's encryption protector is a customer-managed key with auto-rotation, and whether transparent data encryption is on for every user database.
+category: azure
+
+config_schema:
+  resource_exclusions:
+    type: patterns
+    prefixes: [rg, location, id]
+    bare: false
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Resources outside the authorization boundary, to leave out of scope, as
+      case-insensitive glob patterns listed in the manifest, each with a
+      prefix: rg:<resource group> (read from the resource id), location:<region>
+      (the region's name without spaces, such as eastus2; a resource with no
+      location never matches one) or id:<resource id> (also matches that resource's
+      child resources). * matches any run of characters and ? one character. A
+      matching managed instance is listed under excluded with the pattern and left
+      out of every count and verdict; neither it nor its databases are read further
+      (an id: pattern naming one database matches nothing). A pattern without one of these prefixes fails the
+      run. Set it once under platforms.azure.config for every Azure fetcher that has
+      this field; fetchers without it ignore it. Each item is a pattern, or a pattern
+      with a reason. Empty: every resource is in scope.
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_sql_managed_instance_encryption.json
+  aggregation: per_target
+
+target_schema:
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id to collect from. Optional — omit to use the first
+      enabled subscription the ambient credential can see ("collect where
+      deployed"); set one target per subscription to fan out.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: >
+      Deployment environment label (e.g. prod / preprod) written into the evidence
+      metadata. Optional — set per target for multi-subscription runs.
+
+secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
+
+ksis:
+  - KSI-SVC-SIN   # TDE per database, service- or customer-managed protector
+
+evidence_set:
+  reference_id: EVD-AZURE-SQLMI-ENCRYPTION
+  name: Azure SQL Managed Instance Encryption
+  instructions: |
+    Script: azure/sql_managed_instance_encryption/fetcher.py
+
+    Access: Reader on the subscription.
+
+    Commands Executed:
+    - subscriptions.list() — picks a subscription when none is set
+    - providers.get("Microsoft.Sql") — tells "not registered" apart from "no instances"
+    - managed_instances.list() — every managed instance
+    - managed_instance_encryption_protectors.get() (per in-scope instance) — the TDE protector's key type, key name, Key Vault URI, thumbprint and auto-rotation setting
+    - managed_databases.list_by_instance() (per in-scope instance) — the databases on each instance
+    - managed_database_transparent_data_encryption.get() (per user database) — whether transparent data encryption (TDE) is on
+
+    Output: azure_sql_managed_instance_encryption_<subscription>.json — each SQL Managed Instance with its encryption protector (null, and customer_managed_key with it, when the protector couldn't be read), the TDE state of every user database, and all_user_databases_tde_enabled: false once any user database is Disabled, otherwise null when a TDE state couldn't be read, the database list failed or the instance has no user databases, and true only when every user database answered Enabled; system databases (master, model, msdb, tempdb) are kept but not queried or counted, and instances left out of scope are listed with the pattern that matched.
+
+    Summary fields:
+
+    Which instances are left out of scope?
+    - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every instance is in scope
+    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no managed instance, such as a mistyped name; null if the instance list couldn't be read
+    - excluded_managed_instances — Number of managed instances left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, is not read further, and no other count includes it
+    - in_scope_managed_instances — Number of managed instances read and in scope; 0 means none was read or the patterns took out every instance, which a check can catch by requiring more than 0
+
+    What was checked?
+    - total_managed_instances — Number of in-scope SQL Managed Instances; reads 0, not null, when the instance list could not be read (the run then fails)
+    - total_user_databases — Number of user databases on in-scope instances (system databases left out); null if any instance's database list couldn't be read
+    - provider_registration_status — Whether the SQL provider (Microsoft.Sql) is registered on the subscription: registered, not_registered or unknown
+
+    Is the encryption key customer-managed?
+    - instances_customer_managed_key — Number of instances whose TDE protector is a customer-managed Key Vault key (server key type AzureKeyVault); an instance whose protector couldn't be read doesn't count
+    - instances_key_auto_rotation — Number of instances with key auto-rotation on, where Azure omits the setting when it was never turned on, so absent counts as off; an instance whose protector couldn't be read doesn't count
+
+    Is every user database encrypted?
+    - tde_enabled_user_databases — Number of user databases with TDE Enabled
+    - tde_disabled_user_databases — Number of user databases with TDE Disabled
+    - tde_unknown_user_databases — Number of user databases whose TDE state couldn't be read, so they're never counted as unencrypted; an instance whose database list couldn't be read contributes none to any of the three counts

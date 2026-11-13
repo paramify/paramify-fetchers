@@ -25,6 +25,7 @@ from azure_common import (  # noqa: E402
     NOT_REGISTERED,
     REGISTRATION_UNKNOWN,
     Collector,
+    arm_client_kwargs,
     build_payload,
     classify_failure_code,
     coverage_percentage,
@@ -32,12 +33,13 @@ from azure_common import (  # noqa: E402
     failure_reason,
     model_attr,
     provider_registration_status,
+    report_failure,
     resolve_subscription,
     resource_group_from_id,
     sanitize_for_filename,
     write_evidence,
-    write_status,
 )
+from resource_exclusions import ResourceExclusions  # noqa: E402
 
 logger = logging.getLogger("azure_cosmosdb_configuration")
 
@@ -232,18 +234,18 @@ def _count_by_kind(accounts: list[dict]) -> dict:
 
 # --- collection (lazy azure imports) ---
 
-def collect_database_accounts(subscription_id, cred, collector: Collector) -> list[dict]:
+def collect_database_accounts(subscription_id, cred, collector: Collector) -> list[dict] | None:
     """One database_accounts.list() — the whole projection is in that response."""
 
     def _client():
         from azure.mgmt.cosmosdb import CosmosDBManagementClient  # lazy
 
-        return CosmosDBManagementClient(credential=cred, subscription_id=subscription_id)
+        return CosmosDBManagementClient(credential=cred, subscription_id=subscription_id, **arm_client_kwargs())
 
     # Guarded: a missing azure-mgmt-cosmosdb becomes internal_error, evidence still written.
     client = collector.guard("cosmosdb.CosmosDBManagementClient (init)", _client)
     if client is None:
-        return []
+        return None
 
     def _list():
         # ItemPaged: the SDK follows nextLink itself, so pagination is handled.
@@ -252,8 +254,8 @@ def collect_database_accounts(subscription_id, cred, collector: Collector) -> li
             for a in client.database_accounts.list()
         ]
 
-    accounts = collector.guard("cosmosdb.database_accounts.list", _list, default=[])
-    return sorted(accounts, key=lambda r: r.get("id") or "")
+    accounts = collector.guard("cosmosdb.database_accounts.list", _list)
+    return None if accounts is None else sorted(accounts, key=lambda r: r.get("id") or "")
 
 
 def main() -> int:
@@ -272,7 +274,7 @@ def main() -> int:
     subscription_id = sub["subscription_id"]
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
-    accounts: list[dict] = []
+    accounts: list[dict] | None = None
     registration = REGISTRATION_UNKNOWN
     if subscription_id and cred is not None:
         # Asked first: an unregistered provider returns an empty list, not an error.
@@ -295,6 +297,14 @@ def main() -> int:
             ),
         )
 
+    exclusions = ResourceExclusions.from_env()
+    exclusions.record_invalid(collector)
+    listed = accounts is not None
+    accounts, excluded = exclusions.split(accounts or [], "cosmosdb_account")
+    if not listed:
+        exclusions.mark_unread()
+    exclusions.warn_unmatched(logger)
+
     evidence = build_payload(
         subscription_id=subscription_id,
         subscription_source=sub["subscription_source"],
@@ -302,8 +312,13 @@ def main() -> int:
         results={
             "cosmosdb_accounts": accounts,
             "provider_registration_status": registration,
+            "excluded": excluded,
         },
-        summary={**summarize(accounts), "provider_registration_status": registration},
+        summary={
+            **summarize(accounts),
+            "provider_registration_status": registration,
+            **exclusions.summary(excluded, ("cosmosdb_account",), {"cosmosdb_accounts": len(accounts) if listed else None}),
+        },
     )
 
     filename = (
@@ -312,10 +327,7 @@ def main() -> int:
     path = write_evidence(output_dir, filename, evidence)
 
     if not collector.ok:
-        logger.error(
-            "Encountered %d Azure API failure(s) during collection", len(collector.failures)
-        )
-        write_status(
+        report_failure(
             failure_reason(collector.failures), classify_failure_code(collector.failures)
         )
         return 1

@@ -22,19 +22,25 @@ from typing import Any, Dict, List, Optional, Tuple
 import requests
 from dotenv import load_dotenv
 
+# The shared failure-reporting helper lives in fetchers/_lib/ — the same import
+# mechanism as a category `_shared` module, one directory up.
+SCRIPT_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(SCRIPT_DIR.parents[1] / "_lib"))
+# Paging shared by the Datadog fetchers lives in the category's _shared/.
+sys.path.insert(0, str(SCRIPT_DIR.parent / "_shared"))
+
+from datadog_paging import (  # noqa: E402
+    PagedRecords,
+    PagingError,
+    error_result,
+    failure_result,
+    paginate_offset,
+    request_json,
+    with_paging_status,
+)
+from fetcher_status import report_failure  # noqa: E402
+
 logger = logging.getLogger("datadog_infra_agent_checks")
-
-
-def report_failure(reason: str, code: str | None = None) -> None:
-    """Report why this run failed; the runner puts it in the envelope's metadata.error.
-
-    Without it the runner falls back to the tail of stderr — which on the way out
-    is the "Evidence saved" line. See docs/fetcher_contract.md § Output.
-    """
-    path = os.environ.get("FETCHER_STATUS_FILE")
-    if not path:
-        return
-    Path(path).write_text(json.dumps({"error": reason} | ({"code": code} if code else {})))
 
 
 def current_timestamp() -> str:
@@ -66,47 +72,37 @@ STATUS_NORMALIZE = {"OK": "ok", "WARNING": "warning", "ERROR": "critical", "UNKN
 
 
 def get_total_hosts(base_url: str, headers: Dict[str, str]) -> int:
+    """`total_matching` from a one-host page. Raises PagingError on any failure,
+    so a timeout or an auth error can never read as "no hosts"."""
+    operation = "Datadog count hosts"
     try:
-        response = requests.get(
-            f"{base_url}/api/v1/hosts",
-            headers=headers,
-            params={"count": 1},
-            timeout=30,
-        )
-        response.raise_for_status()
-        return response.json().get("total_matching", 0)
-    except requests.exceptions.HTTPError:
-        raise
-    except Exception:
-        return 0
+        payload = request_json("GET", f"{base_url}/api/v1/hosts", headers, params={"count": 1})
+        total = payload["total_matching"]
+        if not isinstance(total, int):
+            raise ValueError(f"total_matching is not an integer: {total!r}")
+        return total
+    except (requests.exceptions.RequestException, ValueError, KeyError, TypeError) as e:
+        raise PagingError(operation, "the total-count request", 0, [], e) from e
 
 
 def fetch_hosts_with_checks(base_url: str, headers: Dict[str, str]) -> List[Dict[str, Any]]:
-    all_hosts: List[Dict[str, Any]] = []
-    count = 1000
-    start = 0
-    endpoint = f"{base_url}/api/v1/hosts"
-
+    """Every host. GET /api/v1/hosts pages with `start` and `count` (max 1000).
+    Raises PagingError if the count or the first page fails; a later failure
+    comes back on the returned list's `.error`."""
     total_matching = get_total_hosts(base_url, headers)
     if total_matching == 0:
-        return []
+        return PagedRecords()
 
-    while start < total_matching:
-        params = {"start": start, "count": count}
-        try:
-            response = requests.get(endpoint, headers=headers, params=params, timeout=60)
-            response.raise_for_status()
-            payload = response.json()
-            hosts = payload.get("host_list", [])
-            if not hosts:
-                break
-            all_hosts.extend(hosts)
-            start += count
-        except requests.exceptions.RequestException as e:
-            logger.warning("Pagination interrupted at start=%s: %s", start, e)
-            break
-
-    return all_hosts
+    return paginate_offset(
+        f"{base_url}/api/v1/hosts",
+        headers,
+        operation="Datadog list hosts",
+        page_size=1000,
+        size_param="count",
+        offset_param="start",
+        records_key="host_list",
+        timeout=60,
+    )
 
 
 def parse_agent_checks(host: Dict[str, Any]) -> List[Tuple[str, str, str]]:
@@ -129,15 +125,18 @@ def parse_agent_checks(host: Dict[str, Any]) -> List[Tuple[str, str, str]]:
 
 
 def get_infra_agent_checks() -> Dict[str, Any]:
-    base_url = get_base_url()
-    headers = get_dd_headers()
+    try:
+        base_url = get_base_url()
+        headers = get_dd_headers()
+    except RuntimeError as e:
+        return error_result(str(e), current_timestamp(), "bad_config")
     endpoint = f"{base_url}/api/v1/hosts"
 
     try:
         hosts = fetch_hosts_with_checks(base_url, headers)
 
         if not hosts:
-            return {
+            return with_paging_status({
                 "status": "partial_or_empty",
                 "message": "No hosts found",
                 "api_endpoint": endpoint,
@@ -152,7 +151,7 @@ def get_infra_agent_checks() -> Dict[str, Any]:
                     "checks_by_name": {},
                 },
                 "retrieved_at": current_timestamp(),
-            }
+            }, hosts)
 
         all_check_records = []
         checks_by_name: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
@@ -180,7 +179,7 @@ def get_infra_agent_checks() -> Dict[str, Any]:
         checks_by_name_final = {k: dict(v) for k, v in checks_by_name.items()}
 
         if not all_check_records:
-            return {
+            return with_paging_status({
                 "status": "partial_or_empty",
                 "message": "Hosts found but no agent_checks data returned",
                 "api_endpoint": endpoint,
@@ -195,9 +194,9 @@ def get_infra_agent_checks() -> Dict[str, Any]:
                     "checks_by_name": {},
                 },
                 "retrieved_at": current_timestamp(),
-            }
+            }, hosts)
 
-        return {
+        return with_paging_status({
             "status": "success",
             "api_endpoint": endpoint,
             "record_count": len(all_check_records),
@@ -211,12 +210,12 @@ def get_infra_agent_checks() -> Dict[str, Any]:
                 "checks_by_name": checks_by_name_final,
             },
             "retrieved_at": current_timestamp(),
-        }
+        }, hosts)
 
-    except RuntimeError as e:
-        return {"status": "error", "message": str(e), "retrieved_at": current_timestamp()}
+    except PagingError as e:
+        return failure_result(e, endpoint, current_timestamp())
     except Exception as e:
-        return {"status": "error", "message": str(e), "retrieved_at": current_timestamp()}
+        return error_result(str(e), current_timestamp())
 
 
 def main() -> int:
@@ -240,8 +239,7 @@ def main() -> int:
     # Last line on stderr wins: the runner reads its tail into the envelope's metadata.error.
     if result.get("status") not in {"success", "partial_or_empty"}:
         reason = result.get("message", "unknown error")
-        logger.error("collection failed: %s", reason)
-        report_failure(reason)
+        report_failure(reason, result.get("error_code"))
         return 1
     return 0
 

@@ -23,7 +23,7 @@ _TARGET_ID="$(aws_target_id "$REGION")"
 OUTPUT_JSON="$OUTPUT_DIR/aws_ssm_patch_compliance_${_TARGET_ID}.json"
 _FETCHER_TMP_JSON="$(mktemp -t aws_ssm_patch_compliance.XXXXXX.json)"
 _FAILURE_LOG="$(mktemp -t aws_ssm_patch_compliance_fail.XXXXXX)"
-trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG"' EXIT
+trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG" "$_AWS_ERR_LOG"' EXIT
 
 log_info() { printf '%s INFO aws_ssm_patch_compliance %s\n' "$(date -u +'%Y-%m-%d %H:%M:%S')" "$*" >&2; }
 log_error() { printf '%s ERROR aws_ssm_patch_compliance %s\n' "$(date -u +'%Y-%m-%d %H:%M:%S')" "$*" >&2; }
@@ -72,14 +72,22 @@ managed_count=$(echo "$managed" | jq 'length')
 compliant_count=$(echo "$compliance" | jq '[.[] | select(.Status == "COMPLIANT")] | length')
 non_compliant_count=$(echo "$compliance" | jq '[.[] | select(.Status == "NON_COMPLIANT")] | length')
 
-jq --argjson instances "$managed" \
-   --argjson compliance "$compliance" \
+# Both lists go through files, not --argjson: past roughly 800 managed
+# instances they overflow Linux's 128 KiB argv limit.
+_MANAGED_JSON="$(mktemp -t aws_ssm_patch_compliance_managed.XXXXXX.json)"
+_COMPLIANCE_JSON="$(mktemp -t aws_ssm_patch_compliance_compliance.XXXXXX.json)"
+trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG" "$_AWS_ERR_LOG" "$_MANAGED_JSON" "$_COMPLIANCE_JSON"' EXIT
+printf '%s' "$managed" > "$_MANAGED_JSON"
+printf '%s' "$compliance" > "$_COMPLIANCE_JSON"
+
+jq --slurpfile instances "$_MANAGED_JSON" \
+   --slurpfile compliance "$_COMPLIANCE_JSON" \
    --arg managed_count "$managed_count" \
    --arg compliant_count "$compliant_count" \
    --arg non_compliant_count "$non_compliant_count" \
    '.results = {
-       "managed_instances": ($instances // []),
-       "patch_compliance": ($compliance // []),
+       "managed_instances": ($instances[0] // []),
+       "patch_compliance": ($compliance[0] // []),
        "summary": {
          "managed_instance_count": ($managed_count | tonumber),
          "compliant_count": ($compliant_count | tonumber),
@@ -89,11 +97,4 @@ jq --argjson instances "$managed" \
 
 log_info "Managed instances: $managed_count; compliant: $compliant_count; non-compliant: $non_compliant_count"
 
-failure_count=$(wc -l < "$_FAILURE_LOG" 2>/dev/null | tr -d ' ')
-failure_count=${failure_count:-0}
-if [ "$failure_count" -gt 0 ]; then
-    log_error "Encountered $failure_count AWS API failures during collection"
-    exit 1
-fi
-
-log_info "Evidence saved to $OUTPUT_JSON"
+aws_finish

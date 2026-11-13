@@ -1,0 +1,18 @@
+key: sqs_no_unencrypted_queues
+name: No Unencrypted SQS Queues
+type: AUTOMATED
+role: configuration
+statement: No SQS queue is reported without server-side encryption.
+
+# Counts violations, so it CANNOT guard itself — zero matches is its pass
+# condition. `sqs_queue_encryption_flags_present` is its mandatory integrity
+# partner; without it a renamed `encrypted` key reads as zero violations.
+regex: '"encrypted":\s*false'
+rules_summary: MATCH_COUNT EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-SQS-ENC

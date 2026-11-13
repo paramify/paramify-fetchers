@@ -21,6 +21,7 @@ from azure_common import (  # noqa: E402
     NOT_REGISTERED,
     REGISTRATION_UNKNOWN,
     Collector,
+    arm_client_kwargs,
     build_payload,
     classify_failure_code,
     coverage_percentage,
@@ -28,12 +29,13 @@ from azure_common import (  # noqa: E402
     failure_reason,
     model_attr,
     provider_registration_status,
+    report_failure,
     resolve_subscription,
     resource_group_from_id,
     sanitize_for_filename,
     write_evidence,
-    write_status,
 )
+from resource_exclusions import ResourceExclusions  # noqa: E402
 
 logger = logging.getLogger("azure_databricks_workspace_configuration")
 
@@ -197,7 +199,7 @@ def summarize(workspaces: list[dict]) -> dict:
 
 # --- collection (lazy azure imports) ---
 
-def collect_workspaces(subscription_id, cred, collector: Collector) -> list[dict]:
+def collect_workspaces(subscription_id, cred, collector: Collector) -> list[dict] | None:
     """One workspaces.list_by_subscription() call: no per-resource GET is needed, the list
     already carries the SKU, network settings, wrapped parameters and encryption block.
     """
@@ -205,12 +207,12 @@ def collect_workspaces(subscription_id, cred, collector: Collector) -> list[dict
 
     def _client():
         return AzureDatabricksManagementClient(
-            credential=cred, subscription_id=subscription_id
+            credential=cred, subscription_id=subscription_id, **arm_client_kwargs()
         )
 
     client = collector.guard("databricks.AzureDatabricksManagementClient (init)", _client)
     if client is None:
-        return []
+        return None
 
     def _list():
         # ItemPaged: the SDK follows nextLink itself, so pagination is handled.
@@ -219,10 +221,8 @@ def collect_workspaces(subscription_id, cred, collector: Collector) -> list[dict
             for workspace in client.workspaces.list_by_subscription()
         ]
 
-    workspaces = collector.guard(
-        "databricks.workspaces.list_by_subscription", _list, default=[]
-    )
-    return sorted(workspaces, key=lambda r: r.get("id") or "")
+    workspaces = collector.guard("databricks.workspaces.list_by_subscription", _list)
+    return None if workspaces is None else sorted(workspaces, key=lambda r: r.get("id") or "")
 
 
 def main() -> int:
@@ -242,7 +242,7 @@ def main() -> int:
     subscription_id = sub["subscription_id"]
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
-    workspaces: list[dict] = []
+    workspaces: list[dict] | None = None
     registration = REGISTRATION_UNKNOWN
     if subscription_id and cred is not None:
         # Asked BEFORE the list call, so a zero-workspace result is legible: Azure returns
@@ -267,6 +267,14 @@ def main() -> int:
             ),
         )
 
+    exclusions = ResourceExclusions.from_env()
+    exclusions.record_invalid(collector)
+    listed = workspaces is not None
+    workspaces, excluded = exclusions.split(workspaces or [], "databricks_workspace")
+    if not listed:
+        exclusions.mark_unread()
+    exclusions.warn_unmatched(logger)
+
     evidence = build_payload(
         subscription_id=subscription_id,
         subscription_source=sub["subscription_source"],
@@ -274,8 +282,13 @@ def main() -> int:
         results={
             "databricks_workspaces": workspaces,
             "provider_registration_status": registration,
+            "excluded": excluded,
         },
-        summary={**summarize(workspaces), "provider_registration_status": registration},
+        summary={
+            **summarize(workspaces),
+            "provider_registration_status": registration,
+            **exclusions.summary(excluded, ("databricks_workspace",), {"databricks_workspaces": len(workspaces) if listed else None}),
+        },
     )
 
     filename = (
@@ -285,10 +298,7 @@ def main() -> int:
     path = write_evidence(output_dir, filename, evidence)
 
     if not collector.ok:
-        logger.error(
-            "Encountered %d Azure API failure(s) during collection", len(collector.failures)
-        )
-        write_status(
+        report_failure(
             failure_reason(collector.failures), classify_failure_code(collector.failures)
         )
         return 1

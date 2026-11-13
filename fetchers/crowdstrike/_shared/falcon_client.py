@@ -15,7 +15,7 @@ Falcon has three pagination styles and this module covers all three:
   - after token              — /spotlight/combined/vulnerabilities/v1
   - integer offset           — /alerts/queries/alerts/v2, /policy/combined/*
 
-Collection-failure convention (see docs/authoring_a_fetcher.md): a failed call
+Collection-failure convention (see docs/authoring_fetcher_guide.md, step 3): a failed call
 appends to `api_failures` and returns None rather than raising, so one bad
 endpoint does not lose the evidence already collected. The caller exits
 non-zero when `api_failures` is non-empty. Authentication failure is the one
@@ -64,6 +64,7 @@ nothing.
 import json
 import logging
 import os
+import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -71,6 +72,13 @@ from typing import Any, Callable, Dict, List, Optional
 
 import requests
 from dotenv import load_dotenv
+
+# One implementation per runtime lives in fetchers/_lib; a category-shared module
+# may RE-EXPORT it and must not reimplement it (docs/fetcher_contract_guide.md, step 6).
+# Same mechanism a fetcher uses, one directory further up: this file is
+# fetchers/crowdstrike/_shared/, so fetchers/_lib is parents[2] / "_lib".
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "_lib"))
+from fetcher_status import report_failure  # noqa: E402,F401
 
 logger = logging.getLogger("crowdstrike._shared")
 
@@ -738,27 +746,6 @@ def evidence(
     return body
 
 
-def report_failure(message: str, code: Optional[str] = None) -> None:
-    """
-    Tell the runner why this run failed. See docs/fetcher_contract.md.
-
-    Without this the runner falls back to the **tail of stderr**, so the last
-    thing logged becomes the reported reason — and since a fetcher logs
-    "Evidence saved to ..." on its way out, a failed run would report a success
-    message as its error (upstream issue #24). Stdlib only, no framework import.
-    """
-    path = os.environ.get("FETCHER_STATUS_FILE")
-    if not path:
-        return
-    body: Dict[str, Any] = {"error": message}
-    if code:
-        body["code"] = code
-    try:
-        Path(path).write_text(json.dumps(body))
-    except OSError as e:  # never let status reporting break the run
-        logger.warning("Could not write FETCHER_STATUS_FILE: %s", e)
-
-
 def run_fetcher(
     collect: Callable[[], Dict[str, Any]],
     output_name: str,
@@ -807,8 +794,10 @@ def run_fetcher(
 
     logger.info("Evidence saved to %s", output_path)
 
-    # The reason must be logged AFTER the "Evidence saved" line above, because
-    # the runner's fallback takes the tail of stderr.
+    # The reason must be reported AFTER the "Evidence saved" line above, because
+    # the runner's fallback takes the tail of stderr. `report_failure` is the whole
+    # failure path — it logs at error level as well as writing the status file, so
+    # no caller-side logger.error is needed (or wanted: it double-logs).
     failures = result.get("api_failures") or []
     if failures:
         first = failures[0]
@@ -817,13 +806,18 @@ def run_fetcher(
             f"{len(failures)} API failure(s) during collection; first: "
             f"{first.get('endpoint', 'unknown endpoint')}: {detail}"
         )
-        logger.error(message)
-        report_failure(message, code=str(first.get("type") or first.get("status_code") or ""))
+        # Falcon's own exception type / HTTP status, which is NOT one of the
+        # contract's categories, so report_failure drops it and metadata.error_code
+        # stays empty. Passed through rather than invented: mapping these onto the
+        # closed set is a behaviour change, not part of a de-duplication.
+        raw_code = first.get("type") or first.get("status_code")
+        report_failure(message, code=str(raw_code) if raw_code else None)
         return 1
 
     if result.get("status") not in {"success", "partial_or_empty"}:
         message = str(result.get("message") or "collection did not complete")
-        logger.error(message)
+        # Not one of the contract's categories either, so it is dropped the same
+        # way. Left verbatim: picking a replacement is a behaviour change.
         report_failure(message, code="collection_error")
         return 1
 

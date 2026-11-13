@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 from jsonschema import Draft202012Validator
 
 from framework.contract import EvidenceSet, Fetcher, InvocationResult
@@ -63,6 +64,18 @@ def test_wrapped_output_conforms_to_envelope_schema(tmp_path):
     assert env["payload"] == {"finding": "x"}                   # payload preserved verbatim
     assert env["metadata"]["evidence_set"]["reference_id"] == "EVD-1"
     assert env["metadata"]["target"] == {"region": "us-east-1"}
+
+
+def test_envelope_carries_the_evidence_set_frequency(tmp_path):
+    default = make_fetcher(tmp_path, evidence_set=EvidenceSet(reference_id="EVD-1", name="S"))
+    env = _wrap_one(tmp_path, {"k": 1}, fetcher=default)
+    assert env["metadata"]["evidence_set"]["frequency"] == "THREE_DAY"
+
+    weekly = make_fetcher(tmp_path, evidence_set=EvidenceSet(reference_id="EVD-1", name="S",
+                                                              frequency="WEEKLY"))
+    env = _wrap_one(tmp_path, {"k": 1}, fetcher=weekly)
+    assert env["metadata"]["evidence_set"]["frequency"] == "WEEKLY"
+    assert not list(_VALIDATOR.iter_errors(env))
 
 
 def test_failed_status_carries_bounded_error_tail(tmp_path):
@@ -161,7 +174,78 @@ def test_unreadable_json_is_skipped_without_raising(tmp_path):
     assert (tmp_path / "ev.json").read_text() == "{ not valid json"   # left as-is
 
 
+@pytest.mark.parametrize("constant", ["NaN", "Infinity", "-Infinity"])
+@pytest.mark.parametrize("already_enveloped", [False, True])
+def test_nonstandard_json_constant_is_not_wrapped(tmp_path, caplog, constant, already_enveloped):
+    raw = '{"value": ' + constant + '}'
+    if already_enveloped:
+        raw = '{"schema_version": "1.0", "metadata": {}, "payload": ' + raw + '}'
+    path = tmp_path / "ev.json"
+    path.write_text(raw)
+
+    wrap_outputs(make_result(), make_fetcher(tmp_path), "rid", tmp_path)
+
+    assert path.read_text() == raw
+    assert "cannot read as JSON" in caplog.text
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), -float("inf")])
+def test_nonfinite_target_does_not_write_invalid_json_or_stop_later_invocations(tmp_path, caplog, value):
+    path = tmp_path / "ev.json"
+    path.write_text('{"value": 1}')
+    wrap_outputs(make_result(target={"value": value}), make_fetcher(tmp_path), "rid", tmp_path)
+
+    assert path.read_text() == '{"value": 1}'
+    assert "cannot serialize as JSON" in caplog.text
+
+    # The per-file failure must not prevent a later valid invocation from wrapping.
+    valid = tmp_path / "valid.json"
+    valid.write_text('{"value": 2}')
+    wrap_outputs(make_result(outputs=["valid.json"]), make_fetcher(tmp_path), "rid", tmp_path)
+    assert json.loads(valid.read_text())["payload"] == {"value": 2}
+
+
+def test_overflowing_payload_number_is_not_written_as_infinity(tmp_path, caplog):
+    path = tmp_path / "ev.json"
+    path.write_text('{"value": 1e999}')
+    valid = tmp_path / "valid.json"
+    valid.write_text('{"value": 2}')
+    wrap_outputs(make_result(outputs=["ev.json", "valid.json"]), make_fetcher(tmp_path), "rid", tmp_path)
+
+    assert path.read_text() == '{"value": 1e999}'
+    assert "cannot serialize as JSON" in caplog.text
+    assert json.loads(valid.read_text())["payload"] == {"value": 2}
+
+
+def test_finite_values_and_constant_names_in_strings_are_preserved(tmp_path):
+    raw = {"zero": 0, "negative": -1.25, "exponent": 1e30,
+           "text": ["NaN", "Infinity", "-Infinity"], "empty": None, "enabled": False}
+    env = _wrap_one(tmp_path, raw)
+    assert env["payload"] == raw
+    _VALIDATOR.validate(env)
+
+
 def test_no_evidence_set_block_when_fetcher_declares_none(tmp_path):
     env = _wrap_one(tmp_path, {"k": 1})   # default fetcher has evidence_set=None
     assert "evidence_set" not in env["metadata"]
     assert not list(_VALIDATOR.iter_errors(env))   # still valid (evidence_set is optional)
+
+
+def test_target_with_a_yaml_date_does_not_abort_the_run(tmp_path):
+    """An unquoted YAML date in a target must not kill wrap_outputs.
+
+    `since: 2026-01-01` in a manifest target is valid YAML and parses to a
+    datetime.date, which json.dumps cannot serialize. Before default=str this
+    raised TypeError out of wrap_outputs — past the invocation's own exit 0,
+    caught by nothing in run_cmd — aborting the manifest with the collected
+    file left unenveloped and no _run_metadata.json written.
+    """
+    import datetime
+
+    env = _wrap_one(
+        tmp_path,
+        {"finding": "x"},
+        result=make_result(target={"since": datetime.date(2026, 1, 1)}),
+    )
+    assert env["metadata"]["target"] == {"since": "2026-01-01"}
+    _VALIDATOR.validate(env)

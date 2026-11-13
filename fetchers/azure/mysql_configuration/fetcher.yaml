@@ -1,16 +1,30 @@
 name: azure_mysql_configuration
-version: 0.1.0
-description: >
-  For each Azure Database for MySQL flexible server in the subscription, reports the
-  engine version, the full server-parameter set, and the posture derived from it:
-  require_secure_transport, the comma-separated tls_version list of every ACCEPTED
-  version (so a deprecated version still being accepted is visible), audit_log_enabled
-  and the audit_log_events classes that show whether connections are recorded, plus
-  public network access, geo-redundant backup and the high-availability mode. Every
-  parameter is listed rather than read by name — the opposite of the PostgreSQL
-  fetcher — because MySQL's audit configuration is spread across parameters that gate
-  each other.
+version: 0.2.1
+description: >-
+  Shows whether each MySQL flexible server requires encrypted connections, accepts only current TLS versions, logs connections, blocks public access, and has geo-redundant backups and a standby.
 category: azure
+
+config_schema:
+  resource_exclusions:
+    type: patterns
+    prefixes: [rg, location, id]
+    bare: false
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Resources outside the authorization boundary, to leave out of scope, as
+      case-insensitive glob patterns listed in the manifest, each with a
+      prefix: rg:<resource group> (read from the resource id), location:<region>
+      (the region's name without spaces, such as eastus2; a resource with no
+      location never matches one) or id:<resource id> (also matches that
+      resource's child resources). * matches any run of characters and ? one
+      character. A matching MySQL flexible server is listed under excluded with the
+      pattern and left out of every count and verdict; its server
+      parameters are not read. A pattern
+      without one of these prefixes fails the run. Set it once under platforms.azure.config for every Azure
+      fetcher that has this field; fetchers without it ignore it. Each item is a
+      pattern, or a pattern with a reason. Empty: every
+      resource is in scope.
 
 supports_targets: true
 
@@ -52,8 +66,44 @@ ksis:
 evidence_set:
   reference_id: EVD-AZURE-MYSQL-CONFIG
   name: Azure MySQL Flexible Server Configuration
-  instructions: >
-    Script: fetcher.py. Azure SDK calls (azure-mgmt-rdbms mysql_flexibleservers
-    MySQLManagementClient): servers.list(), configurations.list_by_server(). Records
-    each server's engine version, durability settings and every server parameter as a
-    name-to-value map.
+  instructions: |
+    Script: azure/mysql_configuration/fetcher.py
+
+    Access: Reader on the subscription.
+
+    Commands Executed:
+    - subscriptions.list() — picks a subscription when none is set
+    - providers.get("Microsoft.DBforMySQL") — tells "not registered" apart from "no servers"
+    - servers.list() — every MySQL flexible server with its version, network, backup and high-availability settings
+    - configurations.list_by_server() (per in-scope server) — every server parameter, including the TLS and audit log ones
+
+    Output: azure_mysql_configuration_<subscription>.json — each MySQL flexible server with its transport encryption, audit logging, network, backup and high-availability settings, every server parameter as a name-to-value map, and the servers left out of scope with the pattern that matched.
+
+    Summary fields:
+
+    Which resources are left out of scope?
+    - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every server is in scope
+    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no MySQL server, such as a mistyped name; null if the server list couldn't be read
+    - excluded_mysql_servers — Number of servers left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, gets no parameter reads, and no other count includes it; null if the server list couldn't be read
+    - in_scope_mysql_servers — Number of servers read and in scope; null if the server list couldn't be read, and 0 means there are none or the patterns took out every server, which a check can catch by requiring more than 0
+
+    What was checked?
+    - total_mysql_servers — Number of in-scope Azure Database for MySQL flexible servers; every count below is out of this total; reads 0, not null, when the server list could not be read, so read it together with in_scope_mysql_servers
+    - total_configuration_parameters — Number of server parameters read, added up across in-scope servers; a server whose parameters couldn't be read adds 0, and its secure transport, TLS version and audit log settings all count as off
+    - provider_registration_status — Whether the MySQL provider (Microsoft.DBforMySQL) is registered on the subscription: registered, not_registered or unknown
+
+    Are connections encrypted with a current TLS version?
+    - require_secure_transport_servers — Number of servers with the require_secure_transport parameter ON, so unencrypted connections are refused
+    - require_secure_transport_percentage — Percentage of servers that refuse unencrypted connections = require_secure_transport_servers / total_mysql_servers × 100 (a whole number, 0–100; reads 0 when total_mysql_servers is 0). Servers whose parameters couldn't be read count in the total but not as refusing, so they lower it
+    - tls_version_compliant_servers — Number of servers whose tls_version parameter lists no version older than TLS 1.2 (for example TLSv1.2,TLSv1.3). The parameter lists every version the server accepts rather than a minimum, so a list that still includes TLSv1, TLSv1.0 or TLSv1.1 doesn't count, and nor does an empty or missing one
+
+    Are connections recorded in the audit log?
+    - audit_log_enabled_servers — Number of servers with the audit_log_enabled parameter ON
+    - audit_log_connection_event_servers — Number of servers whose audit_log_events parameter includes the CONNECTION class, which records who connected; counted whether or not audit_log_enabled is ON
+
+    Is the server kept off the public internet?
+    - public_network_access_disabled_servers — Number of servers with public network access Disabled, so they're reached only through a virtual network or private endpoint
+
+    Will the server survive a zone or region loss?
+    - geo_redundant_backup_servers — Number of servers whose backups are geo-redundant (stored in a second region too)
+    - high_availability_servers — Number of servers with a high-availability mode other than Disabled (ZoneRedundant or SameZone); Disabled or no mode doesn't count

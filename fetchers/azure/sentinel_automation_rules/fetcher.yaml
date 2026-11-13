@@ -1,0 +1,101 @@
+name: azure_sentinel_automation_rules
+version: 0.2.1
+description: >-
+  Shows each Microsoft Sentinel workspace's automation rules, what triggers them, whether they are active, and what actions they take, such as running a playbook.
+category: azure
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_sentinel_automation_rules.json
+  aggregation: per_target
+
+target_schema:
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id to collect from. Optional — omit to use the first
+      enabled subscription the ambient credential can see; set one target per
+      subscription to fan out.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: Deployment environment label (e.g. prod) written into the evidence metadata.
+  workspaces:
+    type: string
+    required: false
+    env: SENTINEL_WORKSPACES
+    description: >
+      Comma-separated workspace names or resource ids to limit collection to.
+      Optional — omit to collect every Sentinel-onboarded workspace in the
+      subscription.
+
+config_schema:
+  resource_exclusions:
+    type: patterns
+    prefixes: [rg, location, id]
+    bare: false
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Resources outside the authorization boundary, to leave out of scope, as
+      case-insensitive glob patterns listed in the manifest, each with a
+      prefix: rg:<resource group> (read from the resource id), location:<region>
+      (the region's name without spaces, such as eastus2; a resource with no
+      location never matches one) or id:<resource id> (also matches that
+      resource's child resources). * matches any run of characters and ? one
+      character. A matching Log Analytics workspace is listed under excluded with the
+      pattern and left out of every count, workspaces_without_sentinel included;
+      its automation rules are not read. An excluded workspace gets no reads, not even its Sentinel onboarding state;
+      a SENTINEL_WORKSPACES filter applies first, and a workspace it names that a
+      pattern takes out fails the run as bad_config. A pattern
+      without one of these prefixes fails the run. Set it once under platforms.azure.config for every Azure
+      fetcher that has this field; fetchers without it ignore it. Each item is a
+      pattern, or a pattern with a reason. Empty: every resource is in scope.
+
+secrets: []          # DefaultAzureCredential only — see _categories/azure.yaml
+
+ksis:
+  - KSI-IAM-SUS      # Responding to suspicious activity — automated response on incidents
+  - KSI-MLA-RVL      # Reviewing logs — incidents are routed, notified and tasked automatically
+
+evidence_set:
+  reference_id: EVD-AZURE-SENTINEL-AUTOMATION-RULES
+  name: Azure Sentinel Automation Rules
+  instructions: |
+    Script: azure/sentinel_automation_rules/fetcher.py
+
+    Access: Microsoft Sentinel Reader on each workspace (or Reader on the subscription).
+
+    Commands Executed:
+    - subscriptions.list() — picks a subscription when none is set
+    - GET Microsoft.OperationalInsights/workspaces — finds the Log Analytics workspaces
+    - GET Microsoft.SecurityInsights/onboardingStates (per workspace) — tells which workspaces have Sentinel on
+    - GET Microsoft.SecurityInsights/automationRules (per Sentinel workspace) — each automation rule with its trigger, conditions and actions
+
+    Output: azure_sentinel_automation_rules_<subscription>.json — for each Sentinel workspace, every automation rule with its order, trigger, conditions (property and operator, with values counted rather than copied), actions (a playbook's Logic App id, the status, severity, classification or owner set, or the task added) and who created and last changed it, plus each workspace's active rules, active actions by type and the playbooks they run, and the workspaces left out of scope.
+
+    Summary fields:
+
+    Which resources are left out of scope?
+    - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every workspace is in scope
+    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no workspace, such as a mistyped name; null when the workspace list could not be read
+    - excluded_workspaces — Number of workspaces left out of scope because a pattern matched; each is listed under excluded with the pattern, gets no reads, and no other count includes it; null when the workspace list could not be read
+    - in_scope_workspaces — Number of in-scope workspaces found, Sentinel or not; 0 means none was found or the patterns took out every workspace, which a check can catch by requiring more than 0; null when the workspace list could not be read
+
+    Which workspaces were checked?
+    - workspaces_collected — Number of in-scope Sentinel workspaces read
+    - workspaces_without_sentinel — Number of in-scope workspaces skipped because Sentinel isn't turned on
+
+    Is incident response automated?
+    - active_rules_total — Number of active automation rules across the workspaces read; active means enabled and not past its expiration time
+    - workspaces_with_no_active_rules — Number of workspaces read with no active automation rule; a workspace whose rules couldn't be read is not counted
+    - playbooks_run — Number of distinct playbooks (Logic Apps) that active automation rules run; playbook internals (the Logic Apps themselves) are not read, so this does not show what a playbook does

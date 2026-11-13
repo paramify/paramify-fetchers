@@ -17,19 +17,29 @@ from typing import Any, Dict, List, Optional
 import requests
 from dotenv import load_dotenv
 
+# The shared failure-reporting helper lives in fetchers/_lib/ — the same import
+# mechanism as a category `_shared` module, one directory up.
+SCRIPT_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(SCRIPT_DIR.parents[1] / "_lib"))
+# Paging shared by the Datadog fetchers lives in the category's _shared/.
+sys.path.insert(0, str(SCRIPT_DIR.parent / "_shared"))
+
+from datadog_incidents import (  # noqa: E402
+    INCIDENTS_PATH,
+    drop_incidents_before,
+    walk_incidents,
+)
+from datadog_paging import (  # noqa: E402
+    PagingError,
+    error_result,
+    failure_result,
+    request_failure,
+    request_json,
+    with_paging_status,
+)
+from fetcher_status import report_failure  # noqa: E402
+
 logger = logging.getLogger("datadog_incident_timelines")
-
-
-def report_failure(reason: str, code: str | None = None) -> None:
-    """Report why this run failed; the runner puts it in the envelope's metadata.error.
-
-    Without it the runner falls back to the tail of stderr — which on the way out
-    is the "Evidence saved" line. See docs/fetcher_contract.md § Output.
-    """
-    path = os.environ.get("FETCHER_STATUS_FILE")
-    if not path:
-        return
-    Path(path).write_text(json.dumps({"error": reason} | ({"code": code} if code else {})))
 
 
 def current_timestamp() -> str:
@@ -56,33 +66,13 @@ def get_base_url() -> str:
 
 
 def fetch_incidents(base_url: str, headers: Dict[str, str], from_ts: str, to_ts: str) -> List[Dict[str, Any]]:
-    all_incidents: List[Dict[str, Any]] = []
-    offset = 0
-    page_size = 100
-    endpoint = f"{base_url}/api/v2/incidents"
+    """Every incident, through the shared incidents walk (see
+    _shared/datadog_incidents.py). Raises PagingError if the first page fails;
+    a later failure comes back on the returned list's `.error`."""
+    return walk_incidents(base_url, headers, from_ts, to_ts)
 
-    while True:
-        params: Dict[str, Any] = {
-            "page[offset]": offset,
-            "page[size]": page_size,
-            "filter[created][start]": from_ts,
-            "filter[created][end]": to_ts,
-        }
-        try:
-            response = requests.get(endpoint, headers=headers, params=params, timeout=30)
-            response.raise_for_status()
-            payload = response.json()
-            data = payload.get("data", [])
-            all_incidents.extend(data)
-            total = payload.get("meta", {}).get("pagination", {}).get("total", 0)
-            offset += len(data)
-            if not data or offset >= total:
-                break
-        except requests.exceptions.RequestException as e:
-            logger.warning("Incident pagination interrupted: %s", e)
-            break
 
-    return all_incidents
+TIMELINE_PATH = "/api/v2/incidents/{incident_id}/relationships/timeline_cells"
 
 
 def fetch_timeline_cells(
@@ -90,42 +80,88 @@ def fetch_timeline_cells(
     headers: Dict[str, str],
     incident_id: str,
 ) -> List[Dict[str, Any]]:
-    endpoint = f"{base_url}/api/v2/incidents/{incident_id}/relationships/timeline_cells"
-    try:
-        response = requests.get(endpoint, headers=headers, timeout=30)
-        response.raise_for_status()
-        return response.json().get("data", [])
-    except requests.exceptions.RequestException as e:
-        logger.warning("Timeline fetch failed for incident %s: %s", incident_id, e)
+    """One incident's timeline cells. Raises on a failed request, so a failed
+    read never looks like an empty timeline."""
+    payload = request_json("GET", f"{base_url}{TIMELINE_PATH.format(incident_id=incident_id)}", headers)
+    data = payload.get("data") if isinstance(payload, dict) else None
+    if data is None:
         return []
+    if not isinstance(data, list):
+        raise ValueError(f"expected a list at data, got {type(data).__name__}")
+    return data
+
+
+def _related_id(relationships: Dict[str, Any], *keys: str) -> Optional[str]:
+    for key in keys:
+        rel = relationships.get(key)
+        data = rel.get("data") if isinstance(rel, dict) else None
+        if isinstance(data, dict) and data.get("id"):
+            return data["id"]
+    return None
+
+
+def cell_content_text(content: Any) -> Optional[str]:
+    """The text of a timeline cell.
+
+    A markdown cell holds it as ``{"content": "<markdown>"}``, the shape the
+    incidents API documents for timeline cells. A bare string is also accepted.
+    """
+    if isinstance(content, str):
+        return content
+    if isinstance(content, dict):
+        text = content.get("content")
+        if isinstance(text, str):
+            return text
+    return None
 
 
 def extract_cell_fields(cell: Dict[str, Any]) -> Dict[str, Any]:
-    attrs = cell.get("attributes", {})
+    attrs = cell.get("attributes") or {}
+    relationships = cell.get("relationships") or {}
+    content = attrs.get("content")
     return {
+        "id": cell.get("id"),
         "cell_type": attrs.get("cell_type"),
         "created": attrs.get("created"),
         "modified": attrs.get("modified"),
-        "created_by_id": cell.get("relationships", {}).get("created_by", {}).get("data", {}).get("id"),
+        "created_by_id": _related_id(relationships, "created_by", "created_by_user"),
+        "important": attrs.get("important"),
+        # What the entry says, for the after-action review. A non-markdown cell
+        # keeps its content object as the API returned it.
+        "content": cell_content_text(content),
+        "content_raw": content if isinstance(content, dict) and cell_content_text(content) is None else None,
     }
 
 
+# Summary figures that do not come from the reads. They stay when a read
+# fails; every other figure becomes null.
+KEEP_SUMMARY = ("lookback_days",)
+
+
 def get_incident_timelines() -> Dict[str, Any]:
-    base_url = get_base_url()
-    headers = get_dd_headers()
+    try:
+        base_url = get_base_url()
+        headers = get_dd_headers()
+    except RuntimeError as e:
+        return error_result(str(e), current_timestamp(), "bad_config")
+    endpoint = f"{base_url}{INCIDENTS_PATH}"
 
     lookback_days = int(os.environ.get("DATADOG_INCIDENTS_LOOKBACK_DAYS", "90"))
     now = datetime.now(timezone.utc)
-    from_ts = (now - timedelta(days=lookback_days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    from_dt = now - timedelta(days=lookback_days)
+    from_ts = from_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
     to_ts = now.strftime("%Y-%m-%dT%H:%M:%SZ")
 
     try:
-        incidents = fetch_incidents(base_url, headers, from_ts, to_ts)
+        walked = fetch_incidents(base_url, headers, from_ts, to_ts)
+        # The date filter is not documented; drop what it did not.
+        incidents, outside_window = drop_incidents_before(walked, from_dt)
 
         if not incidents:
-            return {
+            return with_paging_status({
                 "status": "partial_or_empty",
                 "message": "No incidents found in the lookback window",
+                "api_endpoint": endpoint,
                 "record_count": 0,
                 "data": [],
                 "summary": {
@@ -133,11 +169,14 @@ def get_incident_timelines() -> Dict[str, Any]:
                     "total_timeline_cells": 0,
                     "avg_cells_per_incident": 0,
                     "cell_type_distribution": {},
+                    "incidents_outside_lookback_dropped": outside_window,
+                    "lookback_days": lookback_days,
                 },
                 "retrieved_at": current_timestamp(),
-            }
+            }, walked, keep_summary=KEEP_SUMMARY)
 
         all_timelines = []
+        timeline_failures: List[Dict[str, Any]] = []
         cell_type_counter: Counter = Counter()
         incidents_with_timeline = 0
         total_cells = 0
@@ -148,7 +187,21 @@ def get_incident_timelines() -> Dict[str, Any]:
                 continue
 
             attrs = incident.get("attributes", {})
-            cells_raw = fetch_timeline_cells(base_url, headers, incident_id)
+            try:
+                cells_raw = fetch_timeline_cells(base_url, headers, incident_id)
+            except (requests.exceptions.RequestException, ValueError) as e:
+                logger.warning("Timeline read failed for incident %s: %s", incident_id, e)
+                timeline_failures.append(
+                    request_failure("Datadog read incident timeline", e, incident_id=incident_id)
+                )
+                # Unknown, not empty: the read failed.
+                all_timelines.append({
+                    "incident_id": incident_id,
+                    "incident_title": attrs.get("title"),
+                    "cell_count": None,
+                    "timeline_cells": None,
+                })
+                continue
             cells = [extract_cell_fields(c) for c in cells_raw]
 
             for cell in cells:
@@ -167,9 +220,9 @@ def get_incident_timelines() -> Dict[str, Any]:
 
         avg_cells = round(total_cells / incidents_with_timeline, 2) if incidents_with_timeline else 0
 
-        return {
+        return with_paging_status({
             "status": "success",
-            "api_endpoint": f"{base_url}/api/v2/incidents/{{id}}/relationships/timeline_cells",
+            "api_endpoint": f"{base_url}{TIMELINE_PATH.format(incident_id='{id}')}",
             "record_count": total_cells,
             "data": all_timelines,
             "summary": {
@@ -177,14 +230,16 @@ def get_incident_timelines() -> Dict[str, Any]:
                 "total_timeline_cells": total_cells,
                 "avg_cells_per_incident": avg_cells,
                 "cell_type_distribution": dict(cell_type_counter),
+                "incidents_outside_lookback_dropped": outside_window,
+                "lookback_days": lookback_days,
             },
             "retrieved_at": current_timestamp(),
-        }
+        }, walked, keep_summary=KEEP_SUMMARY, other_failures=timeline_failures)
 
-    except RuntimeError as e:
-        return {"status": "error", "message": str(e), "retrieved_at": current_timestamp()}
+    except PagingError as e:
+        return failure_result(e, endpoint, current_timestamp())
     except Exception as e:
-        return {"status": "error", "message": str(e), "retrieved_at": current_timestamp()}
+        return error_result(str(e), current_timestamp())
 
 
 def main() -> int:
@@ -208,8 +263,7 @@ def main() -> int:
     # Last line on stderr wins: the runner reads its tail into the envelope's metadata.error.
     if result.get("status") not in {"success", "partial_or_empty"}:
         reason = result.get("message", "unknown error")
-        logger.error("collection failed: %s", reason)
-        report_failure(reason)
+        report_failure(reason, result.get("error_code"))
         return 1
     return 0
 

@@ -14,6 +14,7 @@ grant controls are split into grant vs. block — see `split_access_controls()`.
 """
 
 import asyncio
+import json
 import logging
 import os
 import sys
@@ -30,10 +31,11 @@ from azure_common import (  # noqa: E402
     coverage_percentage,
     credential,
     failure_reason,
+    report_failure,
     write_evidence,
-    write_status,
 )
 from entra_graph import (  # noqa: E402
+    aguard,
     graph_attr,
     graph_list,
     paginate,
@@ -69,15 +71,39 @@ WINDOWS_AZURE_SERVICE_MANAGEMENT_API = "797f4846-ba00-4fd7-ba43-dac1f8f63013"
 
 # conditions.applications.includeApplications value meaning "every cloud app".
 ALL_APPLICATIONS = "All"
+# The legacy literal for guests and external users inside includeUsers/excludeUsers.
+GUESTS_LITERAL = "GuestsOrExternalUsers"
 # conditions.users.includeUsers value meaning "every user in the tenant".
 ALL_USERS = "All"
 
 # conditions.clientAppTypes values for the pre-modern-auth protocols, which cannot
 # present an MFA challenge at all.
 LEGACY_CLIENT_APP_TYPES = frozenset({"exchangeActiveSync", "other"})
+# Every conditions.clientAppTypes value by its lowercase form; unset or "all" means all four.
+CLIENT_APP_TYPES = {t.lower(): t for t in ("browser", "mobileAppsAndDesktopClients", "exchangeActiveSync", "other")}
+
+# authenticationMethodModes bound to the sign-in origin, so a look-alike site can't relay them.
+PHISHING_RESISTANT_MODES = frozenset({"fido2", "windowshelloforbusiness", "x509certificatemultifactor"})
+MFA_REQUIREMENT = "mfa"
+# conditionalAccessTransferMethods member for a policy with no authentication flow condition.
+NO_TRANSFER_METHOD = "none"
 
 
 # --- projections: the only code here that touches a Graph model ---
+
+def project_filter(conditional_access_filter) -> dict | None:
+    if conditional_access_filter is None:
+        return None
+    return {"mode": graph_attr(conditional_access_filter, "mode"), "rule": graph_attr(conditional_access_filter, "rule")}
+
+
+def project_guests(spec) -> dict | None:
+    """guestOrExternalUserTypes and the tenant scope kind; tenant ids are never read."""
+    if spec is None:
+        return None
+    return {"types": sorted(str(t) for t in graph_list(spec, "guest_or_external_user_types")),
+            "tenants": graph_attr(graph_attr(spec, "external_tenants"), "membership_kind")}
+
 
 def project_conditional_access_policy(policy) -> dict:
     """Read a `ConditionalAccessPolicy` model's attributes into a flat dict.
@@ -97,8 +123,11 @@ def project_conditional_access_policy(policy) -> dict:
     users = graph_attr(conditions, "users")
     platforms = graph_attr(conditions, "platforms")
     locations = graph_attr(conditions, "locations")
+    device_filter = graph_attr(graph_attr(conditions, "devices"), "device_filter")
+    flows = graph_attr(conditions, "authentication_flows")
     grant_controls = graph_attr(policy, "grant_controls")
     session_controls = graph_attr(policy, "session_controls")
+    strength = graph_attr(grant_controls, "authentication_strength")
 
     return {
         "id": graph_attr(policy, "id"),
@@ -113,14 +142,23 @@ def project_conditional_access_policy(policy) -> dict:
         "exclude_groups": graph_list(users, "exclude_groups"),
         "include_roles": graph_list(users, "include_roles"),
         "exclude_roles": graph_list(users, "exclude_roles"),
+        "include_guests_or_external_users": project_guests(graph_attr(users, "include_guests_or_external_users")),
+        "exclude_guests_or_external_users": project_guests(graph_attr(users, "exclude_guests_or_external_users")),
         # --- what it applies to ---
         "include_applications": graph_list(applications, "include_applications"),
         "exclude_applications": graph_list(applications, "exclude_applications"),
         "include_user_actions": graph_list(applications, "include_user_actions"),
+        "application_filter": project_filter(graph_attr(applications, "application_filter")),
         # --- the rest of the conditions ---
         "client_app_types": graph_list(conditions, "client_app_types"),
         "sign_in_risk_levels": graph_list(conditions, "sign_in_risk_levels"),
         "user_risk_levels": graph_list(conditions, "user_risk_levels"),
+        "service_principal_risk_levels": graph_list(conditions, "service_principal_risk_levels"),
+        # Flag enums: kiota reads "minor,moderate" as a list of members.
+        "insider_risk_levels": graph_list(conditions, "insider_risk_levels"),
+        "device_filter": project_filter(device_filter),
+        "authentication_flow_transfer_methods": [
+            m for m in graph_list(flows, "transfer_methods") if str(m).lower() != NO_TRANSFER_METHOD],
         "include_platforms": graph_list(platforms, "include_platforms"),
         "exclude_platforms": graph_list(platforms, "exclude_platforms"),
         "include_locations": graph_list(locations, "include_locations"),
@@ -128,9 +166,9 @@ def project_conditional_access_policy(policy) -> dict:
         # --- what it requires or denies ---
         "built_in_controls": graph_list(grant_controls, "built_in_controls"),
         "grant_controls_operator": graph_attr(grant_controls, "operator"),
-        "authentication_strength": graph_attr(
-            graph_attr(grant_controls, "authentication_strength"), "display_name"
-        ),
+        "authentication_strength": graph_attr(strength, "display_name"),
+        "authentication_strength_id": graph_attr(strength, "id"),
+        "authentication_strength_requirements": graph_list(strength, "requirements_satisfied"),
         "terms_of_use": graph_list(grant_controls, "terms_of_use"),
         # --- session controls (present = the policy constrains the session) ---
         "has_sign_in_frequency": graph_attr(session_controls, "sign_in_frequency") is not None,
@@ -168,7 +206,27 @@ def split_access_controls(built_in_controls: list) -> dict:
     }
 
 
-def policy_record(policy: dict) -> dict:
+def combination_is_phishing_resistant(combination: str) -> bool:
+    """A combination ("fido2", "password,sms") whose every method is phishing-resistant."""
+    modes = [m.strip().lower() for m in str(combination or "").split(",") if m.strip()]
+    return bool(modes) and all(m in PHISHING_RESISTANT_MODES for m in modes)
+
+
+def strength_record(raw: dict) -> dict:
+    """One authentication strength policy from the raw JSON, where multi-method combinations keep their names."""
+    combinations = sorted(str(c) for c in raw.get("allowedCombinations") or [])
+    requirements = raw.get("requirementsSatisfied")
+    return {
+        "id": raw.get("id"),
+        "display_name": raw.get("displayName"),
+        "policy_type": raw.get("policyType"),
+        "requirements_satisfied": requirements,
+        "allowed_combinations": combinations,
+        "phishing_resistant": bool(combinations) and all(combination_is_phishing_resistant(c) for c in combinations),
+    }
+
+
+def policy_record(policy: dict, strengths: dict | None = None) -> dict:
     """Normalize one projected policy into an evidence record.
 
     `target_resources.include` follows Prowler: `includeApplications` when set, otherwise
@@ -186,9 +244,28 @@ def policy_record(policy: dict) -> dict:
     state = policy.get("state") or STATE_DISABLED
 
     grant = access_controls["grant"]
-    requires_mfa = any(c.lower() in MFA_CONTROLS for c in grant) or bool(
-        policy.get("authentication_strength")
-    )
+    strength_id = policy.get("authentication_strength_id")
+    strength = (strengths or {}).get(str(strength_id).lower()) if strength_id else None
+    requirements = policy.get("authentication_strength_requirements") or str(
+        (strength or {}).get("requirements_satisfied") or ""
+    ).split(",")
+    # A strength counts as MFA only when it says so; a custom one can allow a password alone.
+    strength_mfa = bool(strength_id) and MFA_REQUIREMENT in {str(r).strip().lower() for r in requirements}
+    requires_mfa = any(c.lower() in MFA_CONTROLS for c in grant) or strength_mfa
+    # Under OR, every grant control, the strength and terms of use are alternatives; each must be MFA.
+    any_of = str(policy.get("grant_controls_operator") or "").upper() == "OR"
+    mfa_without_alternative = requires_mfa and (not any_of or (
+        all(c.lower() in MFA_CONTROLS for c in grant) and not policy.get("terms_of_use")
+        and (not strength_id or strength_mfa)))
+    if not strength_id:
+        phishing_resistant: bool | None = False
+    elif strength is None:
+        phishing_resistant = None
+    else:
+        # Under OR, any other grant control, terms of use included, satisfies the policy instead of the strength.
+        either = str(policy.get("grant_controls_operator") or "").upper() == "OR" and bool(
+            grant or policy.get("terms_of_use"))
+        phishing_resistant = strength["phishing_resistant"] and not either
 
     return {
         "id": policy.get("id"),
@@ -205,22 +282,31 @@ def policy_record(policy: dict) -> dict:
             "exclude_groups": sorted(policy.get("exclude_groups") or []),
             "include_roles": sorted(policy.get("include_roles") or []),
             "exclude_roles": sorted(policy.get("exclude_roles") or []),
+            "include_guests_or_external_users": policy.get("include_guests_or_external_users"),
+            "exclude_guests_or_external_users": policy.get("exclude_guests_or_external_users"),
         },
         "target_resources": {
             "include": sorted(include_apps),
             "exclude": sorted(exclude_apps),
+            "application_filter": policy.get("application_filter"),
         },
         "access_controls": {
             "grant": grant,
             "block": access_controls["block"],
             "operator": policy.get("grant_controls_operator"),
             "authentication_strength": policy.get("authentication_strength"),
+            "authentication_strength_id": strength_id,
+            "authentication_strength_combinations": strength["allowed_combinations"] if strength else None,
             "terms_of_use": sorted(policy.get("terms_of_use") or []),
         },
         "conditions": {
             "client_app_types": sorted(policy.get("client_app_types") or []),
             "sign_in_risk_levels": sorted(policy.get("sign_in_risk_levels") or []),
             "user_risk_levels": sorted(policy.get("user_risk_levels") or []),
+            "service_principal_risk_levels": sorted(policy.get("service_principal_risk_levels") or []),
+            "insider_risk_levels": sorted(policy.get("insider_risk_levels") or []),
+            "device_filter": policy.get("device_filter"),
+            "authentication_flow_transfer_methods": sorted(policy.get("authentication_flow_transfer_methods") or []),
             "include_platforms": sorted(policy.get("include_platforms") or []),
             "exclude_platforms": sorted(policy.get("exclude_platforms") or []),
             "include_locations": sorted(policy.get("include_locations") or []),
@@ -236,6 +322,8 @@ def policy_record(policy: dict) -> dict:
         },
         # --- derived flags ---
         "requires_mfa": requires_mfa,
+        "requires_mfa_without_alternative": mfa_without_alternative,
+        "requires_phishing_resistant_mfa": phishing_resistant,
         "blocks_access": bool(access_controls["block"]),
         "requires_compliant_device": any(
             c.lower() in ("compliantdevice", "domainjoineddevice") for c in grant
@@ -246,6 +334,7 @@ def policy_record(policy: dict) -> dict:
             (policy.get("exclude_users") or [])
             or (policy.get("exclude_groups") or [])
             or (policy.get("exclude_roles") or [])
+            or bool(policy.get("exclude_guests_or_external_users"))
         ),
         "targets_legacy_authentication": bool(
             LEGACY_CLIENT_APP_TYPES.intersection(
@@ -255,26 +344,75 @@ def policy_record(policy: dict) -> dict:
     }
 
 
-def _protects(policy: dict, resource: str) -> bool:
-    """Whether an ENFORCED policy requires MFA for all users on `resource`.
+def _client_app_types(policy: dict) -> set:
+    types = {str(t).lower() for t in policy["conditions"]["client_app_types"]}
+    if not types or "all" in types:
+        return set(CLIENT_APP_TYPES.values())
+    return {CLIENT_APP_TYPES.get(t, t) for t in types}
 
-    Ported from Prowler's entra_conditional_access_policy_require_mfa_for_admin_portals
-    and ..._for_management_api: enabled (not report-only), includes All users, targets
-    that resource, and grants on MFA. All four are needed — an enabled MFA policy scoped
-    to one pilot group protects nobody in particular.
 
-    Deviation: a policy targeting `All` applications covers the resource too, which
-    Prowler's literal membership test misses.
+def _unnarrowed(policy: dict, resource: str | None = None) -> bool:
+    """Enforced, on every cloud app (or `resource`), with no condition besides client app types.
+
+    With no `resource`, any excluded app disqualifies; with one, only excluding that resource does.
     """
-    if not policy["is_enforced"] or not policy["requires_mfa"]:
-        return False
-    if not policy["targets_all_users"]:
-        return False
+    c = policy["conditions"]
     included = policy["target_resources"]["include"]
-    return resource in included or ALL_APPLICATIONS in included
+    excluded = policy["target_resources"]["exclude"]
+    covered = ALL_APPLICATIONS in included or (resource is not None and resource in included)
+    narrowed_by_exclusion = (resource in excluded) if resource is not None else bool(excluded)
+    return (policy["is_enforced"] and covered and not narrowed_by_exclusion
+            and not policy["target_resources"]["application_filter"]
+            and not c["sign_in_risk_levels"] and not c["user_risk_levels"]
+            and not c["service_principal_risk_levels"] and not c["insider_risk_levels"]
+            and not c["device_filter"] and not c["authentication_flow_transfer_methods"]
+            and all(str(v).lower() == "all" for v in c["include_platforms"]) and not c["exclude_platforms"]
+            and all(str(v).lower() == "all" for v in c["include_locations"]) and not c["exclude_locations"])
 
 
-def summarize(policies: list[dict]) -> dict:
+def _mfa_for_everyone(policy: dict) -> bool:
+    """Enforced MFA with no alternative, for all users on all cloud apps with none excluded, unnarrowed."""
+    return policy["requires_mfa_without_alternative"] and policy["targets_all_users"] and _unnarrowed(policy)
+
+
+def _mfa_for_all_sign_ins(policy: dict, resource: str | None = None) -> bool:
+    """`_mfa_for_everyone`, on `resource` when given, and for all four client app types."""
+    return (policy["requires_mfa_without_alternative"] and policy["targets_all_users"]
+            and _unnarrowed(policy, resource) and _client_app_types(policy) == set(CLIENT_APP_TYPES.values()))
+
+
+def _phishing_resistant_for_all_sign_ins(policy: dict) -> bool:
+    """Phishing-resistant MFA for all users on all cloud apps, for all client app types, excluding no role."""
+    return (bool(policy["requires_phishing_resistant_mfa"]) and policy["targets_all_users"]
+            and not policy["users"]["exclude_roles"] and _unnarrowed(policy)
+            and _client_app_types(policy) == set(CLIENT_APP_TYPES.values()))
+
+
+def phishing_resistant_summary(enforced: list[dict], strengths_readable: bool, policies_readable: bool) -> dict:
+    """Null when the policies or any enforced policy's strength couldn't be read, so unread never reads as absent."""
+    known = policies_readable and strengths_readable and all(
+        p["requires_phishing_resistant_mfa"] is not None for p in enforced
+    )
+    strong = [p for p in enforced if p["requires_phishing_resistant_mfa"]]
+    role_covering = [p for p in strong if _unnarrowed(p) and _client_app_types(p) == set(CLIENT_APP_TYPES.values())]
+    return {
+        "authentication_strengths_readable": strengths_readable,
+        "enforced_policies_requiring_phishing_resistant_mfa": len(strong) if known else None,
+        "enforced_phishing_resistant_mfa_for_all_users_and_apps": sum(
+            1 for p in strong if _phishing_resistant_for_all_sign_ins(p)
+        ) if known else None,
+        "phishing_resistant_mfa_role_template_ids": sorted(
+            {r for p in role_covering for r in p["users"]["include_roles"]}
+        ) if known else None,
+    }
+
+
+def _guest_principal(spec: dict) -> str:
+    """One principal per distinct guest exclusion: its types and tenant scope kind, never tenant ids."""
+    return f"{GUESTS_LITERAL}:{','.join(spec['types'])}:{spec['tenants']}"
+
+
+def summarize(policies: list[dict], strengths_readable: bool = True, policies_readable: bool = True) -> dict:
     """Enforced policies are the denominator that matters.
 
     Every "enforced_policies_*" count is over enforced policies only, because a disabled
@@ -282,7 +420,7 @@ def summarize(policies: list[dict]) -> dict:
     is reported separately so the gap stays visible.
     """
     enforced = [p for p in policies if p["is_enforced"]]
-    return {
+    summary = {
         "total_policies": len(policies),
         # --- state breakdown: report-only is never folded into enabled ---
         "enabled_policies": len(enforced),
@@ -296,8 +434,9 @@ def summarize(policies: list[dict]) -> dict:
             1 for p in enforced if p["requires_compliant_device"]
         ),
         "enforced_policies_with_authentication_strength": sum(
-            1 for p in enforced if p["access_controls"]["authentication_strength"]
+            1 for p in enforced if p["access_controls"]["authentication_strength_id"]
         ),
+        **phishing_resistant_summary(enforced, strengths_readable, policies_readable),
         "enforced_policies_with_session_controls": sum(
             1 for p in enforced if any(p["session_controls"].values())
         ),
@@ -308,17 +447,17 @@ def summarize(policies: list[dict]) -> dict:
         "enforced_policies_targeting_all_applications": sum(
             1 for p in enforced if p["targets_all_applications"]
         ),
-        "enforced_mfa_for_all_users_and_apps": sum(
-            1
-            for p in enforced
-            if p["requires_mfa"] and p["targets_all_users"] and p["targets_all_applications"]
+        "enforced_mfa_for_all_users_and_apps": sum(1 for p in enforced if _mfa_for_all_sign_ins(p)),
+        # Policies can split the client types between them, e.g. one for browsers and one for apps.
+        "mfa_client_app_types_for_all_users_and_apps": sorted(
+            {t for p in enforced if _mfa_for_everyone(p) for t in _client_app_types(p)}
         ),
         # --- the two resources the CIS Azure benchmark names ---
         "mfa_required_for_admin_portals": any(
-            _protects(p, MICROSOFT_ADMIN_PORTALS) for p in policies
+            _mfa_for_all_sign_ins(p, MICROSOFT_ADMIN_PORTALS) for p in policies
         ),
         "mfa_required_for_azure_management_api": any(
-            _protects(p, WINDOWS_AZURE_SERVICE_MANAGEMENT_API) for p in policies
+            _mfa_for_all_sign_ins(p, WINDOWS_AZURE_SERVICE_MANAGEMENT_API) for p in policies
         ),
         "enforced_policies_targeting_legacy_authentication": sum(
             1 for p in enforced if p["targets_legacy_authentication"]
@@ -332,34 +471,85 @@ def summarize(policies: list[dict]) -> dict:
                 for key in ("exclude", "exclude_groups", "exclude_roles")
                 for principal in p["users"][key]
             }
+            | {
+                _guest_principal(p["users"]["exclude_guests_or_external_users"])
+                for p in enforced
+                if p["users"]["exclude_guests_or_external_users"]
+            }
+        ),
+        "enforced_policies_excluding_guests_or_external_users": sum(
+            1 for p in enforced
+            if p["users"]["exclude_guests_or_external_users"] or GUESTS_LITERAL in p["users"]["exclude"]
+        ),
+        "excluded_guest_or_external_user_types": sorted(
+            {t for p in enforced for t in (p["users"]["exclude_guests_or_external_users"] or {}).get("types", [])}
         ),
     }
+    if not policies_readable:
+        # Policies that weren't read are unknown, not absent.
+        summary = {k: v if k == "authentication_strengths_readable" else None for k, v in summary.items()}
+    return summary
 
 
 # --- collection (lazy msgraph imports) ---
 
-async def _collect(collector: Collector, cred) -> tuple[list[dict], dict]:
-    """One identity.conditional_access.policies.get(), paged to the end."""
+async def read_strengths(client) -> list[dict]:
+    """GET /policies/authenticationStrengthPolicies as raw JSON: the SDK reads "password,sms" as None."""
+    from msgraph.generated.models.o_data_errors.o_data_error import ODataError
+
+    builder = client.policies.authentication_strength_policies
+    info = builder.to_get_request_information()
+    items: list[dict] = []
+    while info is not None:
+        raw = await builder.request_adapter.send_primitive_async(info, "bytes", {"XXX": ODataError})
+        body = json.loads(raw or b"{}")
+        items.extend(body.get("value") or [])
+        next_link = body.get("@odata.nextLink")
+        info = builder.with_url(next_link).to_get_request_information() if next_link else None
+    return items
+
+
+async def _collect(collector: Collector, cred) -> tuple[list[dict], dict, list[dict] | None, bool, bool]:
+    """identity.conditional_access.policies.get() paged to the end, then the strengths they use."""
 
     async def _work(client):
         tenant = await resolve_tenant(collector, client)
-        policies = [
-            policy_record(project_conditional_access_policy(p))
+        before = len(collector.failures)
+        projected = [
+            project_conditional_access_policy(p)
             for p in await paginate(
                 collector,
                 "graph.identity.conditionalAccess.policies.get",
                 client.identity.conditional_access.policies,
             )
         ]
+        policies_readable = len(collector.failures) == before
+        strengths: list[dict] | None = []
+        readable = True
+        if any(p.get("authentication_strength_id") for p in projected):
+            raw = await aguard(collector, "graph.policies.authenticationStrengthPolicies.get",
+                               lambda: read_strengths(client), default=None)
+            readable = raw is not None
+            # None, not [], when the read failed: unread is not "no strengths".
+            strengths = None if raw is None else sorted(
+                (strength_record(s) for s in raw), key=lambda s: (s["display_name"] or "", s["id"] or ""))
+        elif not policies_readable:
+            # The policies not read may use strengths.
+            strengths = None
+        by_id = {str(s["id"]).lower(): s for s in strengths or []} if readable else None
+        policies = [policy_record(p, by_id) for p in projected]
         logger.info("Collected %d Conditional Access policy/policies", len(policies))
         # Sorted for byte-stable re-runs; Graph promises no stable policy order.
         return (
             sorted(policies, key=lambda p: (p.get("display_name") or "", p.get("id") or "")),
             tenant,
+            strengths,
+            readable,
+            policies_readable,
         )
 
     result = await with_graph_client(collector, cred, _work, default=None)
-    return result if result is not None else ([], {"tenant_source": "unresolved"})
+    return result if result is not None else ([], {"tenant_source": "unresolved"}, None, True, False)
 
 
 def main() -> int:
@@ -380,8 +570,10 @@ def main() -> int:
     if cred is None:
         policies: list[dict] = []
         tenant = {"tenant_source": "unresolved"}
+        strengths: list[dict] | None = None
+        strengths_readable, policies_readable = True, False
     else:
-        policies, tenant = asyncio.run(_collect(collector, cred))
+        policies, tenant, strengths, strengths_readable, policies_readable = asyncio.run(_collect(collector, cred))
 
     # No `provider_registration_status()` call, deliberately: Graph is not an ARM
     # resource provider.
@@ -398,19 +590,15 @@ def main() -> int:
         subscription_id=scoping["subscription_id"],
         subscription_source=scoping["subscription_source"],
         collector=collector,
-        results={"conditional_access_policies": policies},
-        summary=summarize(policies),
+        results={"conditional_access_policies": policies, "authentication_strengths": strengths},
+        summary=summarize(policies, strengths_readable, policies_readable),
     )
 
     filename = f"azure_entra_conditional_access_policies_{tenant_filename_key(tenant)}.json"
     path = write_evidence(output_dir, filename, evidence)
 
     if not collector.ok:
-        logger.error(
-            "Encountered %d Microsoft Graph API failure(s) during collection",
-            len(collector.failures),
-        )
-        write_status(
+        report_failure(
             failure_reason(collector.failures), classify_failure_code(collector.failures)
         )
         return 1

@@ -11,26 +11,20 @@ import json
 import logging
 import os
 import re
+import sys
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, Iterator, List, Optional
 
-# The contract's closed set of categories for $FETCHER_STATUS_FILE's optional
-# `code`. Exit codes stay binary (0 / non-zero); the category goes here.
-STATUS_CODES = frozenset(
-    {
-        "auth_failed",
-        "not_authorized",
-        "target_unreachable",
-        "rate_limited",
-        "bad_config",
-        "partial_failure",
-        "internal_error",
-    }
-)
+# One implementation per runtime lives in fetchers/_lib; a category-shared module
+# may RE-EXPORT it and must not reimplement it (docs/fetcher_contract_guide.md, step 6).
+# Same mechanism a fetcher uses, one directory further up: this file is
+# fetchers/azure/_shared/, so fetchers/_lib is parents[2] / "_lib".
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "_lib"))
+from fetcher_status import STATUS_CODES, report_failure  # noqa: E402,F401
 
-_STATUS_LOGGER = logging.getLogger("azure_common")
+_LOGGER = logging.getLogger("azure_common")
 
 
 def current_timestamp() -> str:
@@ -64,6 +58,27 @@ def resource_group_from_id(resource_id: Optional[str]) -> Optional[str]:
         if part.lower() == "resourcegroups" and index + 1 < len(parts):
             return parts[index + 1] or None
     return None
+
+
+def arm_id_key(resource_id: Optional[str]) -> str:
+    """ARM ids are case-insensitive and Azure mixes spellings (seen live); compare on this."""
+    return str(resource_id or "").lower()
+
+
+# Subnets Azure itself routes and filters; their names are reserved, compared lower-cased.
+PLATFORM_SUBNET_NAMES = frozenset({
+    "gatewaysubnet",
+    "azurebastionsubnet",
+    "azurefirewallsubnet",
+    "azurefirewallmanagementsubnet",
+    "routeserversubnet",
+})
+
+
+def vnet_id_of(subnet_id: Optional[str]) -> str:
+    """Lower-cased VNet id from a subnet (or subnet child) id; empty when there is none."""
+    key = arm_id_key(subnet_id)
+    return key.split("/subnets/")[0] if "/subnets/" in key else ""
 
 
 def dig(obj: Any, *path: str) -> Any:
@@ -129,6 +144,76 @@ class Collector:
         return not self.failures
 
 
+def monitor_client(subscription_id, cred):
+    """Microsoft.Insights client; azure-mgmt-monitor 7.0.0 dropped diagnostic_settings."""
+    from azure.mgmt.monitor import MonitorManagementClient  # lazy
+
+    client = MonitorManagementClient(
+        credential=cred, subscription_id=subscription_id, **arm_client_kwargs()
+    )
+    if getattr(client, "diagnostic_settings", None) is None:
+        raise RuntimeError(
+            "installed azure-mgmt-monitor has no diagnostic_settings operation group "
+            "(removed in 7.0.0) — pin azure-mgmt-monitor>=6.0.2,<7"
+        )
+    return client
+
+
+def diagnostic_setting_record(setting) -> Dict[str, Any]:
+    """One resource diagnostic setting: its destinations and per-category log enables."""
+    return {
+        "id": model_attr(setting, "id"),
+        "name": model_attr(setting, "name") or basename(model_attr(setting, "id")),
+        "storage_account_id": model_attr(setting, "storage_account_id"),
+        "workspace_id": model_attr(setting, "workspace_id"),
+        "event_hub_authorization_rule_id": model_attr(setting, "event_hub_authorization_rule_id"),
+        "event_hub_name": model_attr(setting, "event_hub_name"),
+        # Marketplace partner destinations (Datadog, Elastic, New Relic...) count as a destination too.
+        "marketplace_partner_id": model_attr(setting, "marketplace_partner_id"),
+        "logs": [
+            {
+                "category": model_attr(log, "category"),
+                "category_group": model_attr(log, "category_group"),
+                "enabled": bool(model_attr(log, "enabled") or False),
+            }
+            for log in (model_attr(setting, "logs") or [])
+        ],
+    }
+
+
+def list_diagnostic_settings(monitor, resource_id: str) -> List[Dict[str, Any]]:
+    # resource_uri is substituted unquoted after a "/", so no leading slash.
+    return sorted(
+        (
+            diagnostic_setting_record(s)
+            for s in monitor.diagnostic_settings.list(resource_uri=resource_id.lstrip("/"))
+        ),
+        key=lambda r: r.get("id") or "",
+    )
+
+
+NOT_FOUND_MARKERS = ("(resourcenotfound)", "(404)", "was not found", "could not be found")
+
+
+def is_not_found(exc: BaseException) -> bool:
+    """Azure's 404 for an optional sub-resource that was never configured."""
+    if type(exc).__name__.lower() == "resourcenotfounderror":
+        return True
+    message = f"{getattr(exc, 'message', '') or ''} {exc}".lower()
+    return any(marker in message for marker in NOT_FOUND_MARKERS)
+
+
+def get_optional(collector: Collector, operation: str, fn: Callable[[], Any]) -> tuple:
+    """(value, found): found is False on a 404, None when the call failed and was recorded."""
+    try:
+        return fn(), True
+    except Exception as exc:  # noqa: BLE001 — boundary: classify, don't crash the run
+        if is_not_found(exc):
+            return None, False
+        collector.record(operation, exc)
+        return None, None
+
+
 # --------------------------------------------------------------------------- #
 # Failure classification for $FETCHER_STATUS_FILE's `code`
 # --------------------------------------------------------------------------- #
@@ -147,7 +232,7 @@ _CODE_RULES = (
         "not_authorized",
         ("permissionerror",),
         ("authorizationfailed", "does not have authorization", "forbidden", "(403)",
-         "insufficient privileges", "not authorized"),
+         "insufficient privileges", "not authorized", "accessdenied", "authorization_requestdenied"),
     ),
     (
         "rate_limited",
@@ -166,7 +251,9 @@ _CODE_RULES = (
         "bad_config",
         (),
         ("subscriptionnotfound", "invalidsubscriptionid", "invalid subscription",
-         "is not a valid subscription", "no subscription"),
+         "is not a valid subscription", "no subscription", "exclusion pattern",
+         "invalid lookback", "invalid recovery time objective", "invalid setting",
+         "invalid sla days", "config conflict", "is not a positive integer"),
     ),
     (
         # A missing azure-mgmt-* dependency is our fault, not the customer's
@@ -184,6 +271,9 @@ def classify_failure_code(failures: List[Dict[str, str]]) -> str:
         return "partial_failure"
     types = {(f.get("type") or "").lower() for f in failures}
     messages = " ".join((f.get("message") or "").lower() for f in failures)
+    # msgraph renders a status as "<message> (status 403)", or "Code: 403" before kiota-abstractions 1.13; the
+    # markers use ARM's "(403)".
+    messages = re.sub(r"\(status (\d{3})\)|\bcode: (\d{3})\b", lambda m: f"({m.group(1) or m.group(2)})", messages)
     for code, type_markers, message_markers in _CODE_RULES:
         if any(marker in t for t in types for marker in type_markers):
             return code
@@ -193,7 +283,7 @@ def classify_failure_code(failures: List[Dict[str, str]]) -> str:
 
 
 def failure_reason(failures: List[Dict[str, str]], limit: int = 300) -> str:
-    """One-line reason for `write_status`, from the first recorded failure.
+    """One-line reason for `report_failure`, from the first recorded failure.
 
     The full set stays in the payload's `metadata.api_failures`. Truncation is marked
     so a clipped Azure error (they run to many lines) can't be read as the whole one.
@@ -210,32 +300,6 @@ def failure_reason(failures: List[Dict[str, str]], limit: int = 300) -> str:
     )
 
 
-def write_status(error: str, code: Optional[str] = None) -> None:
-    """Write the failure reason to `$FETCHER_STATUS_FILE`, if the runner set one.
-
-    The runner reads this file to fill `metadata.error`; without it the error falls
-    back to the tail of stderr, which reports the last log line (often a harmless
-    INFO) as the cause. A no-op when the env var is unset.
-    """
-    path = os.environ.get("FETCHER_STATUS_FILE")
-    if not path:
-        return
-    one_line = " ".join(str(error).split()) or "collection failed"
-    status: Dict[str, str] = {"error": one_line}
-    if code is not None:
-        if code in STATUS_CODES:
-            status["code"] = code
-        else:
-            _STATUS_LOGGER.warning("dropping unrecognized status code %r", code)
-    try:
-        Path(path).parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "w") as f:
-            json.dump(status, f, sort_keys=True)
-    except OSError as exc:
-        # The status channel must never fail the run; the exit code is authoritative.
-        _STATUS_LOGGER.warning("could not write FETCHER_STATUS_FILE %s: %s", path, exc)
-
-
 # --------------------------------------------------------------------------- #
 # Auth / subscription resolution
 # --------------------------------------------------------------------------- #
@@ -245,6 +309,82 @@ def credential():
     from azure.identity import DefaultAzureCredential  # lazy
 
     return DefaultAzureCredential()
+
+
+# --------------------------------------------------------------------------- #
+# Which ARM cloud to talk to
+# --------------------------------------------------------------------------- #
+#
+# Derived from AZURE_AUTHORITY_HOST exactly as entra_graph.graph_host() derives the
+# Graph host: that variable is the one declared sovereign-cloud selector, and a
+# second knob could disagree with the credential's own authority.
+#
+# Without this the azure.mgmt clients default to commercial Azure. A Gov Cloud
+# subscription then comes back as `SubscriptionNotFound` — the collection does fail
+# rather than silently returning empty evidence, but it fails naming the
+# subscription, so it reads as a bad id or a permissions problem rather than as a
+# request sent to the wrong cloud.
+ARM_ENDPOINT_PUBLIC = "https://management.azure.com"
+
+_AUTHORITY_TO_ARM_ENDPOINT = {
+    "login.microsoftonline.com": ARM_ENDPOINT_PUBLIC,
+    "login.microsoftonline.us": "https://management.usgovcloudapi.net",
+    "login.microsoftonline.de": "https://management.microsoftazure.de",
+    "login.chinacloudapi.cn": "https://management.chinacloudapi.cn",
+    "login.partner.microsoftonline.cn": "https://management.chinacloudapi.cn",
+}
+
+
+def arm_endpoint() -> str:
+    """ARM management endpoint for the cloud the credential's authority points at."""
+    authority = (os.environ.get("AZURE_AUTHORITY_HOST") or "").strip()
+    if not authority:
+        return ARM_ENDPOINT_PUBLIC
+    host = authority.replace("https://", "").replace("http://", "").strip("/").lower()
+    mapped = _AUTHORITY_TO_ARM_ENDPOINT.get(host)
+    if mapped is None:
+        _LOGGER.warning(
+            "AZURE_AUTHORITY_HOST %r is not a recognized sovereign authority; "
+            "collecting against the public management endpoint %s",
+            authority,
+            ARM_ENDPOINT_PUBLIC,
+        )
+        return ARM_ENDPOINT_PUBLIC
+    return mapped
+
+
+def arm_client_kwargs() -> Dict[str, Any]:
+    """`base_url` + `credential_scopes` for an azure.mgmt client, keyed to the cloud.
+
+    Spread into every management client constructor:
+
+        Client(credential=cred, subscription_id=sub, **arm_client_kwargs())
+
+    Both keys are required together. `base_url` alone sends a token minted for the
+    commercial audience to the sovereign endpoint, which rejects it — so setting
+    only the endpoint trades SubscriptionNotFound for an auth error.
+    """
+    from read_boundaries import sdk_arm_boundary_options, target_subscription_scope
+
+    endpoint = arm_endpoint()
+    options = {"base_url": endpoint, "credential_scopes": [f"{endpoint}/.default"]}
+    scope = target_subscription_scope()
+    if scope is not None:
+        options.update(sdk_arm_boundary_options(endpoint, scope))
+    return options
+
+
+def enabled_subscription_ids(cred) -> Iterator[str]:
+    """Every *enabled* subscription the credential can see, lazily."""
+    from azure.mgmt.subscription import SubscriptionClient  # lazy
+
+    client = SubscriptionClient(cred, **arm_client_kwargs())
+    for sub in client.subscriptions.list():
+        # SubscriptionState serializes as "Enabled", its repr as
+        # "SubscriptionState.ENABLED"; both contain "enabled", while "Disabled",
+        # "Warned", "PastDue" and "Deleted" do not.
+        if "enabled" in str(getattr(sub, "state", "")).lower() and getattr(sub, "subscription_id", None):
+            yield sub.subscription_id
 
 
 def resolve_subscription(collector: Collector) -> Dict[str, Optional[str]]:
@@ -257,19 +397,9 @@ def resolve_subscription(collector: Collector) -> Dict[str, Optional[str]]:
     if explicit:
         return {"subscription_id": explicit, "subscription_source": "target"}
 
-    def _discover() -> Optional[str]:
-        from azure.mgmt.subscription import SubscriptionClient  # lazy
-
-        client = SubscriptionClient(credential())
-        for sub in client.subscriptions.list():
-            # SubscriptionState serializes as "Enabled", its repr as
-            # "SubscriptionState.ENABLED"; both contain "enabled", while "Disabled",
-            # "Warned", "PastDue" and "Deleted" do not.
-            if "enabled" in str(getattr(sub, "state", "")).lower():
-                return getattr(sub, "subscription_id", None)
-        return None
-
-    subscription_id = collector.guard("subscription.subscriptions.list", _discover)
+    subscription_id = collector.guard(
+        "subscription.subscriptions.list", lambda: next(enabled_subscription_ids(credential()), None)
+    )
     return {
         "subscription_id": subscription_id,
         "subscription_source": "ambient_default" if subscription_id else "unresolved",
@@ -311,7 +441,9 @@ def provider_registration_status(
         except ImportError:  # pragma: no cover - depends on installed SDK version
             from azure.mgmt.resource import ResourceManagementClient  # lazy
 
-        client = ResourceManagementClient(credential=cred, subscription_id=subscription_id)
+        client = ResourceManagementClient(
+            credential=cred, subscription_id=subscription_id, **arm_client_kwargs()
+        )
         return model_attr(client.providers.get(namespace), "registration_state")
 
     state = collector.guard(f"resource.providers.get({namespace})", _get)
@@ -357,6 +489,54 @@ def write_evidence(output_dir: Path, filename: str, evidence: Dict[str, Any]) ->
     return path
 
 
+def sorted_counts(counter) -> Dict[str, int]:
+    """A Counter as a plain dict in key order, so evidence diffs stay stable."""
+    return {key: counter[key] for key in sorted(counter)}
+
+
 def coverage_percentage(covered: int, total: int) -> int:
     """Integer percentage, matching the AWS/GCP fetchers' summary math (0 when empty)."""
     return (covered * 100) // total if total > 0 else 0
+
+
+# --------------------------------------------------------------------------- #
+# Resource Graph
+# --------------------------------------------------------------------------- #
+
+# Paging lives in _shared/resource_graph.query_all, which also guards truncation and short counts.
+
+
+def subscription_of(resource_id: Optional[str]) -> Optional[str]:
+    """Lowercased subscription id from an ARM resource ID, or None."""
+    parts = (resource_id or "").split("/")
+    return parts[2].lower() if len(parts) > 2 and parts[1].lower() == "subscriptions" else None
+
+
+def resource_group_scope_of(resource_id: Optional[str]) -> Optional[str]:
+    """Lowercased `/subscriptions/<id>/resourcegroups/<rg>` prefix of an ARM resource ID, or None."""
+    sub = subscription_of(resource_id)
+    rg = resource_group_from_id(resource_id)
+    return f"/subscriptions/{sub}/resourcegroups/{rg.lower()}" if sub and rg else None
+
+
+def lookup_status(
+    resource_id: Optional[str], found: bool, lookup_ok: bool, scopes: Optional[Dict[str, set]]
+) -> str:
+    """found / not_found / not_visible / unknown for a resource looked up by id.
+
+    A failed lookup is `unknown`, never `not_found`: the evidence must not report a
+    resource deleted because the call that would have found it errored. A resource
+    whose subscription or resource group the credential cannot read is `not_visible`;
+    a resource group that was itself deleted also lands there, which understates
+    rather than overstates. `not_found` therefore means the credential can read the
+    resource group and the resource is not in it.
+    """
+    if found:
+        return "found"
+    if not lookup_ok or scopes is None:
+        return "unknown"
+    if subscription_of(resource_id) not in scopes["subscriptions"]:
+        return "not_visible"
+    if resource_group_scope_of(resource_id) not in scopes["resource_groups"]:
+        return "not_visible"
+    return "not_found"

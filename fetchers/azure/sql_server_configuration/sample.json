@@ -1,0 +1,180 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "azure_sql_server_configuration",
+  "fetcher_version": "0.1.0",
+  "source": "live",
+  "captured_on": "2026-09-09",
+  "reviewed": false,
+  "collections": [
+    {
+      "path": "results.sql_servers[]",
+      "records": 1,
+      "fields": {
+        "administrators": 1,
+        "allows_all_azure_services": 1,
+        "allows_entire_internet": 1,
+        "auditing_enabled": 1,
+        "auditing_policies": 1,
+        "auditing_retention_over_90_days": 1,
+        "defender_for_sql_enabled": 1,
+        "entra_administrator_configured": 1,
+        "firewall_rules": 1,
+        "fully_qualified_domain_name": 1,
+        "id": 1,
+        "location": 1,
+        "minimal_tls_version": 1,
+        "minimal_tls_version_recommended": 1,
+        "name": 1,
+        "public_network_access": 1,
+        "public_network_access_disabled": 1,
+        "resource_group": 1,
+        "restrict_outbound_network_access": 1,
+        "security_alert_policy": 1,
+        "state": 1,
+        "total_firewall_rules": 1,
+        "type": 1,
+        "version": 1,
+        "vulnerability_assessment": 1,
+        "vulnerability_assessment_enabled": 1
+      }
+    },
+    {
+      "path": "results.sql_servers[].auditing_policies[]",
+      "records": 1,
+      "fields": {
+        "enabled": 1,
+        "id": 1,
+        "is_azure_monitor_target_enabled": 1,
+        "name": 1,
+        "retention_days": 1,
+        "retention_over_90_days": 1,
+        "retention_unlimited": 1,
+        "state": 1,
+        "type": 1
+      }
+    },
+    {
+      "path": "results.sql_servers[].firewall_rules[]",
+      "records": 1,
+      "fields": {
+        "allows_all_azure_services": 1,
+        "allows_entire_internet": 1,
+        "end_ip_address": 1,
+        "id": 1,
+        "name": 1,
+        "start_ip_address": 1
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "api_failures": [],
+      "datetime": "2026-09-09T16:10:53Z",
+      "environment": "test",
+      "partial_failure": false,
+      "subscription_id": "00000000-0000-4000-8000-111111111111",
+      "subscription_source": "target"
+    },
+    "results": {
+      "provider_registration_status": "registered",
+      "sql_servers": [
+        {
+          "administrators": {
+            "administrator_type": null,
+            "azure_ad_only_authentication": false,
+            "login": null,
+            "principal_type": null,
+            "sid": null,
+            "tenant_id": null
+          },
+          "allows_all_azure_services": true,
+          "allows_entire_internet": false,
+          "auditing_enabled": true,
+          "auditing_policies": [
+            {
+              "enabled": true,
+              "id": "/subscriptions/00000000-0000-4000-8000-111111111111/resourceGroups/rg-example-example-profile/providers/Microsoft.Sql/servers/sql-pf-jov5akcv/auditingSettings/Default",
+              "is_azure_monitor_target_enabled": true,
+              "name": "Default",
+              "retention_days": 90,
+              "retention_over_90_days": false,
+              "retention_unlimited": false,
+              "state": "Enabled",
+              "type": "Microsoft.Sql/servers/auditingSettings"
+            }
+          ],
+          "auditing_retention_over_90_days": false,
+          "defender_for_sql_enabled": false,
+          "entra_administrator_configured": false,
+          "firewall_rules": [
+            {
+              "allows_all_azure_services": true,
+              "allows_entire_internet": false,
+              "end_ip_address": "0.0.0.0",
+              "id": "/subscriptions/00000000-0000-4000-8000-111111111111/resourceGroups/rg-example-example-profile/providers/Microsoft.Sql/servers/sql-pf-jov5akcv/firewallRules/allow-azure-services",
+              "name": "allow-azure-services",
+              "start_ip_address": "0.0.0.0"
+            }
+          ],
+          "fully_qualified_domain_name": "sql-pf-jov5akcv.database.windows.net",
+          "id": "/subscriptions/00000000-0000-4000-8000-111111111111/resourceGroups/rg-example-example-profile/providers/Microsoft.Sql/servers/sql-pf-jov5akcv",
+          "location": "centralus",
+          "minimal_tls_version": "1.2",
+          "minimal_tls_version_recommended": true,
+          "name": "sql-pf-jov5akcv",
+          "public_network_access": "Enabled",
+          "public_network_access_disabled": false,
+          "resource_group": "rg-example-example-profile",
+          "restrict_outbound_network_access": "Disabled",
+          "security_alert_policy": {
+            "email_account_admins": false,
+            "email_addresses": [
+              ""
+            ],
+            "enabled": false,
+            "id": "/subscriptions/00000000-0000-4000-8000-111111111111/resourceGroups/rg-example-example-profile/providers/Microsoft.Sql/servers/sql-pf-jov5akcv/securityAlertPolicies/Default",
+            "name": "Default",
+            "retention_days": 0,
+            "state": "Disabled",
+            "type": "Microsoft.Sql/servers/securityAlertPolicies"
+          },
+          "state": "Ready",
+          "total_firewall_rules": 1,
+          "type": "Microsoft.Sql/servers",
+          "version": "12.0",
+          "vulnerability_assessment": {
+            "enabled": false,
+            "id": "/subscriptions/00000000-0000-4000-8000-111111111111/resourceGroups/rg-example-example-profile/providers/Microsoft.Sql/servers/sql-pf-jov5akcv/vulnerabilityAssessments/Default",
+            "name": "Default",
+            "recurring_scans": {
+              "email_subscription_admins": false,
+              "emails": [],
+              "is_enabled": false
+            },
+            "storage_container_path": "",
+            "type": "Microsoft.Sql/servers/vulnerabilityAssessments"
+          },
+          "vulnerability_assessment_enabled": false
+        }
+      ]
+    },
+    "summary": {
+      "auditing_enabled_servers": 1,
+      "auditing_percentage": 100,
+      "auditing_retention_over_90_days_servers": 0,
+      "defender_for_sql_enabled_servers": 0,
+      "entra_administrator_servers": 0,
+      "entra_only_authentication_servers": 0,
+      "provider_registration_status": "registered",
+      "public_network_access_disabled_servers": 0,
+      "recommended_minimal_tls_servers": 1,
+      "servers_allowing_all_azure_services": 1,
+      "servers_allowing_entire_internet": 0,
+      "total_firewall_rules": 1,
+      "total_sql_servers": 1,
+      "vulnerability_assessment_admin_notification_servers": 0,
+      "vulnerability_assessment_enabled_servers": 0,
+      "vulnerability_assessment_recurring_scan_servers": 0
+    }
+  }
+}

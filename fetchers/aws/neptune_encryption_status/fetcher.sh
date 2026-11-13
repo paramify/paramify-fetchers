@@ -27,7 +27,7 @@ _TARGET_ID="$(aws_target_id "$REGION")"
 OUTPUT_JSON="$OUTPUT_DIR/aws_neptune_encryption_status_${_TARGET_ID}.json"
 _FETCHER_TMP_JSON="$(mktemp -t aws_neptune_encryption_status.XXXXXX.json)"
 _FAILURE_LOG="$(mktemp -t aws_neptune_encryption_status_fail.XXXXXX)"
-trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG"' EXIT
+trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG" "$_AWS_ERR_LOG"' EXIT
 
 log_info() { printf '%s INFO aws_neptune_encryption_status %s\n' "$(date -u +'%Y-%m-%d %H:%M:%S')" "$*" >&2; }
 log_error() { printf '%s ERROR aws_neptune_encryption_status %s\n' "$(date -u +'%Y-%m-%d %H:%M:%S')" "$*" >&2; }
@@ -47,40 +47,26 @@ jq -n \
   '{"metadata": {"profile": $profile, "region": $region, "datetime": $datetime, "account_id": $account_id, "arn": $arn}, "results": []}' \
   > "$OUTPUT_JSON"
 
+# One describe returns every Neptune cluster's encryption fields; the per-id
+# describe this replaced re-fetched them one CLI process at a time.
 clusters=$(aws neptune describe-db-clusters \
     --filters Name=engine,Values=neptune \
-    --query 'DBClusters[*].DBClusterIdentifier' --output text 2>/dev/null)
+    --query 'DBClusters[*].{DBClusterIdentifier:DBClusterIdentifier,DBClusterArn:DBClusterArn,StorageEncrypted:StorageEncrypted,KmsKeyId:KmsKeyId,Engine:Engine}' \
+    --output json 2>/dev/null)
 list_exit=$?
 if [ $list_exit -ne 0 ]; then
     echo "aws neptune describe-db-clusters (list) failed (exit=$list_exit)" >> "$_FAILURE_LOG"
     log_error "Failed to list Neptune DB clusters"
 else
-    for cluster in $(aws_text_list "$clusters"); do
-        cluster_details=$(aws neptune describe-db-clusters \
-            --db-cluster-identifier "$cluster" 2>/dev/null)
-        if [ $? -ne 0 ]; then
-            echo "aws neptune describe-db-clusters ($cluster) failed" >> "$_FAILURE_LOG"
-            continue
-        fi
-
-        arn=$(echo "$cluster_details" | jq -r '.DBClusters[0].DBClusterArn // "None"')
-        encrypted=$(echo "$cluster_details" | jq -r '.DBClusters[0].StorageEncrypted // false')
-        kms_key_id=$(echo "$cluster_details" | jq -r '.DBClusters[0].KmsKeyId // "None"')
-        engine=$(echo "$cluster_details" | jq -r '.DBClusters[0].Engine // "None"')
-
-        cluster_data=$(jq -n --arg name "$cluster" --arg arn "$arn" --arg type "neptune_cluster" \
-            --argjson enc "$encrypted" --arg kms "$kms_key_id" --arg eng "$engine" \
-            '{name: $name, arn: $arn, type: $type, encrypted: $enc, kms_key_id: $kms, engine: $eng}')
-
-        jq --argjson data "$cluster_data" '.results += [$data]' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
-    done
+    printf '%s' "$clusters" | jq --slurpfile clusters /dev/stdin '
+        .results += [$clusters[0][]? | {
+            name: .DBClusterIdentifier,
+            arn: (.DBClusterArn // "None"),
+            type: "neptune_cluster",
+            encrypted: (.StorageEncrypted // false),
+            kms_key_id: (.KmsKeyId // "None"),
+            engine: (.Engine // "None")
+        }]' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
 fi
 
-failure_count=$(wc -l < "$_FAILURE_LOG" 2>/dev/null | tr -d ' ')
-failure_count=${failure_count:-0}
-if [ "$failure_count" -gt 0 ]; then
-    log_error "Encountered $failure_count AWS API failures during collection"
-    exit 1
-fi
-
-log_info "Evidence saved to $OUTPUT_JSON"
+aws_finish

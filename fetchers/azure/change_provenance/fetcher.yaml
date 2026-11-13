@@ -1,0 +1,184 @@
+name: azure_change_provenance
+version: 0.3.1
+description: >-
+  Labels each change to the subscription over up to 14 days by origin, such as pipeline, deployment, a person's deployment or direct edit, with some settings' values before and after.
+category: azure
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_change_provenance.json
+  aggregation: per_target
+
+config_schema:
+  lookback_days:
+    type: integer
+    required: false
+    default: 14
+    env: AZURE_CHANGE_LOOKBACK_DAYS
+    description: >
+      How many days of change history to collect, from 1 to 14. Resource Graph keeps
+      change history for 14 days, so a larger value is clamped to 14 with a warning.
+      Schedule the fetcher at least every 14 days, or changes in between are never
+      seen.
+
+  pipeline_principals:
+    type: string
+    required: false
+    env: AZURE_PIPELINE_PRINCIPALS
+    description: >
+      Comma-separated application (client) ids or UPNs of the identities your
+      deployment pipelines run as. Changes those identities make are counted as
+      redeployments (`origin: pipeline`) even when they don't go through an ARM
+      deployment, which is how Terraform and other tools that call ARM directly
+      apply changes, and ARM deployments they run count as redeployments even when
+      the identity is a user. Leave empty and only ARM deployments run by an
+      application count; deployments run by a person are `manual_deployment`.
+
+  value_paths:
+    type: patterns
+    prefixes: [path]
+    bare: false
+    exclusion: false
+    required: false
+    env: AZURE_CHANGE_VALUE_PATHS
+    description: >
+      Property paths whose before and after values to keep, added to the built-in
+      list of security settings and tags, listed in the manifest on this fetcher's
+      entry (paramify manifest set-config; manifest exclude never edits this list)
+      as path:<glob> patterns, such as path:properties.siteConfig.* (case
+      insensitive; * matches any run of characters and ? one character; an array
+      index such as [0] matches any index; path:* allows every path). Values are
+      kept only for direct edits and manual deployments. A path or value that looks
+      like a secret (a password, key, token, connection string, header, body, app
+      setting or environment variable, or a value shaped like a key, password
+      assignment, SAS signature, JWT or URL with credentials) is withheld whatever
+      this lists. The check can't catch a short password with nothing marking it,
+      such as one alone in a tag, or a secret in free-form content under generic
+      names, so path:* shows whatever such content holds: it is your risk.
+      A pattern without path: fails the run and keeps no values. Each item is a
+      pattern, or a pattern with a reason. Empty: only the built-in list.
+
+  max_value_changes:
+    type: integer
+    required: false
+    default: 500
+    env: AZURE_CHANGE_MAX_VALUE_CHANGES
+    description: >
+      How many direct and manual-deployment changes keep their property values,
+      newest first. The older ones keep their property names only and are counted
+      in changes_property_values_capped. 0 keeps no values. A value that isn't a
+      whole number from 0 fails the run as bad_config and keeps no values.
+
+  resource_exclusions:
+    type: patterns
+    prefixes: [rg, location, id]
+    bare: false
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Resources outside the authorization boundary, to leave out of scope, as
+      case-insensitive glob patterns listed in the manifest, each with a
+      prefix: rg:<resource group> (read from the resource id), location:<region>
+      (the region's name without spaces, such as eastus2; a resource with no
+      location never matches one) or id:<resource id> (also matches that
+      resource's child resources). * matches any run of characters and ? one
+      character. A change to a matching resource or resource group is listed
+      under excluded with the pattern and left out of every count and breakdown;
+      changes to the subscription itself stay. A change carries no region, so
+      only rg: and id: patterns reach it. Every change is still attributed
+      against every other change and deployment first, so an in-scope change
+      keeps an origin it took from an excluded one, and the deployment history
+      (deployments_in_history, results.deployments) is still every deployment
+      read. A pattern without one of these prefixes fails the run. Set it once
+      under platforms.azure.config for every Azure fetcher that has this field;
+      fetchers without it ignore it. Each item is a pattern, or a pattern with a
+      reason. Empty: every resource is in scope.
+
+target_schema:
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id to collect from. Optional — omit to use the first
+      enabled subscription the ambient credential can see ("collect where
+      deployed"); set one target per subscription to fan out.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: >
+      Deployment environment label (e.g. prod / preprod) written into the evidence
+      metadata. Optional — set per target for multi-subscription runs.
+secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
+
+ksis:
+  - KSI-CMT-RMV      # Redeploying vs modifying — changes made through deployments, not direct edits
+
+evidence_set:
+  reference_id: EVD-AZURE-CHANGE-PROVENANCE
+  name: Azure Change Provenance
+  instructions: |
+    Script: azure/change_provenance/fetcher.py
+
+    Access: Reader on the subscription.
+
+    Commands Executed:
+    - subscriptions.list() — picks a subscription when none is set
+    - Resource Graph query on resourcechanges — every resource create, update and delete in the lookback window, with caller, client, correlation id and changed properties; the run fails if Resource Graph returns fewer rows than it counted or reports the result truncated
+    - Resource Graph query on resourcecontainerchanges — the same for resource groups and the subscription itself, with the same rule on fewer rows or a truncated result
+    - deployments.list_at_subscription_scope() — subscription deployment history
+    - resource_groups.list() — the resource groups, to read each one's deployments
+    - deployments.list_by_resource_group() (per resource group) — each group's deployment history, to match changes to deployments
+
+    Output: azure_change_provenance_<subscription>.json — every change in the lookback window labelled by origin (pipeline, deployment, manual deployment, direct edit, platform or unattributed), the before and after values of allowlisted settings changed outside a pipeline, and the deployment history the changes were matched against, each deployment with its correlation id, run times, state, template hash and link, output resources, who ran it and its origin, plus the value settings in effect.
+
+    Summary fields:
+
+    Which resources are left out of scope?
+    - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
+    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no change's target, such as a mistyped name; null when a change table could not be read
+    - excluded_changes — Number of changes a pattern took out by their target resource or resource group; each is listed under excluded with the pattern, and no other count includes it. Changes to the subscription itself are never excluded, and a change carries no region, so only rg: and id: patterns reach it; null when a change table could not be read
+    - in_scope_changes — Number of changes left after exclusions, the same as total_changes; null when a change table could not be read
+
+    How many changes were made, and how?
+    - total_changes — Number of in-scope changes in the lookback window (at most 14 days, the length of Resource Graph's change history). A change that names its caller is matched to a deployment by correlation id; one with no caller, or a caller or caller type of System or Unspecified, takes the origin of the nearest named change to the same resource within 10 minutes, else of a deployment whose output resources include its target and whose run, with 10 minutes of slack, covers its timestamp (manual_deployment when that deployment's matched changes were, or none matched and it is Portal-named); run it at least every 14 days
+    - changes_via_deployment — Number of changes made by an ARM deployment run by an application or managed identity, or run by a configured pipeline_principals identity
+    - changes_via_pipeline — Number of changes a configured pipeline_principals identity made outside any deployment, as Terraform and other tools that call ARM directly do
+    - manual_deployment_changes — Number of changes made by a deployment a person ran: the caller is a User, the client is the Azure Portal, or the deployment is named as a Portal create wizard names its own. A configured pipeline principal's deployment never counts here; a missing template link isn't used as a signal, as CLI and pipeline runs of a local template have none either
+    - direct_changes — Number of changes a named caller made outside any deployment or pipeline, such as from the portal or the CLI
+    - platform_changes — Number of changes Azure itself made, recorded with caller or caller type System, that match no deployment
+    - unattributed_changes — Number of changes with no recorded caller that match no deployment or nearby named change; Resource Graph restamps timestamps for hours, so a callerless change whose named partner has drifted past the window lands here or in platform_changes
+
+    Are changes made by redeploying rather than by editing in place?
+    - percent_redeployed — Percentage of changes made by redeploying = (changes_via_deployment + changes_via_pipeline) / (changes_via_deployment + changes_via_pipeline + manual_deployment_changes + direct_changes) × 100 (a whole number, 0–100); 0 when the denominator is 0. Platform and unattributed changes are left out of both
+    - percent_redeployed_conservative — Percentage of changes made by redeploying, counting unattributed changes against it = (changes_via_deployment + changes_via_pipeline) / (changes_via_deployment + changes_via_pipeline + manual_deployment_changes + direct_changes + unattributed_changes) × 100 (a whole number, 0–100); 0 when the denominator is 0. Platform changes are left out of both
+
+    Who made changes outside a pipeline, and with what?
+    - manual_deployment_changes_by_changed_by — Number of manual-deployment changes made by each caller, with none for a change that records no caller
+    - direct_changes_by_changed_by_type — Number of direct changes for each caller type (User, Application, ManagedIdentity and so on), with none for a change that records no type
+    - direct_changes_by_client_type — Number of direct changes from each client (Azure Portal, Azure CLI and so on), with none for a change that records no client
+    - direct_changes_by_changed_by — Number of direct changes made by each caller, with none for a change that records no caller
+    - direct_changes_by_resource_type — Number of direct changes for each resource type, with unknown for a change that records none
+
+    How reliable is the attribution?
+    - attribution_by_method — Number of changes tied to their origin by each method: correlation_id (matched to a deployment by its correlation id), same_resource (took the origin of the nearest named change to the same resource) and deployment_window (made while a deployment that output the resource was running); changes tied by none are left out
+    - direct_changes_in_deleted_resource_groups — Number of direct changes whose resource group no longer exists, whose deployment history was deleted with it, so every change there, deletes included, reads as direct; null if the resource groups couldn't be listed
+    - deployments_in_history — Number of deployments read from subscription and resource group history; every deployment counts, excluded or not
+    - deployments_matched_to_changes — Number of deployments at least one in-scope change was traced to
+    - resource_groups_at_deployment_history_cap — List of resource groups with 800 deployments, ARM's limit, so older deployments were pruned and their changes read as direct; every resource group counts, excluded or not
+
+    What did people change outside a pipeline?
+    - changes_with_property_values — Number of direct and manual-deployment changes whose property values were read and kept; a change lists at most 25 properties, shown values first. Values are kept only for a built-in list of security settings and tags plus any path: patterns in value_paths; null when a change table couldn't be read
+    - changes_property_values_capped — Number of direct and manual-deployment changes past max_value_changes (500 by default, newest kept first), which name their changed properties but keep no values; null when a change table couldn't be read
+    - changes_property_values_unknown — Number of direct and manual-deployment changes that name changed properties but whose values couldn't be read; null when a change table couldn't be read
+    - property_values_shown — Number of changed property values that passed both checks on those changes, counting any past a change's 25-entry listing; each is cut at 200 characters; null when any change's values couldn't be read or a change table couldn't be read
+    - property_values_withheld_by_reason — Number of changed property values withheld on those changes for each reason; a withheld value shows only its path and the reason, never the value; null when any change's values couldn't be read or a change table couldn't be read:
+      - not_allowlisted (not secret-looking, but its path isn't on the list of paths whose values are shown)
+      - secret (its path names a secret or free-form content, such as a password, key, token, connection string, header, body, environment variable or app setting, or its value looks like one, such as a password assignment, credential, JWT, key or URL with a user; checked first on every path, whatever value_paths lists; true or false and Key Vault access-policy permission names are never secret; the check can't catch a short unmarked password or a secret in generic free-form content, so path:* shows whatever such content holds)

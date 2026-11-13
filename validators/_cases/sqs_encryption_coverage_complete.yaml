@@ -1,0 +1,14 @@
+validator: sqs_encryption_coverage_complete
+cases:
+  - name: full_coverage
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"summary":{"total_queues":3,"encrypted_queues":3,"encryption_percentage":100}}}}'
+
+  - name: partial_coverage
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"summary":{"total_queues":3,"encrypted_queues":2,"encryption_percentage":66}}}}'
+
+  - name: rollup_renamed
+    expect: FAIL
+    note: the presence rule catches this; without it the threshold rule would read nothing
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"summary":{"total_queues":3,"encryption_pct":66}}}}'

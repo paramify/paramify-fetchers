@@ -1,5 +1,5 @@
 name: aws_vpc_network_segmentation
-version: 0.1.0
+version: 0.2.0
 description: Lists VPCs, subnets, peering connections, and endpoints to document network topology and segmentation.
 category: aws
 
@@ -33,4 +33,4 @@ ksis:
 evidence_set:
   reference_id: EVD-VPC-SEGMENTATION
   name: VPC Network Segmentation
-  instructions: 'Script: fetcher.sh. Commands executed: aws ec2 describe-vpcs, aws ec2 describe-subnets, aws ec2 describe-vpc-peering-connections, aws ec2 describe-vpc-endpoints.'
+  instructions: 'Script: aws/vpc_network_segmentation/fetcher.sh. Commands executed: aws ec2 describe-vpcs, aws ec2 describe-subnets, aws ec2 describe-vpc-peering-connections, aws ec2 describe-vpc-endpoints.'

@@ -1,0 +1,164 @@
+name: azure_ai_hub_configuration
+version: 0.2.1
+description: >-
+  Shows how exposed each Azure AI hub, project and Machine Learning workspace is, and whether its data, endpoints, compute and connections avoid stored keys.
+category: azure
+
+config_schema:
+  resource_exclusions:
+    type: patterns
+    prefixes: [rg, location, id]
+    bare: false
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Resources outside the authorization boundary, to leave out of scope, as
+      case-insensitive glob patterns listed in the manifest, each with a
+      prefix: rg:<resource group> (read from the resource id), location:<region>
+      (the region's name without spaces, such as eastus2; a resource with no
+      location never matches one) or id:<resource id> (also matches that
+      resource's child resources). * matches any run of characters and ? one
+      character. A matching hub, project or other workspace is listed under excluded with the
+      pattern and left out of every count and verdict; its datastores, endpoints,
+      computes, connections and diagnostic settings are not read. Every project of an
+      excluded hub leaves with it, in any resource group, with reason hub_excluded and the
+      hub in matched_id. An id: pattern reaches only a hub, project or other workspace; one
+      naming a datastore, endpoint, compute or connection matches nothing and is listed
+      among the unmatched patterns. A pattern
+      without one of these prefixes fails the run. Set it once under platforms.azure.config for every Azure
+      fetcher that has this field; fetchers without it ignore it. Each item is a
+      pattern, or a pattern with a reason. Empty: every resource is in scope.
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_ai_hub_configuration.json
+  aggregation: per_target
+
+target_schema:
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id to collect from. Optional — omit to use the first
+      enabled subscription the ambient credential can see ("collect where
+      deployed"); set one target per subscription to fan out.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: >
+      Deployment environment label (e.g. prod / preprod) written into the evidence
+      metadata. Optional — set per target for multi-subscription runs.
+
+secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
+
+ksis:
+  - KSI-CNA-MAT   # public network access, IP allow-lists and private endpoints on each workspace
+  - KSI-CNA-RNT   # managed virtual network isolation and approved outbound rules
+  - KSI-SVC-SIN   # customer-managed key encryption of workspace data
+  - KSI-IAM-SNU   # identity-based datastore access and connections without stored keys
+  - KSI-MLA-LET   # diagnostic logs exported from each workspace
+
+evidence_set:
+  reference_id: EVD-AZURE-AI-HUB-CONFIG
+  name: Azure AI Hub and Project Configuration
+  instructions: |
+    Script: azure/ai_hub_configuration/fetcher.py
+
+    Access: Reader on the subscription.
+
+    Commands Executed:
+    - subscriptions.list() — picks a subscription when none is set
+    - providers.get("Microsoft.MachineLearningServices") — tells "not registered" from "no workspaces"
+    - GET /subscriptions/{id}/providers/Microsoft.MachineLearningServices/workspaces (ARM REST, api-version 2024-10-01) — every hub, project, classic workspace and feature store with its network, encryption and identity settings
+    - GET {workspace}/connections (per workspace) — connections to other services and how each authenticates; no credential is read, and targets are recorded without user:password, query string or fragment
+    - GET {workspace}/datastores (per workspace) — datastores and the credential type used to reach each
+    - GET {workspace}/onlineEndpoints and GET {workspace}/serverlessEndpoints (per workspace) — model endpoints with their authentication mode and public access
+    - GET {workspace}/computes (per workspace) — compute with its public IP and SSH settings
+    - diagnostic_settings.list() (per workspace) — whether diagnostic logs are exported
+
+    Output: azure_ai_hub_configuration_<subscription>.json — each workspace with its network exposure, managed network, encryption, datastores, endpoints, compute, connections and log export settings, plus the workspaces left out and why.
+
+    Summary fields:
+
+    Which workspaces are left out of scope?
+    - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every workspace is in scope
+    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no workspace, such as a mistyped name; null when the workspace list could not be read
+    - excluded_hubs — Number of hubs left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern and gets no further reads; null when the workspace list could not be read
+    - excluded_projects — Number of projects left out of scope because a pattern matched their resource group, region or id, or their hub was excluded (a project follows its hub); null when the workspace list could not be read
+    - excluded_other_workspaces — Number of classic workspaces and feature stores left out of scope because a pattern matched their resource group, region or id; null when the workspace list could not be read
+    - in_scope_hubs — Number of hubs read and in scope; null when the workspace list could not be read
+    - in_scope_projects — Number of projects read and in scope; null when the workspace list could not be read
+    - in_scope_other_workspaces — Number of classic workspaces and feature stores read and in scope; null when the workspace list could not be read; 0 for all three in_scope counts means there are none or the patterns took out every workspace
+
+    What was checked?
+    - total_workspaces — Number of in-scope Machine Learning workspaces of every kind (hubs, projects, classic workspaces and feature stores); null when the workspace list could not be read, as is every count below
+    - workspaces_by_kind — Number of workspaces of each kind, keyed by the kind Azure reports (a workspace with no kind is Default):
+      - Hub (an AI hub that shares resources and connections with its projects)
+      - Project (an AI project under a hub)
+      - Default (a classic Machine Learning workspace)
+      - FeatureStore (a feature store workspace)
+    - hubs — Number of workspaces of kind Hub
+    - projects — Number of workspaces of kind Project; a project that leaves public network access, managed network isolation or encryption unset takes its hub's setting in the counts below, and keeps Azure's defaults when its hub isn't in the subscription
+    - projects_without_hub — Number of Project workspaces that name no hub
+    - provider_registration_status — Whether Microsoft.MachineLearningServices is registered on the subscription: registered, not_registered or unknown
+
+    Can the workspaces be reached from the internet?
+    - workspaces_open_to_all_networks — Number of workspaces whose network exposure is open: public network access is not Disabled (Azure treats unset as Enabled) and no IP allow-list is set or the allow-list admits every IPv4 address, such as 0.0.0.0/0
+    - workspaces_network_restricted — Number of workspaces whose network exposure is restricted: public network access is on but an IP allow-list limits who can connect
+    - workspaces_private_only — Number of workspaces whose network exposure is private: public network access is Disabled
+    - workspaces_with_private_endpoint_but_public_access — Number of workspaces that have a private endpoint but whose network exposure is still open or restricted
+
+    Is outbound traffic from workspace compute controlled?
+    - workspaces_managed_network_disabled — Number of workspaces with no managed virtual network (isolation mode Disabled, the default), so compute uses the public network
+    - workspaces_managed_network_internet_outbound — Number of workspaces with a managed virtual network that may reach any internet address (isolation mode AllowInternetOutbound)
+    - workspaces_outbound_restricted — Number of workspaces whose managed virtual network allows only approved outbound destinations (isolation mode AllowOnlyApprovedOutbound)
+
+    Is workspace data protected?
+    - workspaces_hbi — Number of workspaces marked high business impact, which reduces the diagnostic data Microsoft collects
+    - workspaces_customer_managed_key — Number of workspaces encrypted with a customer-managed key (encryption status Enabled and a Key Vault key identifier set)
+    - workspaces_identity_based_datastore_access — Number of workspaces whose system datastores are reached with an identity or user delegation SAS rather than the storage account key (the key is Azure's default when unset)
+    - workspaces_data_isolation_enabled — Number of workspaces with data isolation turned on
+    - workspaces_v1_legacy_mode — Number of workspaces in v1 legacy mode
+    - workspaces_without_managed_identity — Number of workspaces with no managed identity (identity type None or unset)
+
+    Are workspace logs exported?
+    - workspaces_diagnostic_logs_exported — Number of workspaces with diagnostic logs exported: a diagnostic setting that sends to a destination enables at least one log category or category group
+    - workspaces_diagnostic_logs_not_exported — Number of workspaces whose diagnostic settings were read and export no log category or category group to a destination
+    - workspaces_diagnostic_logs_unknown — Number of workspaces whose diagnostic settings couldn't be read
+
+    Do datastores keep stored credentials?
+    - total_datastores — Number of datastores across all workspaces whose datastores could be read
+    - datastores_with_stored_credentials — Number of datastores whose workspace keeps a secret to reach them (account key, SAS token, service principal, certificate, Kerberos keytab or Kerberos password), even when the workspace's system datastores use an identity
+    - datastores_credentials_unknown — Number of datastores whose credential type is missing or not one the fetcher recognises, so whether a credential is stored is unknown; identity-based access (type None) counts as no stored credential
+    - workspaces_datastores_unknown — Number of workspaces whose datastores couldn't be read
+
+    Who can call the model endpoints?
+    - total_endpoints — Number of online (managed) and serverless (pay-as-you-go) model endpoints across all workspaces whose endpoints could be read; 0 proves nothing about exposure, since nothing may be deployed yet
+    - endpoints_key_auth — Number of model endpoints that authenticate callers with a key (auth mode Key) rather than an Azure ML or Entra ID token
+    - endpoints_public — Number of model endpoints reachable from the public network: online endpoints whose public network access isn't Disabled, and serverless endpoints whose workspace isn't private (a serverless endpoint has no setting of its own)
+    - endpoints_public_with_key_auth — Number of model endpoints that are both public and use key authentication, so anyone holding the key can call the model from anywhere
+    - workspaces_endpoints_unknown — Number of workspaces whose online or serverless endpoints couldn't be read
+
+    Is workspace compute exposed?
+    - total_computes — Number of compute resources across all workspaces whose compute could be read; 0 proves nothing about exposure, since nothing may be deployed yet
+    - computes_public_ip — Number of compute resources whose nodes get a public IP address (true by default on AmlCompute clusters and compute instances; a type with no such setting isn't counted)
+    - computes_ssh_public — Number of compute resources with public SSH access: a compute instance's sshPublicAccess or an AmlCompute cluster's remoteLoginPortPublicAccess is Enabled
+    - workspaces_computes_unknown — Number of workspaces whose compute couldn't be read
+
+    Do connections to other services keep stored secrets?
+    - total_connections — Number of connection listings across all workspaces whose connections could be read, including each project's repeat of a connection it inherits from its hub
+    - connections_using_stored_secrets — Number of connection listings whose auth type keeps a credential in the connection (API key, custom keys, personal access token, username and password, access key, SAS, account key, service principal or OAuth2), as opposed to Entra ID or managed identity types
+    - connections_unauthenticated — Number of connection listings with auth type None (no authentication to the target service)
+    - connections_auth_type_unrecognized — Number of connection listings whose auth type the fetcher doesn't recognise, so whether they keep a secret is unknown
+    - connections_shared_to_all — Number of connection listings shared with every user of the workspace
+    - distinct_connections — Number of connections left after removing each project's repeat of its hub's connection (marked repeats_hub_connection), so each hub's connections and each project's own are counted once, and two hubs with identical connections count as two
+    - distinct_connections_using_stored_secrets — Number of distinct connections whose auth type keeps a credential in the connection
+    - workspaces_connections_unknown — Number of workspaces whose connections couldn't be read

@@ -27,7 +27,7 @@ _TARGET_ID="$(aws_target_id "$REGION")"
 OUTPUT_JSON="$OUTPUT_DIR/aws_ec2_public_exposure_${_TARGET_ID}.json"
 _FETCHER_TMP_JSON="$(mktemp -t aws_ec2_public_exposure.XXXXXX.json)"
 _FAILURE_LOG="$(mktemp -t aws_ec2_public_exposure_fail.XXXXXX)"
-trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG"' EXIT
+trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG" "$_AWS_ERR_LOG"' EXIT
 
 log_info() { printf '%s INFO aws_ec2_public_exposure %s\n' "$(date -u +'%Y-%m-%d %H:%M:%S')" "$*" >&2; }
 log_error() { printf '%s ERROR aws_ec2_public_exposure %s\n' "$(date -u +'%Y-%m-%d %H:%M:%S')" "$*" >&2; }
@@ -55,14 +55,10 @@ if [ $list_exit -ne 0 ]; then
     echo "aws ec2 describe-instances (list) failed (exit=$list_exit)" >> "$_FAILURE_LOG"
     log_error "Failed to list EC2 instances"
 else
-    jq --argjson data "$instances" '.results += [$data[][]]' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
+    # Fed on stdin, not --argjson: Linux caps one argv string at 128 KiB, which
+    # the whole instance list passes at a few hundred instances -- jq then fails
+    # and results stay [] with nothing logged.
+    printf '%s' "$instances" | jq --slurpfile data /dev/stdin '.results += [$data[0][][]]' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
 fi
 
-failure_count=$(wc -l < "$_FAILURE_LOG" 2>/dev/null | tr -d ' ')
-failure_count=${failure_count:-0}
-if [ "$failure_count" -gt 0 ]; then
-    log_error "Encountered $failure_count AWS API failures during collection"
-    exit 1
-fi
-
-log_info "Evidence saved to $OUTPUT_JSON"
+aws_finish

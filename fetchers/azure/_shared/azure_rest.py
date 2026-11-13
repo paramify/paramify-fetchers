@@ -1,0 +1,643 @@
+"""ARM, Microsoft Graph and Log Analytics query REST client shared by the Sentinel, Log Analytics and Entra REST fetchers."""
+
+from __future__ import annotations
+
+import logging
+import os
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
+
+from azure_common import (
+    Collector,
+    arm_endpoint,
+    basename,
+    build_payload,
+    classify_failure_code,
+    dig,
+    failure_reason,
+    report_failure,
+    resolve_subscription,
+    resource_group_from_id,
+    sanitize_for_filename,
+    write_evidence,
+)
+from entra_graph import graph_host
+from read_boundaries import target_subscription_scope, validate_read_url
+from resource_exclusions import ResourceExclusions
+
+SI_API = "2025-09-01"
+# NRT and other rule kinds exist only in preview specs; bump when this one retires.
+SI_PREVIEW_API = "2025-10-01-preview"
+LAW_API = "2023-09-01"
+DIAG_API = "2021-05-01-preview"
+HTTP_TIMEOUT = 60
+QUERY_TIMEOUT = 600
+# Throttling and transient server errors, retried as azure-core's policy does for the SDK fetchers.
+RETRY_STATUSES = frozenset({408, 429, 500, 502, 503, 504})
+MAX_RETRIES = 4
+MAX_RETRY_WAIT = 120
+# Each timed-out try costs HTTP_TIMEOUT, and most fetchers run inside the runner's 600 s default.
+MAX_TIMEOUT_RETRIES = 1
+# Sent as x-ms-app so LAQueryLogs can tell this collector's queries from people's.
+CLIENT_APP = "paramify-fetchers"
+WORKSPACES_ENV = "SENTINEL_WORKSPACES"
+REPO_ROOT = Path(__file__).resolve().parents[3]
+
+_LOGGER = logging.getLogger("azure_rest")
+
+LOGS_ENDPOINT_PUBLIC = "https://api.loganalytics.io"
+_ARM_TO_LOGS_ENDPOINT = {
+    "https://management.azure.com": LOGS_ENDPOINT_PUBLIC,
+    "https://management.usgovcloudapi.net": "https://api.loganalytics.us",
+    "https://management.chinacloudapi.cn": "https://api.loganalytics.azure.cn",
+}
+
+
+def logs_endpoint() -> str:
+    """Log Analytics query endpoint for the cloud arm_endpoint() resolved to."""
+    return _ARM_TO_LOGS_ENDPOINT.get(arm_endpoint(), LOGS_ENDPOINT_PUBLIC)
+
+
+class ArmError(Exception):
+    def __init__(self, status: int, code: str, message: str):
+        self.status, self.code = status, code
+        super().__init__(f"({status}) {code}: {message}")
+
+
+class QueryError(Exception):
+    """details: (code, message) per error.details[] entry; rows: the result a PartialError came with, if any."""
+
+    def __init__(self, code: str, message: str, details: Optional[List[Tuple[Optional[str], str]]] = None,
+                 rows: Optional[List[Dict[str, Any]]] = None):
+        self.code, self.details, self.rows = code, list(details or []), rows
+        super().__init__(f"{code}: {message}")
+
+
+def retry_wait(response, attempt: int) -> float:
+    """Seconds to wait: the service's Retry-After (seconds or HTTP date) when given, else exponential backoff."""
+    headers = getattr(response, "headers", None) or {}
+    raw = headers.get("x-ms-retry-after-ms")
+    if raw:
+        try:
+            return min(float(raw) / 1000, MAX_RETRY_WAIT)
+        except ValueError:
+            pass
+    raw = headers.get("Retry-After")
+    if raw:
+        try:
+            return min(max(float(raw), 0.0), MAX_RETRY_WAIT)
+        except ValueError:
+            from email.utils import parsedate_to_datetime
+
+            try:
+                return min(max((parsedate_to_datetime(raw) - datetime.now(timezone.utc)).total_seconds(), 0.0), MAX_RETRY_WAIT)
+            except (TypeError, ValueError):
+                pass
+    return float(min(2 ** attempt, MAX_RETRY_WAIT))
+
+
+def _error_parts(response) -> tuple:
+    try:
+        err = response.json().get("error") or {}
+    except ValueError:
+        err = {}
+    return err.get("code") or response.reason or "Error", err.get("message") or response.text[:500]
+
+
+class AzureRestClient:
+    """Bearer-token REST calls to ARM, Microsoft Graph and the Log Analytics query API."""
+
+    def __init__(self, cred: Any, session: Any = None):
+        import requests  # lazy
+
+        self.cred = cred
+        self.session = session or requests.Session()
+        self.arm = arm_endpoint()
+        self.logs = logs_endpoint()
+        self.graph = graph_host()
+        self._tokens: Dict[str, Any] = {}
+        # ARM scope is opt-in; Graph origin checks apply to every Graph read.
+        self.arm_subscription_scope: Optional[str] = target_subscription_scope()
+
+    def _token(self, resource: str) -> str:
+        cached = self._tokens.get(resource)
+        if cached is None or cached.expires_on - 120 < time.time():
+            cached = self.cred.get_token(f"{resource}/.default")
+            self._tokens[resource] = cached
+        return cached.token
+
+    def _validate_read_url(self, url: str, resource: str, method: str) -> bool:
+        """Reject untrusted targets before obtaining or sending a bearer token."""
+        scoped_arm = resource == self.arm and self.arm_subscription_scope is not None
+        guarded = self.arm_subscription_scope is not None or resource == self.graph
+        if not guarded:
+            return False
+        validate_read_url(url, resource, self.arm_subscription_scope if scoped_arm else None,
+                          allow_subscription_root=method == "get")
+        return True
+
+    def _send(self, method: str, url: str, resource: str, headers: Optional[Dict[str, str]] = None, **kwargs: Any):
+        """One request, retried on throttling, transient 5xx and dropped connections, and a GET on a timeout."""
+        import requests  # lazy
+
+        guarded = self._validate_read_url(url, resource, method)
+        if guarded:
+            kwargs["allow_redirects"] = False
+        timeouts = 0
+        for attempt in range(MAX_RETRIES + 1):
+            sent = {"Authorization": f"Bearer {self._token(resource)}", **(headers or {})}
+            try:
+                response = getattr(self.session, method)(url, headers=sent, **kwargs)
+            except requests.ConnectionError:
+                if attempt == MAX_RETRIES:
+                    raise
+                time.sleep(float(min(2 ** attempt, MAX_RETRY_WAIT)))
+                continue
+            except requests.Timeout:
+                # A read timeout may come after the server acted, so only an idempotent GET is resent.
+                if method != "get" or timeouts == MAX_TIMEOUT_RETRIES or attempt == MAX_RETRIES:
+                    raise
+                timeouts += 1
+                _LOGGER.warning("%s %s timed out; retrying", method.upper(), url.split("?")[0])
+                time.sleep(float(min(2 ** attempt, MAX_RETRY_WAIT)))
+                continue
+            if guarded and 300 <= response.status_code < 400:
+                raise ArmError(response.status_code, "Redirect", "Read returned a redirect; not followed")
+            if response.status_code not in RETRY_STATUSES or attempt == MAX_RETRIES:
+                return response
+            wait = retry_wait(response, attempt)
+            _LOGGER.warning("%s %s answered %s; retrying in %.0fs", method.upper(), url.split("?")[0], response.status_code, wait)
+            time.sleep(wait)
+        raise AssertionError("unreachable")
+
+    def _get(self, url: str, params: Optional[Dict[str, str]] = None, resource: Optional[str] = None) -> Dict[str, Any]:
+        response = self._send("get", url, resource or self.arm, params=params, timeout=HTTP_TIMEOUT)
+        if response.status_code >= 400:
+            raise ArmError(response.status_code, *_error_parts(response))
+        return response.json()
+
+    def get(self, path: str, api_version: str, params: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+        return self._get(f"{self.arm}{path}", {"api-version": api_version, **(params or {})})
+
+    def list(self, path: str, api_version: str, params: Optional[Dict[str, str]] = None) -> List[Dict[str, Any]]:
+        """Every page: ARM documents no page size for these lists, so stopping early truncates silently."""
+        return self._follow(self._get(f"{self.arm}{path}", {"api-version": api_version, **(params or {})}))
+
+    def _follow(self, body: Dict[str, Any]) -> List[Dict[str, Any]]:
+        items = list(body.get("value") or [])
+        seen = set()
+        while body.get("nextLink"):
+            link = body["nextLink"]
+            if self.arm_subscription_scope is not None and link in seen:
+                raise ValueError("ARM read scope: paging did not terminate")
+            seen.add(link)
+            body = self._get(link)
+            items.extend(body.get("value") or [])
+        return items
+
+    def post(self, path: str, api_version: str) -> Dict[str, Any]:
+        """An ARM read action that takes no body, such as fetchEventDetails."""
+        response = self._send("post", f"{self.arm}{path}", self.arm, params={"api-version": api_version}, timeout=HTTP_TIMEOUT)
+        if response.status_code >= 400:
+            raise ArmError(response.status_code, *_error_parts(response))
+        return response.json()
+
+    def post_list(self, path: str, api_version: str) -> List[Dict[str, Any]]:
+        """Every page of a POST list action; ARM serves the later pages at nextLink by GET."""
+        return self._follow(self.post(path, api_version))
+
+    def graph_get(self, path: str, params: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+        return self._get(f"{self.graph}/v1.0{path}", params, self.graph)
+
+    def graph_pages(
+        self, path: str, version: str = "v1.0", params: Optional[Dict[str, str]] = None
+    ) -> Iterator[List[Dict[str, Any]]]:
+        """Each page of a Microsoft Graph collection in turn, following @odata.nextLink."""
+        body = self._get(f"{self.graph}/{version}{path}", params, self.graph)
+        yield list(body.get("value") or [])
+        seen = {f"{self.graph}/{version}{path}"}
+        while body.get("@odata.nextLink"):
+            link = body["@odata.nextLink"]
+            if link in seen:
+                raise ValueError("Graph paging did not terminate")
+            seen.add(link)
+            body = self._get(link, resource=self.graph)
+            yield list(body.get("value") or [])
+
+    def graph_list(
+        self, path: str, version: str = "v1.0", params: Optional[Dict[str, str]] = None
+    ) -> List[Dict[str, Any]]:
+        return [item for page in self.graph_pages(path, version, params) for item in page]
+
+    def graph_post(self, path: str, body: Dict[str, Any]) -> Dict[str, Any]:
+        response = self._send("post", f"{self.graph}/v1.0{path}", self.graph, json=body, timeout=HTTP_TIMEOUT)
+        if response.status_code >= 400:
+            raise ArmError(response.status_code, *_error_parts(response))
+        return response.json()
+
+    def token_tenant(self) -> Optional[str]:
+        """The `tid` claim of the ARM token: which tenant this run actually authenticated into."""
+        import base64
+        import json
+
+        try:
+            claims = self._token(self.arm).split(".")[1]
+            return json.loads(base64.urlsafe_b64decode(claims + "=" * (-len(claims) % 4))).get("tid")
+        except (IndexError, ValueError):
+            return None
+
+    def query(self, customer_id: str, kql: str, timespan: str) -> List[Dict[str, Any]]:
+        """Rows of the primary table; a partial result raises rather than returning short."""
+        return self._logs_rows(f"{customer_id}/query", json={"query": kql, "timespan": timespan})
+
+    def search(self, customer_id: str, kql: str, timespan: str) -> List[Dict[str, Any]]:
+        """query() for Basic and Auxiliary tables, which /query refuses; /search takes the timespan in the URL."""
+        return self._logs_rows(f"{customer_id}/search", json={"query": kql}, params={"timespan": timespan})
+
+    def _logs_rows(self, path: str, **kwargs: Any) -> List[Dict[str, Any]]:
+        response = self._send(
+            "post",
+            f"{self.logs}/v1/workspaces/{path}",
+            self.logs,
+            headers={"Prefer": f"wait={QUERY_TIMEOUT}", "x-ms-app": CLIENT_APP},
+            timeout=QUERY_TIMEOUT + 30,
+            **kwargs,
+        )
+        if response.status_code >= 400:
+            code, message = _error_parts(response)
+            raise QueryError(f"({response.status_code}) {code}", _innermost(response) or message, _details(response))
+        body = response.json()
+        tables = body.get("tables") or []
+        columns = [c["name"] for c in tables[0].get("columns") or []] if tables else []
+        rows = [dict(zip(columns, row)) for row in tables[0].get("rows") or []] if tables else []
+        if body.get("error"):
+            # The message stays the innermost one: table_missing and the failure classifiers match on its text.
+            raise QueryError("PartialError", _innermost_error(body["error"]), _error_details(body["error"]), rows)
+        return rows
+
+
+def _innermost_error(err: Dict[str, Any]) -> str:
+    while err.get("innererror"):
+        err = err["innererror"]
+    return err.get("message") or err.get("code") or "partial result"
+
+
+def _error_details(err: Dict[str, Any]) -> List[Tuple[Optional[str], str]]:
+    return [(d.get("code"), _innermost_error(d)) for d in err.get("details") or [] if isinstance(d, dict)]
+
+
+def _details(response) -> List[Tuple[Optional[str], str]]:
+    try:
+        err = response.json().get("error")
+    except ValueError:
+        return []
+    return _error_details(err) if isinstance(err, dict) else []
+
+
+def _innermost(response) -> Optional[str]:
+    try:
+        err = response.json().get("error")
+    except ValueError:
+        return None
+    return _innermost_error(err) if err else None
+
+
+def table_missing(exc: BaseException, table: str) -> bool:
+    """A workspace that never received a table answers 'Failed to resolve table' for it."""
+    text = str(exc).lower()
+    return isinstance(exc, QueryError) and "failed to resolve" in text and table.lower() in text
+
+
+def requested_workspaces() -> List[str]:
+    raw = os.environ.get(WORKSPACES_ENV) or ""
+    return [w.strip() for w in raw.split(",") if w.strip()]
+
+
+def _matches(ws: Dict[str, Any], wanted: str) -> bool:
+    wanted = wanted.lower().rstrip("/")
+    return wanted in ((ws.get("id") or "").lower(), (ws.get("name") or "").lower())
+
+
+_NOT_ONBOARDED_CODES = {"missingsubscriptionregistration", "resourcenotfound", "notfound"}
+
+
+def sentinel_onboarded(client: AzureRestClient, workspace_id: str) -> bool:
+    try:
+        states = client.list(f"{workspace_id}/providers/Microsoft.SecurityInsights/onboardingStates", SI_API)
+    except ArmError as exc:
+        # Unregistered provider or a workspace Sentinel never touched: not onboarded, not a failure.
+        if exc.code.lower() == "subscriptionnotfound":
+            raise
+        if exc.status == 404 or exc.code.lower() in _NOT_ONBOARDED_CODES:
+            return False
+        raise
+    return any((s.get("name") or "").lower() == "default" for s in states)
+
+
+def discover_workspaces(client: AzureRestClient, subscription_id: str, collector: Collector,
+                        exclusions: Optional[ResourceExclusions] = None,
+                        excluded: Optional[List[Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
+    """The (selected) workspaces with their Sentinel onboarding; ones `exclusions` takes out go to `excluded`, unread."""
+    return find_workspaces(client, subscription_id, collector, exclusions, excluded) or []
+
+
+def find_workspaces(client: AzureRestClient, subscription_id: str, collector: Collector,
+                    exclusions: Optional[ResourceExclusions] = None,
+                    excluded: Optional[List[Dict[str, Any]]] = None) -> Optional[List[Dict[str, Any]]]:
+    """discover_workspaces, but None when the workspace list couldn't be read."""
+    listed = collector.guard(
+        "operationalinsights.workspaces.list",
+        lambda: client.list(f"/subscriptions/{subscription_id}/providers/Microsoft.OperationalInsights/workspaces", LAW_API),
+    )
+    if listed is None:
+        return None
+    wanted = requested_workspaces()
+    for name in wanted:
+        if not any(_matches(ws, name) for ws in listed):
+            collector.record(
+                f"{WORKSPACES_ENV} lookup",
+                LookupError(f"workspace {name!r} not found in subscription {subscription_id}"),
+            )
+    selected = [ws for ws in listed if not wanted or any(_matches(ws, n) for n in wanted)]
+    selected = sorted(selected, key=lambda w: (w.get("id") or "").lower())
+    if exclusions:
+        selected, out_of_scope = exclusions.split(selected, "workspace")
+        if excluded is not None:
+            excluded.extend(out_of_scope)
+        # Asked for by name but outside the boundary: the two settings disagree, so the run fails as bad config.
+        for name in wanted:
+            out = [e for e in out_of_scope if _matches(e, name)]
+            if out and not any(_matches(ws, name) for ws in selected):
+                collector.record(f"config {WORKSPACES_ENV}", ValueError(
+                    f"workspace {name!r} is named in {WORKSPACES_ENV} but resource exclusion pattern "
+                    f"{out[0]['pattern']!r} takes it out of scope"))
+    out = []
+    for ws in selected:
+        onboarded = collector.guard(
+            f"securityinsights.onboardingStates.list({ws.get('name')})",
+            lambda ws=ws: sentinel_onboarded(client, ws["id"]),
+        )
+        out.append({
+            "id": ws.get("id"),
+            "name": ws.get("name") or basename(ws.get("id")),
+            "resource_group": resource_group_from_id(ws.get("id")),
+            "location": ws.get("location"),
+            "customer_id": dig(ws, "properties", "customerId"),
+            "retention_in_days": dig(ws, "properties", "retentionInDays"),
+            "sentinel_onboarded": onboarded,
+        })
+    return out
+
+
+def workspace_identity(ws: Dict[str, Any]) -> Dict[str, Any]:
+    return {k: ws.get(k) for k in ("id", "name", "resource_group", "location", "retention_in_days", "sentinel_onboarded")}
+
+
+def table_retention(client: AzureRestClient, workspace_id: str, table: str, default: Optional[int]) -> Tuple[bool, Optional[int]]:
+    """Whether one table exists (404 if not), and its interactive (queryable) retention; older rows are gone, not absent."""
+    try:
+        days = dig(client.get(f"{workspace_id}/tables/{table}", LAW_API), "properties", "retentionInDays")
+    except ArmError as exc:
+        if exc.status == 404:
+            return False, default
+        raise
+    return True, days if isinstance(days, int) and days > 0 else default
+
+
+def table_retention_days(client: AzureRestClient, workspace_id: str, table: str, default: Optional[int]) -> Optional[int]:
+    return table_retention(client, workspace_id, table, default)[1]
+
+
+def int_config(env: str, default: int) -> int:
+    raw = (os.environ.get(env) or "").strip()
+    try:
+        value = int(raw) if raw else default
+    except ValueError:
+        _LOGGER.warning("%s=%r is not an integer; using %d", env, raw, default)
+        return default
+    return value if value > 0 else default
+
+
+def bounded_int_config(collector: Collector, env: str, default: int, maximum: int) -> Tuple[int, Optional[int]]:
+    """(value to use, the number asked for, None when the setting isn't a whole number). One that isn't a whole number
+    from 1 up fails the run as bad_config and the default is used; one above `maximum` is capped with a warning."""
+    raw = (os.environ.get(env) or "").strip()
+    if not raw:
+        return default, default
+    try:
+        value: Optional[int] = int(raw)
+    except ValueError:
+        value = None
+    if value is None or value < 1:
+        collector.record(f"config {env}", ValueError(
+            f"invalid setting {env}={raw!r}: expected a whole number from 1 to {maximum}; used {default}"))
+        return default, value
+    if value > maximum:
+        _LOGGER.warning("%s=%d is above the maximum of %d; using %d", env, value, maximum, maximum)
+        return maximum, value
+    return value, value
+
+
+def iso_duration_days(days: int) -> str:
+    return f"P{days}D"
+
+
+def parse_time(value: Any) -> Optional[datetime]:
+    if not value:
+        return None
+    text = str(value).replace("Z", "+00:00")
+    # ARM and KQL emit 1-7 fractional digits; Python 3.10's fromisoformat takes exactly 3 or 6.
+    if "." in text:
+        head, _, tail = text.partition(".")
+        frac = tail[: len(tail) - len(tail.lstrip("0123456789"))]
+        text = f"{head}.{frac[:6].ljust(6, '0')}{tail[len(frac):]}"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+_EXPLICIT_IDENTITY_ENV = ("AZURE_CLIENT_ID", "AZURE_CLIENT_SECRET", "AZURE_FEDERATED_TOKEN_FILE", "IDENTITY_ENDPOINT", "MSI_ENDPOINT")
+
+
+def pinned_credential(subscription_id: Optional[str]):
+    """DefaultAzureCredential, except a CLI login is asked for the account that holds the target subscription."""
+    from azure.identity import (  # lazy
+        AzureCliCredential,
+        ChainedTokenCredential,
+        DefaultAzureCredential,
+    )
+
+    if not subscription_id or any(os.environ.get(v) for v in _EXPLICIT_IDENTITY_ENV):
+        return DefaultAzureCredential()
+    # Unpinned, the CLI mints a token for its default account, which another tenant refuses.
+    return ChainedTokenCredential(AzureCliCredential(subscription=subscription_id), DefaultAzureCredential())
+
+
+def target_tenant_matches(tenant_id: Optional[str], collector: Collector, operation: str) -> bool:
+    """In strict mixed Entra collection, require each tenant read to match the configured tenant."""
+    if target_subscription_scope() is None:
+        return True
+    configured = (os.environ.get("AZURE_TENANT_ID") or "").strip()
+    if not configured:
+        message = "AZURE_TENANT_ID is required for strict subscription and Entra tenant reads"
+    elif not tenant_id:
+        message = "tenant id was not returned; no directory data will be read"
+    elif tenant_id.lower() != configured.lower():
+        message = f"tenant {tenant_id} differs from configured AZURE_TENANT_ID {configured}"
+    else:
+        return True
+    collector.record(operation, RuntimeError(message))
+    return False
+
+
+def _start(logger: logging.Logger) -> Path:
+    from dotenv import load_dotenv  # lazy
+
+    logging.basicConfig(
+        level=os.environ.get("LOG_LEVEL", "INFO"),
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+    )
+    for noisy in ("azure", "urllib3"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
+    # The working directory's .env, then the repo's; neither overrides the real env. Parent folders are not searched.
+    load_dotenv(Path.cwd() / ".env")
+    load_dotenv(REPO_ROOT / ".env")
+    return Path(os.environ.get("EVIDENCE_DIR", "./evidence"))
+
+
+def _finish(logger: logging.Logger, collector: Collector, output_dir: Path, filename: str, evidence: Dict[str, Any]) -> int:
+    path = write_evidence(output_dir, filename, evidence)
+    if not collector.ok:
+        report_failure(failure_reason(collector.failures), classify_failure_code(collector.failures))
+        return 1
+    logger.info("Evidence saved to %s", path)
+    return 0
+
+
+Collect = Callable[[AzureRestClient, str, Collector], tuple]
+
+
+def run_subscription(*, fetcher: str, logger: logging.Logger, collect: Collect, session: Any = None) -> int:
+    """Resolve the subscription, run `collect(client, subscription_id, collector) -> (results, summary)`, write evidence."""
+    scope = target_subscription_scope()
+    output_dir = _start(logger)
+    collector = Collector(logger)
+    sub = resolve_subscription(collector)
+    subscription_id = sub["subscription_id"]
+    cred = collector.guard("azure.identity.DefaultAzureCredential", lambda: pinned_credential(subscription_id))
+
+    results: Dict[str, Any] = {}
+    summary: Dict[str, Any] = {}
+    if subscription_id and cred is not None:
+        client = AzureRestClient(cred, session)
+        if scope is not None:
+            client.arm_subscription_scope = subscription_id
+        results, summary = collect(client, subscription_id, collector)
+        if scope is not None:
+            results["read_scope"] = "target_subscription"
+    elif not subscription_id:
+        collector.record(
+            "resolve_subscription",
+            RuntimeError(
+                "no subscription id (set AZURE_SUBSCRIPTION_ID or configure an "
+                "ambient Azure credential that can list subscriptions)"
+            ),
+        )
+    evidence = build_payload(
+        subscription_id=subscription_id,
+        subscription_source=sub["subscription_source"],
+        collector=collector,
+        results=results,
+        summary=summary,
+    )
+    return _finish(logger, collector, output_dir, f"{fetcher}_{sanitize_for_filename(subscription_id or 'unknown')}.json", evidence)
+
+
+def run_workspaces(
+    *,
+    fetcher: str,
+    logger: logging.Logger,
+    collect: Callable[[AzureRestClient, Dict[str, Any], Collector], Dict[str, Any]],
+    summarize: Callable[[List[Dict[str, Any]]], Dict[str, Any]],
+    sentinel_only: bool = True,
+    resource_exclusions: bool = False,
+    session: Any = None,
+) -> int:
+    """Find the subscription's (Sentinel) workspaces and collect each into one evidence file. With
+    resource_exclusions, workspaces its patterns match are listed under excluded and not read."""
+
+    def per_workspace(client: AzureRestClient, subscription_id: str, collector: Collector) -> tuple:
+        exclusions = ResourceExclusions.from_env() if resource_exclusions else None
+        excluded: List[Dict[str, Any]] = []
+        if exclusions is not None:
+            exclusions.record_invalid(collector)
+        found = find_workspaces(client, subscription_id, collector, exclusions, excluded)
+        listed = found is not None
+        found = found or []
+        workspaces: List[Dict[str, Any]] = []
+        without_sentinel: List[str] = []
+        for ws in found:
+            if sentinel_only and not ws["sentinel_onboarded"]:
+                without_sentinel.append(ws["name"])
+                continue
+            detail = collector.guard(f"collect({ws['name']})", lambda ws=ws: collect(client, ws, collector), default={})
+            workspaces.append({**workspace_identity(ws), **(detail or {})})
+        results: Dict[str, Any] = {"workspaces": workspaces, "workspace_filter": requested_workspaces() or None}
+        summary: Dict[str, Any] = {"workspaces_collected": len(workspaces), **summarize(workspaces)}
+        if sentinel_only:
+            results["workspaces_without_sentinel"] = without_sentinel
+            summary["workspaces_without_sentinel"] = len(without_sentinel)
+        if exclusions is not None:
+            if not listed:
+                exclusions.mark_unread()
+            exclusions.warn_unmatched(logger)
+            results["excluded"] = excluded
+            summary.update(exclusions.summary(excluded, ("workspace",), {"workspaces": len(found)}))
+            if not listed:  # unknown, not none, when the workspace list wasn't read
+                summary.update(excluded_workspaces=None, in_scope_workspaces=None)
+        return results, summary
+
+    return run_subscription(fetcher=fetcher, logger=logger, collect=per_workspace, session=session)
+
+
+def run_tenant(
+    *,
+    fetcher: str,
+    logger: logging.Logger,
+    collect: Callable[[AzureRestClient, Collector], tuple],
+    session: Any = None,
+) -> int:
+    """Tenant-scoped evidence (Entra): one file per tenant, named for AZURE_TENANT_ID or the token's tenant."""
+    output_dir = _start(logger)
+    collector = Collector(logger)
+    subscription_id = (os.environ.get("AZURE_SUBSCRIPTION_ID") or "").strip() or None
+    cred = collector.guard("azure.identity.DefaultAzureCredential", lambda: pinned_credential(subscription_id))
+
+    results: Dict[str, Any] = {}
+    summary: Dict[str, Any] = {}
+    tenant_id = (os.environ.get("AZURE_TENANT_ID") or "").strip() or None
+    tenant_source = "target" if tenant_id else "unresolved"
+    if cred is not None:
+        client = AzureRestClient(cred, session)
+        token_tenant = collector.guard("azure.identity token", client.token_tenant)
+        if token_tenant and tenant_id and token_tenant.lower() != tenant_id.lower():
+            collector.record(
+                "tenant check",
+                RuntimeError(f"credential authenticated into tenant {token_tenant}, not the target tenant {tenant_id}"),
+            )
+        elif collector.ok:
+            tenant_id, tenant_source = tenant_id or token_tenant, tenant_source if tenant_id else "token"
+            results, summary = collect(client, collector)
+    evidence = build_payload(
+        subscription_id=subscription_id,
+        subscription_source="target_correlation_only" if subscription_id else "not_applicable",
+        collector=collector,
+        results=results,
+        summary=summary,
+    )
+    evidence["metadata"].update({"tenant_id": tenant_id, "tenant_source": tenant_source})
+    return _finish(logger, collector, output_dir, f"{fetcher}_{sanitize_for_filename(tenant_id or 'unknown')}.json", evidence)

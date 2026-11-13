@@ -1,0 +1,155 @@
+name: azure_devops_pipelines
+version: 0.1.0
+description: >-
+  Shows whether changes reach production through version-controlled pipelines whose tests can stop a deploy, behind configured environment approvals and default-branch policies.
+category: azure
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+  timeout: 1800
+
+output:
+  type: json
+  path: azure_devops_pipelines.json
+  aggregation: per_target
+
+target_schema:
+  organization_url:
+    type: string
+    required: true
+    env: AZURE_DEVOPS_ORG_URL
+    description: >
+      The Azure DevOps organization, as https://dev.azure.com/<org>,
+      https://<org>.visualstudio.com or just <org>. One target per organization.
+  projects:
+    type: string
+    required: false
+    env: AZURE_DEVOPS_PROJECTS
+    description: >
+      Comma-separated project names or ids to limit collection to. Optional:
+      omit to collect every project the identity can read. A named project that is
+      missing fails the run.
+
+config_schema:
+  lookback_days:
+    type: integer
+    required: false
+    default: 30
+    env: AZURE_DEVOPS_LOOKBACK_DAYS
+    description: >
+      Pipeline runs, test runs and environment deployments from this many days
+      back are collected.
+
+secrets:
+  - name: pat
+    env: AZURE_DEVOPS_PAT
+    per_target: true
+    required: false
+    description: >
+      Personal access token for the organization with Build (Read), Code (Read),
+      Test Management (Read), Project and Team (Read), Release (Read) and
+      Environment (Read & manage). Azure DevOps has no read-only environment
+      scope; the fetcher only reads. Optional: without it the fetcher signs in as
+      the ambient Entra identity (az login, managed or workload identity, or the
+      category's service principal added to the organization), which needs only
+      read access, such as project Readers. Collection covers what the signed-in
+      identity can see, recorded as metadata.collecting_identity.
+
+ksis:
+  - KSI-CMT-RMV      # changes ship by pipeline redeployment from version control
+  - KSI-CMT-VTD      # tests that can stop the deploy, results per run and per deployment
+  - KSI-SVC-VRI      # supporting only: signing, verification and SBOM steps found in YAML; artifact-evaluation checks
+
+evidence_set:
+  reference_id: EVD-AZURE-DEVOPS-PIPELINES
+  name: Azure DevOps Pipelines
+  instructions: |
+    Script: azure/devops_pipelines/fetcher.py
+
+    Access: A personal access token for the organization with Build (Read), Code (Read), Test Management (Read), Project and Team (Read), Release (Read) and Environment (Read & manage), since Azure DevOps has no read-only environment scope and the fetcher only reads; or an Entra identity in the organization with read access to each project, such as the project Readers group. A refused call names the missing scope; without access to a project, its pipelines, environments and repositories are left out (see not_collected).
+
+    Commands Executed:
+    - GET _apis/connectionData — identifies the signed-in user
+    - GET _apis/projects — lists the projects the identity can read
+    - GET _apis/build/generalsettings (per project) — the project's pipeline settings
+    - GET _apis/build/definitions (per project) — every pipeline, YAML or classic
+    - GET _apis/build/builds (per project) — completed runs in the lookback window
+    - GET _apis/test/runs (per project, in 7-day slices) — published test results
+    - GET _apis/git/repositories/{repo}/refs (per default branch) — the head commit, so YAML is read at a fixed commit
+    - POST _apis/pipelines/{id}/preview (per YAML pipeline) — the final YAML with templates expanded; nothing is queued
+    - GET _apis/git/repositories/{repo}/items (when the preview is refused) — the raw YAML file at that commit
+    - GET _apis/distributedtask/environments (per project) — deployment environments
+    - GET _apis/pipelines/checks/configurations (per environment) — approvals and checks as configured now
+    - GET _apis/distributedtask/environments/{id}/environmentdeploymentrecords (per environment) — deployments in the window
+    - GET _apis/git/repositories (per project) — repositories and their default branches
+    - GET _apis/policy/configurations (per project) — branch policies that apply to each default branch
+    - GET _apis/release/definitions and GET _apis/release/deployments (per project) — classic release pipelines and their deployments in the window
+
+    Output: azure_devops_pipelines_<organization>.json — per project, each pipeline with what its final YAML tests, scans, validates, deploys and signs and whether a failing test stops each deploy, its runs and test results, each environment's checks and deployments, each traced to its run, branch, commit and test results, each repository's default-branch policies, and counts of classic releases.
+
+    Summary fields:
+
+    What was collected?
+    - lookback_days — Number of days back runs, test runs and deployments are collected
+    - projects_collected — Number of projects read
+    - pipelines_total — Number of pipelines, YAML and classic
+    - yaml_pipelines — Number of pipelines defined in YAML
+    - classic_pipelines — Number of classic (designer) build pipelines, which are listed but whose steps aren't analysed
+    - disabled_pipelines — Number of pipelines whose queue status is disabled
+    - yaml_pipelines_analyzed — Number of YAML pipelines whose YAML was read and parsed: from the preview run (templates expanded) or, when the preview is refused, the file on the default branch. Steps are sorted into test, scan, validation, deploy, signing, verification and SBOM categories by task name and inputs or by the tools a script runs; disabled steps are ignored; the evidence keeps the commit (and file object id) and SHA-256 of the YAML read, so it can be fetched again and re-checked; templates from other repositories are read at the refs the YAML names
+    - yaml_pipelines_with_templates_expanded — Number of analyzed YAML pipelines read from the preview run, so steps inside templates are visible
+    - yaml_pipelines_not_analyzed — List of YAML pipelines (project/pipeline) whose YAML couldn't be read or parsed, so their steps weren't checked
+
+    What do the pipelines run?
+    - pipelines_with_tests — Number of analyzed pipelines with at least one enabled test step
+    - pipelines_with_security_scan — Number of analyzed pipelines with a security-scan step
+    - pipelines_with_iac_validation — Number of analyzed pipelines with an infrastructure-code validation step (such as terraform plan or validate, bicep build, or a what-if)
+    - pipelines_deploying_infrastructure — Number of analyzed pipelines with an infrastructure deploy step
+    - pipelines_signing_artifacts — Number of analyzed pipelines with a signing step
+    - pipelines_verifying_signatures — Number of analyzed pipelines with a signature-verification step; signing, verification and SBOM steps are found by pattern, so they show the pipeline is set up for it, not that integrity is verified before each deploy
+    - pipelines_generating_sbom — Number of analyzed pipelines with a step that generates an SBOM (software bill of materials)
+
+    Does a failing test stop a deploy?
+    - deploying_pipelines — Number of analyzed pipelines with a deployment job or an infrastructure or application deploy step
+    - deploying_pipelines_with_tests — Number of deploying pipelines with at least one test step
+    - deploying_pipelines_with_tests_gating_deploys — Number of deploying pipelines where every deploy would be skipped by a failing gating test, through later steps of the same job, jobs that depend on it or stages that depend on its stage (by default, the stage before), each with no condition or one that keeps succeeded(); a condition using always(), succeededOrFailed(), failed(), canceled(), or() or not() runs after a failure. A test step doesn't gate when it or its job has continueOnError, it only publishes results (PublishTestResults without failTaskOnFailedTests, or code coverage), or a step, job or stage condition may skip it
+    - deploying_pipelines_without_tests — List of deploying pipelines (project/pipeline) with no test step
+    - deploying_pipelines_with_ungated_deploys — List of deploying pipelines (project/pipeline) with a deploy that still runs when a gating test fails; each deploy and its reason are listed in the evidence
+
+    Did the tests run and pass?
+    - pipeline_runs_in_window — Number of completed pipeline runs in the lookback window
+    - test_runs_in_window — Number of published test runs in the lookback window, including runs no pipeline could be matched to
+    - pipelines_with_test_runs_in_window — Number of pipelines with at least one published test run in the window
+    - tests_total — Number of tests in the test runs matched to a pipeline
+    - tests_passed — Number of those tests that passed
+    - tests_not_passed — Number of those tests that did not pass, not counting tests marked not applicable; taken from each run's totals, so it doesn't drop as failures are triaged
+
+    Are deployments approved and traceable?
+    - environments_total — Number of deployment environments
+    - environments_with_approval — Number of environments with an enabled approval check
+    - environments_with_branch_control — Number of environments with an enabled branch control check
+    - environments_with_required_template — Number of environments with an enabled required template check
+    - environments_with_artifact_evaluation — Number of environments with an enabled artifact evaluation check
+    - environments_without_checks — List of environments (project/environment) with no enabled check. Checks are as configured at collection time; who approved each deployment isn't collected
+    - deployments_in_window — Number of deployments to environments in the lookback window
+    - deployments_succeeded — Number of those deployments whose result is succeeded
+    - deployments_from_default_branch — Number of those deployments whose run was built from its repository's default branch; deployments whose run or default branch couldn't be found aren't counted
+    - deployments_with_test_runs — Number of those deployments whose run published at least one test run
+
+    Do branch policies require review and builds?
+    - repositories_total — Number of repositories that aren't disabled
+    - repositories_requiring_review — Number of repositories whose default branch has a blocking minimum-reviewers policy needing at least one approver other than the author; the author's own vote counts toward the minimum only when the policy allows it
+    - repositories_where_self_approval_satisfies_review — Number of repositories whose default branch has a blocking minimum-reviewers policy that the author can satisfy alone
+    - repositories_requiring_build_validation — Number of repositories whose default branch has a blocking build validation policy
+    - repositories_without_review_or_build_validation — List of repositories (project/repository) with neither a requiring-review policy nor a blocking build validation policy
+
+    What are the project and classic release settings?
+    - projects_with_classic_pipeline_creation_disabled — Number of projects that disable creating classic pipelines
+    - classic_release_definitions — Number of classic release pipelines; they are counted, not analysed
+    - classic_release_deployments_in_window — Number of classic release deployments started in the window
+
+    What isn't collected?
+    - not_collected — What the fetcher deliberately doesn't collect, by area: projects, pipelines and repositories the identity can't see; the stages, approvals, gates and tasks of classic releases; the steps of classic build pipelines; who approved each deployment; and who may bypass branch policies

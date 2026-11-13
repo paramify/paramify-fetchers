@@ -1,0 +1,159 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "gcp_dns_configuration",
+  "fetcher_version": "0.1.0",
+  "source": "live",
+  "captured_on": "2026-08-17",
+  "reviewed": false,
+  "collections": [
+    {
+      "path": "results.dns_policies[]",
+      "records": 1,
+      "fields": {
+        "alternative_name_servers": 0,
+        "description": 1,
+        "id": 1,
+        "inbound_forwarding_enabled": 1,
+        "logging_enabled": 1,
+        "name": 1,
+        "networks": 1
+      }
+    },
+    {
+      "path": "results.managed_zones[]",
+      "records": 2,
+      "fields": {
+        "creation_time": 2,
+        "description": 2,
+        "dns_name": 2,
+        "dnssec_applicable": 2,
+        "dnssec_enabled": 2,
+        "dnssec_non_existence": 1,
+        "dnssec_state": 1,
+        "forwarding_targets": 0,
+        "id": 2,
+        "key_signing_algorithms": 1,
+        "key_specs": 1,
+        "logging_enabled": 2,
+        "name": 2,
+        "name_server_set": 0,
+        "name_servers": 2,
+        "peering_target_network": 0,
+        "private_gke_clusters": 0,
+        "private_networks": 1,
+        "public": 2,
+        "reverse_lookup": 2,
+        "rsasha1_key_signing": 2,
+        "rsasha1_zone_signing": 2,
+        "uses_weak_signing_algorithm": 2,
+        "visibility": 2,
+        "zone_signing_algorithms": 1
+      }
+    },
+    {
+      "path": "results.managed_zones[].key_specs[]",
+      "records": 2,
+      "fields": {
+        "algorithm": 2,
+        "key_length": 2,
+        "key_type": 2,
+        "weak_algorithm": 2
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "api_failures": [],
+      "datetime": "2026-08-17T17:54:44Z",
+      "environment": "test",
+      "partial_failure": false,
+      "project": "example-project",
+      "project_source": "target"
+    },
+    "results": {
+      "dns_policies": [
+        {
+          "alternative_name_servers": [],
+          "description": "query logging fixture",
+          "id": "0000000000000000003",
+          "inbound_forwarding_enabled": false,
+          "logging_enabled": true,
+          "name": "example-dns-policy",
+          "networks": [
+            "example-vpc"
+          ]
+        }
+      ],
+      "managed_zones": [
+        {
+          "creation_time": "2026-08-17T14:19:59.472Z",
+          "description": "DNSSEC fixture",
+          "dns_name": "example-fixture.example.com.",
+          "dnssec_applicable": true,
+          "dnssec_enabled": true,
+          "dnssec_non_existence": "nsec3",
+          "dnssec_state": "on",
+          "forwarding_targets": [],
+          "id": "0000000000000000004",
+          "key_signing_algorithms": [
+            "rsasha256"
+          ],
+          "key_specs": [
+            {
+              "algorithm": "rsasha256",
+              "key_length": 2048,
+              "key_type": "keySigning",
+              "weak_algorithm": false
+            }
+          ],
+          "logging_enabled": false,
+          "name": "example-public",
+          "name_server_set": null,
+          "name_servers": [
+            "ns-cloud-c1.googledomains.com.",
+            "ns-cloud-c2.googledomains.com.",
+            "ns-cloud-c3.googledomains.com."
+          ],
+          "peering_target_network": null,
+          "private_gke_clusters": [],
+          "private_networks": [],
+          "public": true,
+          "reverse_lookup": false,
+          "rsasha1_key_signing": false,
+          "rsasha1_zone_signing": false,
+          "uses_weak_signing_algorithm": false,
+          "visibility": "public",
+          "zone_signing_algorithms": [
+            "rsasha256"
+          ]
+        }
+      ]
+    },
+    "summary": {
+      "dns_api_readable": true,
+      "dnssec_enabled_zones": 1,
+      "dnssec_public_zone_percentage": 100,
+      "dnssec_transferring_zones": 0,
+      "forwarding_zones": 0,
+      "inbound_forwarding_policies": 0,
+      "key_signing_algorithms": {
+        "rsasha256": 1
+      },
+      "logging_enabled_policies": 1,
+      "logging_enabled_zone_percentage": 0,
+      "logging_enabled_zones": 0,
+      "peering_zones": 0,
+      "private_zones": 1,
+      "public_zones": 1,
+      "rsasha1_key_signing_zones": 0,
+      "rsasha1_zone_signing_zones": 0,
+      "total_dns_policies": 1,
+      "total_managed_zones": 2,
+      "unsigned_public_zones": 0,
+      "zone_signing_algorithms": {
+        "rsasha256": 1
+      },
+      "zones_using_weak_signing_algorithm": 0
+    }
+  }
+}

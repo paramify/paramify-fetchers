@@ -1,0 +1,501 @@
+#!/usr/bin/env python3
+"""Entra ID PIM for directory roles: who is eligible, who holds standing or activated access, and each role's activation rules."""
+
+import asyncio
+import logging
+import os
+import sys
+from datetime import timedelta
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+from dotenv import load_dotenv
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(SCRIPT_DIR.parent / "_shared"))
+from azure_common import (  # noqa: E402
+    Collector,
+    build_payload,
+    classify_failure_code,
+    credential,
+    failure_reason,
+    report_failure,
+    write_evidence,
+)
+from entra_graph import (  # noqa: E402
+    GLOBAL_ADMINISTRATOR,
+    GLOBAL_ADMINISTRATOR_TEMPLATE_ID,
+    PRIVILEGED_ROLE_NAMES,
+    graph_attr,
+    graph_list,
+    is_privileged_role,
+    paginate,
+    resolve_tenant,
+    tenant_filename_key,
+    tenant_payload,
+    tenant_scoping,
+    with_graph_client,
+)
+
+NAME = "azure_entra_pim_assignments"
+POLICY_FILTER = "scopeId eq '/' and scopeType eq 'DirectoryRole'"
+# Without Entra ID P2 (or ID Governance) Graph refuses with this code, a state not a failure; reported on a 400 as well as a 403.
+LICENCE_ERROR_CODE = "AadPremiumLicenseRequired"
+LICENCE_STATUSES = (400, 403)
+MFA, JUSTIFICATION, TICKETING = "MultiFactorAuthentication", "Justification", "Ticketing"
+# Summary fields that turn on whether a privileged grant is tenant-wide, by the kind of grant.
+ELIGIBLE_SCOPED = (
+    "eligible_privileged_assignments",
+    "permanently_eligible_privileged_assignments",
+    "principals_eligible_for_privileged_roles",
+    "privileged_roles_with_eligible_holders",
+    "global_administrator_eligible",
+)
+ACTIVE_SCOPED = (
+    "active_privileged_assignments",
+    "active_privileged_by_standing",
+    "permanent_active_privileged_assignments",
+    "permanent_active_privileged_user_assignments",
+    "principals_with_permanent_privileged_access",
+    "privileged_roles_with_permanent_active_holders",
+    "global_administrator_permanent_active",
+)
+
+logger = logging.getLogger(NAME)
+
+
+# --- projections: the only code here that touches a Graph model ---
+
+def iso_duration(value: Any) -> Optional[str]:
+    """kiota parses Graph's ISO-8601 durations into timedelta; render them back."""
+    if value is None or not isinstance(value, timedelta):
+        return value
+    hours, rest = divmod(value.seconds, 3600)
+    minutes, seconds = divmod(rest, 60)
+    time = "".join(f"{n}{unit}" for n, unit in ((hours, "H"), (minutes, "M"), (seconds, "S")) if n)
+    date = f"{value.days}D" if value.days else ""
+    return f"P{date}T{time}" if time else (f"P{date}" if date else "PT0S")
+
+
+def duration_hours(value: Optional[str]) -> Optional[float]:
+    if not value or not value.startswith("P"):
+        return None
+    date, _, time = value[1:].partition("T")
+    total = float(date[:-1]) * 24 if date.endswith("D") else 0.0
+    number = ""
+    for ch in time:
+        if ch.isdigit() or ch == ".":
+            number += ch
+            continue
+        total += float(number or 0) * {"H": 1, "M": 1 / 60, "S": 1 / 3600}.get(ch, 0)
+        number = ""
+    return round(total, 2)
+
+
+def principal_kind(odata_type: Optional[str]) -> Optional[str]:
+    tail = str(odata_type or "").rsplit(".", 1)[-1]
+    return (tail[:1].upper() + tail[1:]) or None
+
+
+def project_role_definition(definition) -> Dict[str, Any]:
+    return {
+        "id": graph_attr(definition, "id"),
+        "template_id": graph_attr(definition, "template_id"),
+        "display_name": graph_attr(definition, "display_name"),
+        "is_built_in": graph_attr(definition, "is_built_in"),
+        "is_enabled": graph_attr(definition, "is_enabled"),
+    }
+
+
+def project_instance(instance) -> Dict[str, Any]:
+    principal = getattr(instance, "principal", None)
+    return {
+        "id": graph_attr(instance, "id"),
+        "principal_id": graph_attr(instance, "principal_id"),
+        "principal_type": principal_kind(graph_attr(principal, "odata_type")) if principal is not None else None,
+        "principal_display_name": graph_attr(principal, "display_name"),
+        "principal_user_principal_name": graph_attr(principal, "user_principal_name"),
+        "role_definition_id": graph_attr(instance, "role_definition_id"),
+        "directory_scope_id": graph_attr(instance, "directory_scope_id"),
+        "app_scope_id": graph_attr(instance, "app_scope_id"),
+        "member_type": graph_attr(instance, "member_type"),
+        "assignment_type": graph_attr(instance, "assignment_type"),
+        "start_date_time": graph_attr(instance, "start_date_time"),
+        "end_date_time": graph_attr(instance, "end_date_time"),
+    }
+
+
+def project_rule(rule) -> Dict[str, Any]:
+    setting = getattr(rule, "setting", None)
+    projected = {
+        "id": graph_attr(rule, "id"),
+        "rule_type": principal_kind(graph_attr(rule, "odata_type")),
+        "is_expiration_required": graph_attr(rule, "is_expiration_required"),
+        "maximum_duration": iso_duration(getattr(rule, "maximum_duration", None)),
+        "enabled_rules": graph_list(rule, "enabled_rules") if getattr(rule, "enabled_rules", None) is not None else None,
+        "is_enabled": graph_attr(rule, "is_enabled"),
+        "claim_value": graph_attr(rule, "claim_value"),
+        "approval": None if setting is None else {
+            "is_approval_required": graph_attr(setting, "is_approval_required"),
+            "is_approval_required_for_extension": graph_attr(setting, "is_approval_required_for_extension"),
+            "is_requestor_justification_required": graph_attr(setting, "is_requestor_justification_required"),
+            "approval_mode": graph_attr(setting, "approval_mode"),
+            "stages": [
+                {
+                    "primary_approver_count": len(getattr(stage, "primary_approvers", None) or []),
+                    "is_escalation_enabled": graph_attr(stage, "is_escalation_enabled"),
+                    "approval_stage_time_out_in_days": graph_attr(stage, "approval_stage_time_out_in_days"),
+                }
+                for stage in getattr(setting, "approval_stages", None) or []
+            ],
+        },
+    }
+    return {k: v for k, v in projected.items() if v is not None}
+
+
+def project_policy_assignment(assignment) -> Dict[str, Any]:
+    policy = getattr(assignment, "policy", None)
+    return {
+        "role_definition_id": graph_attr(assignment, "role_definition_id"),
+        "policy_id": graph_attr(assignment, "policy_id"),
+        "is_organization_default": graph_attr(policy, "is_organization_default"),
+        "last_modified_date_time": graph_attr(policy, "last_modified_date_time"),
+        "rules": [project_rule(r) for r in getattr(policy, "rules", None) or []],
+    }
+
+
+# --- pure transforms ---
+
+def role_index(definitions: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    index: Dict[str, Dict[str, Any]] = {}
+    for d in definitions:
+        for key in (d.get("id"), d.get("template_id")):
+            if key:
+                index[str(key).lower()] = d
+    return index
+
+
+def role_fields(index: Optional[Dict[str, Dict[str, Any]]], role_definition_id: Optional[str]) -> Dict[str, Any]:
+    """With no role definitions read (index None), whether a role is privileged is unknown, not false."""
+    d = (index or {}).get(str(role_definition_id or "").lower()) or {}
+    role = {"display_name": d.get("display_name"), "role_template_id": d.get("template_id") or role_definition_id}
+    return {
+        "role_name": d.get("display_name"),
+        "role_definition_id": role_definition_id,
+        "role_template_id": role["role_template_id"],
+        "is_built_in": d.get("is_built_in"),
+        "is_privileged": None if index is None else is_privileged_role(role),
+        "is_global_administrator": None if index is None else (
+            role["display_name"] == GLOBAL_ADMINISTRATOR
+            or str(role["role_template_id"] or "").lower() == GLOBAL_ADMINISTRATOR_TEMPLATE_ID
+        ),
+    }
+
+
+def standing(instance: Dict[str, Any]) -> str:
+    if (instance.get("assignment_type") or "").lower() == "activated":
+        return "pim_activated"
+    return "permanent" if not instance.get("end_date_time") else "time_bound"
+
+
+def tenant_wide(instance: Dict[str, Any]) -> Optional[bool]:
+    """'/' is the tenant; another directory scope or an app scope isn't; with neither, it's unknown, never assumed."""
+    scope = instance.get("directory_scope_id")
+    if scope == "/":
+        return True
+    return False if scope or instance.get("app_scope_id") else None
+
+
+def assignment_record(instance: Dict[str, Any], index: Optional[Dict[str, Dict[str, Any]]], active: bool) -> Dict[str, Any]:
+    record = {
+        **{k: v for k, v in instance.items() if active or k != "assignment_type"},
+        **role_fields(index, instance.get("role_definition_id")),
+        "tenant_wide": tenant_wide(instance),
+        "is_permanent": not instance.get("end_date_time"),
+    }
+    if active:
+        record["standing"] = standing(instance)
+    return record
+
+
+def _enabled(rules: Dict[str, Dict[str, Any]], rule_id: str, value: str) -> Optional[bool]:
+    # Graph sends [] when nothing is enabled, so a rule without the list is unknown.
+    enabled = (rules.get(rule_id) or {}).get("enabled_rules")
+    return None if enabled is None else value in enabled
+
+
+def _allows_permanent(rules: Dict[str, Dict[str, Any]], rule_id: str) -> Optional[bool]:
+    required = (rules.get(rule_id) or {}).get("is_expiration_required")
+    return None if required is None else not required
+
+
+def policy_record(assignment: Dict[str, Any], index: Optional[Dict[str, Dict[str, Any]]]) -> Dict[str, Any]:
+    rules = {r.get("id"): r for r in assignment["rules"]}
+    activation = rules.get("Expiration_EndUser_Assignment") or {}
+    approval = (rules.get("Approval_EndUser_Assignment") or {}).get("approval") or {}
+    context = rules.get("AuthenticationContext_EndUser_Assignment") or {}
+    return {
+        **role_fields(index, assignment.get("role_definition_id")),
+        "policy_id": assignment.get("policy_id"),
+        "is_organization_default": assignment.get("is_organization_default"),
+        "last_modified_date_time": assignment.get("last_modified_date_time"),
+        "activation_maximum_duration": activation.get("maximum_duration"),
+        "activation_maximum_hours": duration_hours(activation.get("maximum_duration")),
+        "activation_requires_mfa": _enabled(rules, "Enablement_EndUser_Assignment", MFA),
+        "activation_requires_justification": _enabled(rules, "Enablement_EndUser_Assignment", JUSTIFICATION),
+        "activation_requires_ticket": _enabled(rules, "Enablement_EndUser_Assignment", TICKETING),
+        "activation_requires_approval": approval.get("is_approval_required"),
+        # Users and groups named as approvers: a group counts once, however many members it has.
+        "activation_approver_sets": sum(s["primary_approver_count"] for s in approval.get("stages") or []) if approval else None,
+        "activation_authentication_context": context.get("claim_value") if context.get("is_enabled") else None,
+        "permanent_eligible_assignment_allowed": _allows_permanent(rules, "Expiration_Admin_Eligibility"),
+        "eligible_assignment_maximum_duration": (rules.get("Expiration_Admin_Eligibility") or {}).get("maximum_duration"),
+        "permanent_active_assignment_allowed": _allows_permanent(rules, "Expiration_Admin_Assignment"),
+        "active_assignment_maximum_duration": (rules.get("Expiration_Admin_Assignment") or {}).get("maximum_duration"),
+        "active_assignment_requires_mfa": _enabled(rules, "Enablement_Admin_Assignment", MFA),
+        "active_assignment_requires_justification": _enabled(rules, "Enablement_Admin_Assignment", JUSTIFICATION),
+        "rules": sorted(
+            (r for r in assignment["rules"] if not str(r.get("id") or "").startswith("Notification_")),
+            key=lambda r: r.get("id") or "",
+        ),
+    }
+
+
+def _sort_key(record: Dict[str, Any]) -> tuple:
+    return (
+        record.get("role_name") or "",
+        (record.get("principal_user_principal_name") or record.get("principal_display_name") or "").lower(),
+        record.get("principal_id") or "",
+        record.get("start_date_time") or "",
+    )
+
+
+def counted(record: Dict[str, Any]) -> bool:
+    """Direct grants only, so a role held through a group counts once, as the group's."""
+    return (record.get("member_type") or "Direct").lower() == "direct"
+
+
+def privileged(record: Dict[str, Any]) -> bool:
+    """A privileged role held tenant-wide, as azure_entra_privileged_roles counts it; an administrative unit scope is not."""
+    return record["is_privileged"] and record["tenant_wide"]
+
+
+def summarize(eligible: List[Dict[str, Any]], active: List[Dict[str, Any]], policies: List[Dict[str, Any]]) -> Dict[str, Any]:
+    # Any holder, direct or through a group, at any scope: its role's activation rules are in the tenant-wide policy.
+    held = [r for r in eligible + active if r["is_privileged"]]
+    with_policy = {str(p["role_template_id"] or "").lower() for p in policies}
+    eligible = [e for e in eligible if counted(e)]
+    active = [a for a in active if counted(a)]
+    priv_eligible = [e for e in eligible if privileged(e)]
+    priv_active = [a for a in active if privileged(a)]
+    priv_permanent = [a for a in priv_active if a["standing"] == "permanent"]
+    below_tenant = [r for r in eligible + active if r["is_privileged"] and r["tenant_wide"] is False]
+    # A privileged grant with no scope at all could be tenant-wide, so the counts it could change read null.
+    eligible_unknown = any(e["is_privileged"] and e["tenant_wide"] is None for e in eligible)
+    active_unknown = any(a["is_privileged"] and a["tenant_wide"] is None for a in active)
+    priv_policies = [p for p in policies if p["is_privileged"]]
+
+    def names(records, pred=lambda r: True):
+        return sorted({r["role_name"] or r["role_definition_id"] or "" for r in records if pred(r)})
+
+    without_policy = names(held, lambda r: str(r["role_template_id"] or "").lower() not in with_policy)
+
+    def policy_names(field, flagged, pred=lambda p: True):
+        """Null if a held privileged role's policy is missing or left the rule unknown, so neither reads as clean."""
+        if without_policy or any(p[field] is None and pred(p) for p in priv_policies):
+            return None
+        return names(priv_policies, lambda p: p[field] is flagged and pred(p))
+
+    hours = [p["activation_maximum_hours"] for p in priv_policies]
+    permanent_users = None if any(a["principal_type"] is None for a in priv_permanent) else sum(
+        1 for a in priv_permanent if a["principal_type"] == "User"
+    )
+
+    summary = {
+        "pim_available": True,
+        "eligible_assignments": len(eligible),
+        "eligible_privileged_assignments": len(priv_eligible),
+        "permanently_eligible_privileged_assignments": sum(1 for e in priv_eligible if e["is_permanent"]),
+        "principals_eligible_for_privileged_roles": len({e["principal_id"] for e in priv_eligible}),
+        "privileged_roles_with_eligible_holders": names(priv_eligible),
+        "active_assignments": len(active),
+        "active_privileged_assignments": len(priv_active),
+        "active_privileged_by_standing": {
+            s: sum(1 for a in priv_active if a["standing"] == s) for s in ("permanent", "pim_activated", "time_bound")
+        },
+        "permanent_active_privileged_assignments": len(priv_permanent),
+        "permanent_active_privileged_user_assignments": permanent_users,
+        "principals_with_permanent_privileged_access": len({a["principal_id"] for a in priv_permanent}),
+        "privileged_roles_with_permanent_active_holders": names(priv_permanent),
+        "global_administrator_eligible": sum(1 for e in priv_eligible if e["is_global_administrator"]),
+        "global_administrator_permanent_active": sum(1 for a in priv_permanent if a["is_global_administrator"]),
+        "privileged_assignments_scoped_below_tenant": len(below_tenant),
+        "privileged_role_policies": len(priv_policies),
+        "privileged_roles_without_policy": without_policy,
+        "privileged_roles_activation_without_mfa_or_auth_context": policy_names(
+            "activation_requires_mfa", False, lambda p: not p["activation_authentication_context"]
+        ),
+        "privileged_roles_activation_without_justification": policy_names("activation_requires_justification", False),
+        "privileged_roles_activation_without_approval": policy_names("activation_requires_approval", False),
+        "privileged_roles_allowing_permanent_active_assignment": policy_names("permanent_active_assignment_allowed", True),
+        "privileged_roles_allowing_permanent_eligible_assignment": policy_names(
+            "permanent_eligible_assignment_allowed", True
+        ),
+        "max_privileged_activation_hours": None if without_policy or None in hours else max(hours, default=None),
+    }
+    unknown = {
+        **dict.fromkeys(ELIGIBLE_SCOPED, eligible_unknown),
+        **dict.fromkeys(ACTIVE_SCOPED, active_unknown),
+        "privileged_assignments_scoped_below_tenant": eligible_unknown or active_unknown,
+    }
+    return {k: None if unknown.get(k) else v for k, v in summary.items()}
+
+
+# --- collection (lazy msgraph imports) ---
+
+def _query(builder, **params):
+    from kiota_abstractions.base_request_configuration import RequestConfiguration
+
+    parameters = getattr(type(builder), f"{type(builder).__name__}GetQueryParameters")
+    return RequestConfiguration(query_parameters=parameters(**params))
+
+
+def _each(project, items: Optional[List[Any]]) -> Optional[List[Dict[str, Any]]]:
+    return None if items is None else [project(i) for i in items]
+
+
+def licence_refused(exc: BaseException) -> bool:
+    """Graph's licence refusal, told by its error code; a permission failure never counts, whatever its text."""
+    code = getattr(getattr(exc, "error", None), "code", None)
+    return getattr(exc, "response_status_code", None) in LICENCE_STATUSES and code == LICENCE_ERROR_CODE
+
+
+async def _read(collector: Collector, operation: str, builder, config=None,
+                unlicensed: Optional[List[str]] = None) -> Optional[List[Any]]:
+    """`paginate`; None when the read failed. Only a read given `unlicensed` notes a licence refusal there instead of failing."""
+    probe = Collector(logger)
+    try:
+        items = await paginate(probe, operation, builder, config, raise_on_error=True)
+    except Exception as exc:  # noqa: BLE001 — boundary: a licence refusal or a failure, never a crash
+        if unlicensed is not None and licence_refused(exc):
+            unlicensed.append(f"{operation}: {exc}")
+            logger.info("PIM unavailable: %s (%s)", operation, exc)
+            return None
+        probe.record(operation, exc)
+    collector.failures.extend(probe.failures)
+    return None if probe.failures else items
+
+
+async def _collect(collector: Collector, cred) -> tuple:
+    async def _work(client):
+        tenant = await resolve_tenant(collector, client)
+        directory = client.role_management.directory
+        unlicensed: List[str] = []
+
+        async def read(operation: str, builder, project, licence_gate: bool = False, **params):
+            config = _query(builder, **params) if params else None
+            gate = unlicensed if licence_gate else None
+            return _each(project, await _read(collector, f"graph.{operation}.get", builder, config, gate))
+
+        # Role definitions need no P2, so any refusal there is a failure.
+        definitions = await read(
+            "roleManagement.directory.roleDefinitions", directory.role_definitions, project_role_definition
+        )
+        if definitions == []:
+            # Every tenant has built-in directory roles, so an empty list is a bad read, not a fact.
+            collector.record("graph.roleManagement.directory.roleDefinitions.get", RuntimeError("no role definitions returned"))
+            definitions = None
+        # Only the first PIM read can show the tenant is unlicensed; the rest are then skipped, and a refusal of them is a failure.
+        eligible = await read(
+            "roleManagement.directory.roleEligibilityScheduleInstances",
+            directory.role_eligibility_schedule_instances,
+            project_instance,
+            licence_gate=True,
+            expand=["principal"],
+        )
+        if unlicensed:
+            return tenant, definitions, None, None, None, unlicensed
+        active = await read(
+            "roleManagement.directory.roleAssignmentScheduleInstances",
+            directory.role_assignment_schedule_instances,
+            project_instance,
+            expand=["principal"],
+        )
+        policies = await read(
+            "policies.roleManagementPolicyAssignments",
+            client.policies.role_management_policy_assignments,
+            project_policy_assignment,
+            filter=POLICY_FILTER,
+            expand=["policy($expand=rules)"],
+        )
+        return tenant, definitions, eligible, active, policies, unlicensed
+
+    result = await with_graph_client(collector, cred, _work, default=None)
+    return result if result is not None else ({"tenant_source": "unresolved"}, None, None, None, None, [])
+
+
+def build(definitions, eligible, active, policies, unlicensed) -> tuple:
+    index = None if definitions is None else role_index(definitions)
+    eligible_records = None if eligible is None else sorted((assignment_record(i, index, False) for i in eligible), key=_sort_key)
+    active_records = None if active is None else sorted((assignment_record(i, index, True) for i in active), key=_sort_key)
+    assigned = {r["role_definition_id"] for r in (eligible_records or []) + (active_records or [])}
+    policy_records = None if policies is None else sorted(
+        (p for p in (policy_record(a, index) for a in policies) if p["is_privileged"] or p["role_definition_id"] in assigned),
+        key=lambda p: (p["role_name"] or "", p["role_definition_id"] or ""),
+    )
+    # A licence refusal keeps the role definitions; the PIM reads read None.
+    complete = not unlicensed and None not in (definitions, eligible_records, active_records, policy_records)
+    available = False if unlicensed else (True if complete else None)
+    results = {
+        "pim_available": available,
+        "eligible_assignments": eligible_records,
+        "active_assignments": active_records,
+        "role_policies": policy_records,
+        "role_definitions_read": None if definitions is None else len(definitions),
+        "privileged_role_names_checked": sorted(PRIVILEGED_ROLE_NAMES),
+    }
+    if unlicensed:
+        results["notes"] = ["PIM is not available in this tenant (Entra ID P2 or ID Governance is required)", *unlicensed]
+    # A failed read would turn into zero standing admins, so no figures are given unless every read succeeded.
+    if not complete or eligible_records is None or active_records is None or policy_records is None:
+        return results, {"pim_available": available, "collection_complete": False}
+    return results, {"collection_complete": True, **summarize(eligible_records, active_records, policy_records)}
+
+
+def main() -> int:
+    logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"), format="%(asctime)s %(levelname)s %(name)s %(message)s")
+    for noisy in ("azure", "msgraph", "kiota", "httpx", "httpcore"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
+    load_dotenv()
+
+    output_dir = Path(os.environ.get("EVIDENCE_DIR", "./evidence"))
+    collector = Collector(logger)
+    cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
+    if cred is None:
+        tenant: Dict[str, Any] = {"tenant_source": "unresolved"}
+        results: Dict[str, Any] = {}
+        summary: Dict[str, Any] = {"pim_available": None, "collection_complete": False}
+    else:
+        tenant, definitions, eligible, active, policies, unlicensed = asyncio.run(_collect(collector, cred))
+        results, summary = build(definitions, eligible, active, policies, unlicensed)
+
+    scoping = tenant_scoping()
+    evidence = tenant_payload(
+        build_payload,
+        tenant=tenant,
+        subscription_id=scoping["subscription_id"],
+        subscription_source=scoping["subscription_source"],
+        collector=collector,
+        results=results,
+        summary=summary,
+    )
+    path = write_evidence(output_dir, f"{NAME}_{tenant_filename_key(tenant)}.json", evidence)
+    if not collector.ok:
+        report_failure(failure_reason(collector.failures), classify_failure_code(collector.failures))
+        return 1
+    logger.info("Evidence saved to %s", path)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

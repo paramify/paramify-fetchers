@@ -1,0 +1,121 @@
+name: azure_vpn_gateway_configuration
+version: 0.2.1
+description: >-
+  Shows each VPN gateway's type, SKU and point-to-site setup, and whether each site-to-site or VNet-to-VNet connection uses IKEv2 and strong IPsec algorithms.
+category: azure
+
+config_schema:
+  resource_exclusions:
+    type: patterns
+    prefixes: [rg, location, id]
+    bare: false
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Resources outside the authorization boundary, to leave out of scope, as
+      case-insensitive glob patterns listed in the manifest, each with a
+      prefix: rg:<resource group> (read from the resource id), location:<region>
+      (the region's name without spaces, such as eastus2; a resource with no
+      location never matches one) or id:<resource id> (also matches that
+      resource's child resources). * matches any run of characters and ? one
+      character. A matching virtual network gateway, connection or local network
+      gateway is listed under excluded with the pattern and left out of
+      every count and verdict. A connection also leaves with the gateway
+      it belongs to (reason gateway_matched); a connection to an
+      excluded second gateway or local network gateway stays in scope
+      with its verdict unchanged.
+      A pattern
+      without one of these prefixes fails the run. Set it once under platforms.azure.config for every Azure
+      fetcher that has this field; fetchers without it ignore it. Each item is a
+      pattern, or a pattern with a reason. Empty: every
+      resource is in scope.
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_vpn_gateway_configuration.json
+  aggregation: per_target
+
+target_schema:
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id to collect from. Optional — omit to use the first
+      enabled subscription the ambient credential can see ("collect where
+      deployed"); set one target per subscription to fan out.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: >
+      Deployment environment label (e.g. prod / preprod) written into the evidence
+      metadata. Optional — set per target for multi-subscription runs.
+
+secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
+
+ksis:
+  - KSI-SVC-SIN   # IPsec/IKE encryption of site-to-site and remote-access links
+  - KSI-CNA-RNT   # which peers and address spaces the gateways accept traffic from
+  - KSI-CNA-OFA   # active-active gateways
+
+evidence_set:
+  reference_id: EVD-AZURE-VPN-GATEWAY-CONFIG
+  name: Azure VPN Gateway and Connection Configuration
+  instructions: |
+    Script: azure/vpn_gateway_configuration/fetcher.py
+
+    Access: Reader on the subscription.
+
+    Commands Executed:
+    - subscriptions.list() — picks a subscription when none is set
+    - providers.get("Microsoft.Network") — tells "not registered" from "no gateways"
+    - resource_groups.list() — the resource groups to read, because the gateway calls have no subscription-wide list
+    - virtual_network_gateways.list() (per resource group) — each gateway's type, SKU, generation, active-active and BGP settings and point-to-site configuration
+    - virtual_network_gateway_connections.list() (per resource group) — each connection's type, IKE version and IPsec policy
+    - virtual_network_gateway_connections.get() (per connection) — the connection status, which only a get returns
+    - local_network_gateways.list() (per resource group) — each peer's address and address space
+
+    Output: azure_vpn_gateway_configuration_<subscription>.json — each gateway, connection with its IPsec policy and weak algorithms, and local network gateway, plus the resources left out and why; pre-shared keys, authorization keys and RADIUS secrets are never requested or recorded.
+
+    Summary fields:
+
+    Which resources are left out of scope?
+    - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
+    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no virtual network gateway, connection or local network gateway, such as a mistyped name; null when the resource group list, or any resource group's gateway, connection or local network gateway list, could not be read
+    - excluded_virtual_network_gateways — Number of virtual network gateways left out of scope because a pattern matched; each is listed under excluded with the pattern, and no other count includes it; null when the resource group list could not be read
+    - excluded_connections — Number of connections left out of scope because a pattern matched, or because their own gateway (the first one) was excluded, which names that gateway in matched_id; a connection to an excluded second gateway or local network gateway stays in scope with its verdict; null when the resource group list could not be read
+    - excluded_local_network_gateways — Number of local network gateways left out of scope because a pattern matched; null when the resource group list could not be read
+    - in_scope_virtual_network_gateways — Number of virtual network gateways read and in scope; null when the resource group list could not be read
+    - in_scope_connections — Number of connections read and in scope; null when the resource group list could not be read
+    - in_scope_local_network_gateways — Number of local network gateways read and in scope; null when the resource group list could not be read
+
+    Which gateways and connections were checked?
+    - total_gateways — Number of in-scope virtual network gateways, VPN and ExpressRoute
+    - vpn_gateways — Number of those whose gateway type is Vpn
+    - active_active_gateways — Number of gateways with active-active mode on
+    - p2s_enabled_gateways — Number of gateways with point-to-site on, which needs a client address pool; the list call returns a placeholder block for gateways that never set it up
+    - total_connections — Number of in-scope connections of every type
+    - ipsec_connections — Number of connections of type IPsec or VNet-to-VNet, the tunnels the checks below cover
+    - total_local_network_gateways — Number of in-scope local network gateways
+    - provider_registration_status — Whether the networking provider (Microsoft.Network) is registered on the subscription: registered, not_registered or unknown
+
+    Do tunnels use IKEv2?
+    - ikev2_connections — Number of IPsec and VNet-to-VNet connections whose protocol is IKEv2
+    - ikev1_connections — Number of those connections whose protocol is IKEv1
+    - ike_version_unknown_connections — Number of those connections where Azure returned no protocol, so the IKE version is unknown
+    - ikev2_percentage — Percentage of those connections that use IKEv2 = ikev2_connections / ipsec_connections × 100 (rounded down to a whole number); 0 when ipsec_connections is 0
+
+    Do tunnels avoid weak IPsec algorithms?
+    - explicit_ipsec_policy_connections — Number of those connections with a custom IPsec and IKE policy
+    - azure_default_ipsec_policy_connections — Number of those connections with no custom policy, so Azure's default policy applies
+    - weak_ipsec_policy_connections — Number of those connections with at least one weak algorithm (DES, 3DES, MD5, SHA1, DH group 1 or 2, PFS group 1 or 2, or None) in their custom policy; a connection on the default policy always counts, because Azure's default IKEv2 main mode offers DH group 2, listed per connection with an (azure_default) suffix
+
+    Are the connections up?
+    - connected_connections — Number of in-scope connections of any type whose status is Connected

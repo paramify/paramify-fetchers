@@ -1,0 +1,134 @@
+name: azure_residual_resources
+version: 0.3.1
+description: >-
+  Lists resources left behind after changes, such as unattached disks and unused identities, and role assignments whose principal no longer exists in Entra ID.
+category: azure
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_residual_resources.json
+  aggregation: per_target
+
+config_schema:
+  stale_slot_days:
+    type: integer
+    required: false
+    default: 90
+    env: AZURE_STALE_SLOT_DAYS
+    description: >
+      A deployment slot not modified for this many days counts as stale, as does a
+      slot that is not running.
+  resource_exclusions:
+    type: patterns
+    prefixes: [rg, location, id]
+    bare: false
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Resources outside the authorization boundary, to leave out of scope, as
+      case-insensitive glob patterns listed in the manifest, each with a
+      prefix: rg:<resource group> (read from the resource id; an empty resource
+      group matches through its own id), location:<region> (the region's name
+      without spaces, such as eastus2; a resource with no location never matches
+      one) or id:<resource id> (also matches that resource's child resources). *
+      matches any run of characters and ? one character. A matching orphaned
+      resource, or a role assignment made at a matching scope, is listed under
+      excluded with the pattern and left out of every count; assignments made at
+      the subscription itself stay. A role assignment carries no region, so only
+      rg: and id: patterns reach it. Orphans and deleted principals are still
+      worked out against every resource and role assignment, so an in-scope
+      identity used only by an excluded resource still reads as in use. An
+      excluded identity that nothing attaches and that holds no role is listed
+      under excluded without its federated credentials being read. A pattern
+      without one of these prefixes fails the run. Set it once under platforms.azure.config for every Azure
+      fetcher that has this field; fetchers without it ignore it. Each item is a
+      pattern, or a pattern with a reason. Empty: every
+      resource is in scope.
+
+target_schema:
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id to collect from. Optional — omit to use the first
+      enabled subscription the ambient credential can see ("collect where
+      deployed"); set one target per subscription to fan out.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: >
+      Deployment environment label (e.g. prod / preprod) written into the evidence
+      metadata. Optional — set per target for multi-subscription runs.
+secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
+
+ksis:
+  - KSI-SVC-PRR      # Reviewing residual elements after changes — orphaned resources and stale access
+
+evidence_set:
+  reference_id: EVD-AZURE-RESIDUAL-RESOURCES
+  name: Azure Residual Resources
+  instructions: |
+    Script: azure/residual_resources/fetcher.py
+
+    Access: Reader on the subscription, plus Microsoft Graph Directory.Read.All (application permission, admin-consented) when it runs as a service principal or managed identity; a signed-in member user needs nothing extra. Without it the deleted-principal check fails and so does the run. Only role assignments made at the subscription or below are reviewed; those inherited from a management group or the tenant root, and Azure Lighthouse delegations, are not.
+
+    Commands Executed:
+    - subscriptions.list() — picks a subscription when none is set
+    - Resource Graph Resources | where type =~ '<type>' queries, one per orphan kind (paged to the end; a result shorter than Resource Graph counted, or reported truncated, fails the run) — unattached disks, NICs, NSGs, public IPs and NAT gateways, disconnected private endpoints, unlinked private DNS zones and empty App Service plans
+    - Resource Graph ResourceContainers and Resources queries — empty resource groups, as two paged queries (every resource group, and the resource count per group) because a summarize joined into a query is not paged and could drop groups unnoticed
+    - Resource Graph Resources | where type =~ 'microsoft.web/sites/slots' — stale deployment slots
+    - Resource Graph Resources | where type =~ 'microsoft.managedidentity/userassignedidentities', plus a query for every resource naming each identity in its identity block or anywhere in its properties (Bot Service, Database Watcher and storage encryption name it in properties) — unused identities
+    - ARM GET <identity id>/federatedIdentityCredentials (per in-scope identity with no attachment and no role) — federated credentials, which Resource Graph doesn't index
+    - Resource Graph authorizationresources query and role_definitions.list() — role assignments and role names
+    - Resource Graph ResourceContainers subscription query and Microsoft Graph GET /organization — confirms Graph is signed in to the subscription's tenant; in any other tenant every principal would read as deleted, so a mismatch fails the run
+    - Microsoft Graph POST /directoryObjects/getByIds (per batch of 1000 principals) — which principals still exist
+
+    Output: azure_residual_resources_<subscription>.json — each leftover resource and why it counts as unused, and every role assignment with whether its principal still exists; the Resource Graph queries are recorded under sources.
+
+    Summary fields:
+
+    Which resources are left out of scope?
+    - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
+    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no orphaned resource, role assignment, deployment slot or user-assigned managed identity (in use or not), such as a mistyped name, or null when there is no subscription or credential or any Resource Graph query other than the subscription's tenant lookup could not be read
+    - excluded_orphaned_resources — Number of orphaned resources left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, and no other count includes them. A matching user-assigned managed identity that no resource attaches and no role assignment names counts here without its federated credentials being read
+    - excluded_role_assignments — Number of role assignments left out of scope because a pattern matched the resource group or id of the scope they were made at (role assignments carry no region, so location: patterns never match them); assignments made at the subscription itself stay, and each excluded one is listed under excluded with the pattern
+    - in_scope_orphaned_resources — Number of orphaned resources read and in scope
+    - in_scope_role_assignments — Number of role assignments read and in scope
+
+    How many leftovers are there?
+    - total_orphans — Number of in-scope leftover items found: orphaned resources plus role assignments to deleted users, groups or apps
+    - orphans_by_kind — Number of in-scope leftover items of each kind, listing only the kinds found (a leftover is judged against every resource and role assignment, so an in-scope identity used only by an excluded resource still reads as in use):
+      - unattached_disk (a managed disk whose disk state is Unattached)
+      - unattached_nic (a network interface with no virtual machine, private endpoint, private link service or hosted workload)
+      - unattached_nsg (a network security group on no subnet or network interface)
+      - unattached_public_ip (a public IP address bound to no IP configuration or NAT gateway)
+      - unattached_nat_gateway (a NAT gateway on no subnet)
+      - disconnected_private_endpoint (a private endpoint whose connection state is Disconnected, meaning the target resource was deleted or its owner removed the connection)
+      - unlinked_private_dns_zone (a private DNS zone linked to no virtual network, so no network resolves it)
+      - empty_app_service_plan (an App Service plan hosting no app)
+      - empty_resource_group (a resource group that no indexed resource belongs to; hidden resource types that Resource Graph does not index are not counted)
+      - stale_deployment_slot (an App Service or Function App slot that is not Running, or not modified for stale_slot_days days; the record's stale_reasons says which: not_running or not_modified_in_<n>_days)
+      - unused_identity (a user-assigned managed identity that no resource references in this subscription, whose principal holds no role assignment, and that has no federated credential; an identity used only by a resource or role assignment in another subscription or a management group reads as unused, and one whose federated credentials couldn't be read is not reported)
+      - deleted_principal_assignment (a role assignment whose principal no longer exists in Entra ID)
+    - orphaned_resources — Number of in-scope orphaned resources, not counting role assignments
+
+    Do role assignments point to deleted users, groups or apps?
+    - role_assignments_checked — Number of in-scope role assignments read
+    - deleted_principal_assignments — Number of in-scope role assignments whose user, group or app Microsoft Graph does not return (ARM keeps the assignment after the principal is deleted, so only the directory lookup can tell; a principal created in the last few minutes can still read as missing, which created_on lets a reviewer rule out)
+    - principals_checked — Number of distinct users, groups and apps (principals) the in-scope role assignments point to, including those in another tenant that aren't looked up
+    - principals_missing — Number of distinct principals that no longer exist in Entra ID
+    - foreign_principal_assignments — Number of in-scope role assignments to a ForeignGroup, a group in another tenant such as a CSP partner's, which this directory can never return; they are not looked up and are not flagged as deleted
+    - principal_check — Whether the deleted-principal check ran: complete; failed (reading role assignments, checking the tenant or the Graph lookup failed, so principal_exists is null and the run fails); or not_run (no subscription or credential)
+
+    How many identities and slots were checked, and when is a slot stale?
+    - identities_checked — Number of user-assigned managed identities read that no resource_exclusions pattern matches
+    - slots_checked — Number of deployment slots read that no resource_exclusions pattern matches
+    - stale_slot_days — Days without changes after which a deployment slot counts as stale (default 90); a slot that is not running also counts as stale; null when nothing was collected (no subscription or credential, or the Resource Graph client couldn't be created)

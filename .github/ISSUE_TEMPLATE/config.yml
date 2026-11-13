@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Request a platform or fetcher
+    url: https://github.com/paramify/paramify-fetchers/discussions/categories/fetcher-requests
+    about: Ask for new coverage, or upvote a request that is already there.
+  - name: Ask a question
+    url: https://github.com/paramify/paramify-fetchers/discussions/categories/q-a
+    about: How to set up, run or configure a fetcher.
+  - name: Report a security vulnerability
+    url: https://github.com/paramify/paramify-fetchers/security/advisories/new
+    about: Report it privately. Do not open a public issue.

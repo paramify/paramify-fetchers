@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="432" viewBox="0 0 880 432" role="img" aria-label="Fetcher and service counts over time. Fetchers rise from 56 to 343, and services from 7 to 26, between June 2026 and November 2026.">
+<rect x="0" y="0" width="880" height="432" fill="#ffffff"/>
+<text x="24" y="22" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" font-weight="600" fill="#8c959f" text-anchor="start" letter-spacing="0.08em">COVERAGE OVER TIME</text>
+<text x="24" y="72" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif"><tspan font-size="44" font-weight="600" fill="#1f2328" letter-spacing="-0.02em">343</tspan><tspan dx="10" font-size="11" fill="#2270ff">●</tspan><tspan dx="5" font-size="13" fill="#59636e">fetchers</tspan><tspan dx="36" font-size="44" font-weight="600" fill="#1f2328" letter-spacing="-0.02em">26</tspan><tspan dx="10" font-size="11" fill="#1f2328">●</tspan><tspan dx="5" font-size="13" fill="#59636e">services</tspan></text>
+<text x="856" y="72" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="12" font-weight="400" fill="#8c959f" text-anchor="end">since June 2026 · +287 fetchers, +19 services</text>
+<line x1="48" y1="108" x2="48" y2="384" stroke="#eef0f2" stroke-width="1"/>
+<text x="52" y="404" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" font-weight="400" fill="#8c959f" text-anchor="start">Jun 2026</text>
+<line x1="194.91" y1="108" x2="194.91" y2="384" stroke="#eef0f2" stroke-width="1"/>
+<text x="198.91" y="404" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" font-weight="400" fill="#8c959f" text-anchor="start">Jul</text>
+<line x1="346.72" y1="108" x2="346.72" y2="384" stroke="#eef0f2" stroke-width="1"/>
+<text x="350.72" y="404" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" font-weight="400" fill="#8c959f" text-anchor="start">Aug</text>
+<line x1="498.52" y1="108" x2="498.52" y2="384" stroke="#eef0f2" stroke-width="1"/>
+<text x="502.52" y="404" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" font-weight="400" fill="#8c959f" text-anchor="start">Sep</text>
+<line x1="645.43" y1="108" x2="645.43" y2="384" stroke="#eef0f2" stroke-width="1"/>
+<text x="649.43" y="404" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" font-weight="400" fill="#8c959f" text-anchor="start">Oct</text>
+<line x1="797.24" y1="108" x2="797.24" y2="384" stroke="#eef0f2" stroke-width="1"/>
+<text x="801.24" y="404" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="11" font-weight="400" fill="#8c959f" text-anchor="start">Nov</text>
+<line x1="48" y1="236" x2="856" y2="236" stroke="#d1d9e0" stroke-width="1"/>
+<text x="40" y="240" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" font-weight="400" fill="#8c959f" text-anchor="end">0</text>
+<line x1="48" y1="204" x2="856" y2="204" stroke="#eef0f2" stroke-width="1" stroke-dasharray="2 3"/>
+<text x="40" y="208" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" font-weight="400" fill="#8c959f" text-anchor="end">100</text>
+<line x1="48" y1="172" x2="856" y2="172" stroke="#eef0f2" stroke-width="1" stroke-dasharray="2 3"/>
+<text x="40" y="176" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" font-weight="400" fill="#8c959f" text-anchor="end">200</text>
+<line x1="48" y1="140" x2="856" y2="140" stroke="#eef0f2" stroke-width="1" stroke-dasharray="2 3"/>
+<text x="40" y="144" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" font-weight="400" fill="#8c959f" text-anchor="end">300</text>
+<line x1="48" y1="108" x2="856" y2="108" stroke="#eef0f2" stroke-width="1" stroke-dasharray="2 3"/>
+<text x="40" y="112" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" font-weight="400" fill="#8c959f" text-anchor="end">400</text>
+<path d="M48,218.08 L62.69,218.08 L62.69,217.44 L126.35,217.44 L126.35,201.76 L234.08,201.76 L234.08,201.44 L268.36,201.44 L268.36,197.28 L361.41,197.28 L361.41,196.32 L410.38,196.32 L410.38,187.68 L425.07,187.68 L425.07,181.6 L429.96,181.6 L429.96,181.28 L498.52,181.28 L498.52,179.04 L513.21,179.04 L513.21,178.4 L537.7,178.4 L537.7,178.08 L616.05,178.08 L616.05,177.76 L630.74,177.76 L630.74,175.52 L635.64,175.52 L635.64,173.28 L665.02,173.28 L665.02,168.8 L674.81,168.8 L674.81,168.48 L679.71,168.48 L679.71,167.2 L684.61,167.2 L684.61,162.4 L699.3,162.4 L699.3,161.76 L704.19,161.76 L704.19,159.84 L709.09,159.84 L709.09,158.88 L733.58,158.88 L733.58,158.56 L738.47,158.56 L738.47,158.24 L743.37,158.24 L743.37,156.64 L748.27,156.64 L748.27,152.16 L753.16,152.16 L753.16,150.88 L767.85,150.88 L767.85,145.76 L772.75,145.76 L772.75,144.16 L777.65,144.16 L777.65,141.28 L787.44,141.28 L787.44,140.96 L811.93,140.96 L811.93,139.04 L816.82,139.04 L816.82,138.4 L821.72,138.4 L821.72,134.88 L836.41,134.88 L836.41,128.16 L841.31,128.16 L841.31,127.2 L851.1,127.2 L851.1,126.24 L856,126.24 L856,236 L48,236 Z" fill="#2270ff" fill-opacity="0.07" stroke="none"/>
+<path d="M48,218.08 L62.69,218.08 L62.69,217.44 L126.35,217.44 L126.35,201.76 L234.08,201.76 L234.08,201.44 L268.36,201.44 L268.36,197.28 L361.41,197.28 L361.41,196.32 L410.38,196.32 L410.38,187.68 L425.07,187.68 L425.07,181.6 L429.96,181.6 L429.96,181.28 L498.52,181.28 L498.52,179.04 L513.21,179.04 L513.21,178.4 L537.7,178.4 L537.7,178.08 L616.05,178.08 L616.05,177.76 L630.74,177.76 L630.74,175.52 L635.64,175.52 L635.64,173.28 L665.02,173.28 L665.02,168.8 L674.81,168.8 L674.81,168.48 L679.71,168.48 L679.71,167.2 L684.61,167.2 L684.61,162.4 L699.3,162.4 L699.3,161.76 L704.19,161.76 L704.19,159.84 L709.09,159.84 L709.09,158.88 L733.58,158.88 L733.58,158.56 L738.47,158.56 L738.47,158.24 L743.37,158.24 L743.37,156.64 L748.27,156.64 L748.27,152.16 L753.16,152.16 L753.16,150.88 L767.85,150.88 L767.85,145.76 L772.75,145.76 L772.75,144.16 L777.65,144.16 L777.65,141.28 L787.44,141.28 L787.44,140.96 L811.93,140.96 L811.93,139.04 L816.82,139.04 L816.82,138.4 L821.72,138.4 L821.72,134.88 L836.41,134.88 L836.41,128.16 L841.31,128.16 L841.31,127.2 L851.1,127.2 L851.1,126.24 L856,126.24" fill="none" stroke="#2270ff" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+<circle cx="856" cy="126.24" r="3.5" fill="#2270ff"/>
+<line x1="48" y1="384" x2="856" y2="384" stroke="#d1d9e0" stroke-width="1"/>
+<text x="40" y="388" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" font-weight="400" fill="#8c959f" text-anchor="end">0</text>
+<line x1="48" y1="345.33" x2="856" y2="345.33" stroke="#eef0f2" stroke-width="1" stroke-dasharray="2 3"/>
+<text x="40" y="349.33" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" font-weight="400" fill="#8c959f" text-anchor="end">10</text>
+<line x1="48" y1="306.67" x2="856" y2="306.67" stroke="#eef0f2" stroke-width="1" stroke-dasharray="2 3"/>
+<text x="40" y="310.67" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" font-weight="400" fill="#8c959f" text-anchor="end">20</text>
+<line x1="48" y1="268" x2="856" y2="268" stroke="#eef0f2" stroke-width="1" stroke-dasharray="2 3"/>
+<text x="40" y="272" font-family="system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" font-size="10" font-weight="400" fill="#8c959f" text-anchor="end">30</text>
+<path d="M48,356.93 L62.69,356.93 L62.69,353.07 L268.36,353.07 L268.36,349.2 L361.41,349.2 L361.41,345.33 L410.38,345.33 L410.38,341.47 L425.07,341.47 L425.07,337.6 L498.52,337.6 L498.52,333.73 L513.21,333.73 L513.21,329.87 L616.05,329.87 L616.05,326 L635.64,326 L635.64,322.13 L665.02,322.13 L665.02,318.27 L674.81,318.27 L674.81,314.4 L743.37,314.4 L743.37,306.67 L753.16,306.67 L753.16,302.8 L767.85,302.8 L767.85,298.93 L772.75,298.93 L772.75,295.07 L821.72,295.07 L821.72,291.2 L836.41,291.2 L836.41,283.47 L856,283.47" fill="none" stroke="#1f2328" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+<circle cx="856" cy="283.47" r="3.5" fill="#1f2328"/>
+</svg>

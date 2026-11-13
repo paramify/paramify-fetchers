@@ -1,0 +1,142 @@
+name: azure_sentinel_analytics_rules
+version: 0.3.2
+description: >-
+  Lists each Sentinel workspace's detection rules with their queries,
+  suppression and the log tables each reads, flagging arriving logs no enabled
+  rule reads and rules with no recent logs.
+category: azure
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_sentinel_analytics_rules.json
+  aggregation: per_target
+
+target_schema:
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id to collect from. Optional — omit to use the first
+      enabled subscription the ambient credential can see; set one target per
+      subscription to fan out.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: Deployment environment label (e.g. prod) written into the evidence metadata.
+  workspaces:
+    type: string
+    required: false
+    env: SENTINEL_WORKSPACES
+    description: >
+      Comma-separated workspace names or resource ids to limit collection to.
+      Optional — omit to collect every Sentinel-onboarded workspace in the
+      subscription.
+
+config_schema:
+  ingestion_window_days:
+    type: integer
+    required: false
+    default: 14
+    env: SENTINEL_INGESTION_WINDOW_DAYS
+    description: >
+      How far back a table's latest record may be for the table to count as
+      receiving data. The default of 14 matches Sentinel's own rule for showing
+      a connector as connected.
+
+  include_rule_query_text:
+    type: boolean
+    required: false
+    default: false
+    env: SENTINEL_RULE_QUERY_TEXT
+    description: >
+      Opt-in. When true, each rule also carries its full KQL query text as
+      written. Off by default: detection queries routinely contain strings a
+      web firewall refuses (file paths, script tags, shell commands), which
+      can get the whole evidence file refused, and allow-lists can hold user
+      names or IP addresses. Every rule carries the query's SHA-256 and length
+      either way.
+
+  resource_exclusions:
+    type: patterns
+    prefixes: [rg, location, id]
+    bare: false
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Resources outside the authorization boundary, to leave out of scope, as
+      case-insensitive glob patterns listed in the manifest, each with a
+      prefix: rg:<resource group> (read from the resource id), location:<region>
+      (the region's name without spaces, such as eastus2; a resource with no
+      location never matches one) or id:<resource id> (also matches that
+      resource's child resources). * matches any run of characters and ? one
+      character. A matching Log Analytics workspace is listed under excluded
+      with the pattern and left out of every count, workspaces_without_sentinel
+      included; its analytics rules, templates, tables, saved searches,
+      ingestion and data connectors are not read. An excluded workspace gets no reads, not even its Sentinel onboarding state;
+      a SENTINEL_WORKSPACES filter applies first, and a workspace it names that a
+      pattern takes out fails the run as bad_config. A pattern
+      without one of these prefixes fails the run. Set it once under platforms.azure.config for every Azure
+      fetcher that has this field; fetchers without it ignore it. Each item is a
+      pattern, or a pattern with a reason. Empty: every resource is in scope.
+
+secrets: []          # DefaultAzureCredential only — see _categories/azure.yaml
+
+ksis:
+  - KSI-MLA-OSM      # Operating SIEM capability — the detections the SIEM runs
+  - KSI-MLA-RVL      # Reviewing logs — which ingesting tables enabled rules read, and which they don't
+
+evidence_set:
+  reference_id: EVD-AZURE-SENTINEL-ANALYTICS-RULES
+  name: Azure Sentinel Analytics Rules
+  instructions: |
+    Script: azure/sentinel_analytics_rules/fetcher.py
+
+    Access: Microsoft Sentinel Reader and Log Analytics Reader on each Sentinel workspace.
+
+    Commands Executed:
+    - subscriptions.list() — picks a subscription when none is set
+    - GET Microsoft.OperationalInsights/workspaces — the subscription's Log Analytics workspaces
+    - GET Microsoft.SecurityInsights/onboardingStates (per workspace) — finds the Sentinel workspaces
+    - GET Microsoft.SecurityInsights/alertRules (per workspace; stable and preview APIs) — every analytics rule with its query and suppression, including kinds only the preview returns, such as NRT
+    - GET Microsoft.SecurityInsights/alertRuleTemplates (per workspace, stable API) — templates available and in use, and the data types each template lists
+    - GET Microsoft.SecurityInsights/alertRuleTemplates/{name} (preview API, only for a template a rule uses that the stable listing lacks, such as an NRT rule's) — that template's data types
+    - GET Microsoft.OperationalInsights/workspaces/tables (per workspace) — the workspace's table and column names, to find the tables each query reads
+    - GET Microsoft.OperationalInsights/workspaces/savedSearches (per workspace) — the workspace's function names (parsers), so a name a query reads that is neither a listed table nor a function counts as a table the workspace never provisioned
+    - KQL union * summarized by table (per workspace) — each table's last ingestion time in the window
+    - KQL on SecurityAlert by product (per workspace) — which products sent alerts, for incident-creation rules (only when the workspace has one and SecurityAlert received data)
+    - GET Microsoft.SecurityInsights/dataConnectors (per workspace; stable and preview APIs, only when an enabled incident-creation rule's product sent no alert) — which data connections have alerts enabled, so a rule whose product is wired up but sent nothing reads as quiet; only the preview returns Defender XDR's connection
+
+    Output: azure_sentinel_analytics_rules_<subscription>.json — for each Sentinel workspace, every analytics rule with its query's SHA-256 and length (and its full query text as written, including any user names, IP addresses or file paths it names, only when include_rule_query_text is on), suppression, the tables it reads and which of them got no data, plus the arriving tables no enabled rule reads, the enabled incident-creation rules that are quiet, and, per table enabled rules read, how many of those rules read it only through their template. Workspaces the resource_exclusions patterns take out are listed under excluded instead, each with the pattern that matched.
+
+    Summary fields:
+
+    Which workspaces were checked?
+    - workspaces_collected — Number of Sentinel workspaces read
+    - workspaces_without_sentinel — Number of workspaces skipped because Sentinel isn't turned on
+
+    Which workspaces are left out of scope?
+    - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every workspace is in scope
+    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no workspace, such as a mistyped name; null if the workspace list couldn't be read
+    - excluded_workspaces — Number of workspaces left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern and isn't read, and no other count includes them; null if the workspace list couldn't be read
+    - in_scope_workspaces — Number of workspaces found and in scope, Sentinel or not; 0 means none was found or the patterns took out every workspace, which a check can catch by requiring more than 0; null if the workspace list couldn't be read
+
+    Is threat detection turned on?
+    - enabled_rules_total — Number of enabled analytics rules across all Sentinel workspaces
+    - min_enabled_rules — Number of enabled analytics rules on the Sentinel workspace with the fewest; null if no workspace's rules could be read
+    - workspaces_with_no_enabled_rules — Number of Sentinel workspaces with no enabled analytics rule
+    - workspaces_with_fusion_enabled — Number of Sentinel workspaces where the Fusion rule (multistage attack detection) is enabled; Fusion is turned off by design on workspaces onboarded to the Defender portal, where Defender XDR correlates alerts instead
+
+    Do the enabled rules read the logs that arrive?
+    - ingesting_tables_not_read — Number of tables, summed over Sentinel workspaces, with data in the window (default 14 days) that no enabled rule reads; null if the rule list, the table list or the ingestion query failed on every workspace. A rule reads the tables its query names in its own workspace, in code or as a string passed to table() or a function the query defines; a name the workspace doesn't list counts only where a table can stand, a bound name never. If it names none, its template's data types count instead (not for Fusion, ML and threat intelligence rules); an incident-creation rule reads SecurityAlert. Tables read only through a parser function aren't seen. Workspace and Sentinel telemetry (Usage, Heartbeat, SecurityIncident and the like) and SecurityAlert are left out
+    - ingesting_tables_read_only_by_templates — Number of tables, across all Sentinel workspaces, that received data in the window and that enabled rules read only through their templates' data types, which list the sources a rule may read rather than ones its query is known to read (for example a parser rule whose template lists both CommonSecurityLog and Syslog); these count as read in ingesting_tables_not_read. Same telemetry left out; null if the rule list, the table list or the ingestion query failed on every workspace
+    - enabled_rules_missing_data — Number of enabled analytics rules missing data, across all Sentinel workspaces; null if on every workspace the rule list, the table list or the ingestion query failed, or the SecurityAlert products query failed while an enabled incident-creation rule needed it. A rule is missing data when a table its query reads got nothing in the window (including a table the workspace never provisioned), when none of the data types its template lists got anything (a template's data types are alternative sources), or, for an incident-creation rule, when its product sent no alert
+    - enabled_rules_quiet — Number of the rules in enabled_rules_missing_data that are quiet incident-creation rules, across all Sentinel workspaces; equal to it when every rule missing data is quiet. A rule is quiet when the product it creates incidents for sent no alert in the window while a data connection that sends that product's alerts has alerts enabled: the product's own connection or, for Entra ID Protection and Defender for Identity, Endpoint, Office 365 and Cloud Apps, Defender XDR's (which doesn't carry Defender for Cloud or IoT alerts). Null when enabled_rules_missing_data is null, or when a workspace's data connectors couldn't be read and an incident-creation rule there missing data isn't quiet through the connections that were
+    - enabled_rules_tables_unknown — Number of enabled analytics rules whose tables can't be worked out (Fusion, ML and threat intelligence rules, and rules whose query reads only through parser functions or wildcards and whose template lists no data types; when the workspace's saved searches can't be read, also rules whose query reads only tables the workspace doesn't list); null if on every workspace the rule list or the table list couldn't be read

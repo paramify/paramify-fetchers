@@ -14,22 +14,25 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-import requests
 from dotenv import load_dotenv
 
+# The shared failure-reporting helper lives in fetchers/_lib/ — the same import
+# mechanism as a category `_shared` module, one directory up.
+SCRIPT_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(SCRIPT_DIR.parents[1] / "_lib"))
+# Paging shared by the Datadog fetchers lives in the category's _shared/.
+sys.path.insert(0, str(SCRIPT_DIR.parent / "_shared"))
+
+from datadog_paging import (  # noqa: E402
+    PagingError,
+    error_result,
+    failure_result,
+    paginate_page_number,
+    with_paging_status,
+)
+from fetcher_status import report_failure  # noqa: E402
+
 logger = logging.getLogger("datadog_apm_services")
-
-
-def report_failure(reason: str, code: str | None = None) -> None:
-    """Report why this run failed; the runner puts it in the envelope's metadata.error.
-
-    Without it the runner falls back to the tail of stderr — which on the way out
-    is the "Evidence saved" line. See docs/fetcher_contract.md § Output.
-    """
-    path = os.environ.get("FETCHER_STATUS_FILE")
-    if not path:
-        return
-    Path(path).write_text(json.dumps({"error": reason} | ({"code": code} if code else {})))
 
 
 def current_timestamp() -> str:
@@ -56,29 +59,14 @@ def get_base_url() -> str:
 
 
 def fetch_all_services(base_url: str, headers: Dict[str, str]) -> List[Dict[str, Any]]:
-    all_services: List[Dict[str, Any]] = []
-    page_number = 0
-    page_size = 100
-    endpoint = f"{base_url}/api/v2/services/definitions"
-
-    while True:
-        params = {"page[size]": page_size, "page[number]": page_number}
-        try:
-            response = requests.get(endpoint, headers=headers, params=params, timeout=30)
-            response.raise_for_status()
-            payload = response.json()
-            data = payload.get("data", [])
-            if not data:
-                break
-            all_services.extend(data)
-            if len(data) < page_size:
-                break
-            page_number += 1
-        except requests.exceptions.RequestException as e:
-            logger.warning("Pagination interrupted at page %s: %s", page_number, e)
-            break
-
-    return all_services
+    """Every service definition. Raises PagingError if the first page fails;
+    a later failure comes back on the returned list's `.error`."""
+    return paginate_page_number(
+        f"{base_url}/api/v2/services/definitions",
+        headers,
+        operation="Datadog list service definitions",
+        page_size=100,
+    )
 
 
 def extract_service_fields(service: Dict[str, Any]) -> Dict[str, Any]:
@@ -95,8 +83,11 @@ def extract_service_fields(service: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def get_apm_services() -> Dict[str, Any]:
-    base_url = get_base_url()
-    headers = get_dd_headers()
+    try:
+        base_url = get_base_url()
+        headers = get_dd_headers()
+    except RuntimeError as e:
+        return error_result(str(e), current_timestamp(), "bad_config")
     endpoint = f"{base_url}/api/v2/services/definitions"
 
     try:
@@ -116,7 +107,7 @@ def get_apm_services() -> Dict[str, Any]:
         services_with_owner = sum(1 for svc in extracted if svc.get("team"))
         services_without_owner = len(extracted) - services_with_owner
 
-        return {
+        return with_paging_status({
             "status": "success" if extracted else "partial_or_empty",
             "api_endpoint": endpoint,
             "record_count": len(extracted),
@@ -129,12 +120,12 @@ def get_apm_services() -> Dict[str, Any]:
                 "services_without_owner": services_without_owner,
             },
             "retrieved_at": current_timestamp(),
-        }
+        }, services)
 
-    except RuntimeError as e:
-        return {"status": "error", "message": str(e), "retrieved_at": current_timestamp()}
+    except PagingError as e:
+        return failure_result(e, endpoint, current_timestamp())
     except Exception as e:
-        return {"status": "error", "message": str(e), "retrieved_at": current_timestamp()}
+        return error_result(str(e), current_timestamp())
 
 
 def main() -> int:
@@ -158,8 +149,7 @@ def main() -> int:
     # Last line on stderr wins: the runner reads its tail into the envelope's metadata.error.
     if result.get("status") not in {"success", "partial_or_empty"}:
         reason = result.get("message", "unknown error")
-        logger.error("collection failed: %s", reason)
-        report_failure(reason)
+        report_failure(reason, result.get("error_code"))
         return 1
     return 0
 

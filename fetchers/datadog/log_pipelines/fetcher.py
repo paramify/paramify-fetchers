@@ -16,19 +16,14 @@ from typing import Any, Dict, List, Optional
 import requests
 from dotenv import load_dotenv
 
+# The shared failure-reporting helper lives in fetchers/_lib/ — the same import
+# mechanism as a category `_shared` module, one directory up.
+SCRIPT_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(SCRIPT_DIR.parents[1] / "_lib"))
+
+from fetcher_status import report_failure  # noqa: E402
+
 logger = logging.getLogger("datadog_log_pipelines")
-
-
-def report_failure(reason: str, code: str | None = None) -> None:
-    """Report why this run failed; the runner puts it in the envelope's metadata.error.
-
-    Without it the runner falls back to the tail of stderr — which on the way out
-    is the "Evidence saved" line. See docs/fetcher_contract.md § Output.
-    """
-    path = os.environ.get("FETCHER_STATUS_FILE")
-    if not path:
-        return
-    Path(path).write_text(json.dumps({"error": reason} | ({"code": code} if code else {})))
 
 
 def current_timestamp() -> str:
@@ -141,7 +136,6 @@ def main() -> int:
     # Last line on stderr wins: the runner reads its tail into the envelope's metadata.error.
     if result.get("status") not in {"success", "partial_or_empty"}:
         reason = result.get("message", "unknown error")
-        logger.error("collection failed: %s", reason)
         report_failure(reason)
         return 1
     return 0

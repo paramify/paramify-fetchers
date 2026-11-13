@@ -1,0 +1,492 @@
+"""Shared test scaffolding.
+
+This file is deliberately ADDITIVE. It exists so a new test does not have to
+retype a sixteen-field Fetcher to assert one thing, not to deduplicate what is
+already here — a survey of the existing modules found much less real
+duplication than a grep suggests:
+
+  * The four `make_fetcher` copies have all diverged, and only in cosmetic
+    values (name, description, category). Rewriting their call sites to a
+    shared default would change what those tests assert on for no gain.
+  * The four CrowdStrike server fixtures are four *different* setups, not four
+    copies. test_crowdstrike_resilience uses ThreadingHTTPServer for a
+    documented keep-alive deadlock under retries; folding them into one
+    parameterised fixture would add complexity and erase that.
+  * The two FakeResponse classes diverged on purpose — the issues one carries a
+    default artifacts payload and a sentinel whose json() raises.
+  * REPO_ROOT is one line in 24 files. Importing it would be one line in 24
+    files. That is churn, not a saving.
+
+So: use these when writing something new. Leave the existing local copies where
+they are until the module they test is being changed for another reason.
+
+Everything here reaches a test as a FIXTURE. pyproject sets
+--import-mode=importlib, which never puts conftest on sys.path, so
+`from conftest import ...` raises ModuleNotFoundError.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import functools
+import importlib.util
+import json
+import os
+import shutil
+import socket
+from pathlib import Path
+from types import SimpleNamespace
+from typing import Any, Dict
+
+import pytest
+
+from framework.contract import Fetcher, InvocationResult
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+
+
+@pytest.fixture(scope="session")
+def repo_root() -> Path:
+    return REPO_ROOT
+
+
+@pytest.fixture(autouse=True)
+def _no_upload_yaml_from_the_working_tree(monkeypatch):
+    """Tests never read the user's own `<repo>/upload.yaml`.
+
+    It is the uploader config the TUI and CLI read by default, it is not
+    tracked, and a developer often has one (CI never does). A test that plans an
+    upload with the real repo root as its root would read it and route to the
+    developer's evidence sets. For that root only, act as if there is none; a
+    test that passes its own tmp root still gets the real lookup.
+    """
+    from framework import api
+
+    real = api.default_upload_config
+
+    def default_upload_config(root):
+        if Path(root).resolve() == REPO_ROOT:
+            return None
+        return real(root)
+
+    monkeypatch.setattr(api, "default_upload_config", default_upload_config)
+
+
+# --------------------------------------------------------------------------- #
+# --fail-on-skip: the tui job's guard against a missing textual passing as skips.
+# --------------------------------------------------------------------------- #
+
+def pytest_addoption(parser):
+    parser.addoption(
+        "--fail-on-skip", action="store_true",
+        help="fail the run if any test or test module is skipped or xfailed",
+    )
+
+
+class _NotRun:
+    """Skipped and xfailed reports, counted here so the gate holds without the terminal reporter."""
+
+    def __init__(self) -> None:
+        self.reports: list = []
+
+    def pytest_runtest_logreport(self, report) -> None:
+        if report.skipped:  # an xfail reports as skipped too
+            self.reports.append(report)
+
+    def pytest_collectreport(self, report) -> None:
+        if report.skipped:
+            self.reports.append(report)
+
+
+def pytest_configure(config):
+    if config.getoption("--fail-on-skip"):
+        config.pluginmanager.register(_NotRun(), "fail-on-skip")
+
+
+def _not_run(config) -> list:
+    plugin = config.pluginmanager.get_plugin("fail-on-skip")
+    return plugin.reports if plugin else []
+
+
+def pytest_sessionfinish(session, exitstatus):
+    if session.config.getoption("--fail-on-skip") and exitstatus == 0 and _not_run(session.config):
+        session.exitstatus = pytest.ExitCode.TESTS_FAILED
+
+
+def pytest_terminal_summary(terminalreporter, exitstatus, config):
+    if config.getoption("--fail-on-skip") and _not_run(config):
+        terminalreporter.write_line(
+            f"--fail-on-skip: {len(_not_run(config))} skipped or xfailed, so the run fails"
+            " (-rsx lists why)",
+            red=True,
+        )
+
+
+# --------------------------------------------------------------------------- #
+# Contract object factories
+#
+# Every field is spelled out rather than defaulted in Fetcher itself: a new
+# required field on the dataclass should break these loudly, so the tests get
+# updated deliberately instead of silently constructing a half-built fetcher.
+# --------------------------------------------------------------------------- #
+
+def build_fetcher(path: Path, **overrides: Any) -> Fetcher:
+    """A minimal valid Fetcher rooted at `path`. Override any field by keyword."""
+    defaults: Dict[str, Any] = dict(
+        name="t_fetcher",
+        version="0.1.0",
+        description="test fetcher",
+        category="testcat",
+        runtime_type="python",
+        runtime_entry="fetcher.py",
+        runtime_timeout=None,
+        output_type="json",
+        output_path="out.json",
+        output_aggregation=None,
+        secrets=[],
+        supports_targets=False,
+        target_schema={},
+        path=path,
+        config_schema={},
+        evidence_set=None,
+    )
+    defaults.update(overrides)
+    return Fetcher(**defaults)
+
+
+def build_result(**overrides: Any) -> InvocationResult:
+    """A minimal successful InvocationResult. Override any field by keyword."""
+    defaults: Dict[str, Any] = dict(
+        fetcher_name="t_fetcher",
+        fetcher_version="0.1.0",
+        target=None,
+        started_at="2026-01-01T00:00:00Z",
+        completed_at="2026-01-01T00:00:01Z",
+        duration_sec=1.0,
+        exit_code=0,
+        stdout="",
+        stderr="",
+        outputs=["out.json"],
+    )
+    defaults.update(overrides)
+    return InvocationResult(**defaults)
+
+
+@pytest.fixture
+def make_fetcher(tmp_path):
+    """build_fetcher pre-rooted at tmp_path."""
+    def _make(**overrides: Any) -> Fetcher:
+        return build_fetcher(overrides.pop("path", tmp_path), **overrides)
+    return _make
+
+
+@pytest.fixture
+def make_result():
+    return build_result
+
+
+# --------------------------------------------------------------------------- #
+# Summary fields in the instructions, checked against a summary the code built (docs/authoring_fetcher_guide.md)
+# --------------------------------------------------------------------------- #
+
+def documented_summary(fetcher: str) -> Dict[str, list[str]]:
+    """Each field under 'Summary fields:' in a fetcher's instructions, with the breakdown values listed below it."""
+    import re
+
+    import yaml
+
+    yaml_path = next(p for root in ("fetchers", "comparators")
+                     if (p := REPO_ROOT / root / fetcher / "fetcher.yaml").exists())
+    text = (yaml.safe_load(yaml_path.read_text()).get("evidence_set") or {}).get("instructions") or ""
+    _, found, section = text.partition("\nSummary fields:\n")
+    assert found, f"{fetcher}: the instructions have no 'Summary fields:' section"
+    fields: Dict[str, list[str]] = {}
+    field = None
+    for line in section.splitlines():
+        if m := re.match(r"- (\S+) — ", line):
+            field = m.group(1)
+            fields[field] = []
+        elif field and (m := re.match(r"  - (\S+) \(", line)):
+            fields[field].append(m.group(1))
+    return fields
+
+
+@pytest.fixture(name="documented_summary")
+def documented_summary_fixture():
+    return documented_summary
+
+
+@pytest.fixture
+def assert_summary_documented():
+    """Call as assert_summary_documented("azure/<name>", summary) with a summary holding every field."""
+    def _check(fetcher: str, summary: Dict[str, Any]) -> None:
+        documented = documented_summary(fetcher)
+        problems = [f"not in the instructions: {k}" for k in sorted(set(summary) - set(documented))]
+        problems += [f"in the instructions but not the summary: {k}" for k in sorted(set(documented) - set(summary))]
+        for name, values in documented.items():
+            if values and isinstance(summary.get(name), dict):
+                problems += [f"{name}: value {v!r} is not listed under it" for v in sorted(set(summary[name]) - set(values))]
+                problems += [f"{name}: value {v!r} is listed but not in the summary" for v in sorted(set(values) - set(summary[name]))]
+        assert not problems, f"{fetcher} summary fields vs instructions:\n  " + "\n  ".join(problems)
+    return _check
+
+
+# --------------------------------------------------------------------------- #
+# requests test doubles
+#
+# For new uploader tests. The uploaders hold a requests.Session, so a fake with
+# the four attributes they read is enough and avoids a real socket.
+# --------------------------------------------------------------------------- #
+
+class FakeResponse:
+    """Stands in for a requests.Response.
+
+    `json_data=RAISES` makes json() raise ValueError, which is how a real
+    response behaves when the body is not JSON — an HTML error page from a
+    proxy, say, which is a shape the uploaders have hit in production.
+    """
+
+    RAISES = object()
+
+    def __init__(self, status_code: int = 200, json_data: Any = None, text: str = ""):
+        self.status_code = status_code
+        self._json = {} if json_data is None else json_data
+        self.text = text
+
+    def json(self) -> Any:
+        if self._json is FakeResponse.RAISES:
+            raise ValueError("response body is not JSON")
+        return self._json
+
+    def raise_for_status(self) -> None:
+        if self.status_code >= 400:
+            raise RuntimeError(f"HTTP {self.status_code}")
+
+
+class FakeSession:
+    """Records every call and replays a queued response per HTTP verb.
+
+    Queue responses with `queue("get", FakeResponse(...))`; calls are recorded
+    on `.calls` as (method, url, kwargs) so a test can assert on what was sent
+    as well as what came back. A verb with an empty queue returns a bare 200,
+    so a test only has to script the requests it actually cares about.
+    """
+
+    def __init__(self) -> None:
+        self.headers: Dict[str, str] = {}
+        self.calls: list = []
+        self._queues: Dict[str, list] = {}
+
+    def queue(self, method: str, *responses: FakeResponse) -> "FakeSession":
+        self._queues.setdefault(method.lower(), []).extend(responses)
+        return self
+
+    def _dispatch(self, method: str, url: str, **kwargs: Any) -> FakeResponse:
+        self.calls.append((method, url, kwargs))
+        q = self._queues.get(method, [])
+        return q.pop(0) if q else FakeResponse(200)
+
+    def get(self, url: str, **kw: Any) -> FakeResponse:
+        return self._dispatch("get", url, **kw)
+
+    def post(self, url: str, **kw: Any) -> FakeResponse:
+        return self._dispatch("post", url, **kw)
+
+    def patch(self, url: str, **kw: Any) -> FakeResponse:
+        return self._dispatch("patch", url, **kw)
+
+    def put(self, url: str, **kw: Any) -> FakeResponse:
+        return self._dispatch("put", url, **kw)
+
+    def urls_for(self, method: str) -> list:
+        """Every URL this session saw for one verb, in order."""
+        return [u for m, u, _ in self.calls if m == method.lower()]
+
+
+@pytest.fixture
+def fake_session() -> FakeSession:
+    return FakeSession()
+
+
+@pytest.fixture
+def fake_response():
+    """The FakeResponse *class*, so a test can build as many as it needs."""
+    return FakeResponse
+
+
+@pytest.fixture
+def build_fetcher_fn():
+    """build_fetcher itself, for a test that needs an explicit path."""
+    return build_fetcher
+
+
+# --------------------------------------------------------------------------- #
+# Offline demo workspace (TUI snapshot and e2e tests): demo fetcher only, one pinned run.
+# --------------------------------------------------------------------------- #
+
+DEMO_RUN_ID = "2026-01-01T00-00-00Z"
+# test_tui_layout.py checks that every page also fits 160x50.
+TUI_SIZE = (180, 50)
+
+
+@pytest.fixture(scope="session")
+def tui_size() -> tuple:
+    """The terminal size every TUI snapshot, pilot and pty test runs at."""
+    return TUI_SIZE
+
+
+@pytest.fixture
+def run_tui(tui_size):
+    """Boot the TUI on a manifest at tui_size, await body(app, pilot), return its result."""
+    from framework.tui.app import FetcherApp
+
+    def run(body, manifest, root: Path = REPO_ROOT):
+        async def main():
+            app = FetcherApp(manifest_path=str(manifest), root_override=str(root))
+            async with app.run_test(size=tui_size) as pilot:
+                await pilot.pause()
+                return await body(app, pilot)
+
+        return asyncio.run(main())
+
+    return run
+
+
+@functools.cache
+def _cli():
+    spec = importlib.util.spec_from_file_location("cli_goldens", REPO_ROOT / "tools" / "cli_goldens.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.fixture(scope="session")
+def cli_tools():
+    """tools/cli_goldens.py, for its paramify(), offline_env() and normalise()."""
+    return _cli()
+
+
+def _pin(value: Any, roots: list) -> Any:
+    """Strip run ids, timestamps, durations and the root path from run output."""
+    if isinstance(value, dict):
+        return {k: 0.05 if k == "duration_sec" else _pin(v, roots) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_pin(v, roots) for v in value]
+    if isinstance(value, str):
+        return _cli().normalise(value, [r + "/" for r in roots], root="", run_id=DEMO_RUN_ID,
+                                timestamp="2026-01-01T00:00:00Z", asctime="2026-01-01 00:00:00,000")
+    return value
+
+
+def _offline(mp: pytest.MonkeyPatch) -> None:
+    """No .env and no PARAMIFY_* or AZURE_* values in os.environ, the Paramify names as offline_env() sets them."""
+    # Not offline_env()'s allowlist: pytest plugins keep state in os.environ (TEXTUAL_SNAPSHOT_TEMPDIR).
+    # An earlier load_dotenv() in this process may have copied any .env name into os.environ.
+    cli = _cli()
+    dotenv = cli.dotenv_names()
+    for name in [k for k in os.environ if k.startswith(("PARAMIFY_", "AZURE_")) or k in dotenv]:
+        mp.delenv(name)
+    offline = cli.offline_env()
+    for name in (*cli.PARAMIFY_ENV, "PYTHON_DOTENV_DISABLED"):
+        mp.setenv(name, offline[name])
+
+
+@pytest.fixture(scope="session")
+def _demo_template(tmp_path_factory):
+    from framework import api
+
+    root = tmp_path_factory.mktemp("demo-root")
+    no_cache = shutil.ignore_patterns("__pycache__")
+    # The real package, so `python -m framework.tui` run from this root imports it, not a namespace.
+    (root / "framework").symlink_to(REPO_ROOT / "framework", target_is_directory=True)
+    shutil.copytree(REPO_ROOT / "fetchers" / "demo", root / "fetchers" / "demo", ignore=no_cache)
+    (root / "fetchers" / "_categories").mkdir()
+    shutil.copy(REPO_ROOT / "fetchers" / "_categories" / "demo.yaml", root / "fetchers" / "_categories")
+    (root / "uploaders").symlink_to(REPO_ROOT / "uploaders", target_is_directory=True)
+    (root / "manifests").mkdir()
+    manifest = root / "manifests" / "demo.yaml"
+    shutil.copy(REPO_ROOT / "examples" / "demo.yaml", manifest)
+
+    events: list = []
+    with pytest.MonkeyPatch.context() as mp:
+        _offline(mp)
+        mp.chdir(root)
+        summary = api.run(api.read_manifest(manifest), root, on_event=events.append, manifest_path=manifest)
+    if not summary.get("ok"):
+        pytest.fail(f"the demo run the TUI snapshots and replays use failed: {summary}", pytrace=False)
+
+    roots = sorted({str(root), str(root.resolve())}, key=len, reverse=True)
+    run_dir = next((root / "evidence").glob("run-*"))
+    pinned = run_dir.rename(run_dir.with_name(f"run-{DEMO_RUN_ID}"))
+    for path in pinned.glob("*.json"):
+        path.write_text(json.dumps(_pin(json.loads(path.read_text()), roots), indent=2))
+    return root, _pin(events, roots)
+
+
+@pytest.fixture
+def demo_workspace(_demo_template, tmp_path, monkeypatch):
+    """A fresh, offline copy of the demo root as the cwd; `.run_events` replay its pinned run."""
+    template, events = _demo_template
+    root = tmp_path / "demo"
+    shutil.copytree(template, root, symlinks=True)
+    _offline(monkeypatch)
+    monkeypatch.chdir(root)
+    return SimpleNamespace(root=root, run_events=events)
+
+
+_REFUSED_LOOKUPS = ("getaddrinfo", "gethostbyname", "gethostbyname_ex")
+# sendto and sendmsg send without a connect.
+_REFUSED_SOCKET_METHODS = ("connect", "connect_ex", "sendto", "sendmsg")
+
+# Imported by every Python child a no_network test starts (a fetcher, a launched app),
+# out of reach of the in-process patches.
+_CHILD_NO_NETWORK = """\
+import socket
+
+
+def _refuse(*args, **kwargs):
+    with open({log!r}, "a") as fh:
+        fh.write(repr([a for a in args if not isinstance(a, socket.socket)]) + "\\n")
+    raise OSError("network blocked by tests/conftest.py no_network")
+
+
+for _name in {lookups!r}:
+    setattr(socket, _name, _refuse)
+for _name in {methods!r}:
+    setattr(socket.socket, _name, _refuse)
+"""
+
+
+@pytest.fixture
+def no_network(monkeypatch, tmp_path):
+    """Refuse name lookups, connects, sendto and sendmsg, here and in the Python children
+    the test starts; fail at teardown if any were tried, unless the test removed `.log`."""
+    from framework.runner import executor
+
+    attempts: list = []
+
+    def refuse(*args, **kwargs):
+        where = [a for a in args if not isinstance(a, socket.socket)]
+        attempts.append(where)
+        raise AssertionError(f"test touched the network: {where!r}")
+
+    for name in _REFUSED_LOOKUPS:
+        monkeypatch.setattr(socket, name, refuse)
+    for name in _REFUSED_SOCKET_METHODS:
+        monkeypatch.setattr(socket.socket, name, refuse)
+
+    guard = tmp_path / "no-network"
+    guard.mkdir()
+    log = guard / "attempts.log"
+    (guard / "sitecustomize.py").write_text(_CHILD_NO_NETWORK.format(
+        log=str(log), lookups=_REFUSED_LOOKUPS, methods=_REFUSED_SOCKET_METHODS))
+    # Children given os.environ or offline_env() load the guard from PYTHONPATH.
+    monkeypatch.setenv("PYTHONPATH", os.pathsep.join(filter(None, (str(guard), os.environ.get("PYTHONPATH")))))
+    # A fetcher's env is a whitelist, so add the PYTHONPATH that loads the guard.
+    build_env = executor._build_env
+    monkeypatch.setattr(executor, "_build_env",
+                        lambda *a, **kw: {**build_env(*a, **kw), "PYTHONPATH": str(guard)})
+    yield SimpleNamespace(attempts=attempts, log=log)
+    if log.exists():
+        attempts += log.read_text().splitlines()
+    assert not attempts, f"network attempts (the app may have swallowed the error): {attempts}"

@@ -1,0 +1,715 @@
+"""azure_devops_permissions, driven without Azure DevOps.
+
+FakeADO stands in for requests.Session and serves one organization's
+security namespaces, their access control lists (with extended info) and the
+identities API that resolves ACE descriptors. Bodies follow the Azure DevOps
+REST 7.1 reference samples; action names and bits follow the security
+namespace reference.
+"""
+
+from __future__ import annotations
+
+import importlib.util
+import json
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+from types import SimpleNamespace
+from urllib.parse import quote, urlsplit
+
+import pytest
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+FETCHER = REPO_ROOT / "fetchers" / "azure" / "devops_permissions" / "fetcher.py"
+spec = importlib.util.spec_from_file_location("azure_devops_permissions_under_test", FETCHER)
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+dr = sys.modules["devops_rest"]
+
+ORG = "https://dev.azure.com/contoso"
+NOW = datetime.now(timezone.utc)
+WEB = "11111111-1111-1111-1111-111111111111"
+OPS = "22222222-2222-2222-2222-222222222222"
+
+# Organization groups appear in ACLs under this template SID, whatever the organization.
+PCA = "Microsoft.TeamFoundation.Identity;S-1-9-1551374245-1204400969-2402986413-2179408616-0-0-0-0-1"
+WPA = "Microsoft.TeamFoundation.Identity;S-1-9-2-0-0-0-0-1"
+CONTRIB = "Microsoft.TeamFoundation.Identity;S-1-9-2-1-1"
+ALICE = "Microsoft.IdentityModel.Claims.ClaimsIdentity;tenant\\alice@example.com"
+BUILDSVC = "Microsoft.TeamFoundation.ServiceIdentity;build:collection"
+SP = "Microsoft.VisualStudio.Services.Claims.AadServicePrincipal;tenant\\sp-object-id"
+GHOST = "Microsoft.TeamFoundation.Identity;S-1-9-9"
+
+IDENTITIES = {
+    PCA: ("[contoso]\\Project Collection Administrators", "vssgp.pca", True),
+    WPA: ("[Web]\\Project Administrators", "vssgp.wpa", True),
+    CONTRIB: ("[Web]\\Contributors", "vssgp.wc", True),
+    ALICE: ("Alice", "aad.alice", False),
+    BUILDSVC: ("Project Collection Build Service (contoso)", "svc.build", False),
+    SP: ("deploy-automation", "aadsp.deploy", False),
+}
+
+
+def actions(*names):
+    return [{"bit": 1 << i, "name": n, "displayName": n.replace("_", " ").title()} for i, n in enumerate(names) if n]
+
+
+GIT = actions("Administer", "GenericRead", "GenericContribute", "ForcePush", "CreateBranch", "CreateTag",
+              "ManageNote", "PolicyExempt", "CreateRepository", "DeleteRepository", "RenameRepository",
+              "EditPolicies", "RemoveOthersLocks", "ManagePermissions", "PullRequestContribute",
+              "PullRequestBypassPolicy")
+NAMESPACES = [
+    ("ns-collection", "Collection", actions("GENERIC_READ", "GENERIC_WRITE", "CREATE_PROJECTS", "", "", "", "",
+                                            "", "", "", "", "MANAGE_ENTERPRISE_POLICIES")),
+    ("ns-project", "Project", actions("GENERIC_READ", "GENERIC_WRITE", "DELETE")),
+    ("ns-git", "Git Repositories", GIT),
+    ("ns-tfvc", "VersionControlItems", actions("Read", "PendChange", "Checkin", "Label", "Lock", "ReviseOther",
+                                               "UnlockOther", "UndoOther", "LabelOther", "", "AdminProjectRights",
+                                               "CheckinOther")),
+    ("ns-build", "Build", actions("ViewBuilds", "", "", "", "", "", "", "", "", "", "", "EditBuildDefinition",
+                                  "DeleteBuildDefinition", "OverrideBuildCheckInValidation",
+                                  "AdministerBuildPermissions")),
+    ("ns-release", "ReleaseManagement", actions("ViewReleaseDefinition", "EditReleaseDefinition",
+                                                "DeleteReleaseDefinition", "ManageReleaseApprovers", "ManageReleases",
+                                                "ViewReleases", "CreateReleases", "EditReleaseEnvironment",
+                                                "DeleteReleaseEnvironment", "AdministerReleasePermissions")),
+    ("ns-endpoints", "ServiceEndpoints", actions("Use", "Administer", "Create", "ViewAuthorization", "ViewEndpoint")),
+    ("ns-environment", "Environment", actions("View", "Manage", "ManageHistory", "Administer", "Use", "Create")),
+    ("ns-library", "Library", actions("View", "Administer", "Create", "ViewSecrets", "Use", "Owner")),
+    ("ns-audit", "AuditLog", actions("Read", "Write", "Manage_Streams", "Delete_Streams")),
+    ("ns-wiq", "WorkItemQueryFolders", actions("Read", "Contribute")),
+]
+
+
+def bit(namespace, name):
+    acts = next(a for _, n, a in NAMESPACES if n == namespace)
+    return next(a["bit"] for a in acts if a["name"] == name)
+
+
+def ace(descriptor, allow=0, deny=0, effective=None):
+    return {"descriptor": descriptor, "allow": allow, "deny": deny,
+            "extendedInfo": {"effectiveAllow": allow if effective is None else effective, "effectiveDeny": deny,
+                             "inheritedAllow": 0, "inheritedDeny": 0}}
+
+
+def acl(token, *aces, inherit=True):
+    return {"inheritPermissions": inherit, "token": token, "includeExtendedInfo": True,
+            "acesDictionary": {a["descriptor"]: a for a in aces}}
+
+
+ACLS = {
+    "ns-collection": [acl("NAMESPACE:",
+                          ace(PCA, 1 | bit("Collection", "GENERIC_WRITE") | bit("Collection", "MANAGE_ENTERPRISE_POLICIES")),
+                          ace(ALICE, bit("Collection", "GENERIC_WRITE")),
+                          ace(CONTRIB, 0, 0))],
+    "ns-project": [acl(f"$PROJECT:vstfs:///Classification/TeamProject/{WEB}",
+                       ace(WPA, bit("Project", "GENERIC_WRITE") | bit("Project", "DELETE")),
+                       ace(CONTRIB, 1, bit("Project", "DELETE")))],
+    "ns-git": [acl(f"repoV2/{WEB}/r-web", ace(CONTRIB, bit("Git Repositories", "GenericContribute"))),
+               acl(f"repoV2/{WEB}/r-web/refs/heads/6d00610069006e00",
+                   ace(ALICE, bit("Git Repositories", "PolicyExempt")), inherit=False),
+               acl(f"repoV2/{OPS}/r-ops", ace(CONTRIB, bit("Git Repositories", "GenericRead")))],
+    "ns-tfvc": [acl("$/Web", ace(BUILDSVC, 1 | bit("VersionControlItems", "CheckinOther")))],
+    "ns-build": [acl(f"{WEB}/12", ace(SP, bit("Build", "EditBuildDefinition")))],
+    "ns-release": [acl(f"{WEB}/4", ace(WPA, bit("ReleaseManagement", "AdministerReleasePermissions"))),
+                   acl(f"{WEB}/4/Environment/7", ace(CONTRIB, bit("ReleaseManagement", "ManageReleases")))],
+    "ns-endpoints": [acl(f"endpoints/{WEB}/e-wif", ace(GHOST, bit("ServiceEndpoints", "Administer")))],
+    "ns-environment": [acl(f"Environments/{WEB}/3", ace(CONTRIB, bit("Environment", "Use")))],
+    "ns-library": [acl(f"Library/{WEB}/VariableGroup/1", ace(CONTRIB, bit("Library", "View")))],
+    "ns-audit": [acl("AllPermissions", ace(PCA, 15))],
+}
+
+
+class Resp:
+    def __init__(self, status=200, body=None, headers=None):
+        self.status_code, self._body = status, body
+        self.headers = headers or {}
+        self.text = json.dumps(body)
+        self.reason = "OK" if status < 400 else "Error"
+
+    def json(self):
+        return self._body
+
+
+def err(status, message, type_key="Exception"):
+    return Resp(status, {"$id": "1", "message": message, "typeKey": type_key, "errorCode": 0})
+
+
+# An organization-level group appears in ACLs under a template SID; the identities API answers with its own.
+ANSWERED_AS = {PCA: "Microsoft.TeamFoundation.Identity;S-1-9-1551374245-1111111111-2222222222-3333333333-4444444444-0-0-0-0-1"}
+
+
+def identities(params, nulls=True):
+    """Rows in request order, null for a descriptor that isn't found, as Azure DevOps answers."""
+    rows = []
+    for descriptor in params["descriptors"].split(","):
+        if descriptor in IDENTITIES:
+            name, subject, group = IDENTITIES[descriptor]
+            rows.append({"id": f"id-{subject}", "descriptor": ANSWERED_AS.get(descriptor, descriptor),
+                         "subjectDescriptor": subject, "providerDisplayName": name, "isContainer": group,
+                         "isActive": True, "properties": {"SchemaClassName": {"$type": "System.String",
+                                                                              "$value": "Group" if group else "User"}}})
+        elif nulls:
+            rows.append(None)
+    return Resp(body={"count": len(rows), "value": rows})
+
+
+class FakeADO:
+    """Routes by host and path; a route is a Resp or a callable taking the query parameters."""
+
+    def __init__(self):
+        self.calls = []
+        self.routes = {
+            ("dev.azure.com", "/contoso/_apis/connectionData"): Resp(body={"authenticatedUser": {
+                "id": "u0", "providerDisplayName": "Evidence Reader",
+                "properties": {"Account": {"$type": "System.String", "$value": "reader@example.com"}}}}),
+            ("dev.azure.com", "/contoso/_apis/projects"): Resp(body={"value": [
+                {"id": WEB, "name": "Web"}, {"id": OPS, "name": "Ops"}]}),
+            ("dev.azure.com", "/contoso/_apis/securitynamespaces"): Resp(body={"count": len(NAMESPACES), "value": [
+                {"namespaceId": i, "name": n, "displayName": n, "actions": a} for i, n, a in NAMESPACES]}),
+            ("vssps.dev.azure.com", "/contoso/_apis/identities"): identities,
+            ("dev.azure.com", "/contoso/_apis/git/repositories"): Resp(body={"count": 2, "value": [
+                {"id": "r-web", "name": "web", "project": {"id": WEB, "name": "Web"}},
+                {"id": "r-ops", "name": "ops", "project": {"id": OPS, "name": "Ops"}}]}),
+        }
+        for namespace_id, entries in ACLS.items():
+            self.routes[("dev.azure.com", f"/contoso/_apis/accesscontrollists/{namespace_id}")] = \
+                Resp(body={"count": len(entries), "value": entries})
+
+    def request(self, method, url, headers=None, params=None, timeout=None, allow_redirects=True, json=None):
+        params = dict(params or {})
+        parts = urlsplit(url)
+        key = (parts.netloc, parts.path)
+        self.calls.append((method, parts.netloc, parts.path, params))
+        route = self.routes.get(key)
+        if route is None:
+            raise AssertionError(f"unexpected request {method} {key} {params}")
+        return route(params) if callable(route) else route
+
+
+@pytest.fixture(autouse=True)
+def env(monkeypatch, tmp_path):
+    monkeypatch.delenv("AZURE_DEVOPS_PROJECTS", raising=False)
+    monkeypatch.setenv("AZURE_DEVOPS_ORG_URL", ORG)
+    monkeypatch.setenv("AZURE_DEVOPS_PAT", "pat")
+    monkeypatch.setenv("EVIDENCE_DIR", str(tmp_path))
+    monkeypatch.setenv("FETCHER_STATUS_FILE", str(tmp_path / "status.json"))
+    monkeypatch.setattr(dr.time, "sleep", lambda s: None)
+
+
+def run(tmp_path, fake=None):
+    fake = fake or FakeADO()
+    code = dr.run_org(fetcher=mod.NAME, logger=mod.logger, collect=mod.collect, session=fake)
+    evidence = json.loads((tmp_path / "azure_devops_permissions_contoso.json").read_text())
+    status = tmp_path / "status.json"
+    return code, evidence, json.loads(status.read_text()) if status.exists() else None, fake
+
+
+def entry(evidence, namespace, token, who):
+    return next(e for e in evidence["results"]["entries"] if e["namespace"] == namespace and e["token"] == token
+                and (e["identity"] or {}).get("descriptor") == who)
+
+
+def test_collects_the_organization_and_exits_zero(tmp_path, assert_summary_documented):
+    code, evidence, status, _ = run(tmp_path)
+    assert code == 0 and status is None
+    s = evidence["summary"]
+    assert s["namespaces_collected"] == 10 and s["namespaces_not_found"] == ["VersionControlPrivileges"]
+    assert s["namespaces_not_read"] == [] and s["git_repositories"] == 2
+    assert s["acls_total"] == 13 and s["acls_with_inheritance_off"] == 1
+    assert s["entries_total"] == 15  # the empty ACE is left out
+    assert s["entries_by_scope"] == {"branch": 1, "environment": 1, "organization": 3, "pipeline": 2, "project": 3,
+                                     "release_stage": 1, "repository": 2, "service_connection": 1,
+                                     "variable_group": 1}
+    assert s["entries_with_deny"] == 1
+    assert s["identities_with_explicit_entries"] == 7 and s["unresolved_identities"] == 1
+    assert s["users_with_direct_entries"] == ["Alice"]
+    assert s["high_impact_grants_outside_admin_groups"] == 5
+    assert s["identities_with_high_impact_rights_outside_admin_groups"] == [
+        "Alice", "deploy-automation", GHOST, "Project Collection Build Service (contoso)"]
+    assert s["high_impact_rights_outside_admin_groups_by_right"] == {
+        "Build: EditBuildDefinition": 1, "Collection: GENERIC_WRITE": 1, "Git Repositories: PolicyExempt": 1,
+        "ServiceEndpoints: Administer": 1, "VersionControlItems: CheckinOther": 1}
+    assert s["branch_policy_bypass_holders"] == ["Alice"]
+    assert s["checkin_validation_override_grants"] == 0 and s["checkin_validation_override_holders"] == []
+    assert s["checkin_validation_override_grants_outside_admin_groups"] == 0
+    assert_summary_documented("azure/devops_permissions", s)
+
+
+def test_scopes_by_namespace(tmp_path):
+    _, evidence, _, _ = run(tmp_path)
+    scopes = sorted({(e["namespace"], e["token"], e["scope"], e["project"], e["resource"])
+                     for e in evidence["results"]["entries"]}, key=str)
+    assert scopes == sorted([
+        ("AuditLog", "AllPermissions", "organization", None, None),
+        ("Build", f"{WEB}/12", "pipeline", "Web", "12"),
+        ("Collection", "NAMESPACE:", "organization", None, None),
+        ("Environment", f"Environments/{WEB}/3", "environment", "Web", "3"),
+        ("Git Repositories", f"repoV2/{OPS}/r-ops", "repository", "Ops", "r-ops"),
+        ("Git Repositories", f"repoV2/{WEB}/r-web", "repository", "Web", "r-web"),
+        ("Git Repositories", f"repoV2/{WEB}/r-web/refs/heads/6d00610069006e00", "branch", "Web",
+         "r-web/refs/heads/main"),
+        ("Library", f"Library/{WEB}/VariableGroup/1", "variable_group", "Web", "1"),
+        ("Project", f"$PROJECT:vstfs:///Classification/TeamProject/{WEB}", "project", "Web", None),
+        ("ReleaseManagement", f"{WEB}/4", "pipeline", "Web", "4"),
+        ("ReleaseManagement", f"{WEB}/4/Environment/7", "release_stage", "Web", "4/Environment/7"),
+        ("ServiceEndpoints", f"endpoints/{WEB}/e-wif", "service_connection", "Web", "e-wif"),
+        ("VersionControlItems", "$/Web", "project", "Web", None),
+    ], key=str)
+
+
+def test_an_entry_decodes_allow_deny_and_extended_info(tmp_path):
+    _, evidence, _, _ = run(tmp_path)
+    contrib = entry(evidence, "Project", f"$PROJECT:vstfs:///Classification/TeamProject/{WEB}", CONTRIB)
+    assert contrib["allow"] == ["GENERIC_READ"] and contrib["deny"] == ["DELETE"]
+    assert contrib["effective_deny"] == ["DELETE"] and contrib["project"] == "Web"
+    assert contrib["identity"]["kind"] == "group" and contrib["identity"]["admin_group"] is False
+    assert contrib["high_impact_allowed"] == []
+    wpa = entry(evidence, "Project", f"$PROJECT:vstfs:///Classification/TeamProject/{WEB}", WPA)
+    assert wpa["high_impact_allowed"] == ["DELETE", "GENERIC_WRITE"]
+    assert wpa["identity"]["admin_group"] is True and wpa["high_impact_outside_admin_groups"] is False
+
+
+def test_high_impact_rights_outside_admin_groups(tmp_path):
+    _, evidence, _, _ = run(tmp_path)
+    bypass = entry(evidence, "Git Repositories", f"repoV2/{WEB}/r-web/refs/heads/6d00610069006e00", ALICE)
+    assert bypass["scope"] == "branch" and bypass["resource"] == "r-web/refs/heads/main"
+    assert bypass["inherit_permissions"] is False
+    assert bypass["high_impact_outside_admin_groups"] is True and bypass["identity"]["kind"] == "user"
+    tfvc = entry(evidence, "VersionControlItems", "$/Web", BUILDSVC)
+    assert tfvc["scope"] == "project" and tfvc["project"] == "Web"
+    assert tfvc["identity"]["kind"] == "service_identity" and tfvc["high_impact_allowed"] == ["CheckinOther"]
+    ghost = entry(evidence, "ServiceEndpoints", f"endpoints/{WEB}/e-wif", GHOST)
+    assert ghost["identity"]["resolved"] is False and ghost["identity"]["name"] is None
+    assert ghost["scope"] == "service_connection" and ghost["resource"] == "e-wif"
+
+
+def test_acls_are_read_recursively_with_extended_info(tmp_path):
+    _, _, _, fake = run(tmp_path)
+    reads = [(path, p) for _, _, path, p in fake.calls if "/accesscontrollists/" in path]
+    assert len(reads) == 10 and not any(path.endswith("ns-wiq") for path, _ in reads)
+    assert all(p["includeExtendedInfo"] == "true" and p["recurse"] == "true" and "token" not in p
+               for _, p in reads)
+
+
+def test_identities_are_resolved_in_batches(tmp_path, monkeypatch):
+    monkeypatch.setattr(mod, "IDENTITY_BATCH", 3)
+    _, evidence, _, fake = run(tmp_path)
+    batches = [p["descriptors"].split(",") for _, _, path, p in fake.calls if path.endswith("/_apis/identities")]
+    assert [len(b) for b in batches] == [3, 3, 1]
+    assert all(p["queryMembership"] == "None" for _, _, path, p in fake.calls if path.endswith("/_apis/identities"))
+    assert evidence["summary"]["unresolved_identities"] == 1
+
+
+def test_identity_batches_keep_the_query_short(tmp_path, monkeypatch):
+    monkeypatch.setattr(mod, "IDENTITY_QUERY_CHARS", 120)
+    _, evidence, _, fake = run(tmp_path)
+    queries = [p["descriptors"] for _, _, path, p in fake.calls if path.endswith("/_apis/identities")]
+    assert len(queries) > 1 and all(len(quote(q, safe="")) <= 120 for q in queries if "," in q)
+    assert evidence["summary"]["unresolved_identities"] == 1
+
+
+def test_a_404_batch_is_split_and_an_unknown_descriptor_is_not_a_failure(tmp_path):
+    # Azure DevOps answers 404 to a descriptors query that is too long; here, to more than two descriptors.
+    fake = FakeADO()
+    fake.routes[("vssps.dev.azure.com", "/contoso/_apis/identities")] = lambda params: (
+        err(404, "Not Found") if params["descriptors"].count(",") > 1
+        or params["descriptors"] not in IDENTITIES and "," not in params["descriptors"] else identities(params))
+    code, evidence, status, _ = run(tmp_path, fake)
+    assert code == 0 and status is None and evidence["metadata"]["api_failures"] == []
+    s = evidence["summary"]
+    assert s["unresolved_identities"] == 1 and s["high_impact_grants_outside_admin_groups"] is not None
+
+
+def test_a_batch_in_which_no_descriptor_is_found_is_unread_not_unknown(tmp_path, monkeypatch):
+    # Every descriptor answering 404, as a wrong host would, must not read the admin groups as other groups.
+    monkeypatch.setattr(mod, "IDENTITY_BATCH", 4)
+    fake = FakeADO()
+    fake.routes[("vssps.dev.azure.com", "/contoso/_apis/identities")] = err(404, "Not Found")
+    code, evidence, status, _ = run(tmp_path, fake)
+    assert code == 1 and status["code"] == "internal_error"
+    assert [f["operation"] for f in evidence["metadata"]["api_failures"]] == ["identities.read(1)", "identities.read(2)"]
+    s = evidence["summary"]
+    assert s["unresolved_identities"] == 7
+    assert s["high_impact_grants_outside_admin_groups"] is None
+    assert s["identities_with_high_impact_rights_outside_admin_groups"] is None
+    pca = entry(evidence, "AuditLog", "AllPermissions", PCA)
+    assert pca["identity"]["admin_group"] is None and pca["high_impact_outside_admin_groups"] is None
+
+
+@pytest.mark.parametrize("message", [
+    "TF401019: The Git repository with name or identifier x does not exist or you do not have permissions.",
+    "VS800075: The project with id 'x' does not exist, or you do not have permission to access it.",
+])
+def test_a_404_that_hides_a_refusal_is_not_authorized_and_not_split(tmp_path, message):
+    fake = FakeADO()
+    fake.routes[("vssps.dev.azure.com", "/contoso/_apis/identities")] = err(404, message)
+    code, evidence, status, fake = run(tmp_path, fake)
+    assert code == 1 and status["code"] == "not_authorized"
+    assert len([1 for _, _, path, _ in fake.calls if path.endswith("/_apis/identities")]) == 1
+    s = evidence["summary"]
+    assert s["unresolved_identities"] == 7 and s["high_impact_grants_outside_admin_groups"] is None
+
+
+def test_a_project_filter_drops_other_projects_entries(tmp_path, monkeypatch):
+    monkeypatch.setenv("AZURE_DEVOPS_PROJECTS", "Web")
+    _, evidence, _, _ = run(tmp_path)
+    assert not any(e["project_id"] == OPS for e in evidence["results"]["entries"])
+    s = evidence["summary"]
+    assert s["entries_total"] == 14 and s["acls_total"] == 12 and s["git_repositories"] == 1
+
+
+def test_a_project_filter_drops_other_projects_tfvc_paths(tmp_path, monkeypatch):
+    monkeypatch.setenv("AZURE_DEVOPS_PROJECTS", "Web")
+    fake = FakeADO()
+    fake.routes[("dev.azure.com", "/contoso/_apis/accesscontrollists/ns-tfvc")] = Resp(body={"value": [
+        acl("$/Web", ace(BUILDSVC, 1)), acl("$/Ops/Main", ace(BUILDSVC, 1 | bit("VersionControlItems", "CheckinOther")))]})
+    _, evidence, _, _ = run(tmp_path, fake)
+    assert [e["token"] for e in evidence["results"]["entries"] if e["namespace"] == "VersionControlItems"] == ["$/Web"]
+    assert "VersionControlItems: CheckinOther" not in evidence["summary"]["high_impact_rights_outside_admin_groups_by_right"]
+
+
+def test_refused_acls_name_the_scope_and_leave_the_totals_unknown(tmp_path):
+    fake = FakeADO()
+    fake.routes[("dev.azure.com", "/contoso/_apis/accesscontrollists/ns-git")] = err(
+        401, "TF400813: The user 'x' is not authorized to access this resource.", "UnauthorizedRequestException")
+    code, evidence, status, _ = run(tmp_path, fake)
+    assert code == 1 and status["code"] == "auth_failed"
+    failure = evidence["metadata"]["api_failures"][0]
+    assert failure["operation"] == "accesscontrollists.query(Git Repositories)"
+    assert "PAT scope needed: Security (Manage)" in failure["message"]
+    git = next(n for n in evidence["results"]["namespaces"] if n["name"] == "Git Repositories")
+    assert git["acls_read"] is False and git["acls"] is None
+    s = evidence["summary"]
+    assert s["namespaces_collected"] == 9 and s["namespaces_not_read"] == ["Git Repositories"]
+    assert s["branch_policy_bypass_holders"] is None
+    assert s["entries_total"] is None and s["high_impact_grants_outside_admin_groups"] is None
+    assert len(evidence["results"]["entries"]) == 12
+
+
+def test_a_failed_namespace_list_leaves_every_count_unknown(tmp_path):
+    fake = FakeADO()
+    fake.routes[("dev.azure.com", "/contoso/_apis/securitynamespaces")] = err(500, "boom")
+    code, evidence, _, _ = run(tmp_path, fake)
+    s = evidence["summary"]
+    assert code == 1 and s["namespaces_collected"] == 0
+    assert s["namespaces_not_found"] is None and s["namespaces_not_read"] is None
+    assert all(s[k] is None for k in ("acls_total", "entries_total", "high_impact_grants",
+                                      "high_impact_grants_outside_admin_groups", "branch_policy_bypass_holders",
+                                      *OVERRIDE_FIELDS))
+
+
+def contributors_build_acls(*aces):
+    return Resp(body={"value": [acl(WEB, *aces), acl(f"{WEB}/12", ace(SP, bit("Build", "EditBuildDefinition")))]})
+
+
+def test_project_contributors_default_rights_are_counted_apart(tmp_path):
+    fake = FakeADO()
+    fake.routes[("dev.azure.com", "/contoso/_apis/accesscontrollists/ns-build")] = contributors_build_acls(
+        ace(CONTRIB, bit("Build", "EditBuildDefinition") | bit("Build", "DeleteBuildDefinition")))
+    _, evidence, _, _ = run(tmp_path, fake)
+    contrib = entry(evidence, "Build", WEB, CONTRIB)
+    assert contrib["high_impact_from_defaults"] is True and contrib["high_impact_outside_admin_groups"] is False
+    s = evidence["summary"]
+    assert s["high_impact_grants_from_defaults"] == 1
+    assert s["identities_with_high_impact_rights_from_defaults"] == ["[Web]\\Contributors"]
+    assert s["high_impact_grants_outside_admin_groups"] == 5
+    assert s["high_impact_rights_outside_admin_groups_by_right"]["Build: EditBuildDefinition"] == 1
+
+
+def test_an_unread_project_list_leaves_the_defaults_split_unknown(tmp_path):
+    fake = FakeADO()
+    fake.routes[("dev.azure.com", "/contoso/_apis/projects")] = err(500, "boom")
+    fake.routes[("dev.azure.com", "/contoso/_apis/accesscontrollists/ns-build")] = contributors_build_acls(
+        ace(CONTRIB, bit("Build", "EditBuildDefinition")))
+    code, evidence, _, _ = run(tmp_path, fake)
+    contrib = entry(evidence, "Build", WEB, CONTRIB)
+    assert code == 1 and contrib["high_impact_from_defaults"] is None
+    assert contrib["high_impact_outside_admin_groups"] is None
+    s = evidence["summary"]
+    assert s["high_impact_grants_from_defaults"] is None and s["high_impact_grants_outside_admin_groups"] is None
+
+
+OPS_CONTRIB = "Microsoft.TeamFoundation.Identity;S-1-9-3-1-1"
+NAMED_LIKE_CONTRIB = "Microsoft.IdentityModel.Claims.ClaimsIdentity;tenant\\contributors@example.com"
+
+
+@pytest.mark.parametrize("who, rights", [
+    (CONTRIB, ("EditBuildDefinition", "AdministerBuildPermissions")),  # a right beyond the defaults
+    (OPS_CONTRIB, ("EditBuildDefinition",)),  # another project's Contributors
+    (NAMED_LIKE_CONTRIB, ("EditBuildDefinition",)),  # a user, not the group
+], ids=["beyond-defaults", "other-project", "user-named-like-the-group"])
+def test_other_contributors_grants_still_count_outside_the_admin_groups(tmp_path, monkeypatch, who, rights):
+    monkeypatch.setitem(IDENTITIES, OPS_CONTRIB, ("[Ops]\\Contributors", "vssgp.oc", True))
+    monkeypatch.setitem(IDENTITIES, NAMED_LIKE_CONTRIB, ("[Web]\\Contributors", "aad.named", False))
+    fake = FakeADO()
+    mask = 0
+    for right in rights:
+        mask |= bit("Build", right)
+    fake.routes[("dev.azure.com", "/contoso/_apis/accesscontrollists/ns-build")] = contributors_build_acls(ace(who, mask))
+    _, evidence, _, _ = run(tmp_path, fake)
+    assert entry(evidence, "Build", WEB, who)["high_impact_outside_admin_groups"] is True
+    s = evidence["summary"]
+    assert s["high_impact_grants_from_defaults"] == 0 and s["identities_with_high_impact_rights_from_defaults"] == []
+    assert s["high_impact_grants_outside_admin_groups"] == 6
+
+
+def test_a_tfvc_only_organization_has_no_bypass_list(tmp_path):
+    fake = FakeADO()
+    fake.routes[("dev.azure.com", "/contoso/_apis/git/repositories")] = Resp(body={"count": 0, "value": []})
+    fake.routes[("dev.azure.com", "/contoso/_apis/accesscontrollists/ns-git")] = Resp(body={"value": [
+        acl("repoV2", ace(PCA, bit("Git Repositories", "PolicyExempt"))),
+        acl(f"repoV2/{WEB}", ace(WPA, bit("Git Repositories", "PullRequestBypassPolicy")))]})
+    code, evidence, _, _ = run(tmp_path, fake)
+    s = evidence["summary"]
+    assert code == 0 and s["git_repositories"] == 0 and s["branch_policy_bypass_holders"] is None
+    assert s["entries_total"] == 14
+
+
+def test_unlisted_repositories_leave_the_bypass_list_unknown(tmp_path):
+    fake = FakeADO()
+    fake.routes[("dev.azure.com", "/contoso/_apis/git/repositories")] = err(401, "TF400813: not authorized.")
+    code, evidence, _, _ = run(tmp_path, fake)
+    s = evidence["summary"]
+    assert code == 1 and "PAT scope needed: Code (Read)" in evidence["metadata"]["api_failures"][0]["message"]
+    assert s["git_repositories"] is None and s["branch_policy_bypass_holders"] is None
+    assert s["entries_total"] == 15
+
+
+def test_a_project_filter_without_the_project_list_leaves_the_repository_count_unknown(tmp_path, monkeypatch):
+    monkeypatch.setenv("AZURE_DEVOPS_PROJECTS", "Web")
+    fake = FakeADO()
+    fake.routes[("dev.azure.com", "/contoso/_apis/projects")] = err(500, "boom")
+    code, evidence, _, _ = run(tmp_path, fake)
+    s = evidence["summary"]
+    assert code == 1 and s["git_repositories"] is None and s["branch_policy_bypass_holders"] is None
+    assert all(s[k] is None for k in OVERRIDE_FIELDS)
+
+
+def test_refused_identity_lookup_leaves_the_admin_split_unknown(tmp_path):
+    fake = FakeADO()
+    fake.routes[("vssps.dev.azure.com", "/contoso/_apis/identities")] = err(401, "TF400813: not authorized.")
+    code, evidence, status, _ = run(tmp_path, fake)
+    assert code == 1 and "PAT scope needed: Identity (Read)" in evidence["metadata"]["api_failures"][0]["message"]
+    s = evidence["summary"]
+    assert s["unresolved_identities"] == 7 and s["high_impact_grants"] == 9
+    assert s["high_impact_grants_outside_admin_groups"] is None
+    assert s["identities_with_high_impact_rights_outside_admin_groups"] is None
+    assert s["high_impact_grants_from_defaults"] is None
+    assert s["identities_with_high_impact_rights_from_defaults"] is None
+    pca = entry(evidence, "AuditLog", "AllPermissions", PCA)
+    assert pca["identity"]["kind"] == "group" and pca["identity"]["admin_group"] is None
+    assert pca["high_impact_outside_admin_groups"] is None
+
+
+def test_an_organization_group_named_by_its_template_sid_resolves_by_position(tmp_path):
+    _, evidence, _, _ = run(tmp_path)
+    pca = entry(evidence, "AuditLog", "AllPermissions", PCA)
+    assert pca["identity"]["name"] == "[contoso]\\Project Collection Administrators"
+    assert pca["identity"]["admin_group"] is True and pca["high_impact_outside_admin_groups"] is False
+    assert evidence["summary"]["unresolved_identities"] == 1
+
+
+def test_rows_that_drop_the_unfound_are_matched_by_descriptor(tmp_path):
+    fake = FakeADO()
+    fake.routes[("vssps.dev.azure.com", "/contoso/_apis/identities")] = lambda params: identities(params, nulls=False)
+    _, evidence, _, _ = run(tmp_path, fake)
+    assert entry(evidence, "Build", f"{WEB}/12", SP)["identity"]["name"] == "deploy-automation"
+    assert evidence["summary"]["unresolved_identities"] == 2  # the template SID can't be matched this way
+
+
+OVERRIDE_FIELDS = ("checkin_validation_override_grants", "checkin_validation_override_holders",
+                   "checkin_validation_override_build_services",
+                   "checkin_validation_override_grants_outside_admin_groups",
+                   "checkin_validation_override_holders_outside_admin_groups")
+PROJECT_BUILD_SERVICE = f"Microsoft.TeamFoundation.ServiceIdentity;f0e1d2c3-0000-0000-0000-000000000000:Build:{WEB}"
+BUILD_SERVICE_ACCOUNTS = "Microsoft.TeamFoundation.Identity;S-1-9-1-0-0-0-1-1"
+OVERRIDERS = "Microsoft.TeamFoundation.Identity;S-1-9-2-7-7"
+GATED_LEADS = "Microsoft.TeamFoundation.Identity;S-1-9-2-8-8"
+LOOKALIKE = "Microsoft.TeamFoundation.Identity;S-1-9-2-1-424242"  # a custom group: no well-known ending
+
+
+def override_ace(descriptor, allow=0, deny=0, inherited=0, inherited_deny=0):
+    a = ace(descriptor, allow, deny)
+    a["extendedInfo"].update(inheritedAllow=inherited, inheritedDeny=inherited_deny)
+    return a
+
+
+@pytest.fixture
+def override_acls(monkeypatch):
+    monkeypatch.setitem(IDENTITIES, PROJECT_BUILD_SERVICE, ("Web Build Service (contoso)", "svc.web", False))
+    monkeypatch.setitem(IDENTITIES, BUILD_SERVICE_ACCOUNTS,
+                        ("[contoso]\\Project Collection Build Service Accounts", "vssgp.pcbsa", True))
+    monkeypatch.setitem(IDENTITIES, OVERRIDERS, ("[Web]\\Release Engineers", "vssgp.re", True))
+    monkeypatch.setitem(IDENTITIES, GATED_LEADS, ("[Web]\\Gated Leads", "vssgp.gl", True))
+    monkeypatch.setitem(IDENTITIES, LOOKALIKE, ("[contoso]\\Project Collection Build Service Accounts", "vssgp.la", True))
+    override, view = bit("Build", "OverrideBuildCheckInValidation"), bit("Build", "ViewBuilds")
+    fake = FakeADO()
+    fake.routes[("dev.azure.com", "/contoso/_apis/accesscontrollists/ns-build")] = Resp(body={"value": [
+        acl(WEB, override_ace(PCA, override | view), override_ace(PROJECT_BUILD_SERVICE, override),
+            override_ace(BUILD_SERVICE_ACCOUNTS, override), override_ace(OVERRIDERS, override),
+            override_ace(LOOKALIKE, override), override_ace(WPA, view)),
+        acl(f"{WEB}/Gated", override_ace(OVERRIDERS, deny=override, inherited=override),
+            override_ace(GATED_LEADS, override)),
+        acl(f"{WEB}/Open", override_ace(OVERRIDERS, view, inherited=override)),
+    ]})
+    return fake
+
+
+def test_check_in_validation_override_holders(tmp_path, override_acls):
+    code, evidence, _, _ = run(tmp_path, override_acls)
+    assert code == 0
+    assert entry(evidence, "Build", WEB, PCA)["checkin_validation_override"] is True
+    assert entry(evidence, "Build", WEB, WPA)["checkin_validation_override"] is False
+    assert entry(evidence, "Build", f"{WEB}/Open", OVERRIDERS)["checkin_validation_override"] is True  # inherited
+    assert entry(evidence, "Build", f"{WEB}/Gated", OVERRIDERS)["checkin_validation_override"] is False  # denied
+    assert entry(evidence, "Build", f"{WEB}/Gated", GATED_LEADS)["scope"] == "folder"
+    assert not any(e["checkin_validation_override"] for e in evidence["results"]["entries"] if e["namespace"] != "Build")
+    s = evidence["summary"]
+    assert s["checkin_validation_override_grants"] == 7
+    assert s["checkin_validation_override_holders"] == [
+        "[contoso]\\Project Collection Administrators", "[contoso]\\Project Collection Build Service Accounts",
+        "[contoso]\\Project Collection Build Service Accounts", "[Web]\\Gated Leads", "[Web]\\Release Engineers",
+        "Web Build Service (contoso)"]
+    assert s["checkin_validation_override_build_services"] == [
+        "[contoso]\\Project Collection Build Service Accounts", "Web Build Service (contoso)"]
+    # The admin groups and build services are left out; a custom group that takes the build services' name is not.
+    assert s["checkin_validation_override_grants_outside_admin_groups"] == 4
+    assert s["checkin_validation_override_holders_outside_admin_groups"] == [
+        "[contoso]\\Project Collection Build Service Accounts", "[Web]\\Gated Leads", "[Web]\\Release Engineers"]
+
+
+def test_an_unread_identity_leaves_the_override_split_unknown(tmp_path, override_acls):
+    override_acls.routes[("vssps.dev.azure.com", "/contoso/_apis/identities")] = err(401, "TF400813: not authorized.")
+    code, evidence, _, _ = run(tmp_path, override_acls)
+    s = evidence["summary"]
+    assert code == 1 and s["checkin_validation_override_grants"] == 7
+    assert s["checkin_validation_override_build_services"] is None  # an unnamed group can't be recognised
+    assert s["checkin_validation_override_grants_outside_admin_groups"] is None
+    assert s["checkin_validation_override_holders_outside_admin_groups"] is None
+
+
+def test_an_allow_on_a_pipeline_beats_an_inherited_deny(tmp_path, monkeypatch):
+    monkeypatch.setitem(IDENTITIES, OVERRIDERS, ("[Web]\\Release Engineers", "vssgp.re", True))
+    override = bit("Build", "OverrideBuildCheckInValidation")
+    fake = FakeADO()
+    fake.routes[("dev.azure.com", "/contoso/_apis/accesscontrollists/ns-build")] = Resp(body={"value": [
+        acl(WEB, override_ace(OVERRIDERS, deny=override)),
+        acl(f"{WEB}/Infra/12", override_ace(OVERRIDERS, override, inherited_deny=override))]})
+    _, evidence, _, _ = run(tmp_path, fake)
+    assert entry(evidence, "Build", WEB, OVERRIDERS)["checkin_validation_override"] is False
+    pipeline = entry(evidence, "Build", f"{WEB}/Infra/12", OVERRIDERS)
+    assert pipeline["scope"] == "pipeline" and pipeline["checkin_validation_override"] is True
+    s = evidence["summary"]
+    assert s["checkin_validation_override_grants"] == 1
+    assert s["checkin_validation_override_holders_outside_admin_groups"] == ["[Web]\\Release Engineers"]
+
+
+def test_identity_rows_out_of_order_are_unread_not_misattributed(tmp_path):
+    fake = FakeADO()
+
+    def reversed_rows(params):
+        resp = identities(params)
+        resp._body["value"].reverse()
+        return resp
+    fake.routes[("vssps.dev.azure.com", "/contoso/_apis/identities")] = reversed_rows
+    code, evidence, status, _ = run(tmp_path, fake)
+    assert code == 1 and [f["operation"] for f in evidence["metadata"]["api_failures"]] == ["identities.read(1)"]
+    assert evidence["metadata"]["partial_failure"] is True
+    for e in evidence["results"]["entries"]:
+        who = e["identity"]
+        assert who["name"] in (None, IDENTITIES.get(who["descriptor"], (None,))[0])
+    assert evidence["summary"]["high_impact_grants_outside_admin_groups"] is None
+
+
+@pytest.mark.parametrize("requested, got, expected", [
+    (ALICE, ALICE.upper(), True),
+    (PCA, ANSWERED_AS[PCA], True),  # a template SID answers with the group's own SID
+    (PCA, WPA, False),  # a requested descriptor in the template's place
+    (PCA, "Microsoft.TeamFoundation.Identity;S-1-9-1551374245-1-2-3-4-0-0-0-1-1", False),  # another ending
+    (WPA, "Microsoft.TeamFoundation.Identity;S-1-9-1551374245-1-2-3-4-0-0-0-0-1", False),  # not a template SID
+])
+def test_a_row_answers_only_its_own_descriptor(requested, got, expected):
+    assert mod.answers(requested, got, {d.lower() for d in (ALICE, PCA, WPA)}) is expected
+
+
+def test_a_failed_build_acl_read_leaves_the_override_fields_unknown(tmp_path, override_acls):
+    override_acls.routes[("dev.azure.com", "/contoso/_apis/accesscontrollists/ns-build")] = err(500, "boom")
+    code, evidence, _, _ = run(tmp_path, override_acls)
+    s = evidence["summary"]
+    assert code == 1 and all(s[k] is None for k in OVERRIDE_FIELDS)
+    assert s["branch_policy_bypass_holders"] == ["Alice"]
+
+
+def test_a_missing_build_namespace_leaves_the_override_fields_unknown(tmp_path):
+    fake = FakeADO()
+    fake.routes[("dev.azure.com", "/contoso/_apis/securitynamespaces")] = Resp(body={"value": [
+        {"namespaceId": i, "name": n, "displayName": n, "actions": a} for i, n, a in NAMESPACES if n != "Build"]})
+    _, evidence, _, _ = run(tmp_path, fake)
+    s = evidence["summary"]
+    assert "Build" in s["namespaces_not_found"] and all(s[k] is None for k in OVERRIDE_FIELDS)
+
+
+def test_two_people_with_one_display_name_both_appear(tmp_path, monkeypatch):
+    other = "Microsoft.IdentityModel.Claims.ClaimsIdentity;tenant\\alice@other.example.com"
+    monkeypatch.setitem(IDENTITIES, other, ("Alice", "aad.alice2", False))
+    fake = FakeADO()
+    fake.routes[("dev.azure.com", "/contoso/_apis/accesscontrollists/ns-collection")] = Resp(body={"value": [
+        acl("NAMESPACE:", ace(ALICE, bit("Collection", "GENERIC_WRITE")), ace(other, bit("Collection", "GENERIC_WRITE")))]})
+    _, evidence, _, _ = run(tmp_path, fake)
+    assert evidence["summary"]["users_with_direct_entries"] == ["Alice", "Alice"]
+
+
+def test_as_an_entra_identity_a_refusal_names_the_missing_permission(tmp_path, monkeypatch):
+    monkeypatch.delenv("AZURE_DEVOPS_PAT")
+    monkeypatch.setattr(dr, "entra_credential", lambda: SimpleNamespace(
+        get_token=lambda scope: SimpleNamespace(token="t", expires_on=NOW.timestamp() + 3600)))
+    fake = FakeADO()
+    fake.routes[("dev.azure.com", "/contoso/_apis/securitynamespaces")] = err(403, "TF400813: no.")
+    code, evidence, _, _ = run(tmp_path, fake)
+    assert code == 1 and evidence["metadata"]["auth_mode"] == "entra"
+    assert "Entra identity lacks permission" in evidence["metadata"]["api_failures"][0]["message"]
+    assert evidence["summary"]["namespaces_not_found"] is None
+
+
+def test_a_missing_organization_is_bad_config(tmp_path):
+    fake = FakeADO()
+    fake.routes[("dev.azure.com", "/contoso/_apis/projects")] = Resp(404, {"message": "The resource cannot be found."})
+    code, _, status, _ = run(tmp_path, fake)
+    assert code == 1 and "not found" in status["error"]
+
+
+@pytest.mark.parametrize("namespace,token,expected", [
+    ("collection", "NAMESPACE:", ("organization", None, None)),
+    ("project", f"$PROJECT:vstfs:///Classification/TeamProject/{WEB}:", ("project", WEB, None)),
+    ("git repositories", "repoV2", ("organization", None, None)),
+    ("git repositories", f"repoV2/{WEB}", ("project", WEB, None)),
+    ("git repositories", f"repoV2/{WEB}/r1/refs/heads/{'feature'.encode('utf-16-le').hex()}/{'x'.encode('utf-16-le').hex()}",
+     ("branch", WEB, "r1/refs/heads/feature/x")),
+    ("releasemanagement", f"{WEB}/4/Environment/7", ("release_stage", WEB, "4/Environment/7")),
+    ("releasemanagement", f"{WEB}/Environment/4", ("pipeline", WEB, "Environment/4")),
+    ("versioncontrolitems", "$", ("organization", None, None)),
+    ("versioncontrolitems", "$/Web/Main/src", ("path", WEB, "$/Web/Main/src")),
+    ("build", f"{WEB}/Infra/Prod/12", ("pipeline", WEB, "Infra/Prod/12")),
+    ("build", f"{WEB}/Infra", ("folder", WEB, "Infra")),
+    ("serviceendpoints", "endpoints/Collection", ("organization", None, None)),
+    ("serviceendpoints", "endpoints/Collection/e1", ("service_connection", None, "e1")),
+    ("serviceendpoints", f"endpoints/{WEB}", ("project", WEB, None)),
+    ("environment", f"Environments/{WEB}", ("project", WEB, None)),
+    ("library", f"Library/{WEB}/SecureFile/f1", ("secure_file", WEB, "f1")),
+    ("library", f"Library/{WEB}", ("project", WEB, None)),
+    ("auditlog", "AllPermissions", ("organization", None, None)),
+])
+def test_parse_token(namespace, token, expected):
+    assert mod.parse_token(namespace, token, {"web": WEB}) == expected
+
+
+def test_bits_names_known_actions_and_keeps_unknown_bits():
+    acts = [{"bit": 1, "name": "Read"}, {"bit": 4, "name": "Write"}]
+    assert mod.bits(1 | 4 | 64, acts) == ["Read", "Write", "64"]
+    assert mod.bits(None, acts) == [] and mod.bits(0, acts) == []
+
+
+def test_an_evidence_sample_keeps_every_not_collected_entry():
+    from framework import samples
+    assert samples.trim({"not_collected": dict(mod.NOT_COLLECTED)})["not_collected"] == mod.NOT_COLLECTED

@@ -1,0 +1,14 @@
+validator: sqs_queue_encryption_flags_present
+cases:
+  - name: flags_present
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"queues":[{"name":"a","encrypted":true}]}}}'
+
+  - name: flags_renamed
+    expect: FAIL
+    note: this is the failure that covers sqs_no_unencrypted_queues
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"queues":[{"name":"a","is_encrypted":false}]}}}'
+
+  - name: payload_emptied
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":1},"payload":{}}'

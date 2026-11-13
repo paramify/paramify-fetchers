@@ -19,24 +19,20 @@ import json
 import logging
 import os
 import re
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+# One implementation per runtime lives in fetchers/_lib; a category-shared module
+# may RE-EXPORT it and must not reimplement it (docs/fetcher_contract_guide.md, step 6).
+# Same mechanism a fetcher uses, one directory further up: this file is
+# fetchers/gcp/_shared/, so fetchers/_lib is parents[2] / "_lib".
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "_lib"))
+from fetcher_status import STATUS_CODES, report_failure  # noqa: E402,F401
+
 # Least privilege at the token level, on top of the read-only IAM role.
 READ_ONLY_SCOPES = ["https://www.googleapis.com/auth/cloud-platform.read-only"]
-
-# Categories the runner accepts in the status file's `code`. Exit codes stay
-# binary (0 / non-zero); the category goes here instead.
-STATUS_CODES = (
-    "auth_failed",
-    "not_authorized",
-    "target_unreachable",
-    "rate_limited",
-    "bad_config",
-    "partial_failure",
-    "internal_error",
-)
 
 
 def current_timestamp() -> str:
@@ -118,24 +114,6 @@ def _one_line(text: Any, limit: int = 800) -> str:
     """
     collapsed = " ".join(str(text).split())
     return collapsed if len(collapsed) <= limit else collapsed[: limit - 1] + "…"
-
-
-def write_status(error: str, code: Optional[str] = None) -> None:
-    """Tell the runner WHY this invocation failed, via $FETCHER_STATUS_FILE.
-
-    Without this the runner falls back to the *tail* of stderr, which on the way
-    out is the "Evidence saved to ..." INFO line — a failed run reporting a
-    success message as its cause. For the same reason every caller logs its
-    failure reason before any success line, never after. A no-op when the env
-    var is unset.
-    """
-    path = os.environ.get("FETCHER_STATUS_FILE")
-    if not path:
-        return
-    body: Dict[str, Any] = {"error": _one_line(error)}
-    if code:
-        body["code"] = code
-    Path(path).write_text(json.dumps(body))
 
 
 # Substrings mapping a recorded failure onto a STATUS_CODES category, matched
@@ -266,7 +244,7 @@ class Collector:
         return not self.failures
 
     def failure_report(self) -> Tuple[str, str]:
-        """The one-line reason + STATUS_CODES category for `write_status()`.
+        """The one-line reason + STATUS_CODES category for `report_failure()`.
 
         A unanimous cause is reported as itself — expired ADC takes down every call,
         and `auth_failed` says more than `partial_failure`. Mixed causes report

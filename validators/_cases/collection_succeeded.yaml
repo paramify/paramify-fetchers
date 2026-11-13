@@ -1,0 +1,17 @@
+validator: collection_succeeded
+cases:
+  - name: run_succeeded
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{}}}'
+
+  - name: run_failed
+    expect: FAIL
+    note: an expired token or a network timeout; compliance is unknown, not fine
+    artifact: '{"metadata":{"exit_code":1,"status":"failed","error":"ExpiredToken"},"payload":{}}'
+
+  - name: envelope_restructured
+    expect: FAIL
+    note: >
+      the exit_code anchor itself is gone. Nothing downstream can be trusted, and
+      without the MATCH_COUNT rule this would read as healthy.
+    artifact: '{"metadata":{"exitCode":0,"status":"success"},"payload":{"results":{}}}'

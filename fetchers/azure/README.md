@@ -1,0 +1,400 @@
+# Azure
+
+Azure fetchers pull evidence from your Azure subscriptions, Microsoft Entra ID and
+Azure DevOps with Microsoft's Python SDKs and REST APIs. All 98 fetchers are
+read-only and sign in with azure-identity's `DefaultAzureCredential`, so no key file
+or stored secret is required. Install the SDKs with `pip install -e '.[azure]'` (see
+[Install](../../README.md#install)).
+
+## Credential setup
+
+Use a dedicated read-only identity for evidence collection. `DefaultAzureCredential`
+tries a service principal, workload identity, managed identity and then a cached
+`az login`, and uses the first that works. The full order and the variables the
+runner lets through are in [`_categories/azure.yaml`](../_categories/azure.yaml).
+When no service principal, workload or managed identity variable is set, 14 fetchers
+try a cached `az login` first (the five `azure_sentinel_*`,
+`azure_log_analytics_query_audit`, `azure_log_analytics_deletion_rights`,
+`azure_log_storage_immutability`, `azure_app_service_backups`,
+`azure_change_provenance`, `azure_residual_resources`,
+`azure_entra_dormant_identities`, `azure_entra_emergency_accounts` and
+`azure_devops_audit_streams`), and so do
+`azure_entra_diagnostic_settings` and `azure_entra_risky_users` when `subscription_id`
+is set, so on a VM using its managed identity, set
+`AZURE_CLIENT_ID` for a user-assigned identity or don't leave an `az login` on the
+runner.
+
+### Option A: Managed or workload identity (recommended on Azure)
+
+On Azure compute (VM, App Service, Container Apps) the managed identity is picked up
+with nothing to configure. On AKS with workload identity, the pod's
+`AZURE_TENANT_ID`, `AZURE_CLIENT_ID` and `AZURE_FEDERATED_TOKEN_FILE` are passed
+through. Neither path stores a secret.
+
+### Option B: `az login` (workstation)
+
+```bash
+az login
+az account show
+```
+
+The fetchers read the Azure CLI's cached token. Run the Entra fetchers as an
+application instead (see [Microsoft Graph](#microsoft-graph)): under `az login`,
+`azure_entra_authentication_policy` gets a 403 on the authentication methods policy
+and security defaults, however privileged the user.
+
+### Option C: Service principal
+
+Set `AZURE_TENANT_ID`, `AZURE_CLIENT_ID` and `AZURE_CLIENT_SECRET` together. They are
+declared once for the whole category as the optional secrets `tenant_id`,
+`client_id` and `client_secret`, so a manifest can map them with `set-secret`, or you
+can export them in the runner's environment.
+
+### Sovereign clouds
+
+Set `AZURE_AUTHORITY_HOST` (for example `https://login.microsoftonline.us`). The ARM,
+Microsoft Graph and Log Analytics endpoints are derived from it. Azure Government
+uses the GCC High Graph host (`graph.microsoft.us`), so a DoD tenant is not
+supported. Leave it unset for the public cloud.
+
+## Required permissions
+
+**Reader** on each subscription covers every subscription-scoped fetcher except the
+additions below. Grant only the rows for the fetchers you run. A refused read is
+recorded in `payload.metadata.api_failures` and fails the run, unless the row says
+otherwise.
+
+### Azure RBAC
+
+| Access | Needed by | If it is missing |
+|---|---|---|
+| A custom role with `Microsoft.Web/sites/host/listkeys/action` and `Microsoft.Web/sites/config/list/action` | `azure_function_app_configuration` | Access keys and app settings read `not_authorized` per app; the run succeeds |
+| `Microsoft.Web/sites/config/list/action` (optional) | `azure_app_service_backups` | The custom backup configuration reads `not_authorized`; the run succeeds |
+| Key Vault Reader (RBAC vaults), or an access policy with key List and Get Rotation Policy (optional) | `azure_key_vault_key_rotation` | The vault reports `data_plane_status: inaccessible`; rotation policies still come from the management plane |
+| Log Analytics Reader on the workspaces that receive their logs | `azure_network_traffic_activity` | The workspace reads `not_authorized` and its figures unknown; the run succeeds |
+| Log Analytics Reader on the workspaces they query | `azure_log_analytics_query_audit`, `azure_sentinel_analytics_rules`, `azure_sentinel_data_sources`, `azure_sentinel_incidents`, `azure_devops_audit_streams` (Azure Monitor Logs streams) | The KQL query fails |
+| Reader on other subscriptions (optional) | `azure_alert_rules`, `azure_activity_log_alerts` and `azure_waf_ddos_activity` (action groups), `azure_app_gateway_waf` (WAF policies), `azure_vnet_egress_routing` (Virtual WAN hubs), `azure_sentinel_playbooks` (Logic Apps an automation rule runs), `azure_private_endpoint_configuration` (target resources), `azure_private_dns_zone_configuration` (linked virtual networks and record IPs), `azure_firewall_configuration` (a Firewall Policy or base policy held elsewhere), `azure_bastion_configuration` (Bastion hosts in a peered subscription) | That reference reads unresolved; the run succeeds |
+| Reader or Log Analytics Reader on destination workspaces in other subscriptions (optional) | `azure_service_log_records` | Arrival reads unknown for the apps and instances that send logs there; the run succeeds |
+| Reader or Microsoft Sentinel Reader on the workspaces Entra logs are sent to (optional) | `azure_entra_diagnostic_settings` | That category's `to_sentinel_workspace` reads null, with a note; the run succeeds |
+| Log Analytics Reader on the workspaces that receive their logs | `azure_waf_ddos_activity` | The workspace reads `not_authorized` and its figures unknown; the run succeeds |
+| Reader on the management group (optional) | `azure_policy_assignments` | Management-group custom definitions read `unavailable`; the run succeeds |
+| A custom role with `Microsoft.ResourceHealth/events/fetchEventDetails/action` and `Microsoft.ResourceHealth/events/listSecurityAdvisoryImpactedResources/action` (optional) | `azure_service_health_advisories` | A sensitive event's summary and updates, and the resources a security advisory names, read `not_authorized`; the run succeeds |
+
+Reader also covers the Sentinel fetchers' ARM reads. Microsoft Sentinel Reader on the
+workspace is the narrower alternative. The Defender fetchers accept Security Reader
+instead of Reader.
+
+### Microsoft Entra roles
+
+| Role | Needed by | If it is missing |
+|---|---|---|
+| Security Reader or Global Reader, assigned to the identity in Entra ID | `azure_entra_diagnostic_settings` (the tenant's Entra diagnostic settings and log categories, read through ARM's `microsoft.aadiam` provider) | The read is refused and the run fails |
+
+### Microsoft Graph
+
+Application permissions on the identity, with admin consent. The Entra fetchers are
+tenant-scoped, except `azure_entra_dormant_identities` and
+`azure_entra_emergency_accounts`, which take a subscription and read the tenant it
+belongs to.
+
+| Permission | Needed by |
+|---|---|
+| `Application.Read.All` | `azure_entra_app_registrations`, `azure_entra_service_principals` |
+| `Policy.Read.All` | `azure_entra_conditional_access_policies`, `azure_entra_authentication_policy`, `azure_entra_emergency_accounts` (Conditional Access and the X.509 certificate method) |
+| `RoleManagement.Read.Directory` | `azure_entra_pim_assignments` (role definitions, eligible and active assignments, role management policies). The tenant needs Entra ID P2 or ID Governance; without it `pim_available` reads false and the run succeeds. `azure_entra_risky_users` (directory roles and the users, groups and apps that hold them; `Directory.Read.All` also covers it) |
+| `IdentityRiskyUser.Read.All` | `azure_entra_risky_users` (risky users). The tenant needs Entra ID P2; without it `identity_protection_available` reads false and the run succeeds |
+| `Directory.Read.All` | `azure_entra_authentication_policy` (group settings, subscribed SKUs, and with X.509 enabled users' certificate user ids and targeted groups' members), `azure_entra_mfa_status` (users, role members), `azure_entra_privileged_roles`, `azure_residual_resources` (principal lookup), `azure_entra_dormant_identities` (tenant check, users, role members, app registrations, principal lookup), `azure_entra_emergency_accounts` (tenant check, users, excluded groups' and roles' members, emergency accounts' certificate user ids and groups) |
+| `AuditLog.Read.All` | `azure_entra_mfa_status` (sign-in activity and the registration report), `azure_entra_dormant_identities` (users' and service principals' sign-in activity), `azure_entra_sign_ins` (sign-in logs; the tenant also needs Entra ID P1 or P2, and without it `sign_in_logs` reads `not_licensed` and the run succeeds), `azure_entra_emergency_accounts` (emergency accounts' sign-in activity and the registration report) |
+| `GroupMember.Read.All` | `azure_entra_groups` (groups, members and owners). `Directory.Read.All` covers it and the fetcher's optional permissions below, except `Member.Read.Hidden` |
+| `AccessReview.Read.All` | `azure_entra_access_reviews` (review series, runs and decisions). The tenant needs Entra ID P2 or ID Governance; without it `access_reviews_available` reads false and the run succeeds |
+| `Directory.Read.All` (optional) | `azure_log_analytics_deletion_rights`: principal names; without it the grants are listed by id |
+| `Application.Read.All` (optional) | `azure_managed_identity_configuration`: each identity's Graph app permissions; without it `graph_access` reads `not_authorized` and the run succeeds. `azure_entra_groups`: the account state of owners that are apps or managed identities; without it `groups_with_only_disabled_owners` reads null when any owner is one |
+| `DelegatedPermissionGrant.Read.All` (optional) | `azure_entra_service_principals`: delegated grants; without it the delegated grant fields read null and the run succeeds |
+| `User.Read.All` (optional) | `azure_entra_groups`: members' and owners' sign-in names, account state and guest status; without it users come back as an id only, so `member_details_readable` and `owner_details_readable` read false, the guest, disabled-user and disabled-owner figures read null, and the run succeeds. `azure_entra_service_principals`: user owners' names and account state; without it they read null, and so does `service_principals_with_only_disabled_owners`. `azure_entra_risky_users`: whether each privileged user with open risk is enabled; without it `account_enabled` reads null, the user counts as enabled, and the run succeeds |
+| `Policy.Read.ConditionalAccess` or `Policy.Read.All` (optional) | `azure_entra_sign_ins`: the Conditional Access policies applied to each listed sign-in; without it they read null and the run succeeds |
+| `Member.Read.Hidden` (optional) | `azure_entra_groups`: members of hidden-membership groups; without it they read unknown and are counted in `hidden_membership_groups_unread`. `Directory.Read.All` doesn't cover it |
+| `PublicKeyInfrastructure.Read.All` (optional) | `azure_entra_authentication_policy`: the certificate authorities in the PKI-based trust store; without it that store reads `not_authorized`, `pki_store_missing_permission` names the grant, the combined CA counts read null, and the run succeeds (a cloud without the API reads `not_available` the same way) |
+| `Organization.Read.All` (optional) | Every `azure_entra_*` fetcher but `azure_entra_dormant_identities` and `azure_entra_emergency_accounts`: tenant name and domain; without it the tenant id comes from `AZURE_TENANT_ID`, and the run fails only if that is unset too. `azure_entra_authentication_policy` also reads the certificate authorities in the classic trust store with it (the only permission Microsoft documents for that read); without it that store reads `not_authorized`, `classic_store_missing_permission` names the grant, the combined CA counts read null, and the run succeeds |
+
+For the Entra fetchers, narrower permissions can stand in for `Directory.Read.All`;
+each call's Microsoft Graph reference page lists them.
+
+### Azure DevOps
+
+| PAT scope | Needed by |
+|---|---|
+| Build, Code, Test Management, Project and Team, Release (all Read), and Environment (Read & manage, as there is no read-only Environment scope) | `azure_devops_pipelines` |
+| Read Audit Log (`vso.auditlog`), from a user with View audit log and Manage audit streams; listing streams needs Manage audit streams, as there is no read-only stream permission, and without it the stream fields are null and the run is `not_authorized` | `azure_devops_audit_streams` |
+| Graph, Member Entitlement Management (both Read) | `azure_devops_identities` |
+| Security (Manage), as there is no read-only scope for permissions (the fetcher only reads), plus Identity, Code, and Project and Team (all Read) | `azure_devops_permissions` |
+| Service Connections, Variable Groups, Secure Files, Build (for pipeline permissions), and Project and Team (all Read) | `azure_devops_service_connections` |
+| Work Items (Read), Code (Read; for the TFVC changesets linked to work items), and Project and Team (Read; to list projects). Linked Git commits and pull requests are not read | `azure_devops_work_items` |
+
+The PAT is optional. Without one, the fetchers sign in as the ambient Entra identity,
+which must be added to the organization: project Reader for pipelines, View audit log
+and Manage audit streams for audit streams, organization membership for identities
+(the least privilege that reads last-access dates is not yet measured), and an
+organization member who can view
+permissions in each namespace and read every Git repository for permissions,
+Reader on the service connections and on the Library in each project for service
+connections, and Reader in each project for work items. Azure DevOps lists only the service connections the identity holds a
+role on, without refusing the rest; by default only Endpoint Administrators, Endpoint
+Creators and each connection's creator hold one. Only the Entra sign-in can read the
+Log Audit Events policy; with a PAT, `azure_devops_audit_streams` judges auditing
+from the audit log instead.
+
+## Wiring into a manifest
+
+Azure fetchers declare no required secrets. Fan out with one target per subscription,
+and label each with `environment`:
+
+```bash
+paramify manifest add azure_key_vault_configuration
+paramify manifest add-target azure_key_vault_configuration subscription_id=<subscription id> environment=prod
+paramify validate manifest.yaml
+paramify run manifest.yaml
+```
+
+Without a target, a subscription fetcher collects from the first enabled subscription
+the credential can see.
+
+Other fetchers fan out differently:
+
+```bash
+# Entra: one target per tenant
+paramify manifest add-target azure_entra_mfa_status tenant_id=<tenant id>
+
+# Azure DevOps: one target per organization; drop --secret to sign in with Entra
+paramify manifest add-target azure_devops_pipelines organization_url=https://dev.azure.com/<org> --secret pat=AZURE_DEVOPS_PAT
+
+# Sentinel and Log Analytics: optionally limit to some workspaces
+paramify manifest add-target azure_sentinel_incidents subscription_id=<subscription id> workspaces=<workspace name>
+```
+
+Multi-tenant Entra targets need a service principal or workload identity per tenant:
+a managed identity or `az login` collects its own tenant whatever `tenant_id` says,
+and still names the file after the target.
+
+`workspaces` is accepted by the five `azure_sentinel_*` fetchers,
+`azure_log_analytics_query_audit` and `azure_log_analytics_deletion_rights`, and
+`projects` by `azure_devops_pipelines`, `azure_devops_permissions` and
+`azure_devops_service_connections`. Fetchers with lookback windows or list limits
+take `set-config` keys; `paramify describe <fetcher>` lists them with their defaults.
+
+Ready-to-edit manifests:
+
+- [`examples/azure_identity_and_access.yaml`](../../examples/azure_identity_and_access.yaml)
+  — the Entra and RBAC fetchers.
+- [`examples/azure_data_at_rest.yaml`](../../examples/azure_data_at_rest.yaml) —
+  storage encryption, network security groups, Defender plans.
+- [`examples/azure_database_posture.yaml`](../../examples/azure_database_posture.yaml)
+  — SQL, PostgreSQL, MySQL and Cosmos DB.
+- [`examples/azure_compute_posture.yaml`](../../examples/azure_compute_posture.yaml)
+  — VMs, disks, AKS and container registries.
+- [`examples/azure_appservice_posture.yaml`](../../examples/azure_appservice_posture.yaml)
+  — web apps, function apps, App Service plans, Policy assignments, Databricks.
+- [`examples/azure_keys_and_monitoring.yaml`](../../examples/azure_keys_and_monitoring.yaml)
+  — Key Vault, Activity Log export and alerts, Recovery Services vaults.
+
+### Limit mixed Entra reads to one subscription
+
+`azure_entra_emergency_accounts` and `azure_entra_dormant_identities` accept
+`config.target_subscription_only: true`. Supply an explicit `subscription_id`
+target and pass `AZURE_TENANT_ID` through the manifest's Azure authentication
+configuration. The option defaults to false.
+
+With it enabled, ARM requests and continuation URLs stay in the selected
+subscription. The subscription tenant must match `AZURE_TENANT_ID`, and Graph's
+organization must confirm the same tenant before further directory reads.
+Missing, denied or mismatched tenant reads remain failures. Graph data remains
+tenant-wide; selecting a subscription does not filter that directory population.
+
+The shared Graph clients reject continuations outside the configured HTTPS
+origin and refuse redirects. The selected-subscription ARM transports also
+refuse redirects. These checks do not grant access or replace read-only IAM.
+Unsupported cloud APIs and licensing gaps remain visible in the original result.
+
+## Smoke test
+
+```bash
+paramify doctor manifest.yaml --probe
+```
+
+`--probe` prints the principal the credential chain resolved to and the first enabled
+subscription it can see. It does not check Graph or Azure DevOps access, and it always
+calls the public cloud's endpoints.
+
+## Fetchers
+
+Each fetcher's `fetcher.yaml` lists the exact API calls it makes, under
+`evidence_set.instructions`. The KSIs each one supports are in
+[`docs/ksi_mapping.md`](../../docs/ksi_mapping.md).
+
+Identity and access:
+
+| Fetcher | Evidence |
+|---|---|
+| `azure_entra_app_registrations` | App registrations and each client secret and certificate with its expiry: expired, due within 30 days, or never expiring |
+| `azure_entra_service_principals` | Service principals: type, enabled state, owning tenant, owners, every secret, certificate and federated credential they can present, and the API permissions they hold, with privileged Microsoft Graph permissions flagged |
+| `azure_entra_authentication_policy` | Allowed sign-in methods (weak and phishing-resistant flagged), registration campaign, security defaults, password protection, the Entra ID licence tier, the CAs trusted for certificate sign-in (expired, without a CRL), and whether the users X.509 targets are matched to certificates or still reached by weaker methods |
+| `azure_entra_conditional_access_policies` | Conditional Access policies: state (on, report-only, off), included and excluded users, groups, roles and apps, conditions, grant and session controls |
+| `azure_entra_mfa_status` | Each user's enabled state, last sign-in and MFA capability, with coverage for admins, members and guests |
+| `azure_entra_privileged_roles` | Activated directory roles and their holders, with Global Administrators counted and tenant-wide admin roles flagged |
+| `azure_entra_pim_assignments` | PIM for directory roles: who is eligible for each role, active assignments marked permanent, time-bound or activated, and each privileged role's activation rules (MFA or authentication context, justification, approval and approvers, maximum hours), with roles that allow permanent assignments flagged |
+| `azure_entra_dormant_identities` | Users and service principals holding a directory role or an Azure role in the subscription, with their last sign-in: dormant, never-used, guest and deleted identities flagged |
+| `azure_entra_emergency_accounts` | Users that Conditional Access MFA policies exclude and whether another policy still covers them, and each emergency account's exclusions, last sign-in, phishing-resistant methods (multi-factor certificates included) and the Sentinel or Azure Monitor alert rules that name it |
+| `azure_entra_groups` | Groups with their members and owners: kind, whether they can hold directory roles, and dynamic (paused flagged), assigned or synced membership, with groups that have no owner, only disabled owners, guests or disabled users flagged |
+| `azure_entra_sign_ins` | Interactive sign-ins over a lookback: MFA required and passed, methods used (phishing-resistant counted), legacy clients, Conditional Access applied, and risky sign-ins (risk levels need Entra ID P2) |
+| `azure_entra_risky_users` | Users Entra ID Protection flags as risky, the privileged directory roles each holds directly, and privileged users with open risk who can still sign in; groups holding a privileged role are counted, not expanded |
+| `azure_entra_access_reviews` | Access review series: what each reviews (group membership, app assignment, directory role or access package), recurrence, default decision, auto-apply and reviewers, with series that aren't monthly, deny-by-default and auto-applying flagged, and what each active series' latest cycle decided and applied |
+| `azure_rbac_role_assignments` | Role assignments at the subscription and above, and separately below it, with Owner, Contributor, User Access Administrator and RBAC Administrator flagged; whether each is permanent, time-bound or activated through PIM, PIM-eligible assignments, and the over-broad roles' PIM activation settings |
+| `azure_rbac_custom_roles` | Custom role definitions with their full permission sets, flagged for wildcards and for permissions that allow privilege escalation |
+| `azure_managed_identity_configuration` | Managed identities: attached resources, federated credentials, Azure roles judged by their permissions, and Microsoft Graph app permissions |
+
+Network and edge:
+
+| Fetcher | Evidence |
+|---|---|
+| `azure_network_security_groups` | NSG rules (whether admin ports such as 22 and 3389 are reachable from the internet) and each subnet's NSG association |
+| `azure_vnet_egress_routing` | Where each subnet's internet-bound traffic goes: a firewall or appliance, a gateway, a NAT gateway, a black hole, or Azure's default outbound access |
+| `azure_ddos_protection` | Whether every public IP is covered by DDoS Network or IP Protection, and every DDoS protection plan |
+| `azure_firewall_configuration` | Azure Firewalls and Firewall Policies: every rule with allow-all, any-FQDN and DNAT-to-admin-port rules flagged, threat intelligence, IDPS, TLS inspection, DNS proxy, management IP, and whether rule and threat logs are exported |
+| `azure_bastion_configuration` | Bastion hosts: SKU, shareable links, IP connect, native client tunneling, file copy, copy-paste, session recording, private-only mode, IP allow-list, subnet NSG and audit log export, and which virtual machines a Bastion reaches directly or through a peering |
+| `azure_waf_ddos_activity` | Whether WAF and DDoS protection are watched: what each WAF blocked or only logged, WAF and DDoS attack alerts and who they reach, and DDoS mitigations |
+| `azure_dns_configuration` | Public zones with DNSSEC state and signing keys; private zones and their virtual network links |
+| `azure_private_dns_zone_configuration` | Private DNS zones and their virtual network links, whether each privatelink record resolves to a live private endpoint or is stale, and zone names that exist more than once |
+| `azure_private_endpoint_configuration` | Private endpoints: target resource, approval status, subnet, private IPs and DNS zone groups, and whether each target's public network access is disabled |
+| `azure_vpn_gateway_configuration` | VPN gateways (SKU, active-active, BGP, point-to-site) and each connection's IKE version and IPsec/IKE policy |
+| `azure_virtual_wan_configuration` | Virtual WANs and hubs: VPN encryption, transit settings, secured hubs, and each hub VPN connection's IKE and IPsec settings |
+| `azure_app_gateway_tls_listeners` | Application Gateway listeners: protocol, public or private frontend, HTTP-to-HTTPS redirects, and the TLS policy in effect |
+| `azure_app_gateway_backend_tls` | Application Gateway backend settings: whether traffic to the backend is encrypted and its certificate validated |
+| `azure_app_gateway_waf` | The WAF that applies to each Application Gateway listener, whether it is in Prevention mode, and every WAF policy's rules |
+| `azure_front_door_tls` | Front Door routes that accept only HTTPS, and each custom domain's minimum TLS version and certificate |
+| `azure_front_door_origins` | Front Door origin groups and origins: regions, active-active or failover, health probes, and how Front Door connects to them |
+| `azure_front_door_waf_policies` | Front Door WAF policies: mode, managed rule sets, overrides, exclusions, custom rules, and whether each blocks |
+| `azure_front_door_waf_coverage` | Each Front Door host resolved to the WAF policy that applies to it, with hosts lacking a blocking WAF flagged |
+| `azure_api_management_configuration` | API Management services: network exposure, legacy TLS and ciphers, portal sign-up, how each API is protected, subscriptions, backends, audit logs |
+
+Compute, containers and apps:
+
+| Fetcher | Evidence |
+|---|---|
+| `azure_vm_hardening_status` | VMs and scale sets: Trusted Launch, encryption at host, managed disks, SSH-key-only Linux sign-in, source image |
+| `azure_aks_cluster_configuration` | AKS control planes: private cluster or authorized IP ranges, Kubernetes RBAC and Entra integration, local accounts, workload identity, network policy |
+| `azure_container_registry_configuration` | Container registries: admin account, anonymous pull, network access and private endpoints |
+| `azure_container_workloads_configuration` | Container Apps environments, apps and jobs, and Container Instances: exposure, encryption between containers, identities, logging |
+| `azure_app_service_configuration` | Web apps: HTTPS-only, minimum TLS, FTP state, client certificates, App Service Authentication, managed identity, network access |
+| `azure_function_app_configuration` | Function apps: network exposure, transport settings, runtime, identity, and the names of access keys and app settings (never values) |
+| `azure_app_service_plans` | App Service plans: SKU, instance count, zone redundancy, scaling, and the apps on each |
+| `azure_ai_hub_configuration` | AI hubs, projects and Machine Learning workspaces: network exposure, managed network isolation, encryption, connections, endpoints and compute |
+| `azure_ai_services_configuration` | AI services accounts (Foundry, OpenAI and others) and AI Search: network exposure, API keys or Entra only, encryption, audit logs, model deployments, content filters, agent connections |
+| `azure_databricks_workspace_configuration` | Databricks workspaces: public access, secure cluster connectivity, VNet injection and customer-managed keys |
+
+Data, storage and keys:
+
+| Fetcher | Evidence |
+|---|---|
+| `azure_storage_encryption_status` | Storage accounts: customer- or platform-managed key, infrastructure encryption, HTTPS and TLS, public access, network rules, shared-key access, access-key age (never the keys), geo-replication health, each blob container's anonymous access and immutability, owner and classification tags |
+| `azure_disk_encryption_status` | Managed disks: platform key, customer-managed key or double encryption, Azure Disk Encryption, export exposure |
+| `azure_key_vault_configuration` | Key vaults: RBAC or access policies, soft delete and purge protection, network exposure, and whether audit events are exported |
+| `azure_key_vault_key_rotation` | Every key's rotation policy and expiry, and every secret's expiry. No key material or secret value is read |
+| `azure_sql_encryption_status` | Azure SQL TDE key source (customer- or service-managed), key auto-rotation, and per-database TDE state |
+| `azure_sql_server_configuration` | Azure SQL servers: public access, minimum TLS, Entra admin and Entra-only auth, firewall rules (allow-all flagged), auditing, Defender alerts, vulnerability assessment |
+| `azure_sql_managed_instance_configuration` | SQL Managed Instances: public data endpoint, connection type, minimum TLS, private endpoints, Entra admin and Entra-only auth |
+| `azure_sql_managed_instance_encryption` | SQL Managed Instance TDE protector (service- or customer-managed key) and per-database TDE state |
+| `azure_postgresql_configuration` | PostgreSQL flexible servers: secure transport, Entra auth and admins, logging parameters, firewall rules |
+| `azure_mysql_configuration` | MySQL flexible servers: secure transport, every accepted TLS version, audit logging, network access |
+| `azure_cosmosdb_configuration` | Cosmos DB accounts: customer-managed key, local auth disabled, firewall and network access, minimum TLS |
+| `azure_redis_cache_configuration` | Azure Cache for Redis: minimum TLS, non-TLS port, access-key or Entra auth, network access and firewall rules |
+| `azure_managed_redis_configuration` | Azure Managed Redis clusters and databases: minimum TLS, client protocol, access-key auth, network access, customer-managed keys |
+| `azure_data_services_configuration` | DocumentDB (MongoDB vCore), Data Explorer and Event Hubs: network exposure, client authentication, admin assignments, logging |
+
+Backup and recovery:
+
+| Fetcher | Evidence |
+|---|---|
+| `azure_backup_recovery_status` | Recovery Services vaults: backup policies and retention, protected items and their last backup |
+| `azure_app_service_backups` | Whether each web app is actually backed up: newest restore point, gaps, custom backup schedule and history |
+| `azure_sql_managed_instance_backups` | SQL Managed Instance backup storage redundancy, zone redundancy, retention and failover groups |
+| `azure_service_availability` | When each App Service app and SQL Managed Instance was unavailable over the last 30 days, for how long and why, against the recovery time objective; Front Door origin probe failures and each app's health-check results |
+
+Logging and monitoring:
+
+| Fetcher | Evidence |
+|---|---|
+| `azure_diagnostic_settings` | Subscription diagnostic settings that export the Activity Log: categories and destinations |
+| `azure_entra_diagnostic_settings` | Which Entra ID log categories (audit, sign-in and others) a tenant diagnostic setting exports, and whether each reaches a Sentinel workspace |
+| `azure_resource_diagnostic_settings` | Every resource's log categories and whether a diagnostic setting exports them, and where |
+| `azure_log_analytics_workspaces` | Log Analytics workspaces: retention, daily cap, network access, access control mode |
+| `azure_log_analytics_query_audit` | Whether each workspace audits queries, and who queried the logs in which weeks |
+| `azure_log_analytics_deletion_rights` | Who can purge, delete or shorten the retention of each workspace's log data, active or PIM-eligible |
+| `azure_service_log_records` | Whether App Service HTTP logs and SQL Managed Instance audit events reach Log Analytics, with their retention, the principals that connect and the services each app calls |
+| `azure_log_storage_immutability` | Immutability policies, legal holds and soft delete on the blob containers Azure Monitor writes logs to |
+| `azure_resource_locks` | Management locks at every scope, and whether each Log Analytics workspace, Backup and Recovery Services vault, key vault and storage account (configurable) is locked against deletion |
+| `azure_network_flow_logs` | Network Watchers and flow logs (target, state, storage, retention, Traffic Analytics), and which virtual networks and subnets an enabled flow log covers |
+| `azure_network_traffic_activity` | The traffic actually seen: Traffic Analytics flows with new destinations, unexpected inbound ports and denied-flow spikes, Front Door requests, and requests that reached Front Door's App Service origins directly |
+| `azure_alert_rules` | Metric, log search and smart detector alert rules, resolved to the receivers they notify and checked against suppression rules |
+| `azure_activity_log_alerts` | Activity log alert rules and which security-relevant control-plane operations they cover |
+| `azure_monitor_fired_alerts` | Alerts fired in the last 30 days, who acknowledged and closed each and when, and how often each alert rule fired |
+| `azure_service_health_advisories` | Microsoft Service Health events over the last 180 days plus older ones Resource Graph still holds: service issues, planned maintenance, health advisories (retirements included) and security advisories, with status, level, recommended actions and the resources each names |
+
+Microsoft Sentinel:
+
+| Fetcher | Evidence |
+|---|---|
+| `azure_sentinel_analytics_rules` | Analytics rules per workspace: kind, state, severity, MITRE tactics and techniques, a hash of each query (the text is opt-in), suppression, the tables each reads and whether they got data, which incident-creation rules are quiet (no alert from a product whose alerts are wired up), and whether Fusion is on |
+| `azure_sentinel_automation_rules` | Automation rules per workspace: triggers, conditions, state and actions |
+| `azure_sentinel_data_sources` | Data connectors per workspace with each one's last data received and health, and which tables received data in the ingestion window. An alert-only connector (Defender for Endpoint, Office 365, Identity, Cloud, Cloud Apps or IoT, Entra ID Protection, Insider Risk Management) with no alert but a linked connection sending alerts reads quiet, not not connected, and still `connected: false`. `connectors_configured_without_data` counts connectors with a connection but no data that aren't quiet |
+| `azure_sentinel_incidents` | Incidents in the lookback plus every open one: severity, status, classification, owner and time to close |
+| `azure_sentinel_playbooks` | Logic Apps Sentinel runs as playbooks: whether each disables accounts, isolates devices, updates incidents or sends email or Teams messages, its static recipients, whether an active automation rule runs it, and how its recent runs ended |
+
+Defender for Cloud and Azure Policy:
+
+| Fetcher | Evidence |
+|---|---|
+| `azure_defender_plans` | Defender for Cloud plans: tier, sub-plan, enablement and coverage |
+| `azure_defender_assessments` | Every Defender for Cloud assessment result per resource, with status and severity |
+| `azure_defender_regulatory_compliance` | Regulatory compliance standards, their controls and assessments, with passed, failed and skipped counts |
+| `azure_policy_assignments` | Policy assignments in effect, own and inherited: enforcement mode, scope, exclusions, and whether each actually enforces |
+| `azure_policy_compliance` | Non-compliant resources and policies, evaluation details, and remediation tasks with their deployments |
+
+Inventory and change:
+
+| Fetcher | Evidence |
+|---|---|
+| `azure_resource_inventory` | Every resource from Resource Graph with type, location, tags and SKU, plus its Defender for Cloud coverage |
+| `azure_residual_resources` | Leftovers: unattached disks, NICs and public IPs, unused NSGs, empty resource groups, stale slots, unused identities, assignments to deleted principals |
+| `azure_change_provenance` | Every control-plane change in the last 14 days, attributed to a pipeline, a manual deployment or a direct edit |
+| `azure_app_service_deployments` | How each web app and slot is deployed: Kudu records, slot swaps and publishing-credential use with who and when, deployment source, and how each slot differs from production |
+
+Azure DevOps:
+
+| Fetcher | Evidence |
+|---|---|
+| `azure_devops_pipelines` | Pipelines and what their YAML tests, scans and deploys, whether a failing test stops each deploy, runs, test results, environment checks and branch policies |
+| `azure_devops_audit_streams` | Whether auditing is on, every audit stream and its status, and whether Azure Monitor Logs streams are receiving events |
+| `azure_devops_identities` | Every user's access level, groups and last access, inactive users, and who holds privileged Azure DevOps groups, directly or through Entra groups |
+| `azure_devops_permissions` | Who is allowed or denied what at organization, project, repository, pipeline, environment and service-connection scope, high-impact rights outside the admin groups, and who may bypass Git branch policies |
+| `azure_devops_service_connections` | How each service connection signs in (federated or a stored secret), its service principal, which pipelines may use it and which runs did, and whether variable group secrets live in Key Vault |
+| `azure_devops_work_items` | Change and security work items with state, owner, planned date and approval, the share of finished change items needing approval that are approved, whether the requester or author approved them, linked changesets, commits and pull requests, and open, overdue or unassigned security work |
+
+## Notes
+
+- One evidence file per target, written with sorted keys and a stable order, so a
+  diff between runs shows real changes.
+- Any failed API call is listed in `payload.metadata.api_failures`, sets
+  `partial_failure: true` and exits non-zero. The failure reason and code follow the
+  [fetcher contract](../../docs/fetcher_contract_guide.md).
+- A resource provider that is not registered on the subscription is reported as
+  `provider_registration_status: not_registered`, which means the service is not in
+  use. It is not a failure.
+- Most `*_percentage` summary fields are whole numbers rounded down, and 0 when there
+  is nothing to count. Check the matching total before reading 0 as a finding.
+- `paramify doctor` checks the installed Azure SDKs against the pins in
+  `requirements.txt`. A wrong major version can return wrong or empty evidence rather
+  than an error.
+- The Azure DevOps fetchers accept Azure DevOps Services URLs
+  (`https://dev.azure.com/<org>`, `https://<org>.visualstudio.com` or a bare
+  organization name), not Azure DevOps Server.
+- Rotating a service principal's secret means updating `AZURE_CLIENT_SECRET` in your
+  secrets store. Managed and workload identities need nothing.

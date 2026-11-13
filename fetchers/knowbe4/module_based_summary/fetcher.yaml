@@ -25,4 +25,4 @@ ksis:
 evidence_set:
   reference_id: EVD-MODULE-BASED-SUMMARY
   name: KnowBe4 Module Based Summary
-  instructions: 'Script: module_based_summary.sh. Commands executed: KnowBe4 API calls for user training data and enrollments'
+  instructions: 'Script: knowbe4/module_based_summary/fetcher.sh. Commands executed: KnowBe4 API calls for user training data and enrollments'

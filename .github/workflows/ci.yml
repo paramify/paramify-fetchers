@@ -2,10 +2,16 @@ name: CI
 
 # The public API surface — schemas + manifest + envelope + the `paramify` CLI —
 # is the contract (CLAUDE.md). These jobs gate it:
-#   test    — every fetcher.yaml / category file validates against its JSON Schema
-#   smoke   — the CLI discovery surface works across all fetchers
-#   lint    — the framework's own code passes ruff + mypy
-#   secrets — no credentials in the tree or its full git history
+#   test      — every fetcher.yaml / category file validates against its JSON Schema
+#   azure-sdk — the Azure SDK operation groups the fetchers read still exist
+#   oci-sdk   — the OCI fetchers run against recorded responses (needs the oci extra)
+#   smoke     — the CLI discovery surface works across all fetchers, and the
+#               demo run / validate / upload --dry-run output matches its goldens
+#   tui       — the terminal UI on the lowest and latest textual 8: pilot tests,
+#               SVG snapshots, the end-to-end demo flow, a 160x50 layout check,
+#               and a real pty launch
+#   lint      — the framework's own code passes ruff + mypy
+#   secrets   — no credentials in the tree or its full git history
 # Fetchers can't be integration-tested here (no live tenants); that signal comes
 # from recorded fixtures + the scheduled dogfood run (SEC-38).
 
@@ -26,8 +32,8 @@ jobs:
     name: lint (ruff + mypy)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
@@ -49,10 +55,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.11", "3.12", "3.13"]
+        # 3.11 is the oldest Python that pyproject's requires-python allows. 3.14
+        # is the one deploy/Dockerfile and the dev venvs run, so keep that row in
+        # step with the Dockerfile's FROM.
+        python-version: ["3.11", "3.12", "3.13", "3.14", "3.15"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
@@ -61,37 +70,187 @@ jobs:
       # the CLI must stay clean with textual installed.
       - run: python -m pip install -e ".[dev,tui]"
       # Includes tests/test_contracts.py — the schema contract gate over every
-      # fetcher.yaml and _categories/*.yaml.
+      # fetcher.yaml and _categories/*.yaml. `-n auto` (pytest-xdist) spreads the
+      # suite over the runner's cores: serial it took over 4 minutes. A test that
+      # fails here but passes alone shares state with another test; fix the test.
       - name: pytest
-        run: pytest -q
+        run: pytest -q -n auto
+
+  azure-sdk:
+    name: azure-sdk (surface)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      # The only job that installs the azure extra. The `test` matrix
+      # deliberately does not (23 packages, heavier than everything else here
+      # combined), which left azure dependency bumps ungated: PR #59 relaxed the
+      # load-bearing azure-mgmt-monitor<7 and passed all twelve checks, because
+      # nothing in the suite had ever imported an Azure SDK.
+      - run: python -m pip install -e ".[dev,azure]"
+      # A guard, not a formality. tests/test_azure_sdk_surface.py opens with
+      # `pytest.importorskip`, so if the extra failed to resolve the module would
+      # SKIP and this job would go green having verified nothing — reinstating
+      # the exact false confidence it exists to remove. Fail loudly instead.
+      - name: assert the azure extra actually installed
+        run: python -c "import azure.mgmt.monitor, azure.mgmt.network, msgraph"
+      # No credentials and no network: azure-mgmt clients build their operation
+      # groups at construction, so a fake credential is enough to introspect the
+      # surface the fetchers read. Runs unconditionally rather than behind a path
+      # filter — a gate that only sometimes runs is not a gate.
+      - name: pytest (azure SDK surface and read boundaries)
+        run: >-
+          pytest -q tests/test_azure_sdk_surface.py tests/test_azure_entra_conditional_access_policies.py
+          tests/test_azure_sdk_arm_read_boundary.py tests/test_entra_graph_source_boundary.py
+          tests/test_azure_rest_read_boundary.py tests/test_azure_entra_mixed_strict_boundary.py
+
+  oci-sdk:
+    name: oci (fetchers + SDK surface)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      # The only job that installs the oci extra. The `test` matrix deliberately
+      # does not, which means every tests/test_oci_*.py SKIPS there: each opens
+      # with pytest.importorskip("oci"), so the whole OCI suite would go green in
+      # CI having run nothing at all — the same false confidence the azure-sdk
+      # job above exists to remove.
+      - run: python -m pip install -e ".[dev,oci]"
+      - name: assert the oci extra actually installed
+        run: python -c "import oci, oci._vendor.requests"
+      # No credentials and no network: the fetchers run as subprocesses against
+      # recorded HTTP responses (fetchers/oci/tests/cassettes), replayed through
+      # the real SDK, so deserialization, pagination and the SDK's error classes
+      # all still run. ~11s for all seventeen.
+      - name: pytest (OCI fetchers, cross-check, SDK surface)
+        # A glob, not a list: two SDK-dependent test files added later were in no
+        # list, so they skipped in `test` and ran nowhere.
+        run: pytest -q tests/test_oci_*.py
+      # The field-name check against the SDK's generated models. Exits non-zero on
+      # a finding; a companion test (above) fails if a record function goes
+      # unregistered, so this cannot pass by having nothing left to check.
+      - name: oci schema check
+        run: python tools/oci_schema_check.py
 
   smoke:
     name: smoke (CLI discovery)
     runs-on: ubuntu-latest
+    # The goldens step runs real commands; a hang should not hold a runner for 6h.
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: pyproject.toml
       - run: python -m pip install -e .
-      - name: paramify list / catalog / ksi + describe every fetcher
+      - name: paramify list / catalog / ksi
         run: |
           set -euo pipefail
-          paramify list --json > /dev/null
+          paramify list --json > "$RUNNER_TEMP/fetchers.json"
           paramify catalog --json > /dev/null
           paramify ksi --json > /dev/null
-          for f in $(paramify list --json | python -c "import sys, json; [print(x['name']) for x in json.load(sys.stdin)]"); do
-            paramify describe "$f" --json > /dev/null
-          done
-          echo "smoke ok: described all discovered fetchers"
+      # One process for every describe. A `paramify` process per fetcher took
+      # over 2 minutes, nearly all of it Python start-up. CliRunner drives the
+      # same Typer app as the `paramify` entry point, which the step above
+      # already proves works.
+      - name: paramify describe every fetcher
+        run: |
+          python - "$RUNNER_TEMP/fetchers.json" <<'EOF'
+          import json, sys
+          from typer.testing import CliRunner
+          from framework.cli import app
+
+          runner = CliRunner()
+          with open(sys.argv[1]) as fh:
+              names = [f["name"] for f in json.load(fh)]
+          failed = []
+          for name in names:
+              result = runner.invoke(app, ["describe", name, "--json"])
+              try:
+                  assert result.exit_code == 0, f"exit {result.exit_code}: {result.output}"
+                  assert json.loads(result.stdout)["name"] == name, "described another fetcher"
+              except (AssertionError, ValueError) as exc:
+                  failed.append(f"{name}: {exc}")
+          for line in failed:
+              print(line, file=sys.stderr)
+          if failed:
+              sys.exit(f"smoke FAILED: {len(failed)} of {len(names)} fetchers did not describe")
+          print(f"smoke ok: described all {len(names)} discovered fetchers")
+          EOF
+      # The headless path a new user takes first, end to end and offline: run the
+      # credential-free demo manifest, validate it, dry-run its upload. Output is
+      # compared with tests/goldens/cli/ after the repo path, run ids and
+      # timestamps are normalised out. Refresh: python tools/cli_goldens.py --update
+      - name: paramify run / validate / upload --dry-run on the demo (goldens)
+        run: python tools/cli_goldens.py
+
+  tui:
+    name: tui (textual ${{ matrix.textual }})
+    runs-on: ubuntu-latest
+    # A wedged app or pty would otherwise hold the runner for the 6h default.
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # The lowest textual the tui extra allows and the newest it resolves to,
+        # so a textual release that breaks the console fails here first.
+        include:
+          - textual: lowest
+            pin: "textual==8.0.0"
+            # SVGs are compared on latest only, since a textual minor can render
+            # differently. --deselect, not --ignore: an ignore does not drop a
+            # file named on the command line, and a skip would trip --fail-on-skip.
+            pytest-args: "--deselect tests/test_tui_snapshots.py"
+          - textual: latest
+            pin: "textual>=8,<9"
+            pytest-args: ""
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      # snapshots extra: pytest-textual-snapshot, kept out of dev because it caps
+      # pytest below 9 (see pyproject.toml).
+      - run: python -m pip install -e ".[dev,tui,snapshots]" "${{ matrix.pin }}"
+      # Same guard as azure-sdk: every TUI module opens with importorskip, so a
+      # failed install would otherwise pass as a page of skips.
+      - name: assert textual and the snapshot plugin actually installed
+        run: python -c "import textual, pytest_textual_snapshot; from importlib.metadata import version; print('textual', version('textual'))"
+      # Pilot suites, SVG snapshots, the end-to-end demo flow, the 160x50 layout
+      # check and the pty launch.
+      # --fail-on-skip (tests/conftest.py) fails the job if any of them skipped.
+      - name: pytest (TUI)
+        run: >-
+          pytest -q -rsx --fail-on-skip --snapshot-report snapshot_report.html
+          ${{ matrix.pytest-args }}
+          tests/test_tui_*.py tests/test_manifest_autosave.py tests/test_target_editor.py
+      # Side-by-side SVG diff of every mismatched snapshot. Refresh after an
+      # intended UI change: pytest tests/test_tui_snapshots.py --snapshot-update
+      - name: upload the snapshot report
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: snapshot-report-textual-${{ matrix.textual }}
+          path: snapshot_report.html
+          if-no-files-found: ignore
 
   secrets:
     name: secrets (gitleaks full history)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0  # full history — scanning it is the whole point
       # The OSS binary, not the marketplace action (which requires an org

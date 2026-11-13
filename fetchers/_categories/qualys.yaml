@@ -1,0 +1,95 @@
+display_name: Qualys
+description: >-
+  Qualys VMDR vulnerability management. Scan coverage per host, scan schedules
+  and runs, open findings against remediation timeframes, and fixed findings.
+  Also supports enriched VMDR and STIG assessment reports.
+  One read-only API user per subscription.
+
+# Python (requests) against the Qualys VM/PC XML API, parsed with defusedxml.
+# Basic auth with one API user per subscription; no ambient identity.
+requires:
+  python_packages:
+    - defusedxml
+
+secrets:
+  - name: username
+    env: QUALYS_USERNAME
+    description: >-
+      Login of a local (not SSO) Qualys user with the Reader role and API access
+      turned on, assigned the All asset group so it can see every host.
+  - name: password
+    env: QUALYS_PASSWORD
+    description: Password of the same Qualys user.
+
+config_schema:
+  api_url:
+    type: string
+    required: true
+    env: QUALYS_API_URL
+    description: >-
+      API server URL of the Qualys platform the subscription is on, shown in the
+      Qualys UI under Help > About, e.g. https://qualysapi.qualys.com (US1) or
+      https://qualysapi.gov1.qualys.us (GOV1). Not the qualysguard web UI URL.
+      The fetchers accept only a qualysapi. host on a Qualys domain, unless
+      private_cloud_host names the host; any other URL fails before the
+      credentials are sent.
+  private_cloud_host:
+    type: string
+    required: false
+    env: QUALYS_PRIVATE_CLOUD_HOST
+    description: >-
+      Set only for a Qualys private cloud platform: the host name of its API
+      server, e.g. qualysapi.qualys.example.com. QUALYS_API_URL must then use
+      exactly this host.
+  scan_window_days:
+    type: integer
+    required: false
+    env: QUALYS_SCAN_WINDOW_DAYS
+    default: 31
+    description: >-
+      How recent a scan must be to count as within the window, and how far back
+      the scan list reads. The default, 31 days, lets a monthly schedule and a
+      monthly-scanned host count as within it. Set it to the scan frequency
+      your policy states.
+  remediation_days:
+    type: string
+    required: false
+    env: QUALYS_REMEDIATION_DAYS
+    default: "5:30,4:30,3:90,2:180,1:180"
+    description: >-
+      Days allowed to fix a finding, per Qualys severity 5 to 1. The default
+      follows FedRAMP's historical continuous-monitoring convention (high 30,
+      moderate 90, low 180 days, reading severity 5 and 4 as high); set your
+      policy's own values.
+
+  # The following settings apply to assessment reports only.
+  page_size:
+    type: integer
+    default: 1000
+    env: QUALYS_PAGE_SIZE
+    description: Hosts per VMDR page or postures per STIG page (1–10000).
+  max_pages:
+    type: integer
+    default: 10000
+    env: QUALYS_MAX_PAGES
+    description: Maximum pages per collection (1–100000). Exceeding it fails collection.
+  max_records:
+    type: integer
+    default: 500000
+    env: QUALYS_MAX_RECORDS
+    description: Maximum output rows per invocation (1–10000000). Exceeding it fails collection.
+  retries:
+    type: integer
+    default: 3
+    env: QUALYS_RETRIES
+    description: Retries per request for transient failures (0–10).
+  min_request_interval:
+    type: integer
+    default: 1
+    env: QUALYS_MIN_REQUEST_INTERVAL
+    description: Minimum seconds between request starts (0–60). Requests run sequentially.
+  allow_empty:
+    type: boolean
+    default: false
+    env: QUALYS_ALLOW_EMPTY
+    description: Explicitly permit a valid zero-result collection. Missing or malformed responses always fail.

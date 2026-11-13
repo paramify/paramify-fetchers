@@ -1,0 +1,13 @@
+validator: oci_no_internet_reachable_ingress
+cases:
+  - name: open_rules_exist_but_none_is_reachable
+    expect: PASS
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"total_security_lists": 3, "internet_ingress_rules": 3, "reachable_internet_ingress_rules": 0}}'
+
+  - name: an_open_rule_is_reachable
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"total_security_lists": 3, "internet_ingress_rules": 3, "reachable_internet_ingress_rules": 1}}'
+
+  - name: summary_key_renamed
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"total_security_lists": 3, "reachable_ingress_rules": 0}}'

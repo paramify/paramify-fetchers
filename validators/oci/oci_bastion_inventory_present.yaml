@@ -1,0 +1,18 @@
+key: oci_bastion_inventory_present
+name: OCI Bastion Inventory Present
+type: AUTOMATED
+role: integrity
+statement: >
+  At least one bastion was collected. Its partners conclude from zeros — no
+  bastion open to any client IP, none unread — and zeros are equally what an
+  empty collection produces. Does NOT assert anything about posture. Fails when
+  the summary key is renamed and when the tenancy genuinely has no bastion.
+regex: '"total_bastions":\s*(?<total_bastions>[1-9][0-9]*)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-OCI-BASTION-JIT

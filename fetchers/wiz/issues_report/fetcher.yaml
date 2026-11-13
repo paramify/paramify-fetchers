@@ -1,0 +1,82 @@
+name: wiz_issues_report
+version: 0.4.0
+description: >-
+  Downloads the latest run of a Wiz Issues report as Wiz's own CSV, for a
+  Paramify CONFIGURATION assessment pipeline. Read-only: the report is created
+  and scheduled once in Wiz, and this fetcher only reads its last completed run.
+  Full export every run; no delta mode.
+category: wiz
+kind: issue_report
+
+supports_targets: false
+
+runtime:
+  type: python
+  entry: fetcher.py
+  timeout: 900
+
+output:
+  type: csv
+  path: wiz_issues_report.csv
+
+secrets:
+  - name: client_id
+    env: WIZ_CLIENT_ID
+    description: Wiz service account Client ID (Custom Integration, read:reports).
+  - name: client_secret
+    env: WIZ_CLIENT_SECRET
+    description: Wiz service account Client Secret.
+
+config_schema:
+  api_endpoint_url:
+    type: string
+    required: true
+    env: WIZ_API_ENDPOINT_URL
+    description: >-
+      Tenant GraphQL endpoint from Wiz > User menu > Tenant Info > API Endpoint
+      URL, e.g. https://api.us2.app.wiz.us/graphql (Wiz for Gov).
+  auth_url:
+    type: string
+    required: false
+    env: WIZ_AUTH_URL
+    default: https://auth.app.wiz.us/oauth/token
+    description: Token URL. Defaults to Wiz for Gov; commercial is https://auth.app.wiz.io/oauth/token.
+  report_name:
+    type: string
+    required: false
+    env: WIZ_REPORT_NAME
+    default: Paramify-Wiz-Issues
+    description: >-
+      Exact name of the Wiz Issues report to download. Create it once in Wiz
+      and schedule it to rerun (e.g. daily); its own settings decide which
+      projects and issue statuses it covers.
+  report_id:
+    type: string
+    required: false
+    env: WIZ_REPORT_ID
+    description: Download this Wiz report instead of finding one by name.
+  max_report_age_hours:
+    type: string
+    required: false
+    env: WIZ_MAX_REPORT_AGE_HOURS
+    default: "26"
+    description: >-
+      Fail if the report's last completed run is older than this. The default
+      suits a report scheduled every 24 hours.
+  min_request_interval:
+    type: string
+    required: false
+    env: WIZ_MIN_REQUEST_INTERVAL
+    default: "1.0"
+    description: Seconds between API calls. Wiz tenants share a rate limit with every other integration.
+  allow_empty:
+    type: string
+    required: false
+    env: WIZ_ALLOW_EMPTY
+    description: >-
+      "true" to accept a report with a header and no rows. Off by default: an
+      empty report processed with a cycle close resolves every open issue.
+
+issue_report:
+  assessment_type: CONFIGURATION
+  title: Wiz Issues

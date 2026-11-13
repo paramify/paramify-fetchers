@@ -27,7 +27,7 @@ _TARGET_ID="$(aws_target_id "$REGION")"
 OUTPUT_JSON="$OUTPUT_DIR/aws_vpc_network_segmentation_${_TARGET_ID}.json"
 _FETCHER_TMP_JSON="$(mktemp -t aws_vpc_network_segmentation.XXXXXX.json)"
 _FAILURE_LOG="$(mktemp -t aws_vpc_network_segmentation_fail.XXXXXX)"
-trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG"' EXIT
+trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG" "$_AWS_ERR_LOG"' EXIT
 
 log_info() { printf '%s INFO aws_vpc_network_segmentation %s\n' "$(date -u +'%Y-%m-%d %H:%M:%S')" "$*" >&2; }
 log_error() { printf '%s ERROR aws_vpc_network_segmentation %s\n' "$(date -u +'%Y-%m-%d %H:%M:%S')" "$*" >&2; }
@@ -47,6 +47,10 @@ jq -n \
   '{"metadata": {"profile": $profile, "region": $region, "datetime": $datetime, "account_id": $account_id, "arn": $arn}, "results": []}' \
   > "$OUTPUT_JSON"
 
+# Each list reaches jq on stdin, not --argjson: in a Landing Zone Accelerator
+# network account, hundreds of shared subnets or endpoints with their tags run
+# past Linux's 128 KiB argv limit, and the merge would silently not happen.
+
 # VPCs — top-level network boundaries (id, CIDR, default flag).
 vpcs=$(aws ec2 describe-vpcs \
     --query 'Vpcs[*].{VpcId:VpcId,CidrBlock:CidrBlock,IsDefault:IsDefault,State:State,Tags:Tags}' \
@@ -55,7 +59,7 @@ if [ $? -ne 0 ]; then
     echo "aws ec2 describe-vpcs failed" >> "$_FAILURE_LOG"
     log_error "Failed to describe VPCs"
 else
-    jq --argjson data "$vpcs" '.results += [{"ResourceType":"Vpcs","Items":$data}]' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
+    printf '%s' "$vpcs" | jq --slurpfile data /dev/stdin '.results += [{"ResourceType":"Vpcs","Items":$data[0]}]' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
 fi
 
 # Subnets — segmentation within a VPC (CIDR, AZ, public-IP-on-launch).
@@ -66,7 +70,7 @@ if [ $? -ne 0 ]; then
     echo "aws ec2 describe-subnets failed" >> "$_FAILURE_LOG"
     log_error "Failed to describe subnets"
 else
-    jq --argjson data "$subnets" '.results += [{"ResourceType":"Subnets","Items":$data}]' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
+    printf '%s' "$subnets" | jq --slurpfile data /dev/stdin '.results += [{"ResourceType":"Subnets","Items":$data[0]}]' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
 fi
 
 # Peering connections — cross-VPC reachability that crosses segmentation boundaries.
@@ -77,7 +81,7 @@ if [ $? -ne 0 ]; then
     echo "aws ec2 describe-vpc-peering-connections failed" >> "$_FAILURE_LOG"
     log_error "Failed to describe VPC peering connections"
 else
-    jq --argjson data "$peerings" '.results += [{"ResourceType":"VpcPeeringConnections","Items":$data}]' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
+    printf '%s' "$peerings" | jq --slurpfile data /dev/stdin '.results += [{"ResourceType":"VpcPeeringConnections","Items":$data[0]}]' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
 fi
 
 # Endpoints — private service access paths into the VPC.
@@ -88,14 +92,7 @@ if [ $? -ne 0 ]; then
     echo "aws ec2 describe-vpc-endpoints failed" >> "$_FAILURE_LOG"
     log_error "Failed to describe VPC endpoints"
 else
-    jq --argjson data "$endpoints" '.results += [{"ResourceType":"VpcEndpoints","Items":$data}]' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
+    printf '%s' "$endpoints" | jq --slurpfile data /dev/stdin '.results += [{"ResourceType":"VpcEndpoints","Items":$data[0]}]' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
 fi
 
-failure_count=$(wc -l < "$_FAILURE_LOG" 2>/dev/null | tr -d ' ')
-failure_count=${failure_count:-0}
-if [ "$failure_count" -gt 0 ]; then
-    log_error "Encountered $failure_count AWS API failures during collection"
-    exit 1
-fi
-
-log_info "Evidence saved to $OUTPUT_JSON"
+aws_finish

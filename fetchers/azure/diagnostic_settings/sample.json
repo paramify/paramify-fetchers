@@ -1,0 +1,127 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "azure_diagnostic_settings",
+  "fetcher_version": "0.1.0",
+  "source": "live",
+  "captured_on": "2026-09-09",
+  "reviewed": false,
+  "collections": [
+    {
+      "path": "results.diagnostic_settings[]",
+      "records": 1,
+      "fields": {
+        "captures_all_log_categories": 1,
+        "captures_required_log_categories": 1,
+        "destinations": 1,
+        "enabled_log_categories": 1,
+        "enabled_log_category_groups": 0,
+        "event_hub_authorization_rule_id": 0,
+        "event_hub_name": 0,
+        "id": 1,
+        "log_analytics_destination_type": 0,
+        "logs": 1,
+        "marketplace_partner_id": 0,
+        "missing_required_log_categories": 1,
+        "name": 1,
+        "service_bus_rule_id": 0,
+        "storage_account_id": 1,
+        "storage_account_name": 1,
+        "workspace_id": 0,
+        "workspace_name": 0
+      }
+    },
+    {
+      "path": "results.diagnostic_settings[].logs[]",
+      "records": 8,
+      "fields": {
+        "category": 8,
+        "category_group": 0,
+        "enabled": 8,
+        "retention_policy": 8
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "api_failures": [],
+      "datetime": "2026-09-09T16:09:25Z",
+      "environment": "test",
+      "partial_failure": false,
+      "subscription_id": "00000000-0000-4000-8000-111111111111",
+      "subscription_source": "target"
+    },
+    "results": {
+      "diagnostic_settings": [
+        {
+          "captures_all_log_categories": false,
+          "captures_required_log_categories": false,
+          "destinations": [
+            "storage_account"
+          ],
+          "enabled_log_categories": [
+            "Administrative",
+            "Alert",
+            "Security"
+          ],
+          "enabled_log_category_groups": [],
+          "event_hub_authorization_rule_id": null,
+          "event_hub_name": null,
+          "id": "/subscriptions/00000000-0000-4000-8000-111111111111/providers/microsoft.insights/diagnosticSettings/pf-activity-log-to-storage",
+          "log_analytics_destination_type": null,
+          "logs": [
+            {
+              "category": "Security",
+              "category_group": null,
+              "enabled": true,
+              "retention_policy": {
+                "days": 0,
+                "enabled": false
+              }
+            }
+          ],
+          "marketplace_partner_id": null,
+          "missing_required_log_categories": [
+            "Policy"
+          ],
+          "name": "pf-activity-log-to-storage",
+          "service_bus_rule_id": null,
+          "storage_account_id": "/subscriptions/00000000-0000-4000-8000-111111111111/resourceGroups/rg-example-example-profile/providers/Microsoft.Storage/storageAccounts/stpfpermjov5akcv",
+          "storage_account_name": "stpfpermjov5akcv",
+          "workspace_id": null,
+          "workspace_name": null
+        }
+      ],
+      "provider_registration_status": "registered",
+      "scope": "subscription"
+    },
+    "summary": {
+      "activity_log_exported": true,
+      "all_required_log_categories_covered": false,
+      "covered_required_log_categories": 3,
+      "log_category_coverage": {
+        "Administrative": true,
+        "Alert": true,
+        "Autoscale": false,
+        "Policy": false,
+        "Recommendation": false,
+        "ResourceHealth": false,
+        "Security": true,
+        "ServiceHealth": true
+      },
+      "provider_registration_status": "registered",
+      "required_log_categories": [
+        "Administrative",
+        "Security",
+        "Alert"
+      ],
+      "required_log_category_percentage": 75,
+      "settings_capturing_required_categories": 0,
+      "settings_with_event_hub": 0,
+      "settings_with_legacy_retention": 0,
+      "settings_with_log_analytics_workspace": 0,
+      "settings_with_partner_solution": 0,
+      "settings_with_storage_account": 1,
+      "total_diagnostic_settings": 1
+    }
+  }
+}

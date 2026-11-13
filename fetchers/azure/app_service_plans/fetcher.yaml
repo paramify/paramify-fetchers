@@ -1,0 +1,107 @@
+name: azure_app_service_plans
+version: 0.3.1
+description: >-
+  Shows whether each App Service plan, and the web and function apps on it, would survive losing an instance or an availability zone.
+category: azure
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_app_service_plans.json
+  aggregation: per_target
+
+config_schema:
+  resource_exclusions:
+    type: patterns
+    prefixes: [rg, location, id]
+    bare: false
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Resources outside the authorization boundary, to leave out of scope, as
+      case-insensitive glob patterns listed in the manifest, each with a
+      prefix: rg:<resource group> (read from the resource id), location:<region>
+      (the region's name without spaces, such as eastus2) or id:<resource id>
+      (also matches that resource's child resources). * matches any run of
+      characters and ? one character. A matching site (web app or function app)
+      is listed under excluded with the pattern and left out of every count and
+      verdict. A matching plan leaves scope only when no in-scope site runs on
+      it; while one does, the plan stays in the plan list and in every
+      plan-level count. A pattern without one of these
+      prefixes fails the run. Set it once under platforms.azure.config for every Azure
+      fetcher that has this field; fetchers without it ignore it. Each item is a
+      pattern, or a pattern with a reason. Empty: every resource is in
+      scope.
+
+target_schema:
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id to collect from. Optional — omit to use the first
+      enabled subscription the ambient credential can see ("collect where
+      deployed"); set one target per subscription to fan out.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: >
+      Deployment environment label (e.g. prod / preprod) written into the evidence
+      metadata. Optional — set per target for multi-subscription runs.
+
+secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
+
+ksis:
+  - KSI-CNA-OFA   # zone redundancy and instance count of the compute App Service runs on
+
+evidence_set:
+  reference_id: EVD-AZURE-APPSVC-PLANS
+  name: Azure App Service Plans
+  instructions: |
+    Script: azure/app_service_plans/fetcher.py
+
+    Access: Reader on the subscription.
+
+    Commands Executed:
+    - subscriptions.list() — picks a subscription when none is set
+    - providers.get("Microsoft.Web") — tells "App Service not in use" from "no plans"
+    - app_service_plans.list() — every plan with its SKU, instance count, zone redundancy and scaling settings
+    - web_apps.list() — every web app and function app, matched to its plan by server farm id; if it fails the plans are still reported, with no apps attached
+
+    Output: azure_app_service_plans_<subscription>.json — each plan with its tier, instance count, zone redundancy and scaling settings and the web and function apps running on it, plus the resources left out and why.
+
+    Summary fields:
+
+    Which resources are left out of scope?
+    - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
+    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no plan or site, such as a mistyped name; null when the plan list or the site list could not be read
+    - excluded_app_service_plans — Number of plans left out of scope because a pattern matched their resource group, region or id and no in-scope site runs on them; each is listed under excluded with the pattern, and no other count includes it. A matched plan that an in-scope site runs on stays in scope and in every plan count, is not listed under excluded, and its pattern counts as matched
+    - excluded_sites — Number of web apps and function apps left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern
+    - in_scope_app_service_plans — Number of plans read and in scope, matched plans that an in-scope site runs on included; 0 means none was read or the patterns took out every plan
+    - in_scope_sites — Number of web apps and function apps read and in scope; 0 when none was read or the patterns took out every site
+
+    What was checked?
+    - total_app_service_plans — Number of in-scope plans
+    - empty_plans — Number of in-scope plans with no in-scope web app or function app on them
+    - total_sites — Number of in-scope web apps and function apps running on in-scope plans; a plan's number_of_sites counts only these, where Azure's own count would include excluded sites
+    - provider_registration_status — Whether the App Service provider (Microsoft.Web) is registered on the subscription: registered, not_registered or unknown
+
+    Does each plan carry an uptime SLA?
+    - no_sla_tier_plans — Number of plans on the Free or Shared tier, which run on shared infrastructure with no uptime SLA
+
+    Does each plan survive losing an instance?
+    - multi_instance_plans — Number of plans with more than one provisioned instance, which is the instance count set on the plan's SKU
+    - single_instance_plans — Number of plans with a fixed instance count of 1 or less, or none reported, where losing that instance is an outage; platform-scaled plans are left out
+    - platform_scaled_plans — Number of plans on a tier where Azure adds and removes instances itself (Consumption, Flex Consumption or Elastic Premium), so the instance count is not a fixed number
+    - sites_on_multi_instance_plans — Number of in-scope web apps and function apps on an in-scope plan with more than one provisioned instance
+
+    Does each plan survive losing an availability zone?
+    - zone_redundant_plans — Number of plans that are zone redundant, spreading their instances across availability zones
+    - zone_redundant_percentage — Percentage of plans that are zone redundant = zone_redundant_plans / total_app_service_plans × 100 (rounded down to a whole number); 0 when total_app_service_plans is 0. Free, Shared, Basic and Standard plans cannot be zone redundant, so 100 may be impossible
+    - sites_on_zone_redundant_plans — Number of in-scope web apps and function apps on an in-scope zone-redundant plan

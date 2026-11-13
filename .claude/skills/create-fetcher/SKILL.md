@@ -1,8 +1,8 @@
 ---
 name: create-fetcher
 description: >
-  Create a new Paramify fetcher — evidence or issue report — or port an existing
-  one from another source. Use when the user wants to add a fetcher,
+  Create a new Paramify fetcher — evidence, inventory, issue report, or a comparator that
+  matches records across other fetchers' evidence — or port an existing one from another source. Use when the user wants to add a fetcher,
   integrate a new tool or data source (aws, azure, okta, gitlab, k8s, a
   vulnerability scanner, …), or scaffold a fetcher for a category. Runs a short
   interview, routes to the right kind, scaffolds to the v0.x contract, and
@@ -18,7 +18,19 @@ restate them here.
 
 The golden rules below are for an **evidence** fetcher, the default and the
 common case. Phase 0 checks whether you're actually writing an issue report,
-which has its own contract in `docs/issue_report_fetchers.md`.
+which has its own guide in `docs/issue_report_fetchers_guide.md`.
+
+**Is this a whole new platform?** If nothing under `fetchers/` covers this tool
+yet and the goal is a slate rather than one fetcher, you want
+`onboard-platform` — it researches the API, stands up a sandbox with real data
+in it, and calls this skill per fetcher with the control claim already
+established. This skill on its own is the right entry point for adding a
+fetcher to a platform that already has some.
+
+**Called from `onboard-platform`?** The claim is already on disk at
+`.onboarding/<platform>/claim.md`. Read it and start Phase 2 from that control,
+not from "what evidence" — and note that skill owns the populated-evidence gate
+this one cannot reach (Phase 4).
 
 **Golden rules**
 - One fetcher = one evidence set. Directory is `fetchers/<category>/<short_name>/`;
@@ -44,11 +56,12 @@ which has its own contract in `docs/issue_report_fetchers.md`.
    ```
 
 3. **Decide the kind.** Does the source tool already compute the findings — is
-   this a vulnerability scan, a CSPM export, a Nessus file — or is the fetcher
-   asserting a state (MFA on, buckets encrypted)?
+   this a vulnerability scan, a CSPM export, a Nessus file — is the fetcher
+   listing every asset of a kind for Paramify's Inventory, or is it asserting a
+   state (MFA on, buckets encrypted)?
    - **Tool computes findings → ISSUE REPORT.** Copy
      `fetchers/_template_issue_report/` (not `_template/`) and follow
-     `docs/issue_report_fetchers.md` for the rest of the build. Shared parts
+     `docs/issue_report_fetchers_guide.md` for the rest of the build. Shared parts
      (secrets, categories, fanout, `$FETCHER_STATUS_FILE`) still apply from
      below — and if it fans out, the output filename must carry the target
      (keep the template's `target_suffix()`): all targets share one
@@ -58,16 +71,43 @@ which has its own contract in `docs/issue_report_fetchers.md`.
      run `suggest-validator`. The Phase 4 smoke test below expects a JSON
      evidence file — skip it. The check for this kind is: after a real run, the
      file in `<run>/issue-reports/` is byte-identical to the tool's own export.
+   - **Fetcher lists assets for Inventory → INVENTORY.** Copy
+     `fetchers/_template_inventory/` (not `_template/`) and read its README
+     and `framework/schemas/inventory_schema.json`. It is an evidence fetcher with
+     `kind: inventory`, a required `evidence_set`, and a payload of `data`
+     (one record per asset, each with a unique `unique_asset_identifier`) plus
+     `records_included`. All or nothing: any failed page or unreadable asset
+     writes `data: []`, `records_included: false` and exits non-zero. Everything
+     below applies. In the Phase 4 smoke test, also check the envelope's
+     `metadata.inventory.complete` is true. Test the failure paths, not only the
+     happy one. A list of resources that backs a configuration claim (an IAM
+     role list proving least privilege) is evidence, not inventory.
+   - **The claim needs two fetchers' evidence matched record by record →
+     COMPARATOR.** A validator reads one file, so "every change in A was made by
+     a run in B" needs a comparator: it calls no API, declares the fetchers it
+     reads in `depends_on`, and writes one evidence file of verdicts. Copy
+     `comparators/_template/` to `comparators/<category>/<short_name>/` (not
+     under `fetchers/`) and follow `docs/comparators_guide.md`. Its inputs must
+     be JSON evidence fetchers that already exist. `secrets: []`, no targets,
+     and an `evidence_set`; the runner gives it no credentials. Write only a
+     `check(inputs)` returning `(results, summary)` and end with
+     `raise SystemExit(run(check, output=..., summary_keys=...))` from
+     `comparators/_lib/comparator_inputs.py`: `run()` reads the inputs (never
+     glob the run dir), writes the file and reports `input_failed` or
+     `internal_error`. Results hold verdicts, not copies of input records. The Phase 2 auth and fanout questions don't
+     apply; ask only which inputs, the join key, and the evidence set. Test the
+     policy with a missing input (summary all `null`) and a failed one (still
+     compared, exit 1), not only the happy path.
    - **Fetcher asserts a state → EVIDENCE.** Continue below.
 
    Don't ask this as a question if the tool makes it obvious; a scanner is an
-   issue report, an identity provider is evidence. Ask only when the same tool
-   could plausibly be either.
+   issue report, an identity provider is evidence, "for the Inventory" is
+   inventory. Ask only when the same tool could plausibly be more than one.
 
 4. **Decide port vs new.** Ask: "Do you already have a working script that
    collects this evidence (in another repo, a local file, etc.)?"
-   - **Yes → PORT.** Follow `docs/porting_playbook.md` step by step
-     (it has its own verify gates and anti-patterns). Stop using this file.
+   - **Yes → PORT.** Follow `docs/porting_guide.md` step by step
+     (it has its own smoke test and troubleshooting). Stop using this file.
    - **No → NET-NEW.** Continue below.
 
 ---
@@ -75,13 +115,15 @@ which has its own contract in `docs/issue_report_fetchers.md`.
 ## Phase 1 — Orient
 
 Read these before building (skim, don't summarize back):
-- `docs/authoring_a_fetcher.md` — the net-new authoring guide. This is the
-  canonical reference for the rest of this skill; lean on it, don't restate it.
+- `docs/authoring_fetcher_guide.md` — the net-new authoring guide, one worked
+  example end to end. Lean on it, don't restate it.
 - `framework/schemas/fetcher_schema.json` — the enforced schema (required:
   name, version, description, runtime, output, secrets).
-- The closest **reference fetcher** to mirror — pick from the list in
-  `docs/authoring_a_fetcher.md` §"Reference fetchers" (single vs. fanout ×
-  bash vs. Python), so the skill never drifts from the maintained set.
+- The closest **reference fetcher** to mirror: single-target Python
+  `fetchers/okta/phishing_resistant_mfa/`, single-target bash
+  `fetchers/okta/authenticators/`, fanout Python with a per-target secret
+  `fetchers/gitlab/ci_cd_pipeline_config/`, or AWS region/profile fanout in bash
+  `fetchers/aws/auto_scaling_high_availability/`.
 
 ---
 
@@ -94,7 +136,11 @@ Read these before building (skim, don't summarize back):
   (aws, az, kubectl, gcloud); **python** if it needs an SDK/REST client,
   pagination, or non-trivial parsing (okta, gitlab, rippling).
 - `description` and `evidence_set.instructions` — from the user's goal + the
-  exact API/CLI calls the fetcher will make.
+  exact API/CLI calls the fetcher will make, laid out as in
+  `docs/authoring_fetcher_guide.md` ("The `description` and `instructions` text"): a
+  one-sentence description, then plain-text instructions in a `|` block with
+  Script (`<category>/<short_name>/<entry>`), Access, Commands Executed, Output
+  and Summary fields. Paramify shows them as typed, so no markdown.
 - `category` — from the tool name.
 
 **Ask the user (batch into ONE `AskUserQuestion`, ≤3 questions):**
@@ -120,9 +166,9 @@ Read these before building (skim, don't summarize back):
 - First fetcher in a new category → Phase 3 does per-category setup.
 - A long scanner → `runtime.timeout` (default 600s).
 
-**Do NOT offer** `depends_on`/comparators (schema has it but the runner has no
-consumer yet — it won't run), or `controls`/`validation_rules`/`tags` (schema
-rejects them).
+**Do NOT offer** `depends_on` on a fetcher that calls an API — that makes it a
+comparator, which belongs under `comparators/` (Phase 0) — or
+`controls`/`validation_rules`/`tags` (schema rejects them).
 
 **Checkpoint:** print the resolved spec — name, runtime, `secrets[]`, fanout +
 `target_schema`, `evidence_set`, and how a failed run is detected — and get a
@@ -158,28 +204,49 @@ single confirmation before building.
 3. **Write `fetcher.yaml`** to the schema. Use the auth/fanout decisions from
    Phase 2. Include the `evidence_set` block.
 
-4. **Write the entry script** following `docs/authoring_a_fetcher.md`
-   §`fetcher.py` / §`fetcher.sh` (which link onward to the canonical skeleton).
+4. **Write the entry script** following `docs/authoring_fetcher_guide.md`
+   step 3 and the template's `fetcher.py` (bash: mirror
+   `fetchers/okta/authenticators/fetcher.sh`).
    Keep status output to one `logger.info`/`log_info` "Evidence saved to …"
    line on success. Mirror the reference fetcher's shape.
 
-5. **Wire failure → exit code** per `docs/authoring_a_fetcher.md` §"Detecting
-   collection failures": track collection failures, exit non-zero if any
+   **Comments are rare and one line.** A one-line module docstring saying what
+   is collected; a comment only where the code would otherwise mislead (a
+   measured platform quirk, a non-obvious guard). What each field means and how
+   it is derived goes in `evidence_set.instructions`, not a docstring.
+
+5. **Wire failure → exit code** per `docs/authoring_fetcher_guide.md`
+   step 3: track collection failures, exit non-zero if any
    occurred (Python: an `api_failures` list; bash: a temp-file counter).
 
 6. **Report the reason on the failure path** — two lines, both required, per
-   `docs/porting_playbook.md` §"Say why you failed":
+   `docs/fetcher_contract_guide.md` step 6:
    - log it at error level, **after** the "Evidence saved" line (the runner's
      fallback takes the *tail* of stderr, so an INFO line logged last wins);
-   - write `{"error": "…", "code": "…"}` to `$FETCHER_STATUS_FILE`, which is what
+   - call `report_failure "<reason>" <code>` — imported from `fetchers/_lib/`
+     (Python `from fetcher_status import report_failure`, bash
+     `source "$(dirname "$0")/../../_lib/status.sh"`), never reimplemented — which
+     writes `{"error": "…", "code": "…"}` to `$FETCHER_STATUS_FILE`. That is what
      lands in the envelope's `metadata.error` and what Paramify shows the person
      triaging the failure.
 
    Skipping this is how a failed run ends up reporting "Evidence saved to …" as
-   its error (issue #24). Do NOT rely on putting the error in the payload — the
-   runner never reads inside it.
+   its error (issue #24). The runner never reads inside your payload, so an error
+   recorded only there cannot reach `metadata.error`. Do record it there as well
+   though — `metadata.partial_failure` plus `metadata.api_failures[]` of
+   `{operation, type, message}`, that shape exactly — so the evidence file is
+   honest to whoever opens it. See `docs/fetcher_contract_guide.md` step 5.
 
 7. If bash: `chmod +x fetchers/<category>/<short_name>/fetcher.sh`.
+
+8. **Check the summary fields against the code.** If the instructions list
+   summary fields, a test in `tests/` passes a summary holding every field to the
+   `assert_summary_documented` fixture, with the fetcher's path written out:
+   `assert_summary_documented("<category>/<short_name>", summary)`. For a python
+   fetcher, take the summary from a test run of the code. The check for a bash
+   fetcher isn't defined yet; until it is, a bash fetcher's instructions leave
+   out the Summary fields section. `tests/test_contracts.py` fails a fetcher
+   with summary fields and no such call. See `docs/authoring_fetcher_guide.md`.
 
 ---
 
@@ -215,6 +282,12 @@ The skill verifies **wiring**, not data — it can't hit the user's real tenant.
    that run produces real evidence, the `suggest-validator` skill can read it and
    propose a regex validator for the field that proves the control.
 
+   A green smoke test on an **empty** payload looks identical to one on a real
+   one, which is why "exit 0" is not the bar anywhere downstream. If you were
+   called from `onboard-platform`, hand back here — that skill runs against the
+   sandbox in `sandbox.json` and gates on *populated* evidence plus a validator
+   proven to fail.
+
 5. **Wire it into a manifest.** A fetcher on disk does not run until it's in a
    manifest's `run.fetchers:`. To add it and fill in the secrets/config/targets
    it needs, use the `wire-manifest` skill (or, quickly:
@@ -224,9 +297,6 @@ The skill verifies **wiring**, not data — it can't hit the user's real tenant.
 
 ## Anti-patterns
 
-Full list in `docs/authoring_a_fetcher.md` §"What you don't need to do". The
-ones that bite most often:
-
 - Directory `<category>_<short_name>/` → use `<short_name>/` only.
 - `version: 1.0.0` → `0.1.0` for pre-contract fetchers.
 - Emitting an envelope (`metadata`+`payload`) → write a raw evidence dict; the
@@ -235,3 +305,8 @@ ones that bite most often:
 - A CLI arg parser for `--output-dir`/`--profile`/`--region` → read everything
   from env.
 - Forgetting `chmod +x` on a bash entry script.
+- A multi-paragraph docstring restating `evidence_set.instructions` → one line.
+- Importing another category's `_shared/` module → only your own `_shared/`
+  and `fetchers/_lib/`.
+- `controls`, `solution_capabilities` or `validation_rules` in `fetcher.yaml`
+  → leave them out; that mapping lives in Paramify.

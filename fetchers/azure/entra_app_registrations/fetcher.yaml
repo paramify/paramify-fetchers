@@ -1,5 +1,5 @@
 name: azure_entra_app_registrations
-version: 0.1.0
+version: 0.2.1
 description: >
   Every Microsoft Entra ID app registration with each of its client secrets and
   certificate credentials and that credential's expiry date, so credential rotation
@@ -7,7 +7,8 @@ description: >
   expired, inside the 30-day rotation window, and no expiry date at all — because a
   never-expiring credential never appears in an "expiring soon" report by
   construction. Rotation compliance is reported over credentials, excluding apps that
-  hold none.
+  hold none. Each credential also carries the lifetime it was issued for, its end
+  date minus its start date.
 category: azure
 
 supports_targets: true
@@ -20,6 +21,20 @@ output:
   type: json
   path: azure_entra_app_registrations.json
   aggregation: per_target
+
+config_schema:
+  approved_lifetime_days:
+    type: integer
+    required: false
+    default: 365
+    env: AZURE_ENTRA_APPROVED_CREDENTIAL_DAYS
+    description: >
+      A credential issued for more than this many days counts as beyond the approved
+      lifetime. A value that isn't a whole number from 1 up fails the run as
+      bad_config and 365 is used; one above 3650 is capped at 3650. 365 is a convention: FedRAMP KSI-SVC-ASM asks for regular rotation and
+      sets no number. Set it to the tenant's own rotation interval. A 29 February
+      inside a credential's span isn't counted, so a one-year credential issued across
+      one isn't flagged.
 
 target_schema:
   # Microsoft Graph data is TENANT-scoped, so the fanout unit here is the tenant,
@@ -60,7 +75,41 @@ ksis:
 evidence_set:
   reference_id: EVD-AZURE-ENTRA-APP-CREDS
   name: Microsoft Entra ID App Registration Credentials
-  instructions: >
-    Script: fetcher.py. Microsoft Graph calls: GET /applications with
-    $select=id,appId,displayName,createdDateTime,signInAudience,passwordCredentials,keyCredentials;
-    GET /organization. Paged via @odata.nextLink.
+  instructions: |
+    Script: azure/entra_app_registrations/fetcher.py
+
+    Access: Microsoft Graph Application.Read.All. Optional: Organization.Read.All; without it, the tenant's name and domain read null.
+
+    Commands Executed:
+    - Microsoft Graph GET /organization — the tenant's name and domain
+    - Microsoft Graph GET /applications (selecting id, appId, displayName, createdDateTime, signInAudience, passwordCredentials and keyCredentials, paged) — every app registration with each secret and certificate, its start and end dates and the lifetime it was issued for
+
+    Output: azure_entra_app_registrations_<tenant>.json — each app registration with its credentials: when each starts and ends, how long it was issued for, and whether it is expired, expiring soon or has no end date.
+
+    Summary fields:
+
+    What is in the tenant?
+    - total_app_registrations — Number of app registrations in the tenant; null if the applications read failed or stopped part-way
+    - apps_with_credentials — Number of app registrations holding at least one secret or certificate; null if the applications read failed or stopped part-way
+    - apps_without_credentials — Number of app registrations holding none, left out of the rotation percentage; null if the applications read failed or stopped part-way
+    - multi_tenant_apps — Number of app registrations that accept sign-in from outside this tenant; null if the applications read failed or stopped part-way
+
+    Do credentials expire and get rotated?
+    - total_credentials — Number of secrets and certificates across all app registrations; null if the applications read failed or stopped part-way
+    - password_credentials — Number of those that are client secrets; null if the applications read failed or stopped part-way
+    - certificate_credentials — Number of those that are certificates; null if the applications read failed or stopped part-way
+    - expired_credentials — Number of credentials whose end date has passed; null if the applications read failed or stopped part-way
+    - credentials_expiring_soon — Number of credentials that expire within rotation_threshold_days days and haven't expired; null if the applications read failed or stopped part-way
+    - credentials_without_expiry — Number of credentials with no end date; null if the applications read failed or stopped part-way
+    - healthy_credentials — Number of credentials that have an end date, haven't expired and don't expire within rotation_threshold_days days; null if the applications read failed or stopped part-way
+    - rotation_threshold_days — Days before expiry at which a credential counts as expiring soon (30)
+    - credential_rotation_compliance_percentage — Percentage of credentials that are healthy; 0 when there are none; null if the applications read failed or stopped part-way
+    - apps_with_expired_credentials — Number of app registrations holding an expired credential; null if the applications read failed or stopped part-way
+    - apps_with_credentials_expiring_soon — Number of app registrations holding a credential expiring soon; null if the applications read failed or stopped part-way
+    - apps_with_credentials_without_expiry — Number of app registrations holding a credential with no end date; null if the applications read failed or stopped part-way
+    - apps_with_all_credentials_healthy — Number of app registrations whose credentials are all healthy; null if the applications read failed or stopped part-way
+
+    How long were credentials issued for?
+    - credentials_issued_beyond_approved_lifetime — Number of secrets and certificates issued for more than approved_lifetime_days days, not counting any 29 February in the span; a credential with a start date and no end date counts, because it never expires; null if the applications read failed or stopped part-way, or if any credential has no start date or ends before it starts, because the count could be short
+    - credentials_without_lifetime — Number of credentials whose issued lifetime can't be computed: no start date, no end date, or an end before the start; null if the applications read failed or stopped part-way
+    - approved_lifetime_days — Number of days a credential can be issued for and still count as within the approved interval (365 unless configured, at most 3650; 365 is a convention, as FedRAMP KSI-SVC-ASM asks for regular rotation and sets no number)

@@ -19,6 +19,10 @@ from typing import Any, Dict, List, Optional
 import requests
 from dotenv import load_dotenv
 
+SCRIPT_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(SCRIPT_DIR.parents[1] / "_lib"))
+from fetcher_status import report_failure  # noqa: E402
+
 logger = logging.getLogger("rippling_all_employees")
 
 
@@ -96,7 +100,7 @@ def main() -> int:
     try:
         token = get_env("RIPPLING_API_TOKEN")
     except RuntimeError as e:
-        logger.error("%s", e)
+        report_failure(str(e), "bad_config")
         return 1
 
     base_url = os.environ.get("RIPPLING_BASE_URL", "https://api.rippling.com").rstrip("/")
@@ -127,7 +131,16 @@ def main() -> int:
     logger.info("Evidence saved to %s", output_path)
 
     if api_failures:
-        logger.error("Encountered %d API failures during collection", len(api_failures))
+        detail = "; ".join(
+            f"offset {f.get('offset')}: {f.get('type')}: {f.get('message')}"
+            for f in api_failures[:3]
+        )
+        report_failure(
+            f"{len(api_failures)} Rippling API failure(s) collecting all "
+            f"employees (including terminated) from {result['endpoint']}; "
+            f"pagination stopped with {len(employees)} record(s) collected: {detail}",
+            "partial_failure",
+        )
         return 1
     return 0
 

@@ -25,4 +25,4 @@ ksis:
 evidence_set:
   reference_id: EVD-S1-XDR-ASSET
   name: SentinelOne XDR Assets
-  instructions: 'Script: xdrassetfetcher.py. Calls the SentinelOne API endpoint /web/api/v2.1/xdr/assets, supports cursor pagination, summarizes infectionStatus and assetStatus, writes JSON and CSV summary.'
+  instructions: 'Script: sentinelone/xdr_assets/fetcher.py. Calls the SentinelOne API endpoint /web/api/v2.1/xdr/assets, supports cursor pagination, summarizes infectionStatus and assetStatus, writes JSON and CSV summary.'

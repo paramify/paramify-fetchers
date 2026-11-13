@@ -1,0 +1,131 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "azure_key_vault_configuration",
+  "fetcher_version": "0.1.0",
+  "source": "live",
+  "captured_on": "2026-09-09",
+  "reviewed": false,
+  "collections": [
+    {
+      "path": "results.key_vaults[]",
+      "records": 2,
+      "fields": {
+        "access_model": 2,
+        "access_policies": 2,
+        "access_policy_count": 2,
+        "enabled_for_deployment": 2,
+        "enabled_for_disk_encryption": 2,
+        "enabled_for_template_deployment": 2,
+        "id": 2,
+        "location": 2,
+        "name": 2,
+        "network_acl_default_deny": 2,
+        "network_acls": 2,
+        "private_endpoint_connections": 0,
+        "provisioning_state": 2,
+        "public_network_access": 2,
+        "public_network_access_disabled": 2,
+        "purge_protection_enabled": 2,
+        "rbac_authorization_enabled": 2,
+        "recoverable": 2,
+        "resource_group": 2,
+        "sku": 2,
+        "soft_delete_enabled": 2,
+        "soft_delete_retention_in_days": 2,
+        "tenant_id": 2,
+        "vault_uri": 2
+      }
+    },
+    {
+      "path": "results.key_vaults[].access_policies[]",
+      "records": 5,
+      "fields": {
+        "application_id": 0,
+        "object_id": 5,
+        "permissions": 5,
+        "tenant_id": 5
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "api_failures": [],
+      "datetime": "2026-09-09T16:09:55Z",
+      "environment": "test",
+      "partial_failure": false,
+      "subscription_id": "00000000-0000-4000-8000-111111111111",
+      "subscription_source": "target"
+    },
+    "results": {
+      "key_vaults": [
+        {
+          "access_model": "access_policy",
+          "access_policies": [
+            {
+              "application_id": null,
+              "object_id": "00000000-0000-4000-8000-222222222222",
+              "permissions": {
+                "certificates": [],
+                "keys": [
+                  "Create",
+                  "Get",
+                  "List"
+                ],
+                "secrets": [],
+                "storage": []
+              },
+              "tenant_id": "00000000-0000-4000-8000-333333333333"
+            }
+          ],
+          "access_policy_count": 3,
+          "enabled_for_deployment": false,
+          "enabled_for_disk_encryption": false,
+          "enabled_for_template_deployment": false,
+          "id": "/subscriptions/00000000-0000-4000-8000-111111111111/resourceGroups/rg-example-example-profile/providers/Microsoft.KeyVault/vaults/kv-pf-jov5akcv",
+          "location": "eastus",
+          "name": "kv-pf-jov5akcv",
+          "network_acl_default_deny": false,
+          "network_acls": {
+            "bypass": "AzureServices",
+            "default_action": "Allow",
+            "ip_rules": [],
+            "virtual_network_rules": []
+          },
+          "private_endpoint_connections": [],
+          "provisioning_state": "Succeeded",
+          "public_network_access": "Enabled",
+          "public_network_access_disabled": false,
+          "purge_protection_enabled": true,
+          "rbac_authorization_enabled": false,
+          "recoverable": true,
+          "resource_group": "rg-example-example-profile",
+          "sku": {
+            "family": "A",
+            "name": "standard"
+          },
+          "soft_delete_enabled": true,
+          "soft_delete_retention_in_days": 7,
+          "tenant_id": "00000000-0000-4000-8000-333333333333",
+          "vault_uri": "https://kv-pf-jov5akcv.vault.azure.net/"
+        }
+      ],
+      "provider_registration_status": "registered"
+    },
+    "summary": {
+      "access_policy_vaults": 2,
+      "network_acl_default_deny_vaults": 0,
+      "premium_sku_vaults": 0,
+      "private_endpoint_vaults": 0,
+      "provider_registration_status": "registered",
+      "public_network_access_disabled_vaults": 0,
+      "purge_protection_vaults": 2,
+      "rbac_authorization_percentage": 0,
+      "rbac_authorization_vaults": 0,
+      "recoverable_percentage": 100,
+      "recoverable_vaults": 2,
+      "soft_delete_vaults": 2,
+      "total_access_policies": 5,
+      "total_key_vaults": 2
+    }
+  }
+}

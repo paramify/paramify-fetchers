@@ -1,6 +1,8 @@
 # Default Skip Checks for Kubernetes - Checks that commonly fail
 # This file contains Kubernetes checks that are often too strict or not applicable.
 # Users add more via CHECKOV_SKIP_CHECKS (config); the two lists are merged.
+# Set use_default_skip_checks: false (CHECKOV_USE_DEFAULT_SKIP_CHECKS) to ignore
+# this file. The effective list is recorded in the evidence (metadata.skip_checks).
 # Format: one Checkov check ID per line. Lines starting with # are comments.
 
 # Reference for the entries below:

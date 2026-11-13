@@ -1,0 +1,25 @@
+key: oci_no_buckets_reachable_by_par
+name: OCI No Buckets Reachable By Pre-Authenticated Request
+type: AUTOMATED
+role: configuration
+statement: >
+  No bucket whose access type says NoPublicAccess is nonetheless reachable
+  through a live pre-authenticated request — a URL that grants object access to
+  whoever holds it, with no OCI identity involved. This is the exposure a
+  public-access check cannot see, and Prowler's bucket checks do not look at
+  PARs at all. Does NOT assert anything about expired PARs (they grant nothing
+  and are excluded), nor about who holds a live URL, which OCI does not report.
+  Fails when a private bucket carries a live PAR, and when the summary key is
+  renamed.
+regex: '"buckets_private_but_reachable_by_par":\s*(?<buckets_private_but_reachable_by_par>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-OCI-OBJECT-STORAGE-BUCKETS

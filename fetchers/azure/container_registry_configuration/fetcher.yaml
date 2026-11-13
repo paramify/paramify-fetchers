@@ -1,16 +1,30 @@
 name: azure_container_registry_configuration
-version: 0.1.0
-description: >
-  For every container registry in the subscription, reports who can reach it and who
-  can pull from it: the SKU and login server, whether the shared admin account is
-  enabled (a standing finding — it bypasses Entra ID, so pulls and pushes through it
-  are not attributable), whether anonymous pull is on, public network access with the
-  network rule set's default action and IP allow-list, the private endpoint
-  connections and their approval state, customer-managed-key encryption and zone
-  redundancy, the content-trust / quarantine / retention / export / ARM-audience
-  policies, and the diagnostic settings that ship the registry's login and repository
-  audit logs.
+version: 0.2.1
+description: >-
+  Shows whether each container registry blocks the shared admin account and anonymous pulls, is reachable only privately, and sends its audit logs somewhere.
 category: azure
+
+config_schema:
+  resource_exclusions:
+    type: patterns
+    prefixes: [rg, location, id]
+    bare: false
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Resources outside the authorization boundary, to leave out of scope,
+      as case-insensitive glob patterns listed in the manifest, each with
+      a prefix: rg:<resource group> (read from the resource id),
+      location:<region> (the region's name without spaces, such as
+      eastus2; a resource with no location never matches one) or
+      id:<resource id> (also matches that resource's child resources). *
+      matches any run of characters and ? one character. A matching
+      container registry is listed under excluded with the pattern and
+      left out of every count and verdict; its diagnostic settings are not
+      read. A pattern without one of these prefixes fails the run. Set it
+      once under platforms.azure.config for every Azure fetcher that has
+      this field; fetchers without it ignore it. Each item is a pattern, or a pattern with a reason. Empty: every resource is
+      in scope.
 
 supports_targets: true
 
@@ -54,8 +68,50 @@ ksis:
 evidence_set:
   reference_id: EVD-AZURE-ACR-CONFIG
   name: Azure Container Registry Configuration
-  instructions: >
-    Script: fetcher.py. Azure SDK calls: azure-mgmt-containerregistry
-    ContainerRegistryManagementClient.registries.list(), then azure-mgmt-monitor
-    MonitorManagementClient.diagnostic_settings.list(resource_uri) per registry,
-    preceded by ResourceManagementClient.providers.get("Microsoft.ContainerRegistry").
+  instructions: |
+    Script: azure/container_registry_configuration/fetcher.py
+
+    Access: Reader on the subscription.
+
+    Commands Executed:
+    - subscriptions.list() — picks a subscription when none is set
+    - providers.get("Microsoft.ContainerRegistry") — tells "Container Registry not in use" from "no registries"
+    - registries.list() — every registry with its sign-in, network, encryption and image policy settings
+    - diagnostic_settings.list() (per registry) — where the registry sends its login and repository audit logs
+
+    Output: azure_container_registry_configuration_<subscription>.json — each registry's admin account and anonymous pull settings, network access and private endpoint connections, encryption, content trust, quarantine, retention, export and ARM audience policies and diagnostic settings, plus the registries left out and why.
+
+    Summary fields:
+
+    Which resources are left out of scope?
+    - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
+    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no registry, such as a mistyped name; null when the registry list could not be read
+    - excluded_registries — Number of registries left out of scope because a pattern matched; each is listed under excluded with the pattern, and no other count includes it; null when the registry list could not be read
+    - in_scope_registries — Number of registries read and in scope; 0 means there are none or the patterns took out every registry; null when the registry list could not be read
+
+    What was checked?
+    - total_registries — Number of in-scope container registries
+    - premium_sku_registries — Number of registries on the Premium tier, the only tier that supports private endpoints, network rules, customer-managed keys and content trust
+    - provider_registration_status — Whether the Container Registry provider (Microsoft.ContainerRegistry) is registered on the subscription: registered, not_registered or unknown
+
+    Who can pull and push images?
+    - admin_user_enabled_registries — Number of registries with the shared admin account enabled, which is one user name and password that bypasses Entra ID, so pulls and pushes through it cannot be traced to a person
+    - admin_user_disabled_percentage — Percentage of registries with the admin account disabled = (total_registries - admin_user_enabled_registries) / total_registries × 100 (rounded down to a whole number); 0 when total_registries is 0
+    - anonymous_pull_enabled_registries — Number of registries that let anyone pull images without signing in
+
+    Is each registry reachable only privately?
+    - public_network_access_registries — Number of registries whose public network access is not Disabled, which includes Enabled and not returned, since Azure treats that as Enabled
+    - private_network_access_registries — Number of registries whose public network access is Disabled
+    - private_network_access_percentage — Percentage of registries with public network access Disabled = private_network_access_registries / total_registries × 100 (rounded down to a whole number); 0 when total_registries is 0. Only Premium registries can turn public access off, so 100 may be impossible
+    - network_rules_default_deny_registries — Number of registries whose network rules deny by default, so only the listed IP ranges can reach the public endpoint
+    - private_link_registries — Number of registries with at least one private endpoint connection in any approval state, pending and rejected included
+
+    Are images and stored data protected?
+    - customer_managed_key_registries — Number of registries encrypted with a customer-managed key
+    - content_trust_registries — Number of registries with the content trust policy enabled, so signed images can be required
+    - quarantine_policy_registries — Number of registries with the quarantine policy enabled, which holds new images back until a scanner marks them safe
+    - retention_policy_registries — Number of registries with a retention policy enabled, which deletes untagged manifests after a set number of days
+
+    Are registry audit logs kept?
+    - registries_with_diagnostic_settings — Number of registries with at least one diagnostic setting
+    - registries_with_enabled_logs — Number of registries with at least one diagnostic setting that turns a log category on, such as login or repository events; a setting with every category off does not count

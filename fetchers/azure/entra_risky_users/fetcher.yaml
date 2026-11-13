@@ -1,0 +1,95 @@
+name: azure_entra_risky_users
+version: 0.3.0
+description: >-
+  Shows which users Entra ID Protection flags as risky, which privileged ones still have open risk and can sign in, and each open or high risk's history and alerts.
+category: azure
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_entra_risky_users.json
+  aggregation: per_target
+
+target_schema:
+  # Microsoft Graph data is tenant-scoped: one target per Entra tenant.
+  tenant_id:
+    type: string
+    required: false
+    env: AZURE_TENANT_ID
+    description: >
+      Entra tenant id to collect from, and the output filename's discriminator.
+      Optional — omit to use the tenant the credential authenticates into. When
+      set, a credential that lands in a different tenant fails the run.
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Optional and not used to scope collection. With an Azure CLI login it picks
+      the account that holds this subscription, and it is recorded for correlation.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: Deployment environment label (e.g. prod) written into the evidence metadata.
+
+secrets: []          # DefaultAzureCredential only — see _categories/azure.yaml
+
+ksis:
+  - KSI-IAM-SUS      # Responding to suspicious activity — risky accounts remediated or disabled
+
+evidence_set:
+  reference_id: EVD-AZURE-ENTRA-RISKY-USERS
+  name: Azure Entra ID Risky Users
+  instructions: |
+    Script: azure/entra_risky_users/fetcher.py
+
+    Access: Microsoft Graph IdentityRiskyUser.Read.All, SecurityAlert.Read.All and RoleManagement.Read.Directory (or Directory.Read.All), on a tenant with Entra ID P2. Without SecurityAlert.Read.All the run fails as not_authorized, and the risky users and their history are still written. Optional: User.Read.All (or Directory.Read.All); without it, account_enabled reads null and the account counts as enabled.
+
+    Commands Executed:
+    - Microsoft Graph GET /identityProtection/riskyUsers — every user Identity Protection has flagged, with risk level, state and last update
+    - Microsoft Graph GET /identityProtection/riskyUsers/{id}/history (per user at open or high risk) — each change to the user's risk, what caused it and who initiated it
+    - Microsoft Graph GET /security/alerts_v2 filtered to serviceSource azureAdIdentityProtection — the Entra ID Protection alerts, matched to users by the object id or sign-in name in their user evidence and kept for a user only when raised since the user's current risk began
+    - Microsoft Graph GET /directoryRoles — the activated directory roles
+    - Microsoft Graph GET /directoryRoles/{id}/members and its microsoft.graph.servicePrincipal and microsoft.graph.group casts (per role) — who holds each role directly; the casts return the service principals the v1.0 list leaves out, and the role-assignable groups
+    - Microsoft Graph GET /users/{id} (per privileged user with open risk) — whether the account is enabled
+
+    Output: azure_entra_risky_users_<tenant>.json — each risky user with risk level, state, detail and last update and the directory roles it holds; for users at open or high risk, their risk history, the last time their risk was closed and the Identity Protection alerts raised on their current risk (null when the history couldn't be read); plus the groups that hold a privileged role.
+
+    Summary fields:
+
+    Is Identity Protection on?
+    - identity_protection_available — True if the risky users list was read; false if Graph refused it with a 403 whose message mentions licensing, read as a tenant without Entra ID P2, and then no other summary field is written
+
+    Which users are at risk?
+    - risky_users_total — Number of users Identity Protection lists as risky, in any risk state
+    - by_risk_state — Number of risky users for each risk state; a state no user is in is left out:
+      - atRisk (open risk, not yet handled)
+      - confirmedCompromised (open risk, confirmed by an admin)
+      - remediated (closed, for example by a password reset)
+      - dismissed (closed by an admin)
+      - confirmedSafe (closed, confirmed safe by an admin)
+      - unknown (no risk state returned)
+    - open_risk_users — Number of users with open risk: risk state atRisk or confirmedCompromised
+    - open_high_risk_users — Number of users with open risk whose risk level is high
+    - oldest_open_risk_days — Days since the least recently updated open risk was last updated (riskLastUpdatedDateTime). That time moves whenever the risk is updated, so this is not how long the risk has been open; null when no user has open risk
+
+    Do privileged users have open risk?
+    - privileged_principals — Number of users, groups and apps that hold a privileged directory role directly; privileged means one of the tenant-wide admin roles in the shared list in _shared/entra_graph.py (Global Administrator, Privileged Role Administrator, Security Administrator and others), matched by name, and Global Administrator by template id too; PIM-eligible roles aren't read; null when the roles couldn't be read
+    - privileged_role_groups — Number of role-assignable groups that hold a privileged directory role; their members hold the role too but aren't read, as that would need GroupMember.Read.All; null when the roles couldn't be read
+    - privileged_open_risk_users — Number of users with open risk who hold a privileged directory role directly; members of privileged_role_groups aren't counted, so a 0 here shows no privileged user has open risk only when privileged_role_groups is also 0; users eligible for a privileged role through PIM aren't counted either; null when the roles couldn't be read
+    - privileged_open_risk_users_enabled — Number of users counted in privileged_open_risk_users whose account is enabled, so they can still sign in; an account whose state couldn't be read counts as enabled; null when the roles couldn't be read
+
+    Is each open or high risk followed up?
+    - open_or_high_risk_users — Number of followed-up users: users with open risk, or whose risk level is high in any state; these are the users whose risk history and alerts are read
+    - risk_histories_read — Number of followed-up users whose risk history was read; a failed read leaves that user's history and alerts null and fails the run
+    - identity_protection_alerts — Number of Entra ID Protection alerts in the tenant (security alerts whose service source is azureAdIdentityProtection); null when the alerts couldn't be read
+    - alerts_for_open_or_high_risk_users — Number of Identity Protection alerts on a followed-up user's current risk, each alert counted once, resolved ones included. An alert is on the current risk when its user evidence names the user, by object id or sign-in name, and it was created at or after the start of that risk: the first risk history entry after the last closed one, or the oldest entry when the risk was never closed; for a risk that is closed now, the start of the risk that closed; for a risk open again whose history ends closed, the time it closed. Null when the alerts, or a followed-up user's risk history, couldn't be read
+    - open_high_risk_users_without_alert — Number of users with open risk and a high risk level with no alert on their current risk, as counted in alerts_for_open_or_high_risk_users; an alert from an earlier risk doesn't count, a resolved one does; null when the alerts, or the risk history of one of these users, couldn't be read
+    - alerts_without_owner — Number of alerts counted in alerts_for_open_or_high_risk_users whose status isn't resolved and that nobody is assigned to (assigning the Defender XDR incident gives its alerts the same owner); resolved alerts aren't counted, as they need no owner; null when alerts_for_open_or_high_risk_users is null
+    - alerts_without_incident — Number of alerts counted in alerts_for_open_or_high_risk_users whose status isn't resolved and that have no Defender XDR incident id (the id a Sentinel incident records as its provider incident id); resolved alerts aren't counted; null when alerts_for_open_or_high_risk_users is null

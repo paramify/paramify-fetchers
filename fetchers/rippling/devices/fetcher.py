@@ -20,6 +20,10 @@ from typing import Any, Dict, List, Optional, Tuple
 import requests
 from dotenv import load_dotenv
 
+SCRIPT_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(SCRIPT_DIR.parents[1] / "_lib"))
+from fetcher_status import report_failure  # noqa: E402
+
 logger = logging.getLogger("rippling_devices")
 
 
@@ -141,7 +145,7 @@ def main() -> int:
     try:
         token = get_env("RIPPLING_API_TOKEN")
     except RuntimeError as e:
-        logger.error("%s", e)
+        report_failure(str(e), "bad_config")
         return 1
 
     base_url = os.environ.get("RIPPLING_BASE_URL", "https://api.rippling.com").rstrip("/")
@@ -167,7 +171,21 @@ def main() -> int:
     logger.info("Evidence saved to %s", output_path)
 
     if api_failures or endpoint is None:
-        logger.error("Device collection failed (api_failures=%d, endpoint=%s)", len(api_failures), endpoint)
+        detail = "; ".join(
+            f"{f.get('endpoint')}: {f.get('type')}: {f.get('message')}"
+            for f in api_failures[:3]
+        )
+        report_failure(
+            (
+                f"{len(api_failures)} Rippling API failure(s) collecting devices; "
+                f"{len(devices)} record(s) collected: {detail}"
+            ) if api_failures else (
+                "No Rippling device endpoint responded: "
+                f"{' and '.join(DEVICE_ENDPOINTS)} both returned HTTP 404, so the "
+                "Rippling MDM add-on is likely not enabled on this account"
+            ),
+            "partial_failure" if api_failures else "bad_config",
+        )
         return 1
     return 0
 

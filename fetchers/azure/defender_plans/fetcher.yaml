@@ -1,15 +1,7 @@
 name: azure_defender_plans
-version: 0.1.0
-description: >
-  Every Microsoft Defender for Cloud pricing plan on the subscription (Servers,
-  Storage Accounts, Containers, SQL, Key Vault, App Services, …) with its pricing
-  tier, remaining free trial, and which per-plan extensions (agentless VM scanning,
-  vulnerability assessment, file integrity monitoring, …) are enabled — the
-  evidence that vulnerability detection and host/container hardening are switched
-  on, not merely available. A subscription that never registered the
-  Microsoft.Security resource provider reports
-  provider_registration_status: not_registered, which is valid evidence ("not in
-  use") rather than a collection failure.
+version: 0.3.0
+description: >-
+  Shows which Defender for Cloud plans are switched on for the subscription, how much of it each covers, which extensions run, and who Defender for Cloud notifies.
 category: azure
 
 supports_targets: true
@@ -44,11 +36,58 @@ secrets: []          # DefaultAzureCredential only — no handed-over secret (se
 ksis:
   - KSI-CNA-EIS      # Automated services persistently assess resource security — which Defender plans are enabled
   - KSI-SVC-EIS      # Evaluate and improve security — the per-plan vulnerability-scanning extensions
+  - KSI-MLA-RVL      # Security contacts: whether Defender alerts are routed to a person (same reading as alert_rules)
 
 evidence_set:
   reference_id: EVD-AZURE-DEFENDER
   name: Microsoft Defender for Cloud Plans
-  instructions: >
-    Script: fetcher.py. Azure SDK call (azure-mgmt-security SecurityCenter):
-    pricings.list(scope_id="subscriptions/<subscription_id>") for every Defender for
-    Cloud plan.
+  instructions: |
+    Script: azure/defender_plans/fetcher.py
+
+    Access: Reader or Security Reader on the subscription.
+
+    Commands Executed:
+    - subscriptions.list() — picks a subscription when none is set
+    - pricings.list() on the subscription — every Defender plan with its tier, sub-plan, enablement time, remaining free trial, coverage, enforcement, deprecation, inheritance and extensions; a "not registered" answer means Defender for Cloud is not in use; any other error fails the run
+    - GET /subscriptions/<subscription>/providers/Microsoft.Security/securityContacts — the Defender for Cloud security contacts (a bare list or a page, followed to the end); a "not registered" answer reads as no contacts, and any other error fails the run and leaves the contacts unread
+
+    Output: azure_defender_plans_<subscription>.json — each Defender for Cloud plan with its tier, sub-plan, when it was switched on (when Azure reports it), coverage, enforcement, deprecation, inheritance and enabled extensions, plus each security contact's notification addresses, phone-number flag, alert settings and role notifications. The fetcher makes no judgement about which plans a system needs.
+
+    Summary fields:
+
+    What was checked?
+    - provider_registration_status — Whether Defender for Cloud's provider (Microsoft.Security) is registered on the subscription: registered, not_registered (Defender for Cloud is not in use, so no plans are listed) or unknown (the read failed)
+    - total_plans — Number of Defender plans Azure lists for the subscription, deprecated plans included
+
+    Which plans are switched on?
+    - standard_tier_plans — Number of plans on the Standard tier. A plan counts as enabled only on Standard, the paid tier that protects resources; Free is the default tier and protects nothing
+    - free_tier_plans — Number of plans not on the Standard tier, deprecated plans included
+    - standard_tier_percentage — Percentage of plans that are enabled = standard_tier_plans / total_plans × 100 (a whole number, 0–100); 0 when total_plans is 0. Deprecated plans count in the total, and few systems need every plan, so 100 is not expected
+    - enabled_plans — List of the names of the enabled (Standard) plans
+    - plans_not_enabled — List of the names of the plans not on Standard, deprecated plans left out. The fetcher doesn't judge which plans a system needs: VirtualMachines (Defender for Servers) is expected here on a system with no virtual machines
+    - enabled_plan_sub_plans — For each enabled plan, its sub-plan (for example P1 or P2 for VirtualMachines, DefenderForStorageV2 for StorageAccounts, PerKeyVault for KeyVaults); null for a plan that has no sub-plan
+    - enabled_plan_enablement_times — For each enabled plan, the time (UTC) it was last switched to Standard; null when Azure doesn't report it, which can happen for every plan, so every value can be null. Don't build a validator on it
+
+    Which extra protections are switched on?
+    - plans_with_enabled_extensions — Number of plans, on any tier, with at least one extension switched on (for example agentless VM scanning, malware scanning on upload, or container registry vulnerability assessment)
+    - total_enabled_extensions — Number of extensions switched on across all plans
+
+    Does each enabled plan cover the whole subscription?
+    - enabled_plans_not_fully_covered — For each enabled plan whose coverage status isn't FullyCovered, that status: PartiallyCovered (some resources have their own setting that switches the plan off), NotCovered (no resource is covered) or unknown (Azure gave the plan no coverage status, so it isn't counted as covered)
+    - enforced_plans — List of the names of the plans set to enforce, which stops a resource from overriding the subscription's setting
+
+    Are any plans out of date?
+    - deprecated_plans — List of the names of the plans Azure marks as deprecated, on any tier
+    - deprecated_plans_enabled — For each deprecated plan still on Standard, the list of plans that replace it
+
+    Is any plan's setting inherited?
+    - plans_reporting_inheritance — Number of plans for which Azure says whether the setting is inherited. Azure documents this for resource-level settings only, so on a subscription it is usually 0, and the two lists below are then empty because nothing was reported, not because nothing is inherited
+    - inherited_plans — List of the names of the plans whose setting is inherited from a parent scope
+    - plans_inherited_from_management_group — List of the names of the inherited plans whose parent scope is a management group
+
+    Who does Defender for Cloud notify?
+    - security_contacts — Number of security contacts; 0 when there are none or Microsoft.Security is not registered; null if the contacts could not be read
+    - security_contacts_with_alert_notifications_on — Number of security contacts whose alert notifications are on; null if the contacts could not be read
+    - security_contacts_with_role_notifications_on — Number of security contacts that notify subscription roles such as Owner; null if the contacts could not be read
+    - security_contact_emails — Number of distinct notification addresses, counted within each contact and added up across contacts; null if the contacts could not be read
+    - alert_notification_minimal_severities — List of the distinct minimal alert severities the contacts set; null if the contacts could not be read

@@ -15,6 +15,7 @@ from contextlib import asynccontextmanager
 from datetime import date, datetime
 from enum import Enum
 from typing import Any, Awaitable, Callable, Dict, List, Optional
+from urllib.parse import urlsplit
 from uuid import UUID
 
 _LOGGER = logging.getLogger("entra_graph")
@@ -114,6 +115,195 @@ def graph_list(model: Any, name: str) -> List[Any]:
 
 
 # --------------------------------------------------------------------------- #
+# Privileged directory roles
+# --------------------------------------------------------------------------- #
+#
+# Shared so that azure_entra_privileged_roles (who holds these roles) and
+# azure_entra_mfa_status (whether those holders can MFA) agree on what an admin is.
+
+# The role Prowler's entra_global_admin_in_less_than_five_users check counts.
+GLOBAL_ADMINISTRATOR = "Global Administrator"
+
+# A SECOND way to recognize that role, never the only one — `is_privileged_role`
+# matches the display name first, so a wrong constant here cannot drop the role from
+# the counts.
+#
+# Provenance: this GUID has no upstream ancestor. Prowler's config.py carries the ARM
+# *RBAC* role GUIDs (reused verbatim by rbac_role_assignments) but no Entra *directory*
+# role template ids; the two are different id spaces, and Prowler's directory-role code
+# matches on the display name, as this does.
+GLOBAL_ADMINISTRATOR_TEMPLATE_ID = "62e90394-69f5-4237-9190-012177145e10"
+
+# Entra built-in directory roles that grant tenant-wide administrative power: each can
+# take over identities, grant itself more access, or alter the controls protecting the
+# tenant.
+#
+# Matched on display name because that is the stable documented identifier Graph
+# returns for a built-in role (v1.0 does not localize these), and is what Prowler
+# matches on. Each record also carries `role_template_id` verbatim, so a validator can
+# pin the GUID without this list asserting one.
+PRIVILEGED_ROLE_NAMES = frozenset(
+    {
+        # --- full tenant control ---
+        GLOBAL_ADMINISTRATOR,
+        "Privileged Role Administrator",       # can grant any role, including GA
+        "Privileged Authentication Administrator",  # can reset a GA's credentials
+        # --- identity takeover ---
+        "Authentication Administrator",
+        "User Administrator",
+        "Helpdesk Administrator",
+        "Password Administrator",
+        "Directory Writers",
+        # --- can grant itself access via an app or a federated identity ---
+        "Application Administrator",
+        "Cloud Application Administrator",
+        "Hybrid Identity Administrator",
+        "Domain Name Administrator",
+        "External Identity Provider Administrator",
+        # --- controls the controls ---
+        "Conditional Access Administrator",
+        "Security Administrator",
+        "Compliance Administrator",
+        "Intune Administrator",
+        # --- workload-wide data access ---
+        "Exchange Administrator",
+        "SharePoint Administrator",
+        "Teams Administrator",
+        # --- reads everything (no write, but full-tenant disclosure) ---
+        "Global Reader",
+        "Security Reader",
+        # --- commercial control of the tenant ---
+        "Billing Administrator",
+        "Partner Tier2 Support",
+    }
+)
+
+
+def is_privileged_role(role: dict) -> bool:
+    """Whether this directory role grants tenant-wide administrative power.
+
+    Name first, template id second. The redundancy is deliberate: Global Administrator
+    stays recognized even if it ever came back under a different display name.
+    """
+    if (role.get("display_name") or "") in PRIVILEGED_ROLE_NAMES:
+        return True
+    return str(role.get("role_template_id") or "").lower() == GLOBAL_ADMINISTRATOR_TEMPLATE_ID
+
+
+# userRegistrationDetails.methodsRegistered values that are phishing-resistant, synced and device-bound passkeys alike (lowercase; compare with .lower()).
+PHISHING_RESISTANT_METHODS = frozenset({
+    "fido2securitykey", "windowshelloforbusiness", "passkeydevicebound", "passkeydeviceboundauthenticator",
+    "passkeydeviceboundwindowshello", "passkeysynced", "macossecureenclavekey",
+})
+
+
+# --------------------------------------------------------------------------- #
+# Privileged Microsoft Graph permissions
+# --------------------------------------------------------------------------- #
+# Shared so that azure_entra_service_principals and azure_managed_identity_configuration
+# flag the same app role or delegated scope as privileged.
+
+MICROSOFT_GRAPH_APP_ID = "00000003-0000-0000-c000-000000000000"
+# An app role assignment with this appRoleId grants access to the resource but no named role.
+DEFAULT_ACCESS_ROLE_ID = "00000000-0000-0000-0000-000000000000"
+
+# Graph permissions, application or delegated, that let the holder grant itself more access,
+# take over users' sign-in, or change the controls that protect the tenant.
+PRIVILEGED_GRAPH_PERMISSIONS = frozenset(
+    {
+        # --- can grant itself or anyone any role or permission ---
+        "RoleManagement.ReadWrite.Directory",
+        "RoleManagement.ReadWrite.Exchange",
+        "AppRoleAssignment.ReadWrite.All",
+        "Application.ReadWrite.All",
+        "Application.ReadWrite.OwnedBy",
+        "DelegatedPermissionGrant.ReadWrite.All",
+        "Directory.ReadWrite.All",
+        "Directory.AccessAsUser.All",
+        "RoleAssignmentSchedule.ReadWrite.Directory",
+        "RoleEligibilitySchedule.ReadWrite.Directory",
+        "RoleManagementPolicy.ReadWrite.Directory",
+        "PrivilegedAccess.ReadWrite.AzureAD",
+        "PrivilegedAccess.ReadWrite.AzureADGroup",
+        "PrivilegedAssignmentSchedule.ReadWrite.AzureADGroup",
+        "PrivilegedEligibilitySchedule.ReadWrite.AzureADGroup",
+        "EntitlementManagement.ReadWrite.All",
+        "DeviceManagementRBAC.ReadWrite.All",
+        # --- can take over users' sign-in ---
+        "User.ReadWrite.All",
+        "User-PasswordProfile.ReadWrite.All",
+        "User.ManageIdentities.All",
+        "UserAuthenticationMethod.ReadWrite.All",
+        "Group.ReadWrite.All",
+        "GroupMember.ReadWrite.All",
+        "Domain.ReadWrite.All",
+        "IdentityProvider.ReadWrite.All",
+        "Organization.ReadWrite.All",
+        "Synchronization.ReadWrite.All",
+        # --- can change the controls that protect the tenant ---
+        "Policy.ReadWrite.ConditionalAccess",
+        "Policy.ReadWrite.AuthenticationMethod",
+        "Policy.ReadWrite.PermissionGrant",
+        "Policy.ReadWrite.Authorization",
+        "Policy.ReadWrite.CrossTenantAccess",
+        "AdministrativeUnit.ReadWrite.All",
+        "DeviceManagementConfiguration.ReadWrite.All",
+    }
+)
+# Tenant-wide data access, privileged only as an application permission: delegated, the same
+# names reach only what the signed-in user can already open.
+TENANT_DATA_GRAPH_PERMISSIONS = frozenset(
+    {
+        "Mail.Read",
+        "Mail.ReadBasic.All",
+        "Mail.ReadWrite",
+        "Mail.Send",
+        "Mail.Send.Shared",
+        "MailboxSettings.ReadWrite",
+        "Files.Read.All",
+        "Files.ReadWrite.All",
+        "Sites.Read.All",
+        "Sites.ReadWrite.All",
+        "Sites.FullControl.All",
+        "Calendars.Read",
+        "Contacts.Read",
+        "Chat.Read.All",
+        "Chat.ReadWrite.All",
+        "ChannelMessage.Read.All",
+        "Notes.Read.All",
+    }
+)
+# Any application permission whose name contains one of these also counts: as an app role,
+# a write permission reaches the whole tenant.
+PRIVILEGED_APPLICATION_GRAPH_SUBSTRINGS = ("FullControl", "ReadWrite")
+_PRIVILEGED_KEYS = frozenset(p.lower() for p in PRIVILEGED_GRAPH_PERMISSIONS)
+_TENANT_DATA_KEYS = frozenset(p.lower() for p in TENANT_DATA_GRAPH_PERMISSIONS)
+
+
+def is_graph_resource(resource_app_id: Any) -> bool:
+    return str(resource_app_id or "").lower() == MICROSOFT_GRAPH_APP_ID
+
+
+def is_privileged_graph_permission(permission: Any, application: bool = True) -> bool:
+    """Whether a Microsoft Graph permission name is privileged, in any case.
+
+    Only for a permission on Graph itself: the caller checks the resource.
+    """
+    key = str(permission or "").lower()
+    if key in _PRIVILEGED_KEYS:
+        return True
+    if not application:
+        return False
+    return key in _TENANT_DATA_KEYS or any(s.lower() in key for s in PRIVILEGED_APPLICATION_GRAPH_SUBSTRINGS)
+
+
+def is_denied(exc: BaseException) -> bool:
+    status = getattr(exc, "response_status_code", None)
+    text = str(exc).lower()
+    return status in (401, 403) or "authorization_requestdenied" in text or "insufficient privileges" in text
+
+
+# --------------------------------------------------------------------------- #
 # Client construction + async failure guarding
 # --------------------------------------------------------------------------- #
 
@@ -130,16 +320,23 @@ async def graph_service_client(cred):
     from kiota_authentication_azure.azure_identity_authentication_provider import (
         AzureIdentityAuthenticationProvider,
     )
+    from kiota_http.middleware.options.redirect_handler_option import (
+        RedirectHandlerOption,
+    )
     from msgraph import GraphServiceClient
     from msgraph.graph_request_adapter import GraphRequestAdapter
     from msgraph_core import GraphClientFactory
 
     scope, host = graph_scope(), graph_host()
     _LOGGER.info("Microsoft Graph: host=%s scope=%s", host, scope)
-    # allowed_hosts is deliberately left at its default: kiota treats an empty
-    # allow-list as "any host", which is what lets the sovereign hosts above work.
-    auth_provider = AzureIdentityAuthenticationProvider(cred, scopes=[scope])
-    http_client = GraphClientFactory.create_with_default_middleware(host=host)
+    auth_provider = AzureIdentityAuthenticationProvider(
+        cred, scopes=[scope], allowed_hosts=[urlsplit(host).hostname]
+    )
+    redirect = RedirectHandlerOption(max_redirect=0, should_redirect=False)
+    http_client = GraphClientFactory.create_with_default_middleware(
+        host=host, options={redirect.get_key(): redirect}
+    )
+    http_client.follow_redirects = False
     try:
         yield GraphServiceClient(
             request_adapter=GraphRequestAdapter(auth_provider, client=http_client)
@@ -190,6 +387,7 @@ async def paginate(
     builder,
     request_configuration=None,
     page_limit: int = 1000,
+    raise_on_error: bool = False,
 ) -> List[Any]:
     """Follow `@odata.nextLink` to the end and return every item.
 
@@ -203,6 +401,8 @@ async def paginate(
     a tenant that 429s on page 40 still yields 39 pages *and* a non-zero exit.
     `page_limit` is a runaway guard, not a paging cap: a server echoing the same
     nextLink back would otherwise loop forever inside the fetcher's timeout.
+    `raise_on_error=True` re-raises instead, for a caller that must tell a 403 or 404 from a
+    failure and would otherwise read a partial list as complete.
     """
     items: List[Any] = []
     try:
@@ -214,6 +414,10 @@ async def paginate(
             pages += 1
             if not next_link:
                 break
+            target, origin = urlsplit(next_link), urlsplit(graph_host())
+            if (target.scheme != "https" or target.netloc.lower() != origin.netloc.lower()
+                    or target.username is not None or target.password is not None or target.fragment):
+                raise ValueError("Graph continuation is outside the configured source origin")
             if pages >= page_limit:
                 collector.record(
                     operation,
@@ -225,6 +429,8 @@ async def paginate(
                 break
             response = await builder.with_url(next_link).get()
     except Exception as exc:  # noqa: BLE001 — boundary: record, keep what we have
+        if raise_on_error:
+            raise  # the caller classifies it (403 vs 404 vs failure) and records it itself
         collector.record(operation, exc)
     return items
 

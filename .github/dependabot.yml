@@ -1,0 +1,78 @@
+# Dependabot version updates.
+#
+# This file only covers VERSION updates (keeping dependencies current). The other
+# two Dependabot features are repo settings, not config:
+#   - Alerts (detect vulnerable deps)          -> already enabled
+#   - Security updates (auto-PR the fixes)     -> enable in Settings > Advanced Security,
+#                                                 or: gh api -X PUT repos/paramify/paramify-fetchers/automated-security-fixes
+#
+# Grouping matters here. Ungrouped, three ecosystems across ~40 dependencies produce
+# enough weekly PRs that the usual outcome is someone switching Dependabot off. Minor
+# and patch bumps are batched into one PR per ecosystem; majors still come separately
+# because they need a human to read the changelog.
+version: 2
+
+updates:
+  # --- Python: pyproject.toml + requirements.txt --------------------------------
+  - package-ecosystem: pip
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: America/Denver
+    open-pull-requests-limit: 5
+    labels: ["dependencies", "python"]
+    commit-message:
+      prefix: "deps"
+    groups:
+      python-minor-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    ignore:
+      # azure-mgmt-monitor 7.0.0 REMOVED the `diagnostic_settings` operation group
+      # that 6.0.2 exposes under v2021_05_01_preview. Three fetchers read it —
+      # azure/diagnostic_settings, azure/container_registry_configuration and
+      # azure/activity_log_alerts — so a major bump degrades all three to a
+      # collection failure. 7.0.0 is PyPI's current stable, which means an
+      # unconstrained resolve lands on the broken release rather than skipping it.
+      #
+      # Closed as PR #59. Lift this only once a release restores the operation
+      # group; the `<7` ceiling in pyproject.toml/requirements.txt is the pin
+      # itself, and this entry just stops Dependabot reopening the same PR.
+      - dependency-name: azure-mgmt-monitor
+        update-types: ["version-update:semver-major"]
+
+  # --- GitHub Actions: .github/workflows/ci.yml ---------------------------------
+  # Cheap to keep current and the most commonly stale thing in a repo — actions get
+  # pinned once and never touched again.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: America/Denver
+    open-pull-requests-limit: 3
+    labels: ["dependencies", "ci"]
+    commit-message:
+      prefix: "ci"
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # --- Docker base image: deploy/Dockerfile -------------------------------------
+  # Watches `FROM python:3.12-slim`. This one carries real weight for the security
+  # brief: the customer builds their own image, so base-image currency in THIS repo
+  # is what determines the CVE floor of every image they build from it.
+  - package-ecosystem: docker
+    directory: "/deploy"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: America/Denver
+    open-pull-requests-limit: 3
+    labels: ["dependencies", "docker"]
+    commit-message:
+      prefix: "deps"

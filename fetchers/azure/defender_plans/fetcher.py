@@ -9,16 +9,19 @@ Ported from prowler/providers/azure/services/defender/defender_service.py (Apach
 
 import logging
 import os
+import re
 import sys
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR.parent / "_shared"))
+from arm_rest import MAX_PAGES, arm_rest_client, get_json  # noqa: E402
 from azure_common import (  # noqa: E402
     Collector,
+    arm_client_kwargs,
     build_payload,
     classify_failure_code,
     coverage_percentage,
@@ -28,7 +31,7 @@ from azure_common import (  # noqa: E402
     resolve_subscription,
     sanitize_for_filename,
     write_evidence,
-    write_status,
+    report_failure,
 )
 
 logger = logging.getLogger("azure_defender_plans")
@@ -44,6 +47,15 @@ PROTECTED_TIER = "standard"
 REGISTERED = "registered"
 NOT_REGISTERED = "not_registered"
 UNKNOWN = "unknown"
+
+FULLY_COVERED = "fullycovered"
+COVERAGE_UNKNOWN = "unknown"
+
+_SCOPE_PATTERNS = (
+    ("management_group", re.compile(r"^/providers/microsoft\.management/managementgroups/[^/]+$")),
+    ("subscription", re.compile(r"^/subscriptions/[^/]+$")),
+    ("resource_group", re.compile(r"^/subscriptions/[^/]+/resourcegroups/[^/]+$")),
+)
 
 
 # --- projection: the only code here that touches an azure-mgmt model ---
@@ -81,15 +93,31 @@ def _iso8601_duration(value) -> str | None:
     return f"P{date_part}" + (f"T{time_part}" if time_part else "")
 
 
+def _iso8601_timestamp(value) -> str | None:
+    """A `datetime` as the category's UTC "%Y-%m-%dT%H:%M:%SZ"; anything else passes through."""
+    if not isinstance(value, datetime):
+        return value
+    moment = value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    return moment.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def project_pricing(pricing) -> dict:
     """Read a `Pricing` model's attributes into a flat snake_case dict."""
     return {
         "id": model_attr(pricing, "id"),
         "name": model_attr(pricing, "name"),
         "pricing_tier": model_attr(pricing, "pricing_tier"),
+        "sub_plan": model_attr(pricing, "sub_plan"),
         "free_trial_remaining_time": _iso8601_duration(
             model_attr(pricing, "free_trial_remaining_time")
         ),
+        "enablement_time": _iso8601_timestamp(model_attr(pricing, "enablement_time")),
+        "enforce": model_attr(pricing, "enforce"),
+        "inherited": model_attr(pricing, "inherited"),
+        "inherited_from": model_attr(pricing, "inherited_from"),
+        "resources_coverage_status": model_attr(pricing, "resources_coverage_status"),
+        "deprecated": model_attr(pricing, "deprecated"),
+        "replaced_by": list(model_attr(pricing, "replaced_by") or []),
         "extensions": [
             {
                 "name": model_attr(ext, "name"),
@@ -115,18 +143,51 @@ def _as_bool(value) -> bool:
     return str(value).strip().lower() in ("true", "1", "yes", "on", "enabled")
 
 
+def _optional_bool(value) -> bool | None:
+    """Like `_as_bool`, but a field the API left out stays None rather than False."""
+    return None if value is None else _as_bool(value)
+
+
+def _scope_id(value) -> str | None:
+    """`inheritedFrom` is documented as the string "Null" when not inherited."""
+    text = str(value or "").strip()
+    return None if text.lower() in ("", "null", "none") else text
+
+
+def scope_type(scope_id: str | None) -> str | None:
+    """Which kind of ARM scope an `inheritedFrom` id names."""
+    if not scope_id:
+        return None
+    normalized = scope_id.lower().rstrip("/")
+    for name, pattern in _SCOPE_PATTERNS:
+        if pattern.match(normalized):
+            return name
+    return "resource" if normalized.startswith("/subscriptions/") else "other"
+
+
 def pricing_record(pricing: dict) -> dict:
-    """Normalize one projected Defender plan — Prowler's five-field projection.
+    """Normalize one projected Defender plan.
 
     `extensions` collapses the SDK's list of {name, is_enabled, ...} objects into a
     flat {name: bool} map, which is how Prowler's checks read it.
     """
     extensions = pricing.get("extensions") or []
+    inherited_from = _scope_id(pricing.get("inherited_from"))
     return {
         "resource_id": pricing.get("id"),
         "resource_name": pricing.get("name"),
         "pricing_tier": pricing.get("pricing_tier"),
+        "enabled": str(pricing.get("pricing_tier") or "").lower() == PROTECTED_TIER,
+        "sub_plan": pricing.get("sub_plan") or None,
+        "enablement_time": pricing.get("enablement_time"),
         "free_trial_remaining_time": pricing.get("free_trial_remaining_time"),
+        "resources_coverage_status": pricing.get("resources_coverage_status"),
+        "enforce": _optional_bool(pricing.get("enforce")),
+        "inherited": _optional_bool(pricing.get("inherited")),
+        "inherited_from": inherited_from,
+        "inherited_from_scope": scope_type(inherited_from),
+        "deprecated": bool(pricing.get("deprecated")),
+        "replaced_by": sorted(pricing.get("replaced_by") or []),
         "extensions": {
             ext.get("name"): _as_bool(ext.get("is_enabled"))
             for ext in extensions
@@ -135,10 +196,15 @@ def pricing_record(pricing: dict) -> dict:
     }
 
 
+def _names(rows) -> list[str]:
+    return sorted(p["resource_name"] or "" for p in rows)
+
+
 def summarize(plans: list[dict], registration_status: str) -> dict:
     """Standard-tier coverage is the headline: how many plans actually protect."""
     total = len(plans)
-    standard = sum(1 for p in plans if str(p["pricing_tier"] or "").lower() == PROTECTED_TIER)
+    enabled = [p for p in plans if p["enabled"]]
+    standard = len(enabled)
     return {
         "provider_registration_status": registration_status,
         "total_plans": total,
@@ -149,7 +215,31 @@ def summarize(plans: list[dict], registration_status: str) -> dict:
             1 for p in plans if any(p["extensions"].values())
         ),
         "total_enabled_extensions": sum(
-            1 for p in plans for enabled in p["extensions"].values() if enabled
+            1 for p in plans for on in p["extensions"].values() if on
+        ),
+        "enabled_plans": _names(enabled),
+        "enabled_plan_sub_plans": {p["resource_name"]: p["sub_plan"] for p in enabled},
+        "enabled_plan_enablement_times": {
+            p["resource_name"]: p["enablement_time"] for p in enabled
+        },
+        # A plan Azure gave no coverage status is listed as unknown, never read as covered.
+        "enabled_plans_not_fully_covered": {
+            p["resource_name"]: p["resources_coverage_status"] or COVERAGE_UNKNOWN
+            for p in enabled
+            if str(p["resources_coverage_status"] or "").lower() != FULLY_COVERED
+        },
+        "plans_not_enabled": _names(
+            p for p in plans if not p["enabled"] and not p["deprecated"]
+        ),
+        "deprecated_plans": _names(p for p in plans if p["deprecated"]),
+        "deprecated_plans_enabled": {
+            p["resource_name"]: p["replaced_by"] for p in enabled if p["deprecated"]
+        },
+        "enforced_plans": _names(p for p in plans if p["enforce"]),
+        "plans_reporting_inheritance": sum(1 for p in plans if p["inherited"] is not None),
+        "inherited_plans": _names(p for p in plans if p["inherited"]),
+        "plans_inherited_from_management_group": _names(
+            p for p in plans if p["inherited"] and p["inherited_from_scope"] == "management_group"
         ),
     }
 
@@ -171,7 +261,9 @@ def collect_pricings(subscription_id, cred, collector: Collector) -> tuple[list[
     from azure.mgmt.security import SecurityCenter
 
     def _client():
-        return SecurityCenter(credential=cred, subscription_id=subscription_id)
+        return SecurityCenter(
+            credential=cred, subscription_id=subscription_id, **arm_client_kwargs()
+        )
 
     client = collector.guard("security.SecurityCenter (init)", _client)
     if client is None:
@@ -200,6 +292,125 @@ def collect_pricings(subscription_id, cred, collector: Collector) -> tuple[list[
     return sorted(plans, key=lambda r: r.get("resource_name") or ""), REGISTERED
 
 
+# --- security contacts (who Defender for Cloud notifies) ----------------------
+
+# Read over raw ARM, not azure-mgmt-security: Azure Government supports only
+# 2020-01-01-preview and 2017-08-01-preview for securityContacts, and answers the list
+# with a bare JSON array instead of a {"value": [...]} page, which the SDK cannot
+# deserialize ("Unable to deserialize to object: type"). Both shapes are accepted here.
+SECURITY_CONTACTS_API = "2020-01-01-preview"
+
+
+def _dict(value) -> dict:
+    return value if isinstance(value, dict) else {}
+
+
+def project_security_contact(contact: dict) -> dict:
+    """Read one securityContacts item from the ARM JSON (2020-01-01-preview shape)."""
+    props = _dict(_dict(contact).get("properties"))
+    alerts = _dict(props.get("alertNotifications"))
+    by_role = _dict(props.get("notificationsByRole"))
+    return {
+        "name": _dict(contact).get("name"),
+        "emails": props.get("emails"),
+        "phone": props.get("phone"),
+        "alert_notifications_state": alerts.get("state"),
+        "alert_notifications_minimal_severity": alerts.get("minimalSeverity"),
+        "notifications_by_role_state": by_role.get("state"),
+        "notifications_by_role_roles": by_role.get("roles"),
+    }
+
+
+def security_contact_items(body) -> list:
+    """The contacts in a securityContacts response: a bare list (Azure Government) or a {"value": [...]} page."""
+    if isinstance(body, list):
+        return body
+    if isinstance(body, dict) and isinstance(body.get("value"), list):
+        return body["value"]
+    raise ValueError(f"unexpected securityContacts response shape: {type(body).__name__}")
+
+
+def security_contact_record(contact: dict) -> dict:
+    """Normalize one projected security contact.
+
+    `emails` is a semicolon-separated string in ARM; it is split and counted, and the
+    addresses are kept because they are the evidence (who is notified). The phone
+    number is reduced to whether one is set.
+    """
+    raw_emails = contact.get("emails") or ""
+    # ARM sends one semicolon-separated string; accept a list too, so a future SDK that
+    # splits it does not turn the whole list into one bogus address.
+    parts = raw_emails if isinstance(raw_emails, (list, tuple)) else str(raw_emails).split(";")
+    emails = sorted({str(e).strip() for e in parts if str(e).strip()})
+    state = contact.get("alert_notifications_state")
+    role_state = contact.get("notifications_by_role_state")
+    return {
+        "name": contact.get("name"),
+        "emails": emails,
+        "email_count": len(emails),
+        "phone_set": bool(contact.get("phone")),
+        "alert_notifications_state": state,
+        "alert_notifications_minimal_severity": contact.get("alert_notifications_minimal_severity"),
+        "alert_notifications_on": (None if state is None else str(state).lower() == "on"),
+        "notifications_by_role_state": role_state,
+        "notifications_by_role_roles": sorted(str(r) for r in (contact.get("notifications_by_role_roles") or [])),
+        "notifications_by_role_on": (None if role_state is None else str(role_state).lower() == "on"),
+    }
+
+
+def summarize_security_contacts(contacts: list[dict] | None) -> dict:
+    """Counts for the contacts; every key null when the list could not be read (None), 0 when it is empty."""
+    if contacts is None:
+        return {"security_contacts": None, "security_contacts_with_alert_notifications_on": None,
+                "security_contacts_with_role_notifications_on": None, "security_contact_emails": None,
+                "alert_notification_minimal_severities": None}
+    return {
+        "security_contacts": len(contacts),
+        "security_contacts_with_alert_notifications_on": sum(1 for c in contacts if c["alert_notifications_on"]),
+        "security_contacts_with_role_notifications_on": sum(1 for c in contacts if c["notifications_by_role_on"]),
+        "security_contact_emails": sum(c["email_count"] for c in contacts),
+        "alert_notification_minimal_severities": sorted(
+            {str(c["alert_notifications_minimal_severity"]) for c in contacts
+             if c["alert_notifications_minimal_severity"] is not None}),
+    }
+
+
+def collect_security_contacts(subscription_id, cred, collector: Collector) -> list[dict] | None:
+    """GET securityContacts over raw ARM: the subscription's Defender for Cloud notification contacts.
+
+    Returns None (not []) when the read failed, so the summary reads null rather than
+    "no contacts". A subscription where Microsoft.Security is not registered has no
+    contacts to read and is reported as [] without a failure, matching collect_pricings.
+    A {"value": [...]} page that carries a nextLink is followed to the end.
+    """
+    client = collector.guard("arm_rest.ARMPipelineClient (init)", lambda: arm_rest_client(cred))
+    if client is None:
+        return None
+    url = (f"/subscriptions/{subscription_id}/providers/Microsoft.Security/securityContacts"
+           f"?api-version={SECURITY_CONTACTS_API}")
+    items: list = []
+    seen: set = set()
+    pages = 0
+    try:
+        while url:
+            body = get_json(client, url)
+            pages += 1
+            items.extend(security_contact_items(body))
+            url = body.get("nextLink") if isinstance(body, dict) else None
+            # The same bound arm_rest.list_all uses: a repeated or endless nextLink is a failure, not a hang.
+            if url and (url in seen or pages >= MAX_PAGES):
+                raise RuntimeError(f"securityContacts paging did not terminate after {pages} page(s)")
+            if url:
+                seen.add(url)
+    except Exception as exc:  # noqa: BLE001 (boundary: classify, do not crash the run)
+        if is_provider_not_registered(exc):
+            return []
+        collector.record("security.securityContacts.list", exc)
+        return None
+    contacts = [security_contact_record(project_security_contact(c)) for c in items]
+    return sorted(contacts, key=lambda c: c.get("name") or "")
+
+
 def main() -> int:
     logging.basicConfig(
         level=os.environ.get("LOG_LEVEL", "INFO"),
@@ -219,8 +430,10 @@ def main() -> int:
 
     plans: list[dict] = []
     registration_status = UNKNOWN
+    contacts: list[dict] | None = None
     if subscription_id and cred is not None:
         plans, registration_status = collect_pricings(subscription_id, cred, collector)
+        contacts = collect_security_contacts(subscription_id, cred, collector)
     elif not subscription_id:
         collector.record(
             "resolve_subscription",
@@ -238,18 +451,17 @@ def main() -> int:
             "defender_plans": plans,
             # Also in results so a validator can assert the service is in use at all.
             "provider_registration_status": registration_status,
+            # None when the read failed (recorded in api_failures), [] when there are none.
+            "security_contacts": contacts,
         },
-        summary=summarize(plans, registration_status),
+        summary={**summarize(plans, registration_status), **summarize_security_contacts(contacts)},
     )
 
     filename = f"azure_defender_plans_{sanitize_for_filename(subscription_id or 'unknown')}.json"
     path = write_evidence(output_dir, filename, evidence)
 
     if not collector.ok:
-        logger.error(
-            "Encountered %d Azure API failure(s) during collection", len(collector.failures)
-        )
-        write_status(
+        report_failure(
             failure_reason(collector.failures), classify_failure_code(collector.failures)
         )
         return 1

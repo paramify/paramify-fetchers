@@ -1,0 +1,120 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "gcp_iam_custom_roles",
+  "fetcher_version": "0.1.0",
+  "source": "live",
+  "captured_on": "2026-08-17",
+  "reviewed": false,
+  "collections": [
+    {
+      "path": "results.custom_roles[]",
+      "records": 2,
+      "fields": {
+        "deleted": 2,
+        "description": 1,
+        "disabled": 2,
+        "grants_act_as_service_account": 2,
+        "grants_act_as_with_deployment_pivot": 2,
+        "grants_privilege_escalation": 2,
+        "grants_role_management": 2,
+        "grants_set_iam_policy": 2,
+        "included_permissions": 2,
+        "mutating_permission_count": 2,
+        "name": 2,
+        "permission_count": 2,
+        "privilege_escalation_by_category": 1,
+        "privilege_escalation_categories": 1,
+        "privilege_escalation_permissions": 1,
+        "read_only": 2,
+        "role_id": 2,
+        "scope": 2,
+        "service_count": 2,
+        "services": 2,
+        "stage": 2,
+        "title": 2
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "api_failures": [],
+      "datetime": "2026-08-17T17:54:49Z",
+      "environment": "test",
+      "partial_failure": false,
+      "project": "example-project",
+      "project_source": "target",
+      "skipped_calls": [
+        {
+          "message": "403 You don't have permission to list roles in organizations/111111111111. [reason: \"IAM_PERMISSION_DENIED\" domain: \"iam.googleapis.com\" metadata { key: \"troubleshooter_url\" value: \"https://console.cloud.google.com/iam-admin/troubleshooter/summary;errorId=CiQwMWEwMTBkYy1hMWJiLTdlZGEtYTIwNi1hMTRmNTNmNWQ2YzQSGm9yZ2FuaXphdGlvbnMvNzUxNTUxNTc0NzQ2\" } metadata { key: \"resource\" value: \"organizations/111111111111\" } metadata { key: \"permission\" value: \"iam.roles.list\" } metadata { key: \"error_info_id\" value: \"CiQwMWEwMTBkYy1hMWJiLTdlZGEtYTIwNi1hMTRmNTNmNWQ2YzQSGm9yZ2FuaXphdGlvbnMvNzUxNTUxNTc0NzQ2\" } ]",
+          "operation": "iam.roles.list (organizations/111111111111)",
+          "type": "PermissionDenied"
+        }
+      ]
+    },
+    "results": {
+      "custom_roles": [
+        {
+          "deleted": false,
+          "description": "Read-only access for the example GCP fetchers.",
+          "disabled": false,
+          "grants_act_as_service_account": false,
+          "grants_act_as_with_deployment_pivot": false,
+          "grants_privilege_escalation": false,
+          "grants_role_management": false,
+          "grants_set_iam_policy": false,
+          "included_permissions": [
+            "cloudkms.cryptoKeys.list",
+            "cloudkms.keyRings.list",
+            "cloudsql.instances.list"
+          ],
+          "mutating_permission_count": 0,
+          "name": "projects/example-project/roles/exampleEvidenceReader",
+          "permission_count": 16,
+          "privilege_escalation_by_category": {},
+          "privilege_escalation_categories": [],
+          "privilege_escalation_permissions": [],
+          "read_only": true,
+          "role_id": "exampleEvidenceReader",
+          "scope": "project",
+          "service_count": 9,
+          "services": [
+            "cloudkms",
+            "cloudsql",
+            "compute"
+          ],
+          "stage": "GA",
+          "title": "example Evidence Reader"
+        }
+      ]
+    },
+    "summary": {
+      "deleted_roles": 0,
+      "disabled_roles": 0,
+      "largest_role_permission_count": 16,
+      "no_privilege_escalation_percentage": 50,
+      "organization_roles_readable": false,
+      "organization_scope": "organizations/111111111111",
+      "organization_scoped_roles": 0,
+      "privilege_escalation_category_counts": {
+        "act_as_service_account": 1,
+        "deployment_pivot": 0,
+        "role_management": 1,
+        "service_account_key_creation": 1,
+        "set_iam_policy": 1
+      },
+      "project_scoped_roles": 2,
+      "read_only_roles": 1,
+      "role_stages": {
+        "GA": 2
+      },
+      "roles_granting_act_as_service_account": 1,
+      "roles_granting_act_as_with_deployment_pivot": 0,
+      "roles_granting_privilege_escalation": 1,
+      "roles_granting_role_management": 1,
+      "roles_granting_set_iam_policy": 1,
+      "roles_spanning_multiple_services": 2,
+      "total_custom_roles": 2,
+      "total_distinct_permissions": 20
+    }
+  }
+}

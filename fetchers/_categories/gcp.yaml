@@ -1,3 +1,4 @@
+display_name: GCP
 description: >
   GCP evidence fetchers (python, official Google Cloud client libraries). Each
   fetcher authenticates with Application Default Credentials (ADC) — there is no

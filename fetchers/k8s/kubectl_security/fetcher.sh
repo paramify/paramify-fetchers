@@ -35,6 +35,10 @@ trap 'rm -f "$_FETCHER_TMP_JSON" "$_TMP_SUMMARY"' EXIT
 log_info() { printf '%s INFO k8s_kubectl_security %s\n' "$(date -u +'%Y-%m-%d %H:%M:%S')" "$*" >&2; }
 log_error() { printf '%s ERROR k8s_kubectl_security %s\n' "$(date -u +'%Y-%m-%d %H:%M:%S')" "$*" >&2; }
 
+# The shared failure path: report_failure logs the reason AND writes it to
+# $FETCHER_STATUS_FILE, so the runner reports why instead of the stderr tail.
+source "$(dirname "$0")/../../_lib/status.sh"
+
 check_kubectl() {
     if ! command -v kubectl &> /dev/null; then
         log_error "kubectl is not installed"
@@ -74,7 +78,7 @@ echo '{
 }' > "$OUTPUT_JSON"
 
 if ! clusters=$(aws eks list-clusters --query "clusters" --output json 2>/dev/null); then
-    log_error "Failed to list EKS clusters"
+    report_failure "Failed to list EKS clusters"
     exit 1
 fi
 
@@ -212,12 +216,12 @@ while read -r cluster_name; do
 done < <(echo "$clusters" | jq -r '.[]')
 
 if [ "$any_cluster_successful" = false ]; then
-    log_error "No clusters were successfully processed"
+    report_failure "No clusters were successfully processed"
     exit 1
 fi
 
 if [ "$error_occurred" = true ]; then
-    log_error "Some clusters had processing errors"
+    report_failure "Some clusters had processing errors" partial_failure
     exit 1
 fi
 

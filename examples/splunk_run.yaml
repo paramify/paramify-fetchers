@@ -1,0 +1,39 @@
+# Splunk Enterprise evidence from one deployment's management API (port 8089).
+#
+# Set before running:
+#   export SPLUNK_TOKEN=<authentication token; see fetchers/splunk/README.md for the role it needs>
+#
+# Every Splunk fetcher fans out per deployment. The one target below is shared
+# by all seven through a YAML anchor; add a second list item under `targets` to
+# collect from another deployment, each with its own token.
+
+run:
+  output_dir: ./evidence
+
+  fetchers:
+    - use: splunk_log_source_freshness
+      targets:
+        - &splunk_target
+          name: prod
+          base_url: https://splunk.example.com:8089
+          # ca_bundle: /etc/ssl/certs/splunk-ca.pem   # when the certificate is from a private CA
+          secrets:
+            token: ${env:SPLUNK_TOKEN}
+
+    - use: splunk_data_inputs
+      targets: [*splunk_target]
+
+    - use: splunk_index_activity
+      targets: [*splunk_target]
+
+    - use: splunk_index_retention
+      targets: [*splunk_target]
+
+    - use: splunk_alert_rules
+      targets: [*splunk_target]
+
+    - use: splunk_alert_delivery
+      targets: [*splunk_target]
+
+    - use: splunk_role_index_access
+      targets: [*splunk_target]

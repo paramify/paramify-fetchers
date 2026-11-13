@@ -27,7 +27,9 @@ from dotenv import load_dotenv
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR.parent / "_shared"))
+sys.path.insert(0, str(SCRIPT_DIR.parents[1] / "_lib"))
 import ver_common as vc  # noqa: E402
+from fetcher_status import report_failure  # noqa: E402
 
 logger = logging.getLogger("paramify_historical_ver_activity")
 
@@ -57,7 +59,11 @@ def main() -> int:
     )
     load_dotenv()
 
-    env = vc.resolve_common_env()
+    try:
+        env = vc.resolve_common_env()
+    except RuntimeError as e:
+        report_failure(str(e), "bad_config")
+        return 1
     output_dir = Path(os.environ.get("EVIDENCE_DIR", "./evidence"))
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -95,10 +101,13 @@ def main() -> int:
     # for want of data -- NOT because the program has no vulnerabilities.
     # _summary.collection records that inside the payload.
     if api_failures:
-        logger.error(
-            "%d API failure(s) during collection; the snapshot is incomplete and "
-            "its counts must not be read as a clean result",
-            len(api_failures),
+        detail = "; ".join(
+            f"{f.get('type')}: {f.get('message')}" for f in api_failures[:3]
+        )
+        report_failure(
+            f"{len(api_failures)} Paramify API failure(s) reading issues for "
+            f"project {env['project_id']}; the VER activity snapshot is incomplete "
+            f"and its counts must not be read as a clean result: {detail}"
         )
         return 1
     return 0

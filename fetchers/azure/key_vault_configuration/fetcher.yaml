@@ -1,17 +1,29 @@
 name: azure_key_vault_configuration
-version: 0.1.0
-description: >
-  Every key vault in the subscription with the configuration that governs access to
-  the keys and secrets it holds: which authorization model is in force
-  (enable_rbac_authorization — Azure RBAC or the legacy vault access policies, with
-  the access policy entries and their permission verbs alongside it), whether the
-  vault is recoverable (soft delete plus purge protection, and the soft-delete
-  retention window), how it is exposed to the network (public network access, the
-  network ACL default action with its IP and virtual-network rules, private endpoint
-  connections), the SKU, and which platform integrations may read it (deployment,
-  disk encryption, template deployment). Management plane only — no key material or
-  secret value is read.
+version: 0.4.1
+description: >-
+  Shows how each key vault grants access, whether deleted vaults and secrets can be recovered, how it's exposed to the network, and whether its audit events are logged.
 category: azure
+
+config_schema:
+  resource_exclusions:
+    type: patterns
+    prefixes: [rg, location, id]
+    bare: false
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Resources outside the authorization boundary, to leave out of scope, as
+      case-insensitive glob patterns listed in the manifest, each with a
+      prefix: rg:<resource group> (read from the resource id), location:<region>
+      (the region's name without spaces, such as eastus2; a resource with no
+      location never matches one) or id:<resource id> (also matches that
+      resource's child resources). * matches any run of characters and ? one
+      character. A matching key vault is listed under excluded with the pattern
+      and left out of every count and verdict; its diagnostic settings are not
+      read, so a vault the identity can't read doesn't fail the run. A pattern
+      without one of these prefixes fails the run. Set it once under platforms.azure.config for every Azure
+      fetcher that has this field; fetchers without it ignore it. Each item is a
+      pattern, or a pattern with a reason. Empty: every resource is in scope.
 
 supports_targets: true
 
@@ -43,11 +55,63 @@ target_schema:
 secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
 
 ksis:
-  - KSI-IAM-ELP
+  - KSI-IAM-ELP      # Least privilege — the authorization model and access policy verbs
+  - KSI-CNA-MAT      # Minimizing attack surface — public network access, private endpoints
+  - KSI-CNA-RNT      # Restricting network traffic — the network ACL default action and rules
+  - KSI-SVC-SIN      # Securing information — recoverability and the HSM-backed (Premium) SKU
+  - KSI-MLA-LET      # Logging event types — whether AuditEvent is exported, and where
 
 evidence_set:
   reference_id: EVD-AZURE-KEYVAULT-CFG
   name: Azure Key Vault Configuration
-  instructions: >
-    Script: fetcher.py. Azure SDK calls (azure-mgmt-keyvault KeyVaultManagementClient):
-    vaults.list_by_subscription(). Management plane only.
+  instructions: |
+    Script: azure/key_vault_configuration/fetcher.py
+
+    Access: Reader on the subscription.
+
+    Commands Executed:
+    - subscriptions.list() — picks a subscription when none is set
+    - providers.get("Microsoft.KeyVault") — tells "not registered" from "no vaults"
+    - vaults.list_by_subscription() — every key vault with its access model, access policies, recovery, network and SKU settings
+    - diagnostic_settings.list() (per in-scope vault) — where the vault's logs go, and whether audit events are among them
+
+    Output: azure_key_vault_configuration_<subscription>.json — each key vault with its access model and access policies, soft delete and purge protection, public access, firewall rules and private endpoints, SKU, the Azure services allowed to read it and its diagnostic settings, plus the vaults left out and why; no key, secret or certificate is read.
+
+    Summary fields:
+
+    Which vaults are left out of scope?
+    - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every vault is in scope
+    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no key vault, such as a mistyped name; null when the key vault list could not be read
+    - excluded_key_vaults — Number of key vaults left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, no other count includes them, and their diagnostic settings are never read; null when the key vault list could not be read
+    - in_scope_key_vaults — Number of key vaults read and in scope; null when the key vault list could not be read; 0 means there are none or the patterns took out every vault, which a check can catch by requiring more than 0
+
+    Which vaults were checked?
+    - total_key_vaults — Number of in-scope key vaults; every count and percentage below covers only these; reads 0, not null, when the key vault list could not be read, so read it together with in_scope_key_vaults
+    - provider_registration_status — Whether Microsoft.KeyVault is registered on the subscription: registered, not_registered or unknown
+
+    How is access to the vaults granted?
+    - rbac_authorization_vaults — Number of vaults that use Azure RBAC role assignments for access to keys, secrets and certificates (the role assignments aren't in this evidence)
+    - access_policy_vaults — Number of vaults that use the older vault access policies instead of Azure RBAC
+    - rbac_authorization_percentage — Percentage of vaults that use Azure RBAC = rbac_authorization_vaults / total_key_vaults × 100 (a whole number, rounded down; reads 0 when total_key_vaults is 0)
+    - total_access_policies — Number of access policy entries across all vaults, each giving a user, group or app permissions on a vault's keys, secrets, certificates or storage accounts; 0 when the key vault list could not be read
+
+    Can a deleted vault or secret be recovered?
+    - soft_delete_vaults — Number of vaults with soft delete on, so deleted vaults, keys and secrets are kept for the retention period and can be restored; a vault that doesn't report the setting counts as off
+    - purge_protection_vaults — Number of vaults with purge protection on, so nobody can permanently delete the vault or its contents before the retention period ends
+    - recoverable_vaults — Number of recoverable vaults: both soft delete and purge protection on
+    - recoverable_percentage — Percentage of vaults that are recoverable = recoverable_vaults / total_key_vaults × 100 (a whole number, rounded down; reads 0 when total_key_vaults is 0)
+
+    Is network access restricted?
+    - public_network_access_disabled_vaults — Number of vaults with public network access disabled, reachable only through private endpoints; a vault that doesn't report the setting counts as enabled
+    - network_acl_default_deny_vaults — Number of vaults whose firewall denies by default, letting in only listed IP ranges and virtual networks (and trusted Azure services when allowed); a vault with no firewall settings counts as allowing all
+    - private_endpoint_vaults — Number of vaults with at least one private endpoint connection, in any state (pending and rejected connections count)
+
+    Are keys protected by hardware?
+    - premium_sku_vaults — Number of vaults on the Premium tier, which can hold keys in hardware security modules (HSMs); whether each key is HSM-backed isn't checked
+
+    Is every operation on keys and secrets logged?
+    - vaults_with_diagnostic_settings — Number of vaults with at least one diagnostic setting, whatever it exports
+    - vaults_with_audit_logging — Number of vaults with audit logging: a diagnostic setting that exports the AuditEvent category (directly, or through the audit or allLogs group) to a storage account, Log Analytics workspace, event hub or partner solution; AuditEvent records every read or change of a key, secret or certificate
+    - vaults_without_audit_logging — Number of vaults whose diagnostic settings were read and include no audit logging
+    - vaults_audit_logging_unknown — Number of vaults whose diagnostic settings couldn't be read
+    - audit_logging_percentage — Percentage of vaults with audit logging = vaults_with_audit_logging / total_key_vaults × 100 (a whole number, rounded down; reads 0 when total_key_vaults is 0); vaults whose settings couldn't be read count in the total but not as logged

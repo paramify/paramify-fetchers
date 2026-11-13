@@ -1,0 +1,374 @@
+"""Reconcile-engine unit tests for the validator syncer.
+
+Drives sync_validators against an in-memory fake client (no network) to pin the
+create-or-skip / associate-on-create-only / --update / --dry-run / lock behaviour.
+"""
+
+from __future__ import annotations
+
+import importlib.util
+import json
+from pathlib import Path
+
+import pytest
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+SYNCER_PATH = REPO_ROOT / "uploaders" / "paramify_validators" / "syncer.py"
+
+
+def _load_syncer():
+    spec = importlib.util.spec_from_file_location("paramify_validators_syncer", SYNCER_PATH)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+syncer = _load_syncer()
+
+BASE = "https://example.test/api/v0"
+
+
+class TagSession:
+    """What the Tagger posts default custom tags through; records every POST."""
+
+    def __init__(self, status=200):
+        self.status = status
+        self.posts = []
+
+    def post(self, url, json=None, timeout=None, **_):
+        self.posts.append((url, json))
+        return type("R", (), {"status_code": self.status, "text": ""})()
+
+
+class FakeClient:
+    def __init__(self, existing=None, evidence_sets=None, tag_status=200):
+        self.existing = existing or []            # [{"id","name"}]
+        self.evidence_sets = evidence_sets or {}  # reference_id -> evidence_id
+        self.created, self.updated, self.associated = [], [], []
+        self._n = 0
+        self.session = TagSession(tag_status)
+
+    def list_validators(self):
+        return self.existing
+
+    def create_validator(self, payload):
+        self._n += 1
+        vid = f"new-{self._n}"
+        self.created.append((vid, payload))
+        return vid
+
+    def update_validator(self, vid, payload):
+        self.updated.append((vid, payload))
+
+    def find_evidence_set(self, ref):
+        return self.evidence_sets.get(ref)
+
+    def associate_validator(self, evidence_id, validator_id):
+        self.associated.append((evidence_id, validator_id))
+
+
+def _alb():
+    return {
+        "key": "alb_encryption_in_transit",
+        "name": "ALB Encryption In Transit",
+        "type": "AUTOMATED",
+        "statement": "Ensures ALBs encrypt in transit.",
+        "regex": r'"alb_total":\s*(\d+)',
+        "validation_rules": [{"regexOperation": {"type": "MATCH_COUNT"}, "criteria": "GREATER_THAN", "value": {"type": "CUSTOM_TEXT", "customText": "0"}}],
+        "attestation_rules": [],
+        "evidence_sets": ["EVD-LB-ENC-STATUS"],
+    }
+
+
+def _run(validators, client, tmp_path, **kw):
+    return syncer.sync_validators(
+        validators, client=client, base_url=BASE,
+        lock_path=str(tmp_path / "lock.json"), **kw,
+    )
+
+
+def test_build_payload_automated_maps_rules():
+    p = syncer.build_payload(_alb())
+    assert p["type"] == "AUTOMATED"
+    assert "regex" in p and p["validationRules"] and "validation_rules" not in p
+    assert "attestationRules" not in p
+
+
+def test_build_payload_attestation():
+    v = {"key": "k", "name": "N", "type": "ATTESTATION", "statement": "s",
+         "attestation_rules": [{"question": "ok?", "yesDisposition": "PASS", "noDisposition": "FAIL", "nestedRules": []}],
+         "evidence_sets": ["E"]}
+    p = syncer.build_payload(v)
+    assert p["type"] == "ATTESTATION" and p["attestationRules"] and "regex" not in p
+
+
+def test_create_and_associate_on_create(tmp_path):
+    c = FakeClient(evidence_sets={"EVD-LB-ENC-STATUS": "es-1"})
+    s = _run([_alb()], c, tmp_path)
+    assert s["created"] == 1 and s["associated"] == 1 and s["ok"]
+    assert len(c.created) == 1 and c.associated == [("es-1", "new-1")]
+    # lock persisted key -> minted id
+    lock = json.loads((tmp_path / "lock.json").read_text())["validators"]
+    assert lock["alb_encryption_in_transit"] == "new-1"
+
+
+def test_skip_when_locked_no_writes(tmp_path):
+    (tmp_path / "lock.json").write_text(json.dumps({"validators": {"alb_encryption_in_transit": "v1"}}))
+    c = FakeClient(evidence_sets={"EVD-LB-ENC-STATUS": "es-1"})
+    s = _run([_alb()], c, tmp_path)
+    assert s["skipped"] == 1 and s["created"] == 0
+    assert not c.created and not c.updated and not c.associated
+
+
+def test_adopt_existing_by_name_no_create_no_associate(tmp_path):
+    c = FakeClient(existing=[{"id": "ex-9", "name": "ALB Encryption In Transit"}],
+                   evidence_sets={"EVD-LB-ENC-STATUS": "es-1"})
+    s = _run([_alb()], c, tmp_path)
+    assert s["skipped"] == 1 and s["created"] == 0
+    assert not c.created and not c.associated  # adoption != creation -> no wiring
+    lock = json.loads((tmp_path / "lock.json").read_text())["validators"]
+    assert lock["alb_encryption_in_transit"] == "ex-9"  # id cached for next run
+
+
+def test_update_patches_but_does_not_associate(tmp_path):
+    (tmp_path / "lock.json").write_text(json.dumps({"validators": {"alb_encryption_in_transit": "v1"}}))
+    c = FakeClient(evidence_sets={"EVD-LB-ENC-STATUS": "es-1"})
+    s = _run([_alb()], c, tmp_path, update=True)
+    assert s["updated"] == 1 and s["skipped"] == 0
+    assert c.updated == [("v1", syncer.build_payload(_alb()))] and not c.associated
+
+
+def test_dry_run_makes_no_writes(tmp_path):
+    c = FakeClient(evidence_sets={"EVD-LB-ENC-STATUS": "es-1"})
+    s = _run([_alb()], c, tmp_path, dry_run=True)
+    assert s["created"] == 1 and s["dry_run"]
+    assert not c.created and not c.associated and not c.updated
+    assert not (tmp_path / "lock.json").exists()  # lock untouched in dry-run
+
+
+def test_set_not_found_still_creates(tmp_path):
+    c = FakeClient(evidence_sets={})  # set missing
+    s = _run([_alb()], c, tmp_path)
+    assert s["created"] == 1 and s["associated"] == 0 and s["set_not_found"] == 1
+    assert len(c.created) == 1 and not c.associated
+
+
+def test_per_validator_error_isolated(tmp_path):
+    class Boom(FakeClient):
+        def create_validator(self, payload):
+            raise RuntimeError("api down")
+    c = Boom()
+    s = _run([_alb(), {**_alb(), "key": "second", "name": "Second"}], c, tmp_path)
+    assert s["errors"] == 2 and s["ok"] is False  # both isolated, batch completes
+
+
+def test_list_failure_fails_closed_no_duplicate_create(tmp_path):
+    """If GET /validators fails, reconcile must NOT create duplicates — it fails
+    closed (every not-yet-locked validator errors, none is created)."""
+    class ListBoom(FakeClient):
+        def list_validators(self):
+            raise RuntimeError("HTTP 500")
+    c = ListBoom(evidence_sets={"EVD-LB-ENC-STATUS": "es-1"})
+    v2 = {**_alb(), "key": "second", "name": "Second"}
+    s = _run([_alb(), v2], c, tmp_path)  # neither in lock -> both consult name_index
+    assert s["created"] == 0 and s["errors"] == 2 and s["ok"] is False
+    assert not c.created  # crucially, NO spurious creates
+
+
+def test_associate_failure_isolated_not_double_counted(tmp_path):
+    class AssocBoom(FakeClient):
+        def associate_validator(self, evidence_id, validator_id):
+            raise syncer.ParamifyError("assoc failed")
+    c = AssocBoom(evidence_sets={"EVD-A": "es-a", "EVD-B": "es-b"})
+    v = {**_alb(), "evidence_sets": ["EVD-A", "EVD-B"]}
+    s = _run([v], c, tmp_path)
+    assert s["created"] == 1 and s["errors"] == 0 and s["associate_errors"] == 2
+    assert s["ok"] is False  # association failure surfaced, not swallowed
+    r = s["results"][0]
+    assert r["outcome"] == "created" and r["validator_id"] == "new-1"  # id preserved
+    assert r.get("associate_failed") == ["EVD-A", "EVD-B"]
+    lock = json.loads((tmp_path / "lock.json").read_text())["validators"]
+    assert lock["alb_encryption_in_transit"] == "new-1"  # locked -> no re-create
+
+
+def test_update_emits_per_item_event(tmp_path):
+    (tmp_path / "lock.json").write_text(json.dumps({"validators": {"alb_encryption_in_transit": "v1"}}))
+    events = []
+    c = FakeClient()
+    s = syncer.sync_validators(
+        [_alb()], client=c, base_url=BASE, update=True,
+        lock_path=str(tmp_path / "lock.json"), on_event=events.append,
+    )
+    assert s["updated"] == 1
+    upd = [e for e in events if e.get("event") == "sync_validator" and e.get("outcome") == "updated"]
+    assert len(upd) == 1 and upd[0]["validator_id"] == "v1"
+
+
+def test_missing_key_isolated_not_crash(tmp_path):
+    c = FakeClient(evidence_sets={"EVD-LB-ENC-STATUS": "es-1"})
+    bad = {k: val for k, val in _alb().items() if k != "key"}
+    s = _run([bad, _alb()], c, tmp_path)  # must not raise
+    assert s["errors"] == 1 and s["created"] == 1
+
+
+# --------------------------------------------------------------------------- #
+# Default custom tags — on create, on skip, on update; never in a dry run
+# --------------------------------------------------------------------------- #
+
+def _tag_posts(c):
+    return [(url.rsplit("/custom-tags/", 1)[1], body["names"]) for url, body in c.session.posts]
+
+
+@pytest.fixture(autouse=True)
+def _no_ambient_tag_switch(monkeypatch):
+    monkeypatch.delenv("PARAMIFY_CUSTOM_TAGS", raising=False)
+
+
+def test_created_validator_is_tagged_with_its_category(tmp_path):
+    c = FakeClient(evidence_sets={"EVD-LB-ENC-STATUS": "es-1"})
+    v = {**_alb(), "category": "aws"}
+    s = _run([v], c, tmp_path, display_names={"aws": "AWS"})
+    assert _tag_posts(c) == [("validators/new-1", ["Automated by Paramify Fetchers", "AWS"])]
+    assert s["results"][0]["tags"] == ["Automated by Paramify Fetchers", "AWS"]
+    assert s["tags"]["applied"] == 1
+
+
+def test_existing_validator_is_tagged_on_skip_and_update(tmp_path):
+    c = FakeClient(existing=[{"id": "ex-9", "name": "ALB Encryption In Transit"}])
+    s = _run([_alb()], c, tmp_path)
+    assert s["results"][0]["outcome"] == "skipped_exists"
+    assert _tag_posts(c) == [("validators/ex-9", ["Automated by Paramify Fetchers"])]
+
+    c2 = FakeClient(existing=[{"id": "ex-9", "name": "ALB Encryption In Transit"}])
+    s2 = _run([_alb()], c2, tmp_path, update=True)
+    assert s2["results"][0]["outcome"] == "updated"
+    assert _tag_posts(c2) == [("validators/ex-9", ["Automated by Paramify Fetchers"])]
+
+
+def test_dry_run_plans_tags_and_posts_none(tmp_path):
+    c = FakeClient(evidence_sets={"EVD-LB-ENC-STATUS": "es-1"})
+    s = _run([_alb()], c, tmp_path, dry_run=True)
+    assert c.session.posts == []
+    assert s["results"][0]["tags"] == ["Automated by Paramify Fetchers"]
+
+
+def test_tags_off_posts_none(tmp_path):
+    c = FakeClient(evidence_sets={"EVD-LB-ENC-STATUS": "es-1"})
+    s = _run([_alb()], c, tmp_path, config={"tags": False})
+    assert c.session.posts == [] and s["tags"]["enabled"] is False
+
+
+def test_no_tags_switch_posts_none(tmp_path):
+    c = FakeClient(evidence_sets={"EVD-LB-ENC-STATUS": "es-1"})
+    s = _run([_alb()], c, tmp_path, custom_tags=False)
+    assert c.session.posts == [] and s["tags"]["reason"] == "--no-tags"
+    assert s["results"][0]["outcome"] == "created" and s["results"][0]["tags"] == []
+
+
+def test_env_switch_posts_none(tmp_path, monkeypatch):
+    monkeypatch.setenv("PARAMIFY_CUSTOM_TAGS", "off")
+    c = FakeClient(evidence_sets={"EVD-LB-ENC-STATUS": "es-1"})
+    s = _run([_alb()], c, tmp_path)
+    assert c.session.posts == [] and s["tags"]["reason"] == "PARAMIFY_CUSTOM_TAGS=off"
+
+
+def test_missing_tag_permission_keeps_the_sync_ok(tmp_path):
+    c = FakeClient(evidence_sets={"EVD-LB-ENC-STATUS": "es-1"}, tag_status=403)
+    s = _run([_alb(), {**_alb(), "key": "second", "name": "Second"}], c, tmp_path)
+    assert s["ok"] and s["errors"] == 0 and len(c.created) == 2
+    assert len(c.session.posts) == 1 and s["tags"]["disabled"]
+
+
+# --------------------------------------------------------------------------- #
+# ValidatorClient — the HTTP boundary for CONNECT and find (GitHub #83)
+# --------------------------------------------------------------------------- #
+
+import pytest  # noqa: E402
+
+
+class _Resp:
+    def __init__(self, status_code, json_data=None, text=""):
+        self.status_code = status_code
+        self._json = {} if json_data is None else json_data
+        self.text = text
+
+    def json(self):
+        return self._json
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise RuntimeError(f"HTTP {self.status_code}")
+
+
+class _Session:
+    def __init__(self, get=None, post=None):
+        self.headers = {}
+        self._get, self._post = get, post
+
+    def get(self, url, params=None, timeout=None):
+        return self._get(url, params)
+
+    def post(self, url, json=None, timeout=None):
+        return self._post(url, json)
+
+
+def _client(get=None, post=None):
+    c = syncer.ValidatorClient("tok", BASE)
+    c.session = _Session(get, post)
+    return c
+
+
+@pytest.mark.parametrize("status, text", [
+    (400, "Validator already connected to evidence"),   # as observed live
+    (409, "Validator already connected to evidence"),   # same refusal on the code 0.9.2 permits
+])
+def test_associate_tolerates_already_connected(status, text):
+    # The scripts uploader always tolerated this; the syncer raised on it
+    # against the same endpoint. They now share one rule.
+    c = _client(post=lambda url, body: _Resp(status, text=text))
+    c.associate_validator("ev-1", "v-1")  # no raise
+
+
+@pytest.mark.parametrize("status, text", [
+    (400, "subjectId must be a uuid"),
+    (409, '{"statusMessage":"Conflict","error":{"message":"Conflict"}}'),
+    (403, "forbidden"),
+])
+def test_associate_other_refusals_raise(status, text):
+    c = _client(post=lambda url, body: _Resp(status, text=text))
+    with pytest.raises(syncer.ParamifyError):
+        c.associate_validator("ev-1", "v-1")
+
+
+def test_find_evidence_set_failure_is_a_paramify_error():
+    # Not a bare requests.HTTPError: callers reason about this module's own errors.
+    c = _client(get=lambda url, params: _Resp(500, text="boom"))
+    with pytest.raises(syncer.ParamifyError):
+        c.find_evidence_set("EVD-A")
+
+
+def test_token_falls_back_to_read_token_like_the_other_uploaders(monkeypatch, tmp_path):
+    # The syncer used to read PARAMIFY_UPLOAD_API_TOKEN only; a single-token setup
+    # that worked for every other stage failed here. Resolution is shared now.
+    monkeypatch.setattr(syncer, "load_dotenv", lambda *a, **k: None)  # never read a .env from cwd
+    monkeypatch.delenv("PARAMIFY_UPLOAD_API_TOKEN", raising=False)
+    monkeypatch.setenv("PARAMIFY_API_TOKEN", "read-tok")
+    seen = {}
+
+    class Capture(FakeClient):
+        def __init__(self, token, base_url, timeout=30):
+            super().__init__()
+            seen["token"] = token
+            seen["base_url"] = base_url
+
+    monkeypatch.setattr(syncer, "ValidatorClient", Capture)
+    syncer.sync_validators([], base_url=BASE, dry_run=True, lock_path=str(tmp_path / "lock.json"))
+    assert seen == {"token": "read-tok", "base_url": BASE}
+
+
+def test_missing_token_names_both_variables(monkeypatch, tmp_path):
+    monkeypatch.setattr(syncer, "load_dotenv", lambda *a, **k: None)
+    monkeypatch.delenv("PARAMIFY_UPLOAD_API_TOKEN", raising=False)
+    monkeypatch.delenv("PARAMIFY_API_TOKEN", raising=False)
+    with pytest.raises(ValueError, match="PARAMIFY_UPLOAD_API_TOKEN.*PARAMIFY_API_TOKEN"):
+        syncer.sync_validators([], base_url=BASE, lock_path=str(tmp_path / "lock.json"))

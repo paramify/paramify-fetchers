@@ -1,0 +1,48 @@
+name: Bug report
+description: A fetcher, the runner, the uploader or the CLI did something wrong.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for the report. **Remove credentials, account IDs, tenant names and real
+        evidence** from anything you paste. For a security problem, use
+        [private reporting](https://github.com/paramify/paramify-fetchers/security/advisories/new) instead.
+  - type: input
+    id: component
+    attributes:
+      label: Fetcher or command
+      description: The fetcher name (e.g. `aws_iam_mfa_status`) or the command (e.g. `paramify upload`).
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What you expected, and what you got instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How to reproduce
+      description: The commands you ran, and the relevant part of your manifest with secrets removed.
+      render: shell
+  - type: textarea
+    id: output
+    attributes:
+      label: Output or logs
+      description: Error messages, the exit code of the fetcher, or the output of `paramify doctor`.
+      render: text
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The release tag or commit that you use (`git rev-parse --short HEAD`).
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: "Your OS and Python version, and where you run it: locally, in Docker, on ECS or on Kubernetes."

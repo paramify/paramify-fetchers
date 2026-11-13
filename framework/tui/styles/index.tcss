@@ -127,7 +127,7 @@ TabbedContent {
 }
 
 /* ---- Catalog ---- */
-CatalogPage { height: 1fr; padding: 1 1 0 1; }
+CatalogPanel { height: 1fr; padding: 1 1 0 1; }
 
 #catalog-left { width: 42%; min-width: 32; }
 #catalog-search { margin: 1 0; }
@@ -141,7 +141,7 @@ CatalogPage { height: 1fr; padding: 1 1 0 1; }
 #catalog-detail-scroll { width: 1fr; margin-left: 1; }
 
 /* Manifest editor */
-ManifestPage {
+ManifestPanel {
     height: 1fr;
 }
 
@@ -154,6 +154,10 @@ ManifestPage {
 #manifest-top .inline-label {
     width: auto;
     padding: 0 1 0 0;
+}
+
+#manifest-top .after-button {
+    margin-left: 2;
 }
 
 #manifest-output-dir {
@@ -170,6 +174,7 @@ ManifestPage {
 }
 
 #manifest-entries-panel { width: 55%; }
+ManifestPanel.no-detail #manifest-entries-panel { width: 1fr; }
 #manifest-entries { height: 1fr; }
 
 #manifest-detail-scroll {
@@ -247,6 +252,8 @@ UploadPage {
 /* Paramify tab: evidence + issue-report + scripts panels over a shared log. */
 #evidence-panel { height: auto; margin: 1 1 0 1; }
 #evidence-summary { height: auto; }
+/* Preflight errors and warnings: prose that wraps, under the summary table. */
+.panel-notes { height: auto; padding: 0 1; }
 #evidence-actions { height: auto; align: left middle; padding-top: 1; }
 
 /* Sized to content like the evidence panel: for a run with no issue reports it
@@ -256,10 +263,13 @@ UploadPage {
 #issues-actions { height: auto; align: left middle; padding-top: 1; }
 #issues-actions Button { width: 24; }
 
-#scripts-panel { height: 1fr; margin: 1 1 0 1; }
+/* Scripts and log split what the two auto-height panels leave. Each keeps a
+   floor, so neither collapses to its border on a 50-row terminal: the scripts
+   panel needs header, summary, a plan row and the action row (8 with border). */
+#scripts-panel { height: 1fr; min-height: 8; margin: 1 1 0 1; }
 #scripts-header { height: auto; }
 #scripts-plan-summary { height: auto; color: $text-muted; }
-#scripts-plan { height: 1fr; }
+#scripts-plan { height: 1fr; min-height: 2; }
 #scripts-actions { height: auto; align: left middle; padding-top: 1; }
 /* Uniform SIZE across the whole action row. Buttons and checkboxes size to their
    text by default (mismatched widths), and Checkbox keeps its 3-row bordered box
@@ -278,7 +288,7 @@ UploadPage {
     background: $panel;
 }
 
-#upload-log-panel { height: 40%; margin: 1 1 0 1; }
+#upload-log-panel { height: 1fr; min-height: 6; margin: 1 1 0 1; }
 #upload-log { height: 1fr; }
 
 #upload-banner {
@@ -302,7 +312,14 @@ ModalScreen {
 }
 
 #modal-card.confirm {
-    width: 60;
+    width: 72;
+}
+
+/* A Label sizes to its text and clips what does not fit: a long question lost
+   its second sentence — the one saying a close auto-closes open issues. Full
+   width makes it wrap inside the card instead. */
+#modal-card.confirm #modal-title {
+    width: 100%;
 }
 
 #modal-card.wide {
@@ -328,6 +345,14 @@ ModalScreen {
     padding-bottom: 1;
 }
 
+/* Why a picker's list is short: no token, an API error. */
+#picker-notice {
+    color: $warning;
+    border-left: tall $warning;
+    padding: 0 1;
+    margin-bottom: 1;
+}
+
 #modal-body {
     height: auto;
     max-height: 24;
@@ -339,6 +364,22 @@ ModalScreen {
 #modal-card.wide #modal-body {
     height: 1fr;
     max-height: 100%;
+}
+
+/* Targets editor: the table fills the wide card, with the count and the key
+   legend pinned under it. */
+#targets-table {
+    height: 1fr;
+    margin-top: 1;
+}
+
+#targets-count {
+    color: $text-muted;
+    padding-top: 1;
+}
+
+#targets-keys {
+    color: $text-muted;
 }
 
 #preview-text {
@@ -375,9 +416,19 @@ ModalScreen {
     width: 1fr;
 }
 
+.patterns-input {
+    height: 6;
+}
+
 #picker-list {
     height: 16;
     margin-top: 1;
+}
+
+/* A notice's single fallback choice: no filter above it, no empty list below it. */
+#picker-list.fallback {
+    height: auto;
+    margin-top: 0;
 }
 
 /* Multi-select add-fetcher modal: checkbox list (left) + live picked list

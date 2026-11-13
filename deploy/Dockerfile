@@ -7,7 +7,7 @@
 # Build (from the REPO ROOT, not deploy/):
 #   docker build -f deploy/Dockerfile -t paramify-fetchers:beta .
 # or just use docker compose (see deploy/docker-compose.yml).
-FROM python:3.12-slim
+FROM python:3.14-slim
 
 # ---------------------------------------------------------------------------
 # System binaries

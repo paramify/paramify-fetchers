@@ -2,7 +2,7 @@
 #
 # The `platforms:` block holds per-category (platform-wide) config and auth,
 # inherited by every fetcher in that category. Per-fetcher `config:` overrides
-# the platform value. See docs/config_injection_design.md.
+# the platform value. See docs/config_injection_guide.md.
 
 run:
   output_dir: ./evidence

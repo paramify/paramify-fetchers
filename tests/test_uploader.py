@@ -1,13 +1,14 @@
-"""Tests for the Paramify evidence uploader (uploaders/paramify_evidence/uploader.py).
+"""Tests for the legacy evidence uploader script (uploaders/paramify_evidence/uploader.py).
 
-The uploader is the highest-stakes untested code: it pushes real customer
-evidence to Paramify. We mock ONLY the HTTP boundary (a fake requests.Session /
-a fake client) so the uploader's actual logic runs — get-or-create with the 400
-fallback, the run_id token-boundary dedup, per-file partial-failure isolation,
-the https guard, and the skip_failed default.
+The script is a thin, deprecated wrapper: `upload_run` and `main` hand the run to
+the sync engine (framework/api.upload_run). The engine has its own tests
+(test_api_upload_engine.py, test_sync_*.py, test_validator_sync.py); these cover
+what the wrapper itself promises: the legacy signature and summary keys, a
+config dict passed through without touching disk, token and base URL arguments,
+the deprecation notice, and the flags of `main`.
 
-The module isn't an importable package (the CLI loads it by path), so we load it
-the same way here.
+The module is not an importable package (schedules load it by path), so it is
+loaded the same way here.
 """
 
 from __future__ import annotations
@@ -17,7 +18,8 @@ import json
 from pathlib import Path
 
 import pytest
-import requests
+
+from tests.test_api_upload_engine import fake, no_env  # noqa: F401  (fixtures)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 _UPLOADER_PATH = REPO_ROOT / "uploaders" / "paramify_evidence" / "uploader.py"
@@ -25,64 +27,13 @@ _spec = importlib.util.spec_from_file_location("uploader_under_test", _UPLOADER_
 uploader = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(uploader)
 
-
-# --------------------------------------------------------------------------- #
-# Fakes for the HTTP boundary
-# --------------------------------------------------------------------------- #
-
-class FakeResponse:
-    def __init__(self, status_code=200, json_data=None, text=""):
-        self.status_code = status_code
-        self._json = {} if json_data is None else json_data
-        self.text = text
-
-    def json(self):
-        return self._json
-
-    def raise_for_status(self):
-        if self.status_code >= 400:
-            raise requests.HTTPError(str(self.status_code))
-
-
-class FakeSession:
-    """Drop-in for requests.Session; scripted per test via get_handler/post_handler."""
-
-    def __init__(self):
-        self.headers = {}
-        self.get_handler = None
-        self.post_handler = None
-
-    def get(self, url, params=None, timeout=None):
-        return self.get_handler(url, params)
-
-    def post(self, url, json=None, files=None, timeout=None):
-        return self.post_handler(url, json, files)
-
-
-class FakeClient:
-    """Drop-in for ParamifyClient at the upload_run level: lets us drive
-    duplicate/partial-failure behavior without any HTTP."""
-
-    def __init__(self, *, fail_files=(), existing=()):
-        self.fail_files = set(fail_files)
-        self.existing = set(existing)
-        self.uploaded = []
-
-    def get_or_create_evidence_set(self, es):
-        return "ev-" + es["reference_id"]
-
-    def artifact_exists(self, evidence_id, filename, run_id):
-        return filename in self.existing
-
-    def upload_artifact(self, evidence_id, filename, content, meta):
-        if filename in self.fail_files:
-            raise uploader.ParamifyError(f"HTTP 500 on {filename}")
-        self.uploaded.append(filename)
-        return {"id": "art-" + filename}
+LEGACY = {"uploaded", "skipped_duplicate", "skipped_failed", "errors", "ok"}
+URL = "https://api.example.test"
 
 
 def write_evidence(run_dir, name, *, reference_id="EVD-1", set_name="Set",
-                   status="success", run_id="RID", target=None, enveloped=True):
+                   status="success", run_id="RID", target=None, enveloped=True,
+                   category=None):
     if not enveloped:
         (run_dir / name).write_text(json.dumps({"just": "data"}))
         return
@@ -98,171 +49,69 @@ def write_evidence(run_dir, name, *, reference_id="EVD-1", set_name="Set",
     }
     if target:
         env["metadata"]["target"] = target
+    if category:
+        env["metadata"]["category"] = category
     (run_dir / name).write_text(json.dumps(env))
 
 
-# --------------------------------------------------------------------------- #
-# ParamifyClient — get-or-create + the 400 "already exists" idempotency fallback
-# --------------------------------------------------------------------------- #
-
-def _client_with_session(get_handler=None, post_handler=None):
-    c = uploader.ParamifyClient("tok", "https://app.example.com/api/v0")
-    fs = FakeSession()
-    fs.get_handler = get_handler
-    fs.post_handler = post_handler
-    c.session = fs
-    return c
-
-
-def test_find_returns_id_for_exact_reference_match():
-    c = _client_with_session(get_handler=lambda url, params: FakeResponse(200, {"evidences": [
-        {"id": "ev-other", "referenceId": "OTHER"},
-        {"id": "ev-9", "referenceId": "EVD-9"},
-    ]}))
-    assert c.find_evidence_set("EVD-9") == "ev-9"
-
-
-def test_get_or_create_uses_existing_and_never_posts():
-    posts = []
-
-    def post_handler(url, j, f):
-        posts.append(url)
-        return FakeResponse(201, {"id": "NEW"})
-
-    c = _client_with_session(
-        get_handler=lambda url, params: FakeResponse(200, {"evidences": [{"id": "ev-1", "referenceId": "EVD-1"}]}),
-        post_handler=post_handler,
-    )
-    assert c.get_or_create_evidence_set({"reference_id": "EVD-1", "name": "n"}) == "ev-1"
-    assert posts == []   # found it; must not have tried to create
-
-
-def test_create_on_400_already_exists_falls_back_to_find():
-    # initial find -> None; create -> 400 "already exists"; fallback find -> id
-    gets = [FakeResponse(200, {"evidences": []}),
-            FakeResponse(200, {"evidences": [{"id": "ev-7", "referenceId": "EVD-1"}]})]
-    c = _client_with_session(
-        get_handler=lambda url, params: gets.pop(0),
-        post_handler=lambda url, j, f: FakeResponse(400, text="Evidence already exists"),
-    )
-    assert c.get_or_create_evidence_set({"reference_id": "EVD-1", "name": "n"}) == "ev-7"
-
-
-def test_create_other_400_raises():
-    c = _client_with_session(
-        get_handler=lambda url, params: FakeResponse(200, {"evidences": []}),
-        post_handler=lambda url, j, f: FakeResponse(400, text="validation: name required"),
-    )
-    with pytest.raises(uploader.ParamifyError):
-        c.get_or_create_evidence_set({"reference_id": "EVD-1", "name": "n"})
-
-
-# --------------------------------------------------------------------------- #
-# artifact_exists — run_id is matched as a TOKEN, not a substring
-# --------------------------------------------------------------------------- #
-
-def test_artifact_exists_matches_run_id_on_token_boundary():
-    c = _client_with_session(get_handler=lambda url, params: FakeResponse(200, {"artifacts": [
-        {"originalFileName": "ev.json", "note": "fetcher=f; run_id=12; status=success"},
-    ]}))
-    # run_id "1" must NOT match the "run_id=12" token (the substring-bug guard)
-    assert c.artifact_exists("ev-1", "ev.json", "1") is False
-    # the exact token matches
-    assert c.artifact_exists("ev-1", "ev.json", "12") is True
-    # filename mismatch never matches
-    assert c.artifact_exists("ev-1", "other.json", "12") is False
-    # no run_id -> never dedups (always re-uploads)
-    assert c.artifact_exists("ev-1", "ev.json", None) is False
-
-
-# --------------------------------------------------------------------------- #
-# upload_run — partial-failure isolation, dedup, skip_failed, https guard
-# --------------------------------------------------------------------------- #
-
-def test_partial_failure_uploads_good_files_and_reports_not_ok(tmp_path, monkeypatch):
+def _run(tmp_path, *names, **kw):
     run_dir = tmp_path / "run-x"
     run_dir.mkdir()
-    write_evidence(run_dir, "good.json")
-    write_evidence(run_dir, "bad.json")          # sorts first; fails
-    fake = FakeClient(fail_files={"bad.json"})
-    monkeypatch.setattr(uploader, "ParamifyClient", lambda token, base_url: fake)
-
-    summary = uploader.upload_run(run_dir, token="tok", base_url="https://app.example.com/api/v0")
-
-    assert summary["ok"] is False
-    assert summary["uploaded"] == 1 and summary["errors"] == 1
-    assert "good.json" in fake.uploaded and "bad.json" not in fake.uploaded   # batch continued
+    for n in names or ("a.json",):
+        write_evidence(run_dir, n, **kw)
+    return run_dir
 
 
-def test_unenveloped_file_is_error_but_batch_continues(tmp_path, monkeypatch):
-    run_dir = tmp_path / "run-x"
-    run_dir.mkdir()
-    write_evidence(run_dir, "ok.json")
-    write_evidence(run_dir, "raw.json", enveloped=False)
-    fake = FakeClient()
-    monkeypatch.setattr(uploader, "ParamifyClient", lambda token, base_url: fake)
+# --------------------------------------------------------------------------- #
+# upload_run: legacy signature, engine behind it
+# --------------------------------------------------------------------------- #
 
-    summary = uploader.upload_run(run_dir, token="tok", base_url="https://app.example.com/api/v0")
-
-    assert summary["errors"] == 1 and summary["uploaded"] == 1
-    assert "ok.json" in fake.uploaded
-
-
-def test_existing_artifact_is_skipped_as_duplicate(tmp_path, monkeypatch):
-    run_dir = tmp_path / "run-x"
-    run_dir.mkdir()
-    write_evidence(run_dir, "a.json")
-    fake = FakeClient(existing={"a.json"})
-    monkeypatch.setattr(uploader, "ParamifyClient", lambda token, base_url: fake)
-
-    summary = uploader.upload_run(run_dir, token="tok", base_url="https://app.example.com/api/v0")
-
-    assert summary["skipped_duplicate"] == 1 and summary["uploaded"] == 0
-    assert fake.uploaded == []
+def test_upload_run_returns_the_legacy_keys_and_log(fake, tmp_path):  # noqa: F811
+    run_dir = _run(tmp_path, "a.json", "b.json")
+    events = []
+    summary = uploader.upload_run(run_dir, config={}, on_event=events.append)
+    assert LEGACY <= set(summary) and {"results", "tags", "log_path", "files"} <= set(summary)
+    assert (summary["uploaded"], summary["errors"], summary["ok"]) == (2, 0, True)
+    assert [e["event"] for e in events if e["event"].startswith("upload_")][0] == "upload_start"
+    log = json.loads((run_dir / "upload_log.json").read_text())
+    assert "deprecations" not in log  # only main() adds it
 
 
-def test_skip_failed_skips_failed_status(tmp_path, monkeypatch):
-    run_dir = tmp_path / "run-x"
-    run_dir.mkdir()
-    write_evidence(run_dir, "f.json", status="failed")
-    fake = FakeClient()
-    monkeypatch.setattr(uploader, "ParamifyClient", lambda token, base_url: fake)
+def test_a_second_upload_of_the_same_run_changes_nothing(fake, tmp_path):  # noqa: F811
+    run_dir = _run(tmp_path)
+    uploader.upload_run(run_dir)
+    again = uploader.upload_run(run_dir)
+    assert again["uploaded"] == 0 and again["skipped_duplicate"] == 1 and again["ok"] is True
 
-    summary = uploader.upload_run(run_dir, token="tok", base_url="https://app.example.com/api/v0",
-                                  config={"skip_failed": True})
 
+def test_config_dict_is_used_and_nothing_is_written_beside_the_run(fake, tmp_path):  # noqa: F811
+    run_dir = _run(tmp_path, status="failed")
+    summary = uploader.upload_run(run_dir, config={"skip_failed": True})
     assert summary["skipped_failed"] == 1 and summary["uploaded"] == 0
-    assert fake.uploaded == []
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["run-x"]
 
 
-def test_failed_status_uploads_by_default(tmp_path, monkeypatch):
-    """Characterizes the documented default: skip_failed is off, so a
-    failed-status file IS uploaded (flagged failed) unless the operator opts in."""
-    run_dir = tmp_path / "run-x"
-    run_dir.mkdir()
-    write_evidence(run_dir, "f.json", status="failed")
-    fake = FakeClient()
-    monkeypatch.setattr(uploader, "ParamifyClient", lambda token, base_url: fake)
+def test_failed_status_uploads_by_default(fake, tmp_path):  # noqa: F811
+    summary = uploader.upload_run(_run(tmp_path, status="failed"))
+    assert summary["uploaded"] == 1
 
-    summary = uploader.upload_run(run_dir, token="tok", base_url="https://app.example.com/api/v0")
 
-    assert summary["uploaded"] == 1 and "f.json" in fake.uploaded
+def test_unenveloped_file_is_an_error_and_the_rest_upload(fake, tmp_path):  # noqa: F811
+    run_dir = _run(tmp_path, "ok.json")
+    write_evidence(run_dir, "raw.json", enveloped=False)
+    summary = uploader.upload_run(run_dir)
+    assert summary["uploaded"] == 1 and summary["errors"] == 1 and summary["ok"] is False
+    [raw] = [r for r in summary["results"] if r["file"] == "raw.json"]
+    assert raw["outcome"] == "error" and "not envelope-wrapped" in raw["reason"]
 
 
 def test_https_guard_rejects_http_remote(tmp_path):
-    run_dir = tmp_path / "run-x"
-    run_dir.mkdir()
-    write_evidence(run_dir, "a.json")
     with pytest.raises(ValueError, match="https"):
-        uploader.upload_run(run_dir, token="tok", base_url="http://evil.example.com", dry_run=True)
+        uploader.upload_run(_run(tmp_path), token="tok", base_url="http://evil.example.com", dry_run=True)
 
 
 def test_https_guard_allows_localhost_http(tmp_path):
-    run_dir = tmp_path / "run-x"
-    run_dir.mkdir()
-    write_evidence(run_dir, "a.json")
-    # dry_run keeps it API-call-free; the point is the guard does NOT reject localhost http
-    summary = uploader.upload_run(run_dir, base_url="http://localhost:8080", dry_run=True)
+    summary = uploader.upload_run(_run(tmp_path), base_url="http://localhost:8080", dry_run=True)
     assert summary["dry_run"] is True and summary["files"] == 1
 
 
@@ -271,3 +120,107 @@ def test_empty_run_dir_raises(tmp_path):
     run_dir.mkdir()
     with pytest.raises(ValueError, match="no evidence files"):
         uploader.upload_run(run_dir, token="tok", base_url="https://app.example.com/api/v0", dry_run=True)
+
+
+def test_missing_token_is_a_setup_error(no_env, tmp_path):  # noqa: F811
+    with pytest.raises(ValueError, match="PARAMIFY_UPLOAD_API_TOKEN"):
+        uploader.upload_run(_run(tmp_path))
+
+
+def test_token_and_base_url_arguments_win_over_the_environment(no_env, tmp_path, monkeypatch):  # noqa: F811
+    from framework.sync import upload as upload_mod
+
+    seen = {}
+
+    class Stop(Exception):
+        pass
+
+    def spy(token, base_url, **kw):
+        seen.update(token=token, base_url=base_url)
+        raise Stop
+
+    monkeypatch.setenv("PARAMIFY_UPLOAD_API_TOKEN", "env-tok")
+    monkeypatch.setattr(upload_mod, "Client", spy)
+    with pytest.raises(Stop):
+        uploader.upload_run(_run(tmp_path), token="arg-tok", base_url="https://arg.example.test")
+    assert seen == {"token": "arg-tok", "base_url": "https://arg.example.test"}
+
+
+def test_dry_run_plans_tags_and_makes_no_call(no_env, tmp_path):  # noqa: F811
+    run_dir = _run(tmp_path, reference_id="EVD-A", category="aws")
+    summary = uploader.upload_run(run_dir, dry_run=True)
+    assert summary["results"][0]["outcome"] == "would_upload"
+    assert summary["results"][0]["tags"] == ["Automated by Paramify Fetchers", "AWS"]
+    assert summary["tags"]["applied"] == 0 and not (run_dir / "upload_log.json").exists()
+
+
+def test_no_tags_switch_turns_tags_off(fake, tmp_path):  # noqa: F811
+    summary = uploader.upload_run(_run(tmp_path), custom_tags=False)
+    assert summary["tags"]["enabled"] is False and "tags" not in summary["results"][0]
+
+
+def test_the_summary_no_longer_carries_per_file_ids(fake, tmp_path):  # noqa: F811
+    summary = uploader.upload_run(_run(tmp_path))
+    for r in summary["results"]:
+        assert not {"evidence_id", "artifact_id", "channel_id"} & set(r)
+
+
+# --------------------------------------------------------------------------- #
+# main: every flag still works; the deprecation is stated and logged
+# --------------------------------------------------------------------------- #
+
+def test_main_prints_the_deprecation_and_logs_it(fake, tmp_path, capsys):  # noqa: F811
+    run_dir = _run(tmp_path)
+    assert uploader.main([str(run_dir)]) == 0
+    assert uploader.DEPRECATION in capsys.readouterr().err
+    assert uploader.DEPRECATION == "paramify_evidence/uploader.py is deprecated; use 'paramify upload'"
+    log = json.loads((run_dir / "upload_log.json").read_text())
+    assert log["deprecations"] == [uploader.DEPRECATION] and log["uploaded"] == 1
+
+
+def test_main_dry_run_and_config_flags(no_env, tmp_path, capsys):  # noqa: F811
+    run_dir = _run(tmp_path, status="failed")
+    cfg = tmp_path / "up.yaml"
+    cfg.write_text("skip_failed: true\n")
+    assert uploader.main([str(run_dir), "--dry-run", "--config", str(cfg)]) == 0
+    assert not (run_dir / "upload_log.json").exists()
+
+
+def test_main_picks_the_latest_run_under_output_dir(fake, tmp_path):  # noqa: F811
+    out = tmp_path / "evidence"
+    for name in ("run-2026-01-01", "run-2026-02-01"):
+        d = out / name
+        d.mkdir(parents=True)
+        write_evidence(d, "a.json")
+    assert uploader.main(["--output-dir", str(out)]) == 0
+    assert (out / "run-2026-02-01" / "upload_log.json").exists()
+    assert not (out / "run-2026-01-01" / "upload_log.json").exists()
+
+
+def test_main_returns_1_without_a_run_dir(tmp_path):
+    assert uploader.main(["--output-dir", str(tmp_path / "nope")]) == 1
+
+
+def test_main_returns_1_on_a_setup_error(no_env, tmp_path):  # noqa: F811
+    assert uploader.main([str(_run(tmp_path))]) == 1  # no token
+
+
+def test_main_returns_1_when_an_entry_is_refused(fake, tmp_path):  # noqa: F811
+    run_dir = _run(tmp_path)
+    (run_dir / "a.json").write_text((run_dir / "a.json").read_text().replace('"k": 1', '"k": "/bin/sh -c x"'))
+    assert uploader.main([str(run_dir)]) == 1
+
+
+def test_main_returns_1_when_a_file_is_not_an_envelope(fake, tmp_path):  # noqa: F811
+    run_dir = _run(tmp_path, "ok.json")
+    write_evidence(run_dir, "raw.json", enveloped=False)
+    assert uploader.main([str(run_dir)]) == 1
+
+
+def test_main_names_the_exception_type_for_an_unexpected_error(no_env, tmp_path, monkeypatch, caplog):  # noqa: F811
+    def boom(*a, **k):
+        raise KeyError("x")
+
+    monkeypatch.setattr(uploader, "_upload", boom)
+    assert uploader.main([str(_run(tmp_path))]) == 1
+    assert "KeyError: " in caplog.text

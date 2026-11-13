@@ -35,7 +35,7 @@ _TARGET_ID="$(aws_target_id)"
 OUTPUT_JSON="$OUTPUT_DIR/aws_iam_roles_${_TARGET_ID}.json"
 _FETCHER_TMP_JSON="$(mktemp -t aws_iam_roles.XXXXXX.json)"
 _FAILURE_LOG="$(mktemp -t aws_iam_roles_fail.XXXXXX)"
-trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG"' EXIT
+trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG" "$_AWS_ERR_LOG"' EXIT
 
 log_info() { printf '%s INFO aws_iam_roles %s\n' "$(date -u +'%Y-%m-%d %H:%M:%S')" "$*" >&2; }
 log_error() { printf '%s ERROR aws_iam_roles %s\n' "$(date -u +'%Y-%m-%d %H:%M:%S')" "$*" >&2; }
@@ -55,65 +55,49 @@ jq -n \
   '{"metadata": {"profile": $profile, "region": $region, "datetime": $datetime, "account_id": $account_id, "arn": $arn}, "results": []}' \
   > "$OUTPUT_JSON"
 
-roles=$(aws iam list-roles --query 'Roles[*].[RoleName,Arn,CreateDate]' --output json 2>/dev/null)
+# Two paginated calls cover every role, instead of four per role (get-role,
+# list-attached-role-policies, list-instance-profiles-for-role, list-role-tags),
+# which ran past the runner's timeout in accounts with hundreds of roles.
+# list-roles carries the Role fields get-role returned that are used here
+# (Description, MaxSessionDuration, the trust policy); get-account-authorization-
+# details carries the attachments, instance profiles and tags. It needs
+# iam:GetAccountAuthorizationDetails (in ReadOnlyAccess and SecurityAudit).
+_ROLES_JSON="$(mktemp -t aws_iam_roles_list.XXXXXX.json)"
+_GAAD_JSON="$(mktemp -t aws_iam_roles_gaad.XXXXXX.json)"
+trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG" "$_AWS_ERR_LOG" "$_ROLES_JSON" "$_GAAD_JSON"' EXIT
+
+aws iam list-roles --query 'Roles[*]' --output json > "$_ROLES_JSON" 2>/dev/null
 list_exit=$?
 if [ $list_exit -ne 0 ]; then
     echo "aws iam list-roles failed (exit=$list_exit)" >> "$_FAILURE_LOG"
     log_error "Failed to list IAM roles"
 else
-    echo "$roles" | jq -c '.[]' | while read -r role; do
-        role_name=$(echo "$role" | jq -r '.[0]')
-        role_arn=$(echo "$role" | jq -r '.[1]')
+    # A failed details call keeps the roles and falls back to [] for what it
+    # would have supplied -- the default each per-role call used on failure.
+    if ! aws iam get-account-authorization-details --filter Role \
+            --query 'RoleDetailList[*].{RoleName:RoleName,AttachedManagedPolicies:AttachedManagedPolicies,InstanceProfileList:InstanceProfileList,Tags:Tags}' \
+            --output json > "$_GAAD_JSON" 2>/dev/null; then
+        echo "aws iam get-account-authorization-details (roles) failed" >> "$_FAILURE_LOG"
+        echo '[]' > "$_GAAD_JSON"
+    fi
 
-        if [ "$EXCLUDE_AWS_ROLES" = "true" ] && [[ "$role_arn" == arn:aws:iam::aws:role/* ]]; then
-            continue
-        fi
-
-        role_data=$(aws iam get-role --role-name "$role_name" --query 'Role' --output json 2>/dev/null)
-        if [ $? -ne 0 ]; then
-            echo "aws iam get-role ($role_name) failed" >> "$_FAILURE_LOG"
-            continue
-        fi
-        trust_policy=$(echo "$role_data" | jq '.AssumeRolePolicyDocument')
-
-        attached_policies=$(aws iam list-attached-role-policies --role-name "$role_name" --query 'AttachedPolicies[*].[PolicyName,PolicyArn]' --output json 2>/dev/null)
-        if [ $? -ne 0 ]; then
-            echo "aws iam list-attached-role-policies ($role_name) failed" >> "$_FAILURE_LOG"
-            attached_policies='[]'
-        fi
-
-        instance_profiles=$(aws iam list-instance-profiles-for-role --role-name "$role_name" --query 'InstanceProfiles[*].[InstanceProfileName,InstanceProfileId]' --output json 2>/dev/null)
-        if [ $? -ne 0 ]; then
-            echo "aws iam list-instance-profiles-for-role ($role_name) failed" >> "$_FAILURE_LOG"
-            instance_profiles='[]'
-        fi
-
-        role_tags=$(aws iam list-role-tags --role-name "$role_name" --query 'Tags[*]' --output json 2>/dev/null)
-        if [ $? -ne 0 ]; then
-            echo "aws iam list-role-tags ($role_name) failed" >> "$_FAILURE_LOG"
-            role_tags='[]'
-        fi
-
-        role_info=$(jq -n \
-            --argjson role "$role_data" \
-            --argjson trust "$trust_policy" \
-            --argjson policies "$attached_policies" \
-            --argjson profiles "$instance_profiles" \
-            --argjson tags "$role_tags" \
-            '{
-                "RoleName": $role.RoleName,
-                "Arn": $role.Arn,
-                "CreateDate": $role.CreateDate,
-                "Description": $role.Description,
-                "MaxSessionDuration": $role.MaxSessionDuration,
-                "TrustPolicy": $trust,
-                "AttachedPolicies": $policies,
-                "InstanceProfiles": $profiles,
-                "Tags": $tags
-            }')
-
-        jq --argjson role "$role_info" '.results += [$role]' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
-    done
+    jq --slurpfile roles "$_ROLES_JSON" --slurpfile details "$_GAAD_JSON" --arg exclude "$EXCLUDE_AWS_ROLES" '
+        (reduce $details[0][]? as $d ({}; .[$d.RoleName] = $d)) as $by_name
+        | .results += [$roles[0][]?
+            | select(($exclude == "true" and (.Arn | startswith("arn:aws:iam::aws:role/"))) | not)
+            | ($by_name[.RoleName] // {}) as $d
+            | {
+                "RoleName": .RoleName,
+                "Arn": .Arn,
+                "CreateDate": .CreateDate,
+                "Description": .Description,
+                "MaxSessionDuration": .MaxSessionDuration,
+                "TrustPolicy": .AssumeRolePolicyDocument,
+                "AttachedPolicies": [($d.AttachedManagedPolicies // [])[] | [.PolicyName, .PolicyArn]],
+                "InstanceProfiles": [($d.InstanceProfileList // [])[] | [.InstanceProfileName, .InstanceProfileId]],
+                "Tags": ($d.Tags // [])
+            }]
+    ' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
 fi
 
 password_policy=$(aws iam get-account-password-policy --query 'PasswordPolicy' --output json 2>/dev/null)
@@ -123,11 +107,4 @@ if [ $? -ne 0 ]; then
 fi
 jq --argjson policy "$password_policy" '.results += [{"Type": "PasswordPolicy", "Policy": $policy}]' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
 
-failure_count=$(wc -l < "$_FAILURE_LOG" 2>/dev/null | tr -d ' ')
-failure_count=${failure_count:-0}
-if [ "$failure_count" -gt 0 ]; then
-    log_error "Encountered $failure_count AWS API failures during collection"
-    exit 1
-fi
-
-log_info "Evidence saved to $OUTPUT_JSON"
+aws_finish

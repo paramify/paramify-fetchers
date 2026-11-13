@@ -1,10 +1,16 @@
 # paramify_evidence — uploader
 
+> **Deprecated.** This script hands the run to the engine behind
+> `paramify upload` and prints a notice. It stays for one release so old
+> schedules keep working. Use `paramify upload`. The guide is
+> [`docs/uploader_guide.md`](../../docs/uploader_guide.md).
+
 Pushes envelope-wrapped evidence from a run directory to Paramify. A **separate
 stage** from collection: it reads a completed `evidence/run-<timestamp>/` and
-attaches each evidence file to its Paramify evidence set. It never runs fetchers
-and never touches fetcher source credentials — so you can point it at an old run
-to re-upload.
+sends the files of each fetcher entry to a Paramify evidence set as one batch.
+If an entry cannot go in a batch, it goes direct, as before batches. It
+never runs fetchers and never touches fetcher source credentials. You can point
+it at an old run, and uploading a run again changes nothing.
 
 ## Paramify API key
 
@@ -32,17 +38,31 @@ export PARAMIFY_UPLOAD_API_TOKEN=<paste key here>
 
 1 fetcher = 1 **evidence set** (a Paramify container). Each fetcher declares its
 evidence-set identity in its `fetcher.yaml` `evidence_set` block (`reference_id`,
-`name`, `instructions`); the runner copies that into every evidence file's
+`name`, `instructions`, `frequency`); the runner copies that into every evidence file's
 envelope (`metadata.evidence_set`). The uploader reads it from the envelope, so
 it needs only the run directory — not the `fetchers/` tree.
 
-For each evidence file the uploader:
-1. reads `metadata.evidence_set` (skips with an error if missing),
+For each fetcher entry in the run the upload:
+1. reads `metadata.evidence_set` from the files of the entry. A file that is
+   unreadable, is not an envelope, or has no complete evidence set is an error.
+   The upload names it and sends the other files,
 2. applies any per-fetcher override from `--config`,
-3. **get-or-creates** the evidence set by `reference_id`,
-4. **attaches** the evidence as an artifact — skipping it if an artifact with the
-   same filename and `run_id` already exists (so re-running is safe; a *different*
-   run still adds a new versioned artifact).
+3. **get-or-creates** the evidence set by `reference_id`. A new set gets the
+   approval mode `SUBMISSION` unless `approval` in the
+   manifest says otherwise. It never changes an existing set. It only adds tags,
+4. **routes** the batch by the channels on the set. With no channel, the batch
+   goes on the evidence set. With one channel, it uses that channel. With
+   several channels, it uses the channel on the stack of the entry. It refuses
+   the entry, and says why, when it cannot choose,
+5. **delivers** one batch with every file of the entry, then submits it. A
+   temporary failure leaves the batch open. Run the same upload again to resume
+   it. A file that fails for good is dropped and named, and the rest goes in.
+   If the entry cannot use a batch, the upload sends the files direct. See
+   [direct delivery](../../docs/uploader_guide.md#when-a-batch-cannot-be-used).
+
+A refusal or failure stops that entry only. The stack, `approval`, `delivery`
+and `no_request` settings are in the run manifest under `run.paramify`. See
+[the uploader guide](../../docs/uploader_guide.md#how-a-run-is-delivered).
 
 Tying evidence sets to controls/solution-capabilities is done in Paramify (manual
 today) and is out of scope here.
@@ -52,7 +72,7 @@ today) and is out of scope here.
 ```bash
 export PARAMIFY_UPLOAD_API_TOKEN=...   # any source: .env, secret manager, CI
 
-# Upload the latest run under ./evidence:
+# Upload the latest run under ./evidence (deprecated; use `paramify upload`):
 python uploaders/paramify_evidence/uploader.py
 
 # A specific run:
@@ -65,19 +85,35 @@ python uploaders/paramify_evidence/uploader.py --dry-run
 python uploaders/paramify_evidence/uploader.py --config examples/upload.yaml
 ```
 
-Writes an `upload_log.json` into the run directory. Exits non-zero if any file
-failed to upload or was missing its evidence-set block.
+Writes an `upload_log.json` into the run directory. It holds the plan, the state
+of each entry and the notice under `deprecations`. It exits 1 if an entry failed
+or was refused. The result no longer lists `evidence_id`, `artifact_id` or
+`channel_id` for each file. Read the batch from `entries`.
 
 ## Config (`--config`, optional)
 
 See [`examples/upload.yaml`](../../examples/upload.yaml):
 - `paramify.base_url` — default `https://app.paramify.com/api/v0`.
-- `overrides.<fetcher_name>.reference_id` (and optionally `name`/`instructions`) —
+- `overrides.<fetcher_name>.reference_id` (and optionally `name`/`instructions`/`frequency`) —
   map a fetcher to a different evidence set for your program.
+- `overrides.<fetcher_name>.frequency` — how often Paramify expects a new
+  artifact on the set (`DAILY`, `THREE_DAY`, `WEEKLY`, `BIWEEKLY`, `MONTHLY`,
+  `QUARTERLY`, `BIANNUAL`, `ANNUAL`, `NOT_SET`). The default is `THREE_DAY`. The
+  uploader writes it only when it creates the set, and there is no setting for
+  all fetchers. To change sets that exist, see
+  [set the collection frequency](../../docs/uploader_guide.md#set-the-collection-frequency).
 - `skip_failed` — skip files whose run status was `failed` (default: upload anyway,
   with the status noted on the artifact).
 - `artifact_payload` — `envelope` (default, self-describing) or `payload` (bare
   evidence) if Paramify ingestion expects the unwrapped dict.
+- `tags` — the default custom tags put on every evidence set, every run:
+  `provenance` (default `Automated by Paramify Fetchers`, or `false`) and
+  `service` (`true`: the category's `display_name`, e.g. `AWS`; `false` to
+  drop it). `tags: false` turns both off. Additive only: your own tags on a set
+  are never touched. Without the custom-tags permission the upload still
+  succeeds, with one warning. **Off switch:** `PARAMIFY_CUSTOM_TAGS=off` in the
+  environment turns the feature off everywhere, whatever the config says;
+  `paramify upload --no-tags` does it for one run. The Done block says which.
 
 ## Required tooling
 

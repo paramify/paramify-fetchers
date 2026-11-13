@@ -5,7 +5,7 @@ call ONLY this module. They never re-implement discovery, validation, manifest
 editing, or execution; they differ only in how they render the JSON-able values
 these functions return.
 
-Design constraints (see docs/config_injection_design.md, CLAUDE.md):
+Design constraints:
 - The editable artifact is the manifest (customer-side values). Declarations
   (fetcher.yaml, fetchers/_categories/*.yaml) are read-only — they generate the
   form via catalog(); we never write into fetchers/.
@@ -17,53 +17,76 @@ the same shape as the on-disk YAML and the manifest schema. Manifest is only
 materialized internally (parse_manifest) for semantic validation and execution.
 """
 
+import difflib
 import importlib.util
 import json
 import os
 import re
+import secrets
 import shutil
 import sys
+import tempfile
 from datetime import datetime, timezone
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as pkg_version
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 from urllib.parse import urlparse
 
 import yaml
+from dotenv import load_dotenv
 from packaging.requirements import Requirement
 from packaging.specifiers import SpecifierSet
 from packaging.utils import canonicalize_name
 
+from framework import patterns, yaml_io
+from framework import samples as _samples
 from framework.config_loader import discover_fetchers, discover_platforms
-from framework.contract import ConfigField, Secret, TargetField, effective_secrets
-from framework.envelope import is_enveloped, wrap_outputs
+from framework.contract import (
+    ConfigField,
+    ManifestEntry,
+    PlatformConfig,
+    Secret,
+    TargetField,
+    config_hint,
+    effective_secrets,
+    platform_category,
+    platform_for,
+)
+from framework.custom_tags import category_display_names
+from framework.envelope import ENVELOPE_KEYS, is_enveloped, wrap_outputs
 from framework.issue_reports import (
     ASSESSMENT_ID_FIELD,
     ASSESSMENT_NAME_FIELD,
+    CLOSE_CYCLE_FIELD,
+    CLOSE_CYCLE_VALUES,
     ISSUE_REPORTS_DIR,
+    record_failed_entry,
 )
 from framework.issue_reports import read_index as read_issue_report_index
 from framework.issue_reports import record_outputs as record_issue_reports
+from framework.paramify.client import base_url_error
 from framework.paramify_auth import (
     BASE_URL_ENV,
     READ_TOKEN_ENV,
     UPLOAD_TOKEN_ENV,
     describe_base_url,
+    missing_token_error,
     resolve_base_url,
     resolve_upload_token,
 )
 from framework.probe import probe_categories
-from framework.runner import manifest_loader
+from framework.run_files import is_evidence_file
+from framework.runner import dependency_graph, manifest_loader
+from framework.secret_resolver import (
+    is_env_ref_attempt,
+    is_partial_env_ref,
+    view_runtime_value,
+)
+from framework.sync import upload as _sync_upload
+from framework.sync.model import Plan
 
-
-def _missing_token_error() -> str:
-    """One wording for the missing-token error, since three call sites raise it."""
-    return (
-        f"{UPLOAD_TOKEN_ENV} is not set (or {READ_TOKEN_ENV} as a fallback). "
-        f"Set it in the environment by any means — export, .env, secret manager, "
-        f"CI secret — or run `paramify doctor <manifest>` to check before a run."
-    )
+_missing_token_error = missing_token_error
 
 _STDERR_TAIL_CHARS = 4000
 
@@ -88,7 +111,7 @@ def find_repo_root(start: Optional[Path] = None) -> Path:
 # --------------------------------------------------------------------------- #
 
 def _config_descriptor(f: ConfigField) -> dict:
-    return {
+    d = {
         "name": f.name,
         "kind": "config",
         "type": f.type,
@@ -97,6 +120,9 @@ def _config_descriptor(f: ConfigField) -> dict:
         "description": f.description,
         "env": f.env,
     }
+    if f.type == patterns.TYPE:
+        d.update(prefixes=list(f.prefixes), bare=f.bare)
+    return d
 
 
 def _secret_descriptor(s: Secret) -> dict:
@@ -138,13 +164,26 @@ def _fetcher_descriptor(f, platform_spec=None) -> dict:
         "secrets": [_secret_descriptor(s) for s in effective_secrets(f, platform_spec)],
         "target_schema": [_target_descriptor(t) for t in f.target_schema.values()],
     }
+    # Where the output goes, so a front-end can say so before anything runs.
+    # Evidence names its destination in fetcher.yaml; an issue report names only
+    # the kind of assessment it fits, and the manifest picks which one.
+    if f.evidence_set is not None:
+        d["evidence_set"] = {
+            "reference_id": f.evidence_set.reference_id,
+            "name": f.evidence_set.name,
+            "frequency": f.evidence_set.frequency,
+        }
     if f.issue_report is not None:
         # What kind of assessment this report can go to, so a front-end can
-        # filter the assessment picker without re-reading fetcher.yaml.
+        # filter the assessment picker without re-reading fetcher.yaml. The
+        # format is the tool's own (csv, nessus, …), never one we convert to.
         d["issue_report"] = {
             "assessment_type": f.issue_report.assessment_type,
             "title": f.issue_report.title,
+            "format": f.output_type,
         }
+    if f.is_comparator:
+        d["depends_on"] = list(f.depends_on)
     return d
 
 
@@ -175,7 +214,8 @@ def catalog(root: Path) -> dict:
     for name in sorted(by_category):
         spec = platforms.get(name)
         platform_block = None
-        if spec is not None:
+        # The block is what the category's fetchers take; a comparator takes none of it.
+        if spec is not None and any(platform_category(f) for f in by_category[name]):
             platform_block = {
                 "config": [_config_descriptor(c) for c in spec.config_schema.values()],
                 "secrets": [_secret_descriptor(s) for s in spec.secrets],
@@ -184,9 +224,10 @@ def catalog(root: Path) -> dict:
         categories.append({
             "name": name,
             "description": spec.description if spec else None,
+            "display_name": spec.display_name if spec else None,
             "platform": platform_block,
             "fetchers": [
-                _fetcher_descriptor(f, spec)
+                _fetcher_descriptor(f, platform_for(f, platforms))
                 for f in sorted(by_category[name], key=lambda x: x.name)
             ],
         })
@@ -200,7 +241,7 @@ def catalog(root: Path) -> dict:
 
 def _load_ksi_reference(root: Path) -> dict:
     """Load the canonical FedRAMP KSI reference (the coverage denominator)."""
-    return yaml.safe_load((root / "framework" / "reference" / "ksis.yaml").read_text())
+    return yaml_io.load_path(root / "framework" / "reference" / "ksis.yaml")
 
 
 def ksi_coverage(root: Path) -> dict:
@@ -426,8 +467,8 @@ def doctor(
     py = sys.version_info
     python = {
         "version": f"{py.major}.{py.minor}.{py.micro}",
-        "required": "3.10",
-        "ok": (py.major, py.minor) >= (3, 10),
+        "required": "3.11",
+        "ok": (py.major, py.minor) >= (3, 11),
     }
 
     fetchers = discover_fetchers(root)
@@ -449,7 +490,7 @@ def doctor(
         entries = (data.get("run") or {}).get("fetchers") or []
         used_cats = sorted({
             c for c in (
-                fetchers[e["use"]].category
+                platform_category(fetchers[e["use"]])
                 for e in entries
                 if e.get("use") in fetchers
             )
@@ -585,11 +626,16 @@ def upload_readiness(root: Path, config_path: Optional[Path] = None) -> dict:
     The destination is reported as loudly as the token, because pointing at
     stage when you meant production (or the reverse) fails silently: the upload
     succeeds, into the wrong workspace.
+
+    `.env` is loaded first, as `list_stacks` and the upload do (override=False,
+    so a real export wins). Without it a token kept only in `.env` reads as
+    missing here while `paramify stacks` and `paramify upload` find it.
     """
+    load_dotenv()
     config: dict = {}
     if config_path is not None:
         try:
-            loaded = yaml.safe_load(Path(config_path).read_text())
+            loaded = yaml_io.load_path(Path(config_path))
             config = loaded if isinstance(loaded, dict) else {}
         except (OSError, yaml.YAMLError) as exc:
             return {
@@ -629,14 +675,107 @@ def upload_readiness(root: Path, config_path: Optional[Path] = None) -> dict:
 # Manifest read / write
 # --------------------------------------------------------------------------- #
 
-def read_manifest(path: Path) -> dict:
-    """Read a manifest YAML into its raw dict. Returns an empty manifest if the
-    file is missing or blank. Raises yaml.YAMLError on malformed YAML."""
+class ManifestNotFound(FileNotFoundError):
+    """No manifest resolved from what the caller asked for.
+
+    Carries the candidates that were tried so the CLI can say where it looked
+    without re-deriving the ladder.
+    """
+
+    def __init__(self, given: str, tried: List[Path]):
+        self.given = given
+        self.tried = tried
+        super().__init__(f"no such manifest: {given}")
+
+
+def resolve_manifest_path(root: Path, name: str, *, must_exist: bool = True) -> Path:
+    """Resolve what the user typed to a manifest path.
+
+    Tries the value as typed, then — for a bare name with no directory part —
+    <root>/manifests/<name> and <root>/manifests/<name>.yaml, then <root>/<name>,
+    so a bare name works from anywhere in the tree.
+
+    This is workspace policy, not CLI presentation: the console resolves the
+    same way, and the two disagreeing is the bug this replaces. Sixteen call
+    sites used a bare Path(x).resolve(), which for a bare name resolves against
+    the process's cwd — so `manifest add -f demo` read ./demo as an empty
+    manifest and WROTE a brand-new one there, while manifests/demo.yaml sat
+    untouched. The manifest silently forks in two and nothing says so.
+
+    must_exist=False is for the create commands (`manifest init`, `manifest
+    new`) and returns the first candidate whether or not anything is there.
+    Everything else should let this raise.
+    """
+    given = Path(name)
+    candidates: List[Path] = [given]
+    if not given.is_absolute():
+        if len(given.parts) == 1:
+            candidates += [root / "manifests" / name, root / "manifests" / f"{name}.yaml"]
+        candidates.append(root / name)
+
+    # `root / name` repeats the as-typed candidate when the CLI already runs
+    # from the repo root, which is the common case. Dedupe on the resolved path
+    # so the error lists each place once.
+    seen, tried = set(), []
+    for candidate in candidates:
+        key = candidate.resolve()
+        if key in seen:
+            continue
+        seen.add(key)
+        tried.append(candidate)
+        if candidate.is_file():
+            return key
+
+    if not must_exist:
+        return tried[0].resolve()
+    raise ManifestNotFound(name, tried)
+
+
+def _atomic_write(path: Path, text: str) -> None:
+    """Write via a temp file in the same directory, then rename over the target.
+
+    write_text truncates in place, so a crash or a full disk between truncate
+    and write leaves a half-written or empty manifest — and the manifest is the
+    only record of what a run is supposed to collect. os.replace is atomic on
+    the same filesystem, so a reader sees either the old file or the new one.
+
+    Same directory rather than the system temp dir: a rename across filesystems
+    is not atomic and raises OSError.
+    """
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as fh:
+            fh.write(text)
+        os.replace(tmp, path)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
+
+
+def read_manifest(path: Path, *, must_exist: bool = False) -> dict:
+    """Read a manifest YAML into its raw dict. Raises yaml.YAMLError on malformed YAML.
+
+    must_exist=True raises ManifestNotFound for a missing file or a non-mapping
+    root, instead of returning an empty manifest. Every command that GATES on a
+    manifest (doctor, validate, run) or MUTATES one wants that: an empty
+    manifest validates clean, so reading a path that isn't there reported a
+    typo'd filename as a passing preflight, and reading a non-mapping YAML
+    reported it as valid with zero entries.
+
+    The default stays permissive because the editing path genuinely wants it —
+    the console opens a not-yet-created manifest and fills it in.
+    """
     p = Path(path)
     if not p.exists():
+        if must_exist:
+            raise ManifestNotFound(str(path), [p])
         return init_manifest()
-    data = yaml.safe_load(p.read_text())
-    return data if isinstance(data, dict) else init_manifest()
+    data = yaml_io.load_path(p)
+    if isinstance(data, dict):
+        return data
+    if must_exist:
+        raise ManifestNotFound(str(path), [p])
+    return init_manifest()
 
 
 def dump_manifest(manifest: dict, path: Path, root: Path) -> None:
@@ -648,7 +787,7 @@ def dump_manifest(manifest: dict, path: Path, root: Path) -> None:
         raise ValueError("refusing to write schema-invalid manifest:\n  " + "\n  ".join(errs))
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(yaml.safe_dump(manifest, sort_keys=False, default_flow_style=False))
+    _atomic_write(p, yaml.safe_dump(manifest, sort_keys=False, default_flow_style=False))
 
 
 # --------------------------------------------------------------------------- #
@@ -685,36 +824,77 @@ def set_output_dir(m: dict, output_dir: str) -> dict:
     return m
 
 
-def add_entry(m: dict, use: str) -> dict:
-    if _find_entry(m, use) is None:
-        _entries(m).append({"use": use})
-    return m
+def add_entry(m: dict, use: str, fetchers: Optional[Mapping[str, Any]] = None) -> Dict[str, Optional[str]]:
+    """Add `use` and, from `fetchers`, every input a comparator reads (and theirs) that the
+    manifest lacks. Done here, not at run time: an input can need targets and secrets a
+    run can't supply. Returns {each name added: the comparator it is an input of, or None}."""
+    fetchers = fetchers or {}
+    added: Dict[str, Optional[str]] = {}
+    todo: List[Tuple[str, Optional[str]]] = [(use, None)]
+    seen = set()
+    while todo:
+        name, reader = todo.pop(0)
+        if name in seen:
+            continue
+        seen.add(name)
+        if _find_entry(m, name) is None:
+            _entries(m).append({"use": name})
+            added[name] = reader
+        f = fetchers.get(name)
+        todo += [(dep, name) for dep in (f.depends_on if f else []) if dep in fetchers]
+    return added
 
 
-def remove_entry(m: dict, use: str) -> dict:
+def remove_entry(m: dict, use: str, entry_key: Optional[str] = None) -> dict:
+    """Remove every entry that uses `use`, or, given `entry_key` (`x#1`), only that entry."""
     run = _run(m)
-    run["fetchers"] = [e for e in _entries(m) if e.get("use") != use]
+    if entry_key is None:
+        run["fetchers"] = [e for e in _entries(m) if e.get("use") != use]
+        return m
+    hit = next((e for k, e in _keyed_entries(m) if k == entry_key), None)
+    run["fetchers"] = [e for e in _entries(m) if e is not hit]
     return m
 
 
-def set_fetcher_config(m: dict, use: str, key: str, value: Any) -> dict:
-    _ensure_entry(m, use).setdefault("config", {})[key] = value
+def _existing_entry(m: dict, use: str, entry_key: Optional[str]) -> Optional[dict]:
+    """The entry named by `entry_key`, else the first using `use`; None when absent."""
+    if entry_key is None:
+        return _find_entry(m, use)
+    return next((e for k, e in _keyed_entries(m) if k == entry_key), None)
+
+
+def _entry_for(m: dict, use: str, entry_key: Optional[str]) -> dict:
+    """The entry to write: the one named by `entry_key` (`x`, `x#1`) when given, else the
+    first entry using `use` (created when missing)."""
+    if entry_key is None:
+        return _ensure_entry(m, use)
+    hit = next((e for k, e in _keyed_entries(m) if k == entry_key), None)
+    if hit is None:
+        raise ValueError(f"no entry {entry_key!r} in the manifest")
+    return hit
+
+
+def set_fetcher_config(m: dict, use: str, key: str, value: Any, entry_key: Optional[str] = None) -> dict:
+    _entry_for(m, use, entry_key).setdefault("config", {})[key] = value
     return m
 
 
-def set_secret(m: dict, use: str, name: str, env_var: str) -> dict:
+def set_secret(m: dict, use: str, name: str, env_var: str, entry_key: Optional[str] = None) -> dict:
     """Set a (non-per-target) secret reference for a fetcher entry. Stores a
-    ${env:VAR} reference — never the secret value."""
-    _ensure_entry(m, use).setdefault("secrets", {})[name] = f"${{env:{env_var}}}"
+    ${env:VAR} reference — never the secret value. `entry_key` (`x#1`) picks one of
+    several entries that use the same fetcher."""
+    _entry_for(m, use, entry_key).setdefault("secrets", {})[name] = f"${{env:{env_var}}}"
     return m
 
 
 def add_target(
-    m: dict, use: str, values: Dict[str, Any], secret_env: Optional[Dict[str, str]] = None
+    m: dict, use: str, values: Dict[str, Any], secret_env: Optional[Dict[str, str]] = None,
+    entry_key: Optional[str] = None,
 ) -> dict:
     """Append a fanout target. secret_env maps per_target secret name -> ENV_VAR;
-    each is stored as a ${env:VAR} reference."""
-    entry = _ensure_entry(m, use)
+    each is stored as a ${env:VAR} reference. `entry_key` (`x#1`) picks one of
+    several entries that use the same fetcher."""
+    entry = _entry_for(m, use, entry_key)
     target = dict(values)
     if secret_env:
         target["secrets"] = {n: f"${{env:{v}}}" for n, v in secret_env.items()}
@@ -722,10 +902,38 @@ def add_target(
     return m
 
 
-def remove_target(m: dict, use: str, index: int) -> dict:
+def set_target(
+    m: dict, use: str, index: int, values: Dict[str, Any],
+    secret_env: Optional[Dict[str, str]] = None,
+    entry_key: Optional[str] = None,
+) -> dict:
+    """Replace the fanout target at `index`. Raises IndexError if it is not there.
+
+    A replace rather than a merge: the editor hands back every field it showed,
+    and a field the user cleared has to actually clear. Per-target secrets are
+    preserved when `secret_env` is None, because the editor can show a target's
+    values without touching credentials it never displayed. `entry_key` (`x#1`)
+    picks one of several entries that use the same fetcher.
+    """
+    entry = _existing_entry(m, use, entry_key)
+    targets = (entry or {}).get("targets") or []
+    if not 0 <= index < len(targets):
+        raise IndexError(f"{use} has no target at index {index}")
+    target = dict(values)
+    if secret_env is not None:
+        if secret_env:
+            target["secrets"] = {n: f"${{env:{v}}}" for n, v in secret_env.items()}
+    elif targets[index].get("secrets"):
+        target["secrets"] = targets[index]["secrets"]
+    targets[index] = target
+    return m
+
+
+def remove_target(m: dict, use: str, index: int, entry_key: Optional[str] = None) -> dict:
     """Remove the fanout target at `index` from a fetcher entry. No-op if the
-    entry or index does not exist."""
-    entry = _find_entry(m, use)
+    entry or index does not exist. `entry_key` (`x#1`) picks one of several
+    entries that use the same fetcher."""
+    entry = _existing_entry(m, use, entry_key)
     if entry is not None:
         targets = entry.get("targets") or []
         if 0 <= index < len(targets):
@@ -747,10 +955,259 @@ def set_passthrough_env(m: dict, category: str, env_vars: List[str]) -> dict:
     return m
 
 
+def pattern_fields(target: str, fetchers: Mapping, platforms: Mapping) -> Tuple[str, Dict[str, ConfigField], List[str]]:
+    """Where `target` keeps pattern lists ("entry" for a fetcher, "platform" for a category), the exclusion lists it
+    takes, and, for a category, the ones its fetchers declare with different prefixes, which can't be set category-wide.
+    A patterns field with `exclusion: false`, such as an allowlist, is never one: exclude must not widen it."""
+    if target in fetchers:
+        f = fetchers[target]
+        spec = platform_for(f, platforms)
+        schema = {**(spec.config_schema if spec else {}), **f.config_schema}
+        return "entry", {n: d for n, d in schema.items() if d.type == patterns.TYPE and d.exclusion}, []
+    members = [f for f in fetchers.values() if platform_category(f) == target]
+    if not members and target not in platforms:
+        raise LookupError(f"{target!r} is neither a fetcher nor a category")
+    spec = platforms.get(target)
+    declared = [*(spec.config_schema.values() if spec else ()), *(d for f in members for d in f.config_schema.values())]
+    grammars: Dict[str, set] = {}
+    fields: Dict[str, ConfigField] = {}
+    for d in declared:
+        if d.type == patterns.TYPE and d.exclusion:
+            grammars.setdefault(d.name, set()).add((frozenset(d.prefixes), d.bare))
+            fields.setdefault(d.name, d)
+    mixed = sorted(n for n, g in grammars.items() if len(g) > 1)
+    return "platform", {n: d for n, d in fields.items() if n not in mixed}, mixed
+
+
+def pick_pattern_field(fields: Mapping[str, ConfigField], pattern: str, field: Optional[str] = None) -> str:
+    """The field `pattern` goes in: `field` when given, else the only one whose prefixes take it."""
+    if field is not None:
+        if field not in fields:
+            raise ValueError(f"{field!r} is not a pattern list here; pattern lists: {', '.join(fields) or 'none'}")
+        problem = patterns.check([patterns.Item(pattern)], fields[field].prefixes, fields[field].bare)
+        if problem:
+            raise ValueError(f"{field}: {problem[0]}")
+        return field
+    fits = [n for n, d in fields.items() if not patterns.check([patterns.Item(pattern)], d.prefixes, d.bare)]
+    if len(fits) == 1:
+        return fits[0]
+    if fits:
+        raise ValueError(f"{pattern!r} fits {', '.join(fits)}; say which with --field")
+    kind, sep, _ = pattern.partition(":")
+    owner = next((n for n, d in fields.items() if sep and kind.lower() in d.prefixes), None)
+    if owner:
+        raise ValueError(f"{owner}: {patterns.check([patterns.Item(pattern)], fields[owner].prefixes, fields[owner].bare)[0]}")
+    takes = "; ".join(f"{n} takes {grammar_text(d.prefixes, d.bare)}" for n, d in fields.items())
+    raise ValueError(f"no pattern list here takes {pattern!r} ({takes or 'none declared'})")
+
+
+def grammar_text(prefixes, bare: bool = True) -> str:
+    """What a patterns field takes, in words: "rg:, location: or id: patterns", "route: or unprefixed patterns"."""
+    named = [f"{p}:" for p in prefixes] + (["unprefixed"] if bare else [])
+    if not named:
+        return "no patterns"
+    return (", ".join(named[:-1]) + " or " + named[-1] if len(named) > 1 else named[0]) + " patterns"
+
+
+def _pattern_holder(m: dict, scope: str, target: str) -> dict:
+    block = _ensure_entry(m, target) if scope == "entry" else _platform(m, target)
+    return block.setdefault("config", {})
+
+
+def _existing_pattern_holder(m: dict, scope: str, target: str) -> Optional[dict]:
+    block = _find_entry(m, target) if scope == "entry" else (_run(m).get("platforms") or {}).get(target)
+    return (block or {}).get("config")
+
+
+def _pattern_items(holder: Optional[dict], field: str, where: str) -> List[patterns.Item]:
+    value = (holder or {}).get(field)
+    if patterns.is_reference(value):
+        raise ValueError(f"{where}.{field} is {value!r}; {patterns.ENV_REF_REFUSAL} "
+                         f"(clear it first: paramify manifest unexclude ... --field {field} --all)")
+    items, problems = patterns.parse(value)
+    if problems:
+        raise ValueError(f"{where}.{field}: {problems[0]}")
+    return items
+
+
+def pattern_location(scope: str, target: str) -> str:
+    return f"platforms.{target}.config" if scope == "platform" else f"{target}.config"
+
+
+def inherited_patterns(m: dict, category: Optional[str], field: str) -> List[patterns.Item]:
+    """The patterns a fetcher with no list of its own takes from platforms.<category>.config."""
+    if not category:
+        return []
+    return _pattern_items(_existing_pattern_holder(m, "platform", category), field, f"platforms.{category}.config")
+
+
+def add_pattern(m: dict, scope: str, target: str, field: str, pattern: str, reason: Optional[str] = None,
+                category: Optional[str] = None) -> Tuple[str, List[patterns.Item]]:
+    """Add a pattern (or give a listed one this reason) to a fetcher's or a category's pattern list, and say "added",
+    "updated" or "unchanged". A string value becomes a list. A fetcher's own list replaces its category's, so when it
+    has none yet the category's patterns are copied in first, and returned, so it keeps them."""
+    held = _existing_pattern_holder(m, scope, target)
+    where = pattern_location(scope, target)
+    own = held is not None and field in held
+    copied = [] if own or scope != "entry" else inherited_patterns(m, category, field)
+    items = _pattern_items(held, field, where) if own else list(copied)
+    pattern, reason = pattern.strip(), (reason or "").strip() or None
+    outcome = "added"
+    for i, item in enumerate(items):
+        if item.pattern.lower() == pattern.lower():
+            if reason is None or reason == item.reason:
+                return "unchanged", []
+            items[i], outcome = patterns.Item(item.pattern, reason), "updated"
+            break
+    else:
+        items.append(patterns.Item(pattern, reason))
+    _pattern_holder(m, scope, target)[field] = [it.as_manifest() for it in items]
+    return outcome, copied
+
+
+def remove_pattern(m: dict, scope: str, target: str, field: str, pattern: Optional[str] = None,
+                   category: Optional[str] = None) -> Optional[int]:
+    """Remove a pattern (every pattern when None) from a pattern list: how many went, or None when the field or the
+    pattern isn't there. An emptied list is dropped, except a fetcher's whose category lists patterns: that one stays
+    as [], so the category's patterns don't come back to it."""
+    holder = _existing_pattern_holder(m, scope, target)
+    if not holder or field not in holder:
+        return None
+    if pattern is None:
+        gone = patterns.count(holder[field])
+        kept: List[patterns.Item] = []
+    else:
+        items = _pattern_items(holder, field, pattern_location(scope, target))
+        kept = [it for it in items if it.pattern.lower() != pattern.strip().lower()]
+        if len(kept) == len(items):
+            return None
+        gone = len(items) - len(kept)
+    if kept or scope == "entry" and category_patterns(m, category, field):
+        holder[field] = [it.as_manifest() for it in kept]
+    else:
+        del holder[field]
+    return gone
+
+
+def set_pattern_list(m: dict, use: str, field: str, items: List[patterns.Item], category: Optional[str] = None,
+                     entry_key: Optional[str] = None) -> None:
+    """Give a fetcher its own pattern list. An empty one stays as [] while its category lists patterns, so those don't
+    come back to it, and is dropped otherwise. `entry_key` (`x#1`) picks one of several entries that use `use`."""
+    if items or category_patterns(m, category, field):
+        set_fetcher_config(m, use, field, [it.as_manifest() for it in items], entry_key=entry_key)
+    else:
+        held = (_existing_entry(m, use, entry_key) or {}).get("config")
+        if held is not None:
+            held.pop(field, None)
+
+
+def category_patterns(m: dict, category: Optional[str], field: str) -> List[patterns.Item]:
+    """The patterns platforms.<category>.config.<field> holds; none for a reference, which is never read."""
+    value = ((_existing_pattern_holder(m, "platform", category) if category else None) or {}).get(field)
+    return [] if patterns.is_reference(value) else patterns.parse(value)[0]
+
+
 # --------------------------------------------------------------------------- #
 # Validation — schema + semantic, returns readable error strings (never raises
 # on a merely-incomplete manifest)
 # --------------------------------------------------------------------------- #
+
+#: A config key no fetcher or category declares is a validate error; False makes it a validate_notes() line instead.
+UNKNOWN_CONFIG_KEYS_ARE_ERRORS = True
+
+
+def _did_you_mean(name: str, names) -> str:
+    close = difflib.get_close_matches(name, sorted(names), n=1, cutoff=0.75)
+    return f" (did you mean {close[0]!r}?)" if close else ""
+
+
+def unknown_config_keys(parsed, fetchers: Mapping, platforms: Mapping) -> List[str]:
+    """Config keys the runner would carry but no fetcher reads: a platform key no fetcher of that category (nor its
+    category file) declares, a platform block for no category, and an entry key its fetcher doesn't declare."""
+    from framework.runner.executor import UNDECLARED_KEYS  # lazy: import cycle
+
+    by_category: Dict[str, set] = {cat: set(spec.config_schema) for cat, spec in platforms.items()}
+    comparator_keys: Dict[str, set] = {}
+    for f in fetchers.values():
+        category = platform_category(f)
+        if category:
+            by_category.setdefault(category, set()).update(f.config_schema)
+        elif f.category:
+            comparator_keys.setdefault(f.category, set()).update(f.config_schema)
+    out = []
+    for cat, block in parsed.platforms.items():
+        if cat not in by_category:
+            out.append(f"platforms.{cat}: no fetcher category is named {cat}{_did_you_mean(cat, by_category)}")
+            continue
+        for key in block.config:
+            if key in by_category[cat] or key in UNDECLARED_KEYS:
+                continue
+            why = (" (a comparator takes it, but only on its own entry)" if key in comparator_keys.get(cat, ())
+                   else _did_you_mean(key, by_category[cat]))
+            out.append(f"platforms.{cat}.config: no {cat} fetcher takes {key!r}{why}")
+    for entry in parsed.entries:
+        f = fetchers.get(entry.use)
+        if f is None:
+            continue
+        spec = platform_for(f, platforms)
+        declared = set(f.config_schema) | set(spec.config_schema if spec else ())
+        out += [f"{entry.use}: config {key!r} is not a setting of this fetcher{_did_you_mean(key, declared)}"
+                for key in entry.config if key not in declared and key not in UNDECLARED_KEYS]
+    return out
+
+
+def validate_notes(manifest: dict, root: Path, fetchers=None, platforms=None) -> List[str]:
+    """What a reader of a valid manifest should still know: which entries take each category-wide pattern list, and
+    the unknown config keys when UNKNOWN_CONFIG_KEYS_ARE_ERRORS is False."""
+    if manifest_loader.schema_errors(manifest, root):
+        return []
+    fetchers = discover_fetchers(root) if fetchers is None else fetchers
+    platforms = discover_platforms(root) if platforms is None else platforms
+    parsed = manifest_loader.parse_manifest(manifest)
+    notes = []
+    for cat, block in parsed.platforms.items():
+        entries = [(e, fetchers[e.use]) for e in parsed.entries
+                   if e.use in fetchers and platform_category(fetchers[e.use]) == cat]
+        schemas = {e.use: {**(platforms[cat].config_schema if cat in platforms else {}), **f.config_schema}
+                   for e, f in entries}
+        for key, value in block.config.items():
+            if not any(key in sc and sc[key].type == patterns.TYPE for sc in schemas.values()):
+                continue
+            taking = [e.use for e, _ in entries if key in schemas[e.use] and key not in e.config]
+            own = [e.use for e, _ in entries if key in schemas[e.use] and key in e.config]
+            ignoring = [e.use for e, _ in entries if key not in schemas[e.use]]
+            n = patterns.count(value)
+            held = "a ${env:} reference, refused" if patterns.is_reference(value) else \
+                f"{n} pattern{'' if n == 1 else 's'}"
+            note = (f"platforms.{cat}.config.{key} ({held}) applies to {len(taking)} of "
+                    f"{len(entries)} {cat} entries: {', '.join(taking) or 'none'}")
+            if own:
+                note += f"; replaced by their own list in {', '.join(own)}"
+            if ignoring:
+                note += f"; not a setting of {', '.join(ignoring)}"
+            notes.append(note)
+    if not UNKNOWN_CONFIG_KEYS_ARE_ERRORS:
+        notes += unknown_config_keys(parsed, fetchers, platforms)
+    notes += _duplicate_entry_notes(parsed, fetchers)
+    return notes
+
+
+def _duplicate_entry_notes(parsed, fetchers) -> List[str]:
+    """Entries that run one fetcher with no targets: each writes the same file names,
+    so the runner fails every entry after the first (see executor._clobbered)."""
+    keys: Dict[str, List[str]] = {}
+    for e, key in zip(parsed.entries, manifest_loader.entry_keys(parsed.entries)):
+        if e.use in fetchers and not fetchers[e.use].supports_targets:
+            keys.setdefault(e.use, []).append(key)
+    notes = []
+    for same in keys.values():
+        if len(same) < 2:
+            continue
+        names = f"{', '.join(same[:-1])} and {same[-1]}"
+        later = "the second entry's run fails" if len(same) == 2 else "every entry after the first fails"
+        notes.append(f"entries {names} run the same fetcher with no targets; they write the same files, so {later}.")
+    return notes
+
 
 def validate(manifest: dict, root: Path, fetchers=None, platforms=None) -> List[str]:
     """Validate a manifest dict against the schema and the discovered fetchers.
@@ -760,6 +1217,11 @@ def validate(manifest: dict, root: Path, fetchers=None, platforms=None) -> List[
     may be passed pre-discovered (e.g. when validating many manifests in a loop)
     to avoid re-scanning the fetcher tree each call.
     """
+    from framework.runner.executor import (  # lazy: import cycle
+        merged_config,
+        secret_env_vars,
+    )
+
     errors = manifest_loader.schema_errors(manifest, root)
     if errors:
         return errors  # can't do semantic checks on a structurally-broken manifest
@@ -769,12 +1231,30 @@ def validate(manifest: dict, root: Path, fetchers=None, platforms=None) -> List[
     if platforms is None:
         platforms = discover_platforms(root)
     parsed = manifest_loader.parse_manifest(manifest)
+    in_manifest = {e.use for e in parsed.entries}
+    problems = dependency_graph.problems(fetchers)
+    secret_vars = secret_env_vars(fetchers.values(), platforms.values(), parsed.entries)
+    if UNKNOWN_CONFIG_KEYS_ARE_ERRORS:
+        errors += unknown_config_keys(parsed, fetchers, platforms)
+    # A bad category-wide pattern list is one mistake, reported once with the entries it reaches.
+    shared: Dict[Tuple[Optional[str], str], List[str]] = {}
 
-    for i, entry in enumerate(parsed.entries):
+    # Each message names its entry by key (`x`, `x#1`), so a front-end can tell
+    # which of two entries of one fetcher it is about.
+    for i, (entry, key) in enumerate(zip(parsed.entries, manifest_loader.entry_keys(parsed.entries))):
         if entry.use not in fetchers:
             errors.append(f"entry[{i}] uses unknown fetcher: {entry.use}")
             continue
         fetcher = fetchers[entry.use]
+
+        if entry.use in problems:
+            errors.append(f"{key}: {problems[entry.use]}")
+        else:
+            # Same run only: an input the manifest doesn't run is reported missing.
+            errors.extend(
+                f"{key}: reads {dep}, which is not in the manifest (fix: paramify manifest add {dep})"
+                for dep in fetcher.depends_on if dep not in in_manifest
+            )
 
         if fetcher.supports_targets and not entry.targets:
             # No targets[] is valid when every target field is optional — the runner
@@ -782,14 +1262,14 @@ def validate(manifest: dict, root: Path, fetchers=None, platforms=None) -> List[
             # target field is actually required.
             if any(f.required for f in fetcher.target_schema.values()):
                 errors.append(
-                    f"{entry.use}: supports_targets but no targets[] in manifest "
+                    f"{key}: supports_targets but no targets[] in manifest "
                     f"(a required target field has no value)"
                 )
         if not fetcher.supports_targets and entry.targets:
-            errors.append(f"{entry.use}: does not support targets but manifest has targets[]")
+            errors.append(f"{key}: does not support targets but manifest has targets[]")
 
-        spec = platforms.get(fetcher.category)
-        platform_cfg = parsed.platforms.get(fetcher.category)
+        spec = platform_for(fetcher, platforms)
+        platform_cfg = platform_for(fetcher, parsed.platforms)
         combined = {}
         if spec:
             combined.update(spec.config_schema)
@@ -800,22 +1280,53 @@ def validate(manifest: dict, root: Path, fetchers=None, platforms=None) -> List[
             in_platform = platform_cfg and name in platform_cfg.config
             in_entry = name in entry.config
             if not (in_platform or in_entry):
-                errors.append(
-                    f"{entry.use}: required config '{name}' not set "
-                    f"(platforms.{fetcher.category}.config or fetcher config)"
-                )
+                errors.append(f"{key}: required config '{name}' not set ({config_hint(fetcher, name)})")
+
+        # The references the runner would refuse, so a hand edit fails here rather than at run time.
+        merged = merged_config(fetcher, spec, platform_cfg, entry, secret_vars)
+        for name, problem in merged.errors.items():
+            fdef = merged.schema.get(name)
+            if merged.sources.get(name) == "platform" and fdef is not None and fdef.type == patterns.TYPE:
+                shared.setdefault((platform_category(fetcher), problem), []).append(entry.use)
+            else:
+                errors.append(f"{key}: {problem}")
+        for j, t in enumerate(entry.targets):
+            errors += [f"{key} target[{j}]: {k} is {v!r}, but target fields aren't resolved, so ${{env:}} "
+                       f"references don't work there" for k, v in t.values.items() if is_env_ref_attempt(v) or is_partial_env_ref(v)]
 
         # An issue report with no assessment collects fine but can never be
         # intaken, so the gap is reported here rather than at upload time — after
         # someone has already paid for a scan. It is deliberately NOT a required
         # config field: making it one would block collecting without a Paramify
-        # connection, which the framework is supposed to allow (docs/design.md).
+        # connection, which the framework is supposed to allow (docs/architecture_guide.md, step 3).
         if fetcher.is_issue_report:
-            in_platform = platform_cfg and ASSESSMENT_ID_FIELD in platform_cfg.config
-            if not (ASSESSMENT_ID_FIELD in entry.config or in_platform):
+            values = merged.values
+            # A reference unset in this shell may well be set where the run happens, so it is named, not "not set".
+            first_unset = {name: var for name, var in reversed(merged.unset)}
+            unset = {name for name in (ASSESSMENT_ID_FIELD, CLOSE_CYCLE_FIELD)
+                     if values.get(name) is None and name in first_unset}
+            errors += [f"{key}: {name} reads ${{env:{first_unset[name]}}}, a reference unset in this environment"
+                       for name in sorted(unset)]
+            if not values.get(ASSESSMENT_ID_FIELD) and ASSESSMENT_ID_FIELD not in unset:
                 errors.append(
-                    f"{entry.use}: no {ASSESSMENT_ID_FIELD} set, so its report cannot be "
-                    f"intaken (fix: paramify assessments select {entry.use})"
+                    f"{key}: no {ASSESSMENT_ID_FIELD} set, so its report cannot be "
+                    f"sent to Paramify (fix: paramify assessments select {entry.use})"
+                )
+            # Same reasoning as assessment_id: not a required field (collecting
+            # needs no Paramify decision), but the uploader will not guess it.
+            close_cycle = values.get(CLOSE_CYCLE_FIELD)
+            if close_cycle is None:
+                if CLOSE_CYCLE_FIELD not in unset:
+                    errors.append(
+                        f"{key}: no {CLOSE_CYCLE_FIELD} set — say whether the "
+                        f"assessment's cycle closes after each run "
+                        f"({' or '.join(CLOSE_CYCLE_VALUES)}; fix: paramify assessments "
+                        f"select {entry.use} --close-cycle after_run|never)"
+                    )
+            elif close_cycle not in CLOSE_CYCLE_VALUES:
+                errors.append(
+                    f"{key}: {CLOSE_CYCLE_FIELD} is {close_cycle!r}; expected "
+                    f"{' or '.join(CLOSE_CYCLE_VALUES)}"
                 )
 
         # effective_secrets, and skip the optional ones: the runner resolves a
@@ -830,12 +1341,13 @@ def validate(manifest: dict, root: Path, fetchers=None, platforms=None) -> List[
                 for j, t in enumerate(entry.targets):
                     if secret.name not in t.secrets:
                         errors.append(
-                            f"{entry.use} target[{j}] missing per_target secret '{secret.name}'"
+                            f"{key} target[{j}] missing per_target secret '{secret.name}'"
                         )
             else:
                 if secret.name not in entry.secrets:
-                    errors.append(f"{entry.use}: missing secret '{secret.name}'")
+                    errors.append(f"{key}: missing secret '{secret.name}'")
 
+    errors += [f"platforms.{cat}.config: {problem} (for {', '.join(uses)})" for (cat, problem), uses in shared.items()]
     return errors
 
 
@@ -860,7 +1372,32 @@ def _invocation_record(r) -> dict:
     }
     if r.exit_code != 0 and r.stderr:
         record["stderr_tail"] = r.stderr[-_STDERR_TAIL_CHARS:]
+    if r.exit_code != 0:
+        # Why it failed, with the precedence the fetcher_result event uses.
+        reason = r.error or _last_line(r.stderr)
+        if reason:
+            record["error"] = reason
+        if r.error_code:
+            record["error_code"] = r.error_code
+    if r.inputs is not None:
+        record["inputs"] = r.inputs
+    if r.overwritten:
+        record["overwritten"] = r.overwritten
+    record["entry_key"] = r.entry_key
     return record
+
+
+def _wrap_results(results, fetcher, run_id: str, run_dir: Path) -> None:
+    """Envelope the outputs of one entry's invocations, all targets at once.
+
+    Every target of an entry runs before any is wrapped. So when a later target
+    wrote over an earlier target's file, the earlier result still names it, and
+    wrapping it would label the later target's data with the earlier target and
+    status. Such a file is left raw; the later invocation already failed for it.
+    """
+    skip = frozenset(name for r in results for name in r.overwritten)
+    for r in results:
+        wrap_outputs(r, fetcher, run_id, run_dir, skip=skip)
 
 
 def _manifest_id(path, root: Path) -> str:
@@ -873,6 +1410,71 @@ def _manifest_id(path, root: Path) -> str:
         return str(p)
 
 
+def _last_line(text: Optional[str]) -> str:
+    """Last non-blank line of `text`, or ''."""
+    for line in reversed((text or "").splitlines()):
+        if line.strip():
+            return line.strip()
+    return ""
+
+
+def _input_record(r) -> dict:
+    """What a comparator is told about one invocation of its input; from the result, never the payload."""
+    failed = r.exit_code != 0
+    return {
+        "target": r.target,
+        "status": "failed" if failed else "success",
+        "exit_code": r.exit_code,
+        "error": (r.error or _last_line(r.stderr) or None) if failed else None,
+        "error_code": r.error_code if failed else None,
+        "collected_at": r.completed_at,
+        "outputs": [o for o in r.outputs if o.endswith(".json")],
+    }
+
+
+def _setup_failure_record(error: str) -> dict:
+    return {
+        "target": None, "status": "failed", "exit_code": None, "error": error,
+        "error_code": "runner_setup_failed", "collected_at": None, "outputs": [],
+    }
+
+
+def _inputs_index(fetcher, run_id: str, run_dir: Path, collected: dict, in_manifest: set) -> dict:
+    """The $COMPARATOR_INPUTS index: each input's invocations and the paths of their files."""
+    return {
+        "run_id": run_id,
+        "run_dir": str(run_dir),
+        "inputs": {
+            dep: {
+                "in_manifest": dep in in_manifest,
+                "invocations": [
+                    {**{k: v for k, v in rec.items() if k != "outputs"},
+                     "files": [str(run_dir / name) for name in rec["outputs"]]}
+                    for rec in collected.get(dep, [])
+                ],
+            }
+            for dep in fetcher.depends_on
+        },
+    }
+
+
+def _metadata_inputs(fetcher, run_id: str, collected: dict) -> List[dict]:
+    """`metadata.inputs`: one row per input file, or one per input that has none."""
+    rows: List[dict] = []
+    for dep in fetcher.depends_on:
+        records = collected.get(dep)
+        if not records:
+            rows.append({"fetcher_name": dep, "target": None, "run_id": None,
+                         "collected_at": None, "status": "missing", "file": None})
+            continue
+        for rec in records:
+            for name in rec["outputs"] or [None]:
+                rows.append({"fetcher_name": dep, "target": rec["target"], "run_id": run_id,
+                             "collected_at": rec["collected_at"], "status": rec["status"],
+                             "file": name})
+    return rows
+
+
 def run(
     manifest: dict,
     root: Path,
@@ -881,17 +1483,20 @@ def run(
 ) -> dict:
     """Execute a manifest. Wraps each output in the evidence envelope and writes
     _run_metadata.json (unchanged from the original CLI run). Fires on_event for
-    run_start / fetcher_start / fetcher_skip / log_line / fetcher_result /
-    fetcher_error / run_complete so a UI can stream live progress.
+    run_start / fetcher_start / fetcher_skip / fetcher_note / log_line /
+    fetcher_result / fetcher_error / run_complete so a UI can stream live progress.
 
     Pass manifest_path so the run metadata records which manifest produced the
     run — that attribution powers each manifest's last_run in list_manifests().
 
-    Returns a summary dict. Raises ValueError if the manifest is schema-invalid.
+    Returns a summary dict: one record per invocation, plus `skipped`, `setup_errors`
+    (setup failed before any invocation) and `notes`, each naming its entry.
+    Raises ValueError if the manifest is schema-invalid.
     """
     from framework.runner.executor import (  # lazy: avoid import cycle
         merged_config,
         run_entry,
+        secret_env_vars,
     )
 
     errs = manifest_loader.schema_errors(manifest, root)
@@ -901,92 +1506,145 @@ def run(
     fetchers = discover_fetchers(root)
     platforms = discover_platforms(root)
     parsed = manifest_loader.parse_manifest(manifest)
+    secret_vars = secret_env_vars(fetchers.values(), platforms.values(), parsed.entries)
 
     def emit(event: dict) -> None:
         if on_event is not None:
             on_event(event)
 
-    run_id = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
+    # The suffix keeps two runs started in the same second apart.
+    run_id = f"{datetime.now(timezone.utc):%Y-%m-%dT%H-%M-%SZ}-{secrets.token_hex(2)}"
     run_dir = parsed.output_dir.resolve() / f"run-{run_id}"
-    run_dir.mkdir(parents=True, exist_ok=True)
+    run_dir.mkdir(parents=True, exist_ok=False)
+    # Keys come from manifest order; dependency_graph.order only reorders the same objects.
+    keys = {id(e): k for e, k in zip(parsed.entries, manifest_loader.entry_keys(parsed.entries))}
+
+    # Two phases: every fetcher in manifest order, then every comparator.
+    entries = dependency_graph.order(parsed.entries, fetchers)
+    in_manifest = {e.use for e in entries}
+    collected: Dict[str, List[dict]] = {}
+    problems = dependency_graph.problems(fetchers)
 
     emit({
         "event": "run_start",
         "run_id": run_id,
         "run_dir": str(run_dir),
-        "fetchers": [e.use for e in parsed.entries],
+        "fetchers": [e.use for e in entries],
     })
 
     all_results = []
+    # Entries that end with no invocation, and notes that must not be silent.
+    # The summary carries them, so a caller that reads no events still sees them.
+    skipped: List[dict] = []
+    setup_errors: List[dict] = []
+    notes: List[dict] = []
     overall_ok = True
     started_at = _iso_now()
 
-    for entry in parsed.entries:
-        if entry.use not in fetchers:
-            emit({"event": "fetcher_skip", "fetcher": entry.use, "reason": "not discovered"})
+    for entry in entries:
+        key = keys[id(entry)]
+        reason = "not discovered" if entry.use not in fetchers else problems.get(entry.use)
+        if reason:
+            emit({"event": "fetcher_skip", "fetcher": entry.use, "reason": reason})
+            skipped.append({"entry_key": key, "fetcher": entry.use, "reason": reason})
             overall_ok = False
             continue
         fetcher = fetchers[entry.use]
+        spec, platform_cfg = platform_for(fetcher, platforms), platform_for(fetcher, parsed.platforms)
         # An ambient run (supports_targets, no targets[]) is a single invocation.
         n_targets = len(entry.targets) if (fetcher.supports_targets and entry.targets) else 1
-        emit({
+        start_event = {
             "event": "fetcher_start",
             "fetcher": entry.use,
             "targets": n_targets,
             "fanout": fetcher.supports_targets,
-        })
+        }
+        if fetcher.is_comparator:
+            start_event["depends_on"] = list(fetcher.depends_on)
+        emit(start_event)
+
+        inputs_index = (
+            _inputs_index(fetcher, run_id, run_dir, collected, in_manifest) if fetcher.is_comparator else None
+        )
 
         def on_line(line: str, _use=entry.use) -> None:
             emit({"event": "log_line", "fetcher": _use, "line": line})
+
+        # Its own event, not a log_line: consumers drop log_line by default, and
+        # a dropped credential has to reach the operator.
+        def on_note(note: str, _use=entry.use, _key=key) -> None:
+            emit({"event": "fetcher_note", "fetcher": _use, "note": note})
+            notes.append({"entry_key": _key, "fetcher": _use, "note": note})
+
+        # Which assessment an issue report is destined for, and whether its cycle
+        # closes after the run, are resolved from the manifest but injected into
+        # no env var — the fetcher has no use for them, only the uploader does.
+        # Read them off the same merged config the runner builds so the ladder
+        # can't drift.
+        assessment = None
+        if fetcher.is_issue_report:
+            values = merged_config(fetcher, spec, platform_cfg, entry, secret_vars).values
+            assessment = {
+                ASSESSMENT_ID_FIELD: values.get(ASSESSMENT_ID_FIELD),
+                ASSESSMENT_NAME_FIELD: values.get(ASSESSMENT_NAME_FIELD),
+                CLOSE_CYCLE_FIELD: values.get(CLOSE_CYCLE_FIELD),
+            }
 
         try:
             results = run_entry(
                 fetcher,
                 entry,
                 run_dir,
-                platforms.get(fetcher.category or ""),
-                parsed.platforms.get(fetcher.category or ""),
+                spec,
+                platform_cfg,
                 on_line=on_line,
+                on_note=on_note,
+                inputs_index=inputs_index,
+                secret_vars=secret_vars,
+                entry_key=key,
             )
         except (RuntimeError, ValueError) as e:
             emit({"event": "fetcher_error", "fetcher": entry.use, "error": str(e)})
+            setup_errors.append({"entry_key": key, "fetcher": entry.use, "error": str(e)})
             overall_ok = False
+            collected.setdefault(entry.use, []).append(_setup_failure_record(str(e)))
+            if fetcher.is_issue_report:
+                # No invocation ran, so nothing else records it — and a cycle
+                # must not close on a run this entry was part of.
+                record_failed_entry(fetcher, run_id, run_dir, str(e), assessment)
             continue
 
-        # Which assessment an issue report is destined for is resolved from the
-        # manifest but injected into no env var — the fetcher has no use for it,
-        # only the uploader does. Read it off the same merged config the runner
-        # built so the ladder can't drift.
-        assessment = None
-        if fetcher.is_issue_report:
-            _, values = merged_config(
-                fetcher,
-                platforms.get(fetcher.category or ""),
-                parsed.platforms.get(fetcher.category or ""),
-                entry,
-            )
-            assessment = {
-                ASSESSMENT_ID_FIELD: values.get(ASSESSMENT_ID_FIELD),
-                ASSESSMENT_NAME_FIELD: values.get(ASSESSMENT_NAME_FIELD),
-            }
-
+        collected.setdefault(entry.use, []).extend(_input_record(r) for r in results)
+        if fetcher.is_comparator:
+            for r in results:
+                r.inputs = _metadata_inputs(fetcher, run_id, collected)
+        # Exactly one of these applies: an issue report is never enveloped
+        # (wrap_outputs returns early on kind), and only an issue report gets
+        # a sidecar record.
+        _wrap_results(results, fetcher, run_id, run_dir)
         for r in results:
-            # Exactly one of these applies: an issue report is never enveloped
-            # (wrap_outputs returns early on kind), and only an issue report gets
-            # a sidecar record.
-            wrap_outputs(r, fetcher, run_id, run_dir)
             if fetcher.is_issue_report:
                 record_issue_reports(r, fetcher, run_id, run_dir, assessment)
             if r.exit_code != 0:
                 overall_ok = False
-            emit({
+            result_event = {
                 "event": "fetcher_result",
                 "fetcher": entry.use,
                 "exit_code": r.exit_code,
                 "duration_sec": r.duration_sec,
                 "target": r.target,
                 "outputs": r.outputs,
-            })
+            }
+            if r.exit_code != 0:
+                # Why it failed, for a front-end to show next to the status: what
+                # the fetcher reported via $FETCHER_STATUS_FILE, else the last
+                # line it wrote to stderr (the same precedence the sidecar uses).
+                reason = r.error or _last_line(r.stderr)
+                if reason:
+                    result_event["error"] = reason
+                if r.error_code:
+                    result_event["error_code"] = r.error_code
+            emit(result_event)
         all_results.extend(results)
 
     completed_at = _iso_now()
@@ -996,6 +1654,10 @@ def run(
         "started_at": started_at,
         "completed_at": completed_at,
         "invocations": [_invocation_record(r) for r in all_results],
+        "paramify": {
+            keys[id(e)]: {"use": e.use, **manifest_loader.resolved_paramify(parsed, e)}
+            for e in entries
+        },
     }
     metadata_path = run_dir / "_run_metadata.json"
     metadata_path.write_text(json.dumps(metadata, indent=2, default=str))
@@ -1008,6 +1670,9 @@ def run(
         "started_at": started_at,
         "completed_at": completed_at,
         "invocations": metadata["invocations"],
+        "skipped": skipped,
+        "setup_errors": setup_errors,
+        "notes": notes,
         # Issue reports go to a different endpoint, so a run that collected any is
         # not finished after `paramify upload`. Counted here so every front-end can
         # say so without re-reading the run dir.
@@ -1024,17 +1689,117 @@ def run(
 # Upload — Paramify evidence uploader facade (powers CLI + TUI)
 # --------------------------------------------------------------------------- #
 
-def _load_paramify_uploader(root: Path):
-    """Load the source-tree uploader without requiring uploaders/ to be packaged."""
-    path = Path(root) / "uploaders" / "paramify_evidence" / "uploader.py"
+UPLOAD_CONFIG_NAME = "upload.yaml"
+
+
+def default_upload_config(root: Path) -> Optional[Path]:
+    """The uploader config used when a caller names none: ``<root>/upload.yaml``.
+
+    The TUI has no way to pass a path, and until it had a default it could reach
+    no config at all — no base_url, no overrides, and no channel. Resolving the
+    same file for every stage is also what keeps the evidence upload, the issue
+    intake, and the scripts sync reading one set of overrides, rather than the
+    CLI and the TUI disagreeing about which evidence set a fetcher belongs to.
+    """
+    path = Path(root) / UPLOAD_CONFIG_NAME
+    return path if path.is_file() else None
+
+
+def _upload_config(root: Path, config_path: Optional[Path]) -> Optional[Path]:
+    return Path(config_path) if config_path else default_upload_config(root)
+
+
+def _load_paramify_validator_syncer(root: Path):
+    """Load the source-tree validator syncer without requiring uploaders/ to be packaged."""
+    path = Path(root) / "uploaders" / "paramify_validators" / "syncer.py"
     if not path.exists():
-        raise RuntimeError(f"Paramify evidence uploader not found at {path}")
-    spec = importlib.util.spec_from_file_location("paramify_evidence_uploader", path)
+        raise RuntimeError(f"Paramify validator syncer not found at {path}")
+    spec = importlib.util.spec_from_file_location("paramify_validators_syncer", path)
     if spec is None or spec.loader is None:
-        raise RuntimeError(f"Could not load Paramify evidence uploader from {path}")
+        raise RuntimeError(f"Could not load Paramify validator syncer from {path}")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def reference_ids_from_run(run_dir) -> set:
+    """The evidence-set reference_ids present in a run directory's envelopes.
+
+    Lets `upload --with-validators` scope the sync to exactly the sets this run
+    produced, rather than a manifest.
+    """
+    refs: set = set()
+    run_path = Path(run_dir)
+    if not run_path.is_dir():
+        return refs
+    for p in sorted(run_path.glob("*.json")):
+        if not is_evidence_file(p):
+            continue
+        try:
+            env = json.loads(p.read_text())
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(env, dict):
+            continue
+        meta = env.get("metadata")
+        if not isinstance(meta, dict):
+            continue
+        es = meta.get("evidence_set")
+        if isinstance(es, dict) and es.get("reference_id"):
+            refs.add(es["reference_id"])
+    return refs
+
+
+def check_validators(root, select=None, mode="api-today") -> dict:
+    """Run the behaviour cases in validators/_cases/ and report what held.
+
+    An authoring aid, not a merge gate: a validator's failure modes are silent,
+    so the only way to know one works is to run it against evidence that should
+    fail as well as evidence that should pass. Needs `node` — Paramify evaluates
+    these with ECMAScript, so Python `re` would use the wrong engine.
+    """
+    from framework.validator_eval.cases import run_cases
+
+    return run_cases(Path(root), select=select, mode=mode)
+
+
+def sync_validators(
+    root: Path,
+    manifest_path: Optional[Path] = None,
+    config_path: Optional[Path] = None,
+    *,
+    reference_ids=None,
+    dry_run: bool = False,
+    update: bool = False,
+    lock_path: Optional[str] = None,
+    on_event: Optional[Callable[[dict], None]] = None,
+    custom_tags: bool = True,
+) -> dict:
+    """Sync registry validators to Paramify and associate them to evidence sets.
+
+    Scope precedence: explicit `reference_ids` > `manifest_path`'s fetchers'
+    sets > whole registry. Create-or-skip; associates on create only; `update`
+    opt-in patches existing. Fires sync_start / sync_validator / sync_complete.
+    Raises ValueError for setup errors; returns the syncer summary otherwise.
+    """
+    syncer = _load_paramify_validator_syncer(root)
+    validators = syncer.collect_validators(root, manifest_path, reference_ids)
+    # The same default config as the other stages (<root>/upload.yaml), so the
+    # base URL and the default tags do not depend on which stage is running.
+    config_path = _upload_config(root, config_path)
+    config: dict = {}
+    if config_path:
+        config = yaml_io.load_path(Path(config_path)) or {}
+    return syncer.sync_validators(
+        validators,
+        config=config,
+        dry_run=dry_run,
+        update=update,
+        lock_path=lock_path,
+        on_event=on_event,
+        display_names=category_display_names(root),
+        custom_tags=custom_tags,
+    )
 
 
 def upload_preflight(
@@ -1045,9 +1810,9 @@ def upload_preflight(
     dry_run: bool = False,
 ) -> dict:
     """Inspect upload readiness without making Paramify API calls."""
-    uploader = _load_paramify_uploader(root)
-    uploader.load_dotenv()
-    config = uploader.load_config(str(config_path)) if config_path else {}
+    load_dotenv()
+    config_path = _upload_config(root, config_path)
+    config = _sync_upload.load_config(config_path)
     paramify_cfg = config.get("paramify") or {}
     base_url, base_url_source = resolve_base_url(paramify_cfg.get("base_url"))
 
@@ -1057,11 +1822,11 @@ def upload_preflight(
     if not run_path.is_dir():
         errors.append(f"No run directory to upload: {run_path}")
     else:
-        file_count = sum(1 for _ in uploader.iter_evidence_files(run_path))
+        file_count = sum(1 for p in run_path.glob("*.json") if is_evidence_file(p))
         if file_count == 0:
             errors.append(f"No evidence files found in {run_path}")
 
-    url_error = uploader._base_url_error(base_url)
+    url_error = base_url_error(base_url)
     if url_error:
         errors.append(url_error)
 
@@ -1076,12 +1841,46 @@ def upload_preflight(
         "base_url": base_url,
         "base_url_source": base_url_source,
         "base_url_label": describe_base_url(base_url),
+        "config_path": str(config_path) if config_path else None,
         "file_count": file_count,
         "token_present": token_present,
         "token_source": token_source,
         "dry_run": dry_run,
         "errors": errors,
     }
+
+
+def plan_upload(
+    run_dir,
+    root: Path,
+    config_path: Optional[Path] = None,
+    *,
+    online: bool,
+    stack: Optional[str] = None,
+    only_file: Optional[str] = None,
+    custom_tags: bool = True,
+    with_validators: bool = False,
+    manifest_path: Optional[Path] = None,
+    owner: Optional[str] = None,
+) -> Plan:
+    """The upload plan for one run directory; nothing is written.
+
+    Online it reads the workspace and needs a token; `online=False` needs
+    neither, and shows routing values as unknown. Raises ValueError for setup
+    errors. `framework.sync.render.render_plan` turns the plan into text.
+
+    `stack` and `owner` win over what the run recorded, for every entry.
+
+    The plan notes each Paramify setting (stack, owner, approval, no_request,
+    delivery) that `manifest_path` now sets differently from the run. Without
+    it, the run's own manifest is used; with neither, nothing is compared. The
+    run's settings still apply.
+    """
+    return _sync_upload.plan_upload(
+        run_dir, root, _upload_config(root, config_path), online=online, stack=stack,
+        only_file=only_file, custom_tags=custom_tags, with_validators=with_validators,
+        manifest_path=manifest_path, owner=owner,
+    )
 
 
 def upload_run(
@@ -1091,21 +1890,193 @@ def upload_run(
     *,
     dry_run: bool = False,
     on_event: Optional[Callable[[dict], None]] = None,
+    custom_tags: bool = True,
+    stack: Optional[str] = None,
+    only_file: Optional[str] = None,
+    with_validators: bool = False,
+    upload_cfg: Optional[dict] = None,
+    token: Optional[str] = None,
+    base_url: Optional[str] = None,
+    deprecations: Sequence[str] = (),
+    manifest_path: Optional[Path] = None,
+    owner: Optional[str] = None,
 ) -> dict:
-    """Upload one run directory to Paramify.
+    """Upload one run directory to Paramify, one batch per manifest entry.
 
-    Fires upload_start / upload_file / upload_complete so front-ends can render
-    progress. Raises ValueError for setup errors; returns the uploader summary
-    for completed batches, even when some files failed.
+    Plans, then applies under a lock on the run. Fires upload_start /
+    upload_file / upload_complete (plus the engine's action_* and
+    delivery_file events) so front-ends can render progress. A dry run plans
+    offline: no token and no API call. Raises ValueError for setup errors;
+    otherwise returns the summary (`uploaded`, `skipped_duplicate`,
+    `skipped_failed`, `errors`, `ok`, `plan`, `entries`, ...), even when some
+    entries failed. `with_validators` syncs validators for the run's sets
+    before delivery. `upload_cfg` (a config dict used instead of the file),
+    `token` and `base_url` (both ahead of the environment) are for callers that
+    already hold them; `deprecations` are notes for `upload_log.json`.
+    `manifest_path` is as for plan_upload: the plan notes the settings it now
+    sets differently from the run. `stack` and `owner` are as for plan_upload.
     """
-    uploader = _load_paramify_uploader(root)
-    config = uploader.load_config(str(config_path)) if config_path else {}
-    return uploader.upload_run(
-        Path(run_dir),
-        config=config,
-        dry_run=dry_run,
-        on_event=on_event,
+    return _sync_upload.run_upload(
+        run_dir, root, _upload_config(root, config_path), dry_run=dry_run, on_event=on_event,
+        custom_tags=custom_tags, stack=stack, only_file=only_file, with_validators=with_validators,
+        upload_cfg=upload_cfg, token=token, base_url=base_url, deprecations=deprecations,
+        manifest_path=manifest_path, owner=owner,
     )
+
+
+def _workspace(root: Optional[Path], config_path: Optional[Path]) -> Any:
+    """Resources for the configured workspace. Raises ValueError with no token or a bad base URL."""
+    root = Path(root) if root is not None else find_repo_root()
+    load_dotenv()
+    config = _sync_upload.load_config(_upload_config(root, config_path))
+    base_url, _ = resolve_base_url((config.get("paramify") or {}).get("base_url"))
+    url_error = base_url_error(base_url)
+    if url_error:
+        raise ValueError(url_error)
+    token, _ = resolve_upload_token()
+    if not token:
+        raise ValueError(_missing_token_error())
+    return _sync_upload.Resources(_sync_upload.Client(token, base_url))
+
+
+def list_stacks(root: Optional[Path] = None, config_path: Optional[Path] = None) -> List[dict]:
+    """The workspace's stacks as `[{"id", "name"}]`, sorted by name. Needs a token.
+
+    Raises ValueError when there is no token or the base URL is invalid; an
+    API error is raised as it is.
+    """
+    stacks = _workspace(root, config_path).stacks()
+    return sorted(({"id": s.id, "name": s.name} for s in stacks), key=lambda s: (s["name"], s["id"]))
+
+
+def list_channel_owners(root: Optional[Path] = None, config_path: Optional[Path] = None) -> List[dict]:
+    """The owners of the workspace's channels as `[{"owner", "sets"}]`, sorted by username.
+
+    `sets` counts the evidence sets where the owner has a channel. These are the
+    names `paramify.owner` can take. Needs a token; errors as for list_stacks.
+    """
+    found: Dict[str, Dict[str, Any]] = {}
+    for ev in _workspace(root, config_path).evidence_sets():
+        for name in {c.owner for c in ev.channels if c.owner}:
+            found.setdefault(name.casefold(), {"owner": name, "sets": 0})["sets"] += 1
+    return sorted(found.values(), key=lambda r: r["owner"].casefold())
+
+
+def _run_block(m: dict) -> dict:
+    run = m.get("run")
+    return run if isinstance(run, dict) else {}
+
+
+def _keyed_entries(m: dict) -> List[Tuple[str, dict]]:
+    """Each fetcher entry with its entry key (`x`, `x#1`), as the runner names them."""
+    run = _run_block(m)
+    entries = [e for e in run.get("fetchers") or [] if isinstance(e, dict) and isinstance(e.get("use"), str)]
+    return list(zip(manifest_loader.entry_keys([ManifestEntry(use=e["use"]) for e in entries]), entries))
+
+
+def resolve_stack(stacks: Sequence[Mapping[str, Any]], value: str) -> Dict[str, str]:
+    """The workspace stack a user's `value` names: an exact id first, then an exact (case-sensitive) name.
+
+    Raises ValueError when nothing matches, or when a name is shared by several
+    stacks (the message lists their ids).
+    """
+    for s in stacks:
+        if s["id"] == value:
+            return {"id": s["id"], "name": s["name"]}
+    named = [s for s in stacks if s["name"] == value]
+    if len(named) == 1:
+        return {"id": named[0]["id"], "name": named[0]["name"]}
+    if named:
+        ids = ", ".join(s["id"] for s in named)
+        raise ValueError(f"{len(named)} stacks are named {value!r}; use one of these ids: {ids}")
+    known = ", ".join(s["name"] for s in stacks) or "none"
+    raise ValueError(f"no stack {value!r} in this workspace (stacks: {known})")
+
+
+def stack_errors(manifest: dict, stacks: Sequence[Mapping[str, Any]]) -> List[str]:
+    """One error for each `stack` in the manifest (the default and each entry's) that no workspace stack matches."""
+    run = _run_block(manifest)
+    places = [("run.paramify.stack", (run.get("paramify") or {}).get("stack"))]
+    places += [(f"fetchers[{k}].paramify.stack", (e.get("paramify") or {}).get("stack"))
+               for k, e in _keyed_entries(manifest)]
+    errors = []
+    for where, value in places:
+        if not value:
+            continue
+        try:
+            resolve_stack(stacks, str(value))
+        except ValueError as exc:
+            errors.append(f"{where}: {exc}")
+    return errors
+
+
+def manifest_owners(manifest: dict) -> List[Tuple[str, str]]:
+    """Each `owner` the manifest sets, as (where, username): the default, then each entry's."""
+    run = _run_block(manifest)
+    places = [("run.paramify.owner", (run.get("paramify") or {}).get("owner"))]
+    places += [(f"fetchers[{k}].paramify.owner", (e.get("paramify") or {}).get("owner"))
+               for k, e in _keyed_entries(manifest)]
+    return [(where, str(value)) for where, value in places if value]
+
+
+def owner_notes(manifest: dict, owners: Sequence[Mapping[str, Any]]) -> List[str]:
+    """One note for each `owner` in the manifest that owns no channel in the workspace.
+
+    A note, not an error: the owner is read only where a stack has several
+    channels, and there such an owner breaks no tie, so the upload refuses.
+    """
+    known = {str(o["owner"]).casefold() for o in owners}
+    names = ", ".join(str(o["owner"]) for o in owners) or "none"
+    return [f"{where}: no channel in this workspace is owned by {value!r} (owners: {names})"
+            for where, value in manifest_owners(manifest) if value.casefold() not in known]
+
+
+def _paramify_block(m: dict, use: Optional[str]) -> dict:
+    """The `paramify` block to write: the manifest's, or with `use`, one fetcher entry's.
+
+    `use` is an entry key (`aws_iam_mfa` is the first entry for that fetcher,
+    `aws_iam_mfa#1` the second) or a fetcher name; one that matches none, or
+    several, raises ValueError naming the entry keys.
+    """
+    if use is None:
+        return _run(m).setdefault("paramify", {})
+    pairs = _keyed_entries(m)
+    hits = [(k, e) for k, e in pairs if k == use] or [(k, e) for k, e in pairs if e.get("use") == use]
+    if len(hits) != 1:
+        names = ", ".join(k for k, _ in hits) if hits else ", ".join(k for k, _ in pairs) or "none"
+        what = (f"matches several entries; use {hits[0][0]} for the first, {hits[0][0]}#1 for the second"
+                if hits else "matches no entry")
+        raise ValueError(f"{use!r} {what} (entries: {names})")
+    return hits[0][1].setdefault("paramify", {})
+
+
+def set_stack(m: dict, stack: str, stack_name: Optional[str] = None, use: Optional[str] = None) -> dict:
+    """Record the Paramify stack uploads go to: manifest-wide, or for one fetcher entry.
+
+    Writes `run.paramify.stack` (and `stack_name` when given). With `use`, writes
+    that entry's `paramify` block instead (see _paramify_block).
+    """
+    block = _paramify_block(m, use)
+    block["stack"] = stack
+    if stack_name:
+        block["stack_name"] = stack_name
+    else:
+        block.pop("stack_name", None)
+    return m
+
+
+def set_owner(m: dict, owner: Optional[str], use: Optional[str] = None) -> dict:
+    """Record the Paramify username whose channel uploads use when a stack has one per owner.
+
+    Writes `run.paramify.owner`, or with `use` that entry's (see _paramify_block).
+    A blank `owner` removes it, so an entry inherits the manifest's again.
+    """
+    block = _paramify_block(m, use)
+    if owner and owner.strip():
+        block["owner"] = owner.strip()
+    else:
+        block.pop("owner", None)
+    return m
 
 
 # --------------------------------------------------------------------------- #
@@ -1126,6 +2097,50 @@ def _load_paramify_issues_uploader(root: Path):
     return module
 
 
+def _with_manifest_close_cycles(run_dir: Path, root: Path, config: dict, index: Optional[dict]) -> dict:
+    """Fill in close_cycle for fetchers whose run recorded none, from the
+    manifest that produced the run as it stands now.
+
+    The runner records each entry's close_cycle in the sidecar, so a run
+    collected before the policy was set — or before the key existed — carries
+    none, and setting it in the manifest afterwards changed nothing: the upload
+    stayed refused until the scan was collected again. The run's metadata names
+    its manifest, so its current value is the fallback. An explicit uploader
+    override and a value the run did record both still win.
+    """
+    if not index:
+        return config
+    items = list(index.get("reports") or []) + list(index.get("invocations") or [])
+    names = sorted({i.get("fetcher_name") for i in items if i.get("fetcher_name")})
+    unset = [
+        n for n in names
+        if all(i.get(CLOSE_CYCLE_FIELD) is None for i in items if i.get("fetcher_name") == n)
+    ]
+    if not unset:
+        return config
+    try:
+        meta = json.loads((Path(run_dir) / "_run_metadata.json").read_text())
+        manifest_id = meta.get("manifest")
+    except (OSError, json.JSONDecodeError):
+        return config
+    if not manifest_id:
+        return config
+    path = Path(manifest_id)
+    path = path if path.is_absolute() else Path(root) / path
+    if not path.is_file():
+        return config
+    try:
+        view = effective_config(read_manifest(path), unset, root)
+    except Exception:  # noqa: BLE001 — a fallback; the uploader reports what is still missing
+        return config
+    overrides = {k: dict(v or {}) for k, v in (config.get("overrides") or {}).items()}
+    for name in unset:
+        value = view_runtime_value(next((d for d in view.get(name, []) if d["name"] == CLOSE_CYCLE_FIELD), None))
+        if value is not None:
+            overrides.setdefault(name, {}).setdefault(CLOSE_CYCLE_FIELD, value)
+    return {**config, "overrides": overrides}
+
+
 def issues_upload_preflight(
     run_dir,
     root: Path,
@@ -1143,6 +2158,7 @@ def issues_upload_preflight(
     """
     uploader = _load_paramify_issues_uploader(root)
     uploader.load_dotenv()
+    config_path = _upload_config(root, config_path)
     config = uploader.load_config(str(config_path)) if config_path else {}
     paramify_cfg = config.get("paramify") or {}
     base_url, base_url_source = resolve_base_url(paramify_cfg.get("base_url"))
@@ -1152,6 +2168,10 @@ def issues_upload_preflight(
     warnings: List[str] = []
     file_count = 0
     missing_assessment: List[str] = []
+    # Per assessment: what the upload will send, computed without the network.
+    # A report that fails to upload at run time can still downgrade a planned
+    # PROCESS_CLOSE to PROCESS; this is the plan when every upload succeeds.
+    plan: List[dict] = []
     if not run_path.is_dir():
         errors.append(f"No run directory to upload: {run_path}")
     else:
@@ -1173,13 +2193,42 @@ def issues_upload_preflight(
             missing_assessment = sorted({
                 r.get("fetcher_name") or "?" for r in reports if not r.get("assessment_id")
             })
+            config = _with_manifest_close_cycles(run_path, root, config, index)
+            overrides = config.get("overrides") or {}
+            for aid, group in uploader.plan_assessments(index, overrides).items():
+                if not aid:
+                    continue
+                files_ok = all(r.get("status") == "success" for r in group["records"])
+                operation, close_skipped = uploader.close_decision(group, files_ok)
+                bad = sorted({
+                    str(p) for p in group["policies"] if p not in CLOSE_CYCLE_VALUES
+                })
+                plan.append({
+                    "assessment_id": aid,
+                    "assessment_name": group["name"],
+                    "files": len(group["records"]),
+                    "operation": None if bad else operation,
+                    "close_skipped": close_skipped,
+                    "error": (
+                        f"{CLOSE_CYCLE_FIELD} is {', '.join(bad)}; set after_run or never"
+                        if bad else None
+                    ),
+                })
+                if bad:
+                    # A warning for the same reason as a missing assessment: the
+                    # uploader holds back only this assessment's reports.
+                    warnings.append(
+                        f"assessment {group['name'] or aid}: no valid {CLOSE_CYCLE_FIELD} "
+                        f"({', '.join(bad)}), so its reports will not be sent "
+                        f"(fix: paramify assessments select --close-cycle after_run|never)"
+                    )
             for name in missing_assessment:
                 # A warning, not an error. upload_run already isolates this per
                 # file and sends the rest, so gating the batch on it stranded
                 # reports that were correctly wired — and blocked --dry-run from
                 # showing what would have gone.
                 warnings.append(
-                    f"{name}: no assessment_id, so its report cannot be intaken "
+                    f"{name}: no assessment_id, so its report cannot be sent "
                     f"(fix: paramify assessments select {name})"
                 )
 
@@ -1198,8 +2247,10 @@ def issues_upload_preflight(
         "base_url": base_url,
         "base_url_source": base_url_source,
         "base_url_label": describe_base_url(base_url),
+        "config_path": str(config_path) if config_path else None,
         "file_count": file_count,
         "missing_assessment": missing_assessment,
+        "assessments": plan,
         "warnings": warnings,
         "token_present": token_present,
         "token_source": token_source,
@@ -1215,22 +2266,117 @@ def issues_upload_run(
     *,
     dry_run: bool = False,
     force: bool = False,
+    wait: bool = True,
+    wait_timeout: Optional[float] = None,
     on_event: Optional[Callable[[dict], None]] = None,
 ) -> dict:
-    """Intake one run directory's issue reports into Paramify assessments.
+    """Send one run directory's issue reports into their Paramify pipelines.
 
     Fires the same upload_start / upload_file / upload_complete events as
-    upload_run, so a front-end renders both with one code path.
+    upload_run, so a front-end renders both with one code path, plus the
+    pipeline's own: process_plan (dry-run), job_queued, job_status,
+    job_complete, process_skipped.
     """
     uploader = _load_paramify_issues_uploader(root)
+    config_path = _upload_config(root, config_path)
     config = uploader.load_config(str(config_path)) if config_path else {}
+    try:
+        index = read_issue_report_index(Path(run_dir))
+    except ValueError:
+        index = None  # upload_run reports the unreadable index itself
+    config = _with_manifest_close_cycles(Path(run_dir), root, config, index)
     return uploader.upload_run(
         Path(run_dir),
         config=config,
         dry_run=dry_run,
         force=force,
+        wait=wait,
+        wait_timeout=wait_timeout,
         on_event=on_event,
     )
+
+
+def _issues_client(root: Path, config_path: Optional[Path] = None):
+    """(uploader module, client) for the pipeline commands that act on Paramify
+    directly rather than on a run: jobs, retry, cancel, close."""
+    uploader = _load_paramify_issues_uploader(root)
+    uploader.load_dotenv()
+    config_path = _upload_config(root, config_path)
+    config = uploader.load_config(str(config_path)) if config_path else {}
+    base_url, _ = resolve_base_url((config.get("paramify") or {}).get("base_url"))
+    url_error = uploader._base_url_error(base_url)
+    if url_error:
+        raise RuntimeError(url_error)
+    token, _ = resolve_upload_token()
+    if not token:
+        raise RuntimeError(_missing_token_error())
+    return uploader, uploader.ParamifyClient(token, base_url)
+
+
+def issues_jobs(
+    root: Path,
+    config_path: Optional[Path] = None,
+    *,
+    assessment_id: Optional[str] = None,
+    status: Optional[str] = None,
+    limit: int = 50,
+) -> List[dict]:
+    """Recent pipeline jobs, newest first, as job_summary dicts plus timestamps."""
+    uploader, client = _issues_client(root, config_path)
+    out = []
+    for job in client.list_jobs(assessment_id=assessment_id, status=status, limit=limit):
+        out.append({
+            **uploader.job_summary(job),
+            "assessment_id": job.get("assessmentId"),
+            "created_at": job.get("createdAt"),
+            "completed_at": job.get("completedAt"),
+        })
+    return out
+
+
+def issues_job_action(
+    root: Path, job_id: str, action: str, config_path: Optional[Path] = None
+) -> dict:
+    """Retry or cancel one pipeline job. Cancelling also cancels every unfinished
+    job queued behind it on the same assessment — that is Paramify's rule."""
+    uploader, client = _issues_client(root, config_path)
+    if action == "retry":
+        job = client.retry_job(job_id)
+    elif action == "cancel":
+        job = client.cancel_job(job_id)
+    else:
+        raise ValueError(f"unknown job action {action!r}")
+    return uploader.job_summary(job)
+
+
+def issues_close(
+    root: Path,
+    assessment_id: str,
+    config_path: Optional[Path] = None,
+    *,
+    wait: bool = True,
+    wait_timeout: Optional[float] = None,
+    on_event: Optional[Callable[[dict], None]] = None,
+) -> dict:
+    """Close an assessment's current cycle on its own, and report what it closed.
+
+    For assessments whose cycle is filled by several runs (`close_cycle: never`):
+    closing auto-closes every open issue the cycle never saw, so it belongs after
+    the last file has landed, which only a person knows.
+    """
+    uploader, client = _issues_client(root, config_path)
+    job = uploader.job_summary(client.close(assessment_id))
+    if on_event:
+        on_event({"event": "job_queued", "assessment_id": assessment_id,
+                  "job_id": job["job_id"], "operation": "CLOSE"})
+    if not wait:
+        return job
+    timeout = wait_timeout or uploader.DEFAULT_WAIT_TIMEOUT
+    final, timed_out = uploader.wait_for_job(client, job["job_id"], timeout=timeout)
+    result = uploader.job_summary(final)
+    if timed_out:
+        result["timed_out"] = True
+    return result
 
 
 # --------------------------------------------------------------------------- #
@@ -1264,6 +2410,7 @@ def scripts_sync_preflight(
     """
     uploader = _load_paramify_scripts_uploader(root)
     uploader.load_dotenv()
+    config_path = _upload_config(root, config_path)
     config = uploader.load_config(str(config_path)) if config_path else {}
     paramify_cfg = config.get("paramify") or {}
     base_url, base_url_source = resolve_base_url(paramify_cfg.get("base_url"))
@@ -1312,6 +2459,7 @@ def scripts_sync(
     reassociate: bool = False,
     include: Optional[set] = None,
     on_event: Optional[Callable[[dict], None]] = None,
+    custom_tags: bool = True,
 ) -> dict:
     """Sync fetcher entry scripts to Paramify and associate them to evidence sets.
 
@@ -1322,6 +2470,7 @@ def scripts_sync(
     fetchers); ``None`` syncs every discovered fetcher.
     """
     uploader = _load_paramify_scripts_uploader(root)
+    config_path = _upload_config(root, config_path)
     config = uploader.load_config(str(config_path)) if config_path else {}
     return uploader.sync_scripts(
         root,
@@ -1331,6 +2480,7 @@ def scripts_sync(
         reassociate=reassociate,
         include=include,
         on_event=on_event,
+        custom_tags=custom_tags,
     )
 
 
@@ -1372,7 +2522,10 @@ def _run_summary(run_dir: Path) -> dict:
             })
     # Any JSON outputs not recorded in the metadata (e.g. legacy/direct runs).
     for p in sorted(run_dir.glob("*.json")):
-        if p.name == "_run_metadata.json" or p.name in seen:
+        # upload_log.json is the evidence uploader's own record, not evidence:
+        # counted, a scan-only run someone once ran `paramify upload` on looked
+        # like an evidence run and was picked as one.
+        if not is_evidence_file(p) or p.name in seen:
             continue
         files.append({"name": p.name, "path": str(p), "fetcher": None, "target": None,
                       "exit_code": None, "kind": "evidence"})
@@ -1432,6 +2585,42 @@ def list_runs(output_dir) -> List[dict]:
     return runs
 
 
+RUN_KINDS = ("evidence", "issue_report")
+
+
+def run_has(run: dict, kind: str) -> bool:
+    """Whether a list_runs entry holds anything for this kind's upload."""
+    if kind == "issue_report":
+        return bool(run.get("issue_reports"))
+    if kind == "evidence":
+        return any(f.get("kind") == "evidence" for f in run.get("files") or [])
+    raise ValueError(f"unknown run kind {kind!r}; expected one of {RUN_KINDS}")
+
+
+def latest_run(
+    output_dir,
+    *,
+    kind: Optional[str] = None,
+    manifest_path=None,
+    root: Optional[Path] = None,
+) -> Optional[dict]:
+    """The newest run under output_dir worth uploading, or None.
+
+    `kind` skips runs with nothing of that kind: an evidence manifest and a
+    pipeline manifest usually share an output_dir, and "the newest run" alone
+    handed `paramify issues upload` an evidence-only run while the scan run sat
+    beside it. `manifest_path` keeps only runs that manifest produced (its
+    _manifest_id in the run metadata), for two manifests of the same kind.
+    """
+    runs = list_runs(output_dir)
+    if manifest_path is not None:
+        mid = _manifest_id(manifest_path, root or find_repo_root())
+        runs = [r for r in runs if r.get("manifest") == mid]
+    if kind is not None:
+        runs = [r for r in runs if run_has(r, kind)]
+    return runs[0] if runs else None
+
+
 def read_evidence(path) -> dict:
     """Read one evidence JSON file, normalized. Splits the standard envelope
     (schema_version/metadata/payload); a raw (un-enveloped) file comes back with
@@ -1471,6 +2660,109 @@ def read_issue_report(path) -> dict:
     if rec is None:
         raise ValueError(f"{p.name} is not listed in the issue-report index")
     return rec
+
+
+# --------------------------------------------------------------------------- #
+# Evidence samples — one representative record per fetcher (framework/samples.py)
+# --------------------------------------------------------------------------- #
+
+def sample_status(root: Path, fetchers: Optional[dict] = None) -> List[dict]:
+    """One row per evidence fetcher: whether it has a committed sample, and if
+    so where it came from, whether a person has reviewed it, and whether it was
+    captured from the fetcher's current version. Issue-report fetchers are left
+    out — their output is the vendor's own file, not an evidence payload."""
+    fetchers = fetchers if fetchers is not None else discover_fetchers(root)
+    rows = []
+    for name in sorted(fetchers):
+        f = fetchers[name]
+        if f.is_issue_report:
+            continue
+        doc = _samples.read_sample(f.path)
+        row = {"fetcher": name, "category": f.category, "version": f.version,
+               "has_sample": doc is not None}
+        if doc is not None:
+            row.update({
+                "source": doc.get("source"),
+                "reviewed": bool(doc.get("reviewed")),
+                "captured_on": doc.get("captured_on"),
+                "sample_version": doc.get("fetcher_version"),
+                "current": doc.get("fetcher_version") == f.version,
+                "records": {c["path"]: c["records"] for c in doc.get("collections") or []},
+            })
+        rows.append(row)
+    return rows
+
+
+def read_sample(root: Path, name: str, fetchers: Optional[dict] = None) -> dict:
+    """The committed sample for one fetcher. Raises ValueError if the fetcher is
+    unknown or has no sample yet."""
+    fetchers = fetchers if fetchers is not None else discover_fetchers(root)
+    f = fetchers.get(name)
+    if f is None:
+        raise ValueError(f"unknown fetcher: {name}")
+    doc = _samples.read_sample(f.path)
+    if doc is None:
+        raise ValueError(f"{name} has no sample yet ({_samples.SAMPLE_FILENAME} beside its fetcher.yaml)")
+    return doc
+
+
+def backfill_samples(
+    root: Path,
+    evidence_dir,
+    only: Optional[List[str]] = None,
+    scrub: Optional[List[str]] = None,
+    force: bool = False,
+    dry_run: bool = False,
+    fetchers: Optional[dict] = None,
+) -> dict:
+    """Build a sample for every fetcher that has evidence with records under
+    `evidence_dir` (searched recursively), from the best file it has: one with
+    records, from the current fetcher version, that succeeded, and showed the
+    most. Existing samples are kept unless `force`.
+
+    Sanitizing uses the identifiers of EVERY scanned file, not only the chosen
+    one, so an account id from one run is caught in another's sample. A sample
+    that still contains a known identifier after sanitizing is not written; it
+    is reported under "blocked" with what leaked.
+
+    Returns {"written": [...], "skipped": [...], "blocked": [...],
+    "no_records": [...], "unknown": [...]}, each a list of row dicts.
+    """
+    fetchers = fetchers if fetchers is not None else discover_fetchers(root)
+    candidates = _samples.scan_evidence(Path(evidence_dir))
+    extra = _samples.collect_all_needles(candidates)
+    out: Dict[str, List[dict]] = {
+        "written": [], "skipped": [], "blocked": [], "no_records": [], "unknown": [],
+    }
+    for name in sorted(candidates):
+        if only and name not in only:
+            continue
+        f = fetchers.get(name)
+        if f is None or f.is_issue_report:
+            out["unknown"].append({"fetcher": name})
+            continue
+        best = _samples.best_candidate(candidates[name], f.version)
+        if not _samples.has_records(best.profiled):
+            out["no_records"].append({"fetcher": name, "files": len(candidates[name])})
+            continue
+        if _samples.read_sample(f.path) is not None and not force:
+            out["skipped"].append({"fetcher": name, "reason": "sample exists (use --force)"})
+            continue
+        doc, leaks = _samples.build_sample(best, scrub=scrub or (), extra=extra)
+        row = {
+            "fetcher": name,
+            "source_file": str(best.path),
+            "sample_version": doc["fetcher_version"],
+            "current": doc["fetcher_version"] == f.version,
+            "records": {c["path"]: c["records"] for c in doc["collections"]},
+        }
+        if leaks:
+            out["blocked"].append({**row, "leaks": leaks})
+            continue
+        if not dry_run:
+            row["path"] = str(_samples.write_sample(f.path, doc))
+        out["written"].append(row)
+    return out
 
 
 def preview_issue_report(path) -> str:
@@ -1522,7 +2814,7 @@ def _manifest_summary(path: Path, root: Path, fetchers=None, platforms=None) -> 
         "readable": True,
     }
     try:
-        raw = yaml.safe_load(path.read_text())
+        raw = yaml_io.load_path(path)
     except (OSError, yaml.YAMLError):
         summary["readable"] = False
         return summary
@@ -1583,21 +2875,47 @@ def list_manifests(root) -> List[dict]:
     return [s for s in summaries if s is not None]
 
 
-def new_manifest_path(root, name: str, output_dir: str = "./evidence") -> Path:
-    """Create a fresh manifest file at <root>/manifests/<name>.yaml and return
-    its path. Raises FileExistsError if it already exists, ValueError on a bad
-    name."""
+def new_manifest_target(root, name: str) -> Path:
+    """The path `new_manifest_path` would create for `name`, without writing it.
+
+    Raises ValueError on a bad name and FileExistsError if the manifest is
+    already there. A front-end asks this before it asks anything else, so a
+    taken name is refused while it is still the only thing typed.
+    """
     safe = name.strip()
     if not safe or "/" in safe or safe.startswith("."):
         raise ValueError(f"invalid manifest name: {name!r}")
     if not safe.endswith(".yaml"):
         safe += ".yaml"
-    mdir = Path(root) / "manifests"
-    mdir.mkdir(parents=True, exist_ok=True)
-    path = mdir / safe
+    path = Path(root) / "manifests" / safe
     if path.exists():
         raise FileExistsError(str(path))
-    path.write_text(yaml.safe_dump(init_manifest(output_dir), sort_keys=False))
+    return path
+
+
+def new_manifest_path(
+    root,
+    name: str,
+    output_dir: str = "./evidence",
+    *,
+    stack: Optional[str] = None,
+    stack_name: Optional[str] = None,
+) -> Path:
+    """Create a fresh manifest file at <root>/manifests/<name>.yaml and return
+    its path. Raises FileExistsError if it already exists, ValueError on a bad
+    name.
+
+    With `stack`, the manifest starts with `run.paramify.stack` (and
+    `stack_name`) set, as `set_stack` writes them, in the same single write.
+    """
+    path = new_manifest_target(root, name)
+    m = init_manifest(output_dir)
+    if stack:
+        set_stack(m, stack, stack_name)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    # "x" so a manifest made between the check and here is never overwritten.
+    with path.open("x") as fh:
+        fh.write(yaml.safe_dump(m, sort_keys=False))
     return path
 
 
@@ -1907,8 +3225,10 @@ def issue_report_fetchers(
     ]
 
 
-def set_assessment(m: dict, use: str, assessment: dict) -> dict:
-    """Point one manifest entry at an assessment.
+def set_assessment(
+    m: dict, use: str, assessment: dict, close_cycle: Optional[str] = None
+) -> dict:
+    """Point one manifest entry at an assessment, and optionally set its close policy.
 
     Writes the UUID (authoritative) and the display name (so the manifest reads
     as something a human recognises, and a UUID that no longer resolves can be
@@ -1919,7 +3239,345 @@ def set_assessment(m: dict, use: str, assessment: dict) -> dict:
     label = assessment_display_name(assessment)
     if label and label != assessment["id"]:
         set_fetcher_config(m, use, ASSESSMENT_NAME_FIELD, label)
+    if close_cycle is not None:
+        set_close_cycle(m, use, close_cycle)
     return m
+
+
+def set_close_cycle(m: dict, use: str, close_cycle: str) -> dict:
+    """Set whether an issue-report entry's cycle closes after each run."""
+    if close_cycle not in CLOSE_CYCLE_VALUES:
+        raise ValueError(
+            f"{CLOSE_CYCLE_FIELD} must be {' or '.join(CLOSE_CYCLE_VALUES)}, "
+            f"got {close_cycle!r}"
+        )
+    set_fetcher_config(m, use, CLOSE_CYCLE_FIELD, close_cycle)
+    return m
+
+
+# --------------------------------------------------------------------------- #
+# Paramify workspace — solution capabilities
+#
+# A capability carries the narrative an assessor actually reads: the claim the
+# evidence is supposed to substantiate. Authoring a validator against a fetcher
+# description instead is guessing at that claim, so the narrative has to be
+# readable from the same place the evidence is.
+#
+# The capability -> evidence set link is NOT readable here: it is write-only via
+# POST /evidence/{id}/associate. These helpers list and resolve capabilities;
+# pairing one with an evidence set stays a human decision, made per run.
+# --------------------------------------------------------------------------- #
+
+_CAPABILITIES_PATH = "/solution-capabilities"
+_EVIDENCE_SETS_PATH = "/evidence"
+_ARTIFACT_DOWNLOAD_TIMEOUT = 120
+# A pulled artifact is real tenant evidence. 200 MB is well past any enveloped
+# fetcher payload and stops a mis-selected disk image from filling the disk.
+_ARTIFACT_MAX_BYTES = 200 * 1024 * 1024
+
+
+def _resolve_workspace_item(
+    items: List[dict], selector: str, display: Callable[[dict], str],
+    noun: str, id_fields: Tuple[str, ...],
+) -> dict:
+    """Resolve one workspace object from an id, reference id, or name.
+
+    Exact match on any `id_fields` value, then exact case-insensitive display
+    name, then a unique case-insensitive substring of it. Raises LookupError
+    when nothing matches and ValueError when a substring is ambiguous — the
+    same contract as resolve_program / resolve_assessment, which predate this
+    and keep their own copies.
+    """
+    needle = selector.strip()
+    for item in items:
+        if any((item.get(f) or "") == needle for f in id_fields):
+            return item
+    lowered = needle.lower()
+    exact = [i for i in items if display(i).lower() == lowered]
+    if len(exact) == 1:
+        return exact[0]
+    if len(exact) > 1:
+        raise ValueError(
+            f"{selector!r} matches {len(exact)} {noun}s by name; use the id instead"
+        )
+    partial = [i for i in items if lowered in display(i).lower()]
+    if len(partial) == 1:
+        return partial[0]
+    if len(partial) > 1:
+        names = ", ".join(f"{display(i)} ({i['id']})" for i in partial[:5])
+        raise ValueError(f"{selector!r} is ambiguous — matches: {names}")
+    raise LookupError(f"no {noun} matches {selector!r}")
+
+
+def capability_display_name(capability: dict) -> str:
+    """Best human-readable label for a capability, falling back to its UUID.
+
+    `reference_id` is null on a workspace that has not renumbered its template
+    capabilities, so `template_reference_id` (RS-12-01-01) is the identifier
+    people actually see there.
+    """
+    return (
+        capability.get("name")
+        or capability.get("reference_id")
+        or capability.get("template_reference_id")
+        or capability.get("id", "")
+    )
+
+
+def list_capabilities() -> List[dict]:
+    """Fetch the workspace's solution capabilities via GET /solution-capabilities.
+
+    Returns [{"id", "name", "reference_id", "template_reference_id", "family",
+    "subfamily", "risk", "risk_family", "implementation_status",
+    "main_component", "functions"}] sorted by display name, where `functions` is
+    [{"type", "name", "narrative", "implementation_status"}] — the narratives
+    being the point of the call.
+
+    Raises RuntimeError with an actionable message on missing credentials, a
+    non-https endpoint, or a transport/HTTP failure.
+    """
+    payload = _workspace_get(_CAPABILITIES_PATH)
+    raw = payload.get("solutionCapabilities", []) if isinstance(payload, dict) else payload
+
+    capabilities = []
+    for c in raw:
+        if not isinstance(c, dict) or not c.get("id"):
+            continue
+        main = c.get("mainComponent") or {}
+        functions = []
+        for fn in c.get("functions") or []:
+            if not isinstance(fn, dict):
+                continue
+            functions.append({
+                "type": fn.get("type") or "",
+                "name": fn.get("name") or "",
+                # The narrative is a template until someone fills it in, and an
+                # unfilled one still carries #PLACEHOLDER tokens. Passed through
+                # verbatim: deciding whether it says anything is the reader's job.
+                "narrative": fn.get("narrative") or "",
+                "implementation_status": fn.get("implementationStatus") or "",
+            })
+        capabilities.append({
+            "id": c["id"],
+            "name": c.get("name") or "",
+            "reference_id": c.get("referenceId") or "",
+            "template_reference_id": c.get("templateReferenceId") or "",
+            "family": c.get("family") or "",
+            "subfamily": c.get("subfamily") or "",
+            "risk": c.get("risk") or "",
+            "risk_family": c.get("riskFamily") or "",
+            "implementation_status": c.get("implementationStatus") or "",
+            "main_component": (main.get("name") or "") if isinstance(main, dict) else "",
+            "functions": functions,
+        })
+    capabilities.sort(key=lambda c: capability_display_name(c).lower())
+    return capabilities
+
+
+def capability_narratives(capability: dict) -> List[dict]:
+    """The capability's functions that actually carry narrative text.
+
+    Most capabilities have three functions and only one or two are written, so
+    a reader (or a validator author) wants the written ones without scanning
+    past the empty ones.
+    """
+    return [f for f in capability.get("functions") or [] if (f.get("narrative") or "").strip()]
+
+
+def resolve_capability(capabilities: List[dict], selector: str) -> dict:
+    """Resolve one capability from a user-supplied id, reference id, or name."""
+    return _resolve_workspace_item(
+        capabilities, selector, capability_display_name, "capability",
+        ("id", "reference_id", "template_reference_id"),
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Paramify workspace — evidence sets and their artifacts
+#
+# `paramify evidence <path>` reads a file this repo produced. These read the
+# other direction: what is already attached in the workspace, including
+# artifacts nobody here collected (a customer upload, another team's fetcher).
+# That is the only way to author a validator for evidence this repo does not
+# generate.
+# --------------------------------------------------------------------------- #
+
+def evidence_set_display_name(evidence_set: dict) -> str:
+    """Best label for an evidence set. The reference id leads: EVD-IAM-MFA is
+    how a set is named in fetcher.yaml, in the registry, and in conversation —
+    the UI name is prose and not stable."""
+    return (
+        evidence_set.get("reference_id")
+        or evidence_set.get("name")
+        or evidence_set.get("id", "")
+    )
+
+
+def list_evidence_sets() -> List[dict]:
+    """Fetch the workspace's evidence sets via GET /evidence.
+
+    Returns [{"id", "reference_id", "name", "description", "instructions",
+    "artifact_count", "automated", "frequency"}] sorted by display name.
+    `artifact_count` is what says whether there is anything here to author
+    against at all.
+    """
+    payload = _workspace_get(_EVIDENCE_SETS_PATH)
+    raw = payload.get("evidences", []) if isinstance(payload, dict) else payload
+
+    sets = []
+    for e in raw:
+        if not isinstance(e, dict) or not e.get("id"):
+            continue
+        sets.append({
+            "id": e["id"],
+            "reference_id": e.get("referenceId") or "",
+            "name": e.get("name") or "",
+            "description": e.get("description") or "",
+            "instructions": e.get("instructions") or "",
+            "artifact_count": e.get("artifactCount") or 0,
+            # Derived server-side from whether a validator is attached; read-only.
+            "automated": bool(e.get("automated")),
+            "frequency": e.get("frequency") or "",
+        })
+    sets.sort(key=lambda e: evidence_set_display_name(e).lower())
+    return sets
+
+
+def resolve_evidence_set(sets: List[dict], selector: str) -> dict:
+    """Resolve one evidence set from a user-supplied id, reference id, or name."""
+    return _resolve_workspace_item(
+        sets, selector, evidence_set_display_name, "evidence set",
+        ("id", "reference_id"),
+    )
+
+
+def list_artifacts(evidence_set_id: str) -> List[dict]:
+    """Fetch one evidence set's artifacts via GET /evidence/{id}/artifacts.
+
+    Returns [{"id", "title", "file_name", "file_type", "is_url", "created_at",
+    "created_by", "effective_date", "download_url", "validators"}] newest
+    first. `download_url` is a presigned S3 link that expires in about an hour,
+    so it is fetched, not stored.
+    """
+    payload = _workspace_get(f"{_EVIDENCE_SETS_PATH}/{evidence_set_id}/artifacts")
+    raw = payload.get("artifacts", []) if isinstance(payload, dict) else payload
+
+    artifacts = []
+    for a in raw:
+        if not isinstance(a, dict) or not a.get("id"):
+            continue
+        creator = a.get("createdBy") or {}
+        validators = []
+        for v in a.get("validators") or []:
+            if isinstance(v, dict):
+                validators.append({"name": v.get("name") or "", "result": v.get("result") or ""})
+        artifacts.append({
+            "id": a["id"],
+            "title": a.get("title") or "",
+            "file_name": a.get("originalFileName") or "",
+            "file_type": a.get("fileType") or "",
+            # A pasted link, not an uploaded file: there is nothing to download.
+            "is_url": bool(a.get("isUrl")),
+            "created_at": a.get("createdAt") or "",
+            "created_by": (creator.get("username") or creator.get("email") or "")
+                          if isinstance(creator, dict) else "",
+            "effective_date": a.get("effectiveDate") or "",
+            "download_url": a.get("pathname") or "",
+            "validators": validators,
+        })
+    artifacts.sort(key=lambda a: a.get("created_at") or "", reverse=True)
+    return artifacts
+
+
+def _artifact_filename(evidence_set: dict, artifact: dict) -> str:
+    """A stable, collision-free local name: the set's reference id, the
+    artifact's id, and the original extension. Named for the set rather than the
+    uploaded filename because two sets routinely carry `evidence.json`."""
+    stem = (evidence_set_display_name(evidence_set) or "artifact").replace("/", "_")
+    suffix = Path(artifact.get("file_name") or "").suffix
+    if not suffix:
+        suffix = {
+            "application/json": ".json", "text/csv": ".csv", "application/pdf": ".pdf",
+            "text/plain": ".txt", "application/xml": ".xml", "text/xml": ".xml",
+        }.get(artifact.get("file_type") or "", "")
+    return f"{stem}_{artifact['id'][:8]}{suffix}"
+
+
+def pull_artifact(evidence_set: dict, artifact: dict, dest_dir) -> dict:
+    """Download one artifact to `dest_dir` and report what landed.
+
+    Returns {"path", "bytes", "file_type", "enveloped", "artifact_id",
+    "evidence_set"}. `enveloped` is the fact a validator author needs before
+    reading any further: an artifact is only this repo's envelope shape when
+    someone uploaded it from here, and a workspace is full of PDFs and
+    screenshots that no regex validator can be authored against.
+
+    Raises RuntimeError with an actionable message; ValueError when the artifact
+    is a pasted URL rather than a file.
+    """
+    import requests  # local, as elsewhere on the network path
+
+    if artifact.get("is_url"):
+        raise ValueError(
+            f"artifact {artifact['id']} is a link, not a file "
+            f"({artifact.get('download_url') or 'no target'}) — nothing to download"
+        )
+    url = artifact.get("download_url")
+    if not url:
+        raise RuntimeError(f"artifact {artifact['id']} has no download target")
+
+    dest = Path(dest_dir).expanduser()
+    dest.mkdir(parents=True, exist_ok=True)
+    path = dest / _artifact_filename(evidence_set, artifact)
+
+    # No Authorization header. The URL is already presigned, and S3 rejects a
+    # request carrying both signatures ("Only one auth mechanism allowed") — so
+    # reusing _workspace_get here would fail on every artifact.
+    try:
+        with requests.get(url, stream=True, timeout=_ARTIFACT_DOWNLOAD_TIMEOUT) as resp:
+            if resp.status_code != 200:
+                raise RuntimeError(
+                    f"downloading artifact {artifact['id']} failed "
+                    f"(HTTP {resp.status_code}); the presigned link expires after "
+                    f"about an hour — re-list the artifacts to get a fresh one"
+                )
+            written = 0
+            with open(path, "wb") as fh:
+                for chunk in resp.iter_content(chunk_size=64 * 1024):
+                    written += len(chunk)
+                    if written > _ARTIFACT_MAX_BYTES:
+                        fh.close()
+                        path.unlink(missing_ok=True)
+                        raise RuntimeError(
+                            f"artifact {artifact['id']} exceeds "
+                            f"{_ARTIFACT_MAX_BYTES // (1024 * 1024)} MB — refusing to pull"
+                        )
+                    fh.write(chunk)
+    except requests.RequestException as e:
+        path.unlink(missing_ok=True)
+        raise RuntimeError(f"could not download artifact {artifact['id']}: {e}") from e
+
+    # "Not enveloped" is confusing on its own: an older or hand-built artifact
+    # can carry schema_version and metadata and still not be readable as one.
+    # Say which keys are missing so the verdict is actionable rather than flat.
+    enveloped, missing = False, []
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+        enveloped = is_enveloped(doc)
+        if not enveloped and isinstance(doc, dict):
+            missing = sorted(ENVELOPE_KEYS - set(doc.keys()))
+    except (ValueError, OSError, UnicodeDecodeError):
+        pass  # not JSON, or not readable as text: not our envelope
+
+    return {
+        "path": str(path),
+        "bytes": written,
+        "file_type": artifact.get("file_type") or "",
+        "enveloped": enveloped,
+        "missing_envelope_keys": missing,
+        "artifact_id": artifact["id"],
+        "evidence_set": evidence_set_display_name(evidence_set),
+    }
 
 
 def effective_config(
@@ -1927,53 +3585,77 @@ def effective_config(
     platforms: Optional[dict] = None,
 ) -> Dict[str, List[dict]]:
     """Per entry, every config field that applies to it, with its value and where
-    that value comes from — the merge the runner actually performs:
+    that value comes from — the runner's own merge (executor.merged_config):
 
         platform defaults <- platform values <- per-fetcher values
 
-    Returns {use: [descriptor + {"value", "source"}]}, where source is "entry",
-    "platforms.<category>", "default", or None when nothing supplies it. A field
-    the category declares (and the fetcher doesn't) is included too, since it is
-    injected into that fetcher's environment just the same.
+    `uses` holds entry keys (manifest_loader.entry_keys): a fetcher name is its
+    first entry's key, and `x#1` is the second entry that uses `x`. A key no entry
+    has is read as a fetcher name with no entry of its own.
+
+    Returns {key: [descriptor + {"value", "source"}]}, where source is "entry",
+    "platforms.<category>", "default", or None when nothing supplies it. When the
+    value as written is a ${env:} reference, "reference" holds it and
+    "reference_state" says "set", "unset" (value and source are then the next
+    value down, as at run time) or "invalid". "value" is what the runner injects,
+    except that a value read from a reference is shown as the reference, never
+    what it resolves to, and "value_from_env" is then True (see
+    secret_resolver.view_runtime_value for the value itself). A field the category
+    declares (and the fetcher doesn't) is included too, since it is injected into
+    that fetcher's environment just the same.
 
     Front-ends need this to render config honestly: reading only the entry's own
     `config` block reports a value set once at the category level as unset on
     every entry that inherits it. Batched over `uses` so a caller redrawing a
     table scans the fetcher tree once, not once per row.
     """
+    from framework.runner.executor import (  # lazy: import cycle
+        merged_config,
+        secret_env_vars,
+    )
+
     discovered = fetchers if fetchers is not None else discover_fetchers(root)
     specs = platforms if platforms is not None else discover_platforms(root)
-    all_platforms = _run(m).get("platforms") or {}
+    run = _run(m)
+    parsed = manifest_loader.parse_manifest({"run": {**run, "fetchers": run.get("fetchers") or []}})
+    # By entry key, so two entries of one fetcher each get their own view.
+    entries = dict(zip(manifest_loader.entry_keys(parsed.entries), parsed.entries))
+    # The whole manifest's secrets, so a config reference reading one shows as invalid, as at run time.
+    secret_vars = secret_env_vars(discovered.values(), specs.values(), parsed.entries)
 
     out: Dict[str, List[dict]] = {}
-    for use in uses:
-        f = discovered.get(use)
+    for key in uses:
+        entry = entries.get(key) or ManifestEntry(use=key)
+        f = discovered.get(entry.use)
         if f is None:
-            out[use] = []
+            out[key] = []
             continue
-        spec = specs.get(f.category) if f.category else None
-        schema: Dict[str, ConfigField] = {}
-        if spec:
-            schema.update(spec.config_schema)
-        schema.update(f.config_schema)  # fetcher overrides platform on a name clash
-
-        platform_values = ((all_platforms.get(f.category or "") or {}).get("config")) or {}
-        entry_values = (_find_entry(m, use) or {}).get("config") or {}
+        spec = platform_for(f, specs)
+        platform_cfg = platform_for(f, parsed.platforms) or PlatformConfig()
+        platform_values, entry_values = platform_cfg.config, entry.config
+        merged = merged_config(f, spec, platform_cfg, entry, secret_vars)
+        labels = {"entry": "entry", "platform": f"platforms.{f.category}", "default": "default"}
 
         fields: List[dict] = []
-        for name, fdef in schema.items():
+        for name, fdef in merged.schema.items():
             d = _config_descriptor(fdef)
             d["category"] = f.category
-            if name in entry_values:
-                d["value"], d["source"] = entry_values[name], "entry"
-            elif name in platform_values:
-                d["value"], d["source"] = platform_values[name], f"platforms.{f.category}"
-            elif fdef.default is not None:
-                d["value"], d["source"] = fdef.default, "default"
-            else:
-                d["value"], d["source"] = None, None
+            d["value"] = merged.referenced.get(name, merged.values.get(name))
+            if name in merged.referenced:
+                d["value_from_env"] = True
+            d["source"] = labels.get(merged.sources.get(name, ""))
+            # The value as written, when it is a reference: "set" when the runner resolves it,
+            # "unset" when the next value down applies, "invalid" when the runner refuses it.
+            top_source, top = next(((label, v) for label, v in (("entry", entry_values.get(name)),
+                                                                ("platform", platform_values.get(name)),
+                                                                ("default", fdef.default)) if v is not None),
+                                   (None, None))
+            if is_env_ref_attempt(top) or is_partial_env_ref(top):
+                d["reference"] = top
+                d["reference_state"] = ("invalid" if name in merged.errors
+                                        else "set" if merged.sources.get(name) == top_source else "unset")
             fields.append(d)
-        out[use] = fields
+        out[key] = fields
     return out
 
 def shared_config_state(
@@ -1984,11 +3666,12 @@ def shared_config_state(
     `uses` — the kind set once per category rather than per entry:
 
         categories  every category among `uses` that accepts `field_name`
-        value       the value they all resolve to today, or None when nothing
-                    supplies one or the entries disagree
+        value       the value they all resolve to today, as written (a reference
+                    stays one), or None when nothing supplies one or the entries
+                    disagree
         sources     where those values come from ("entry", "platforms.<cat>",
                     "default"), distinct, in the order met
-        conflict    True when the entries resolve to different values
+        conflict    True when the entries resolve to different values at run time
         missing     categories where nothing supplies a required value
 
     A view over effective_config() rather than a second merge, so "is it set"
@@ -2000,6 +3683,7 @@ def shared_config_state(
     categories: List[str] = []
     missing: List[str] = []
     values: List[Any] = []
+    runtime: List[Any] = []
     sources: List[str] = []
     for fields in effective_config(m, uses, root, fetchers, platforms).values():
         for d in fields:
@@ -2011,14 +3695,17 @@ def shared_config_state(
                 missing.append(d["category"])
             if d["source"] is None:
                 continue
-            if d["value"] not in values:
+            # Compared as the runner sees them, so ${env:TAG} and the literal it reads agree.
+            now = view_runtime_value(d)
+            if now not in runtime:
+                runtime.append(now)
                 values.append(d["value"])
             if d["source"] not in sources:
                 sources.append(d["source"])
     return {
         "categories": categories,
-        "value": values[0] if len(values) == 1 else None,
+        "value": values[0] if len(runtime) == 1 else None,
         "sources": sources,
-        "conflict": len(values) > 1,
+        "conflict": len(runtime) > 1,
         "missing": missing,
     }

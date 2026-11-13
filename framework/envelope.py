@@ -4,20 +4,29 @@ Fetchers write raw evidence dicts; the runner calls `wrap_outputs()` after each
 invocation to add the `{schema_version, metadata, payload}` wrapper so every
 evidence file is self-describing and the uploader has one shape to read. This
 keeps the v0.x "fetchers write raw dicts" interim clause true — the framework
-adds the envelope, not the fetcher. See docs/envelope_design.md.
+adds the envelope, not the fetcher. See docs/envelope_guide.md.
 """
 
 import json
 import logging
 from pathlib import Path
+from typing import Any, Dict, NoReturn
 
+from framework import inventory
 from framework.contract import Fetcher, InvocationResult
 
 logger = logging.getLogger("framework.envelope")
 
 ENVELOPE_SCHEMA_VERSION = "1.0"
 _ERROR_TAIL_CHARS = 4000
-_ENVELOPE_KEYS = {"schema_version", "metadata", "payload"}
+# Public: callers that report *why* something is not enveloped need the set,
+# not just the boolean.
+ENVELOPE_KEYS = {"schema_version", "metadata", "payload"}
+_ENVELOPE_KEYS = ENVELOPE_KEYS  # back-compat for in-module use
+
+
+def _invalid_json_constant(value: str) -> NoReturn:
+    raise ValueError(f"Invalid JSON constant: {value}")
 
 
 def is_enveloped(obj) -> bool:
@@ -26,7 +35,7 @@ def is_enveloped(obj) -> bool:
 
 
 def build_metadata(result: InvocationResult, fetcher: Fetcher, run_id: str) -> dict:
-    meta = {
+    meta: Dict[str, Any] = {
         "fetcher_name": result.fetcher_name,
         "fetcher_version": result.fetcher_version,
         "category": fetcher.category,
@@ -42,7 +51,7 @@ def build_metadata(result: InvocationResult, fetcher: Fetcher, run_id: str) -> d
         # heuristic — it assumes the last thing logged is why the run failed, which
         # is false for any fetcher whose final log line is an INFO message — so it
         # is the second choice, not the first. The payload is never consulted: it
-        # is fetcher-shaped and unredacted. See docs/fetcher_contract.md.
+        # is fetcher-shaped and unredacted. See docs/fetcher_contract_guide.md, step 4.
         error = result.error or (result.stderr[-_ERROR_TAIL_CHARS:] if result.stderr else None)
         if error:
             meta["error"] = error
@@ -50,47 +59,80 @@ def build_metadata(result: InvocationResult, fetcher: Fetcher, run_id: str) -> d
             meta["error_code"] = result.error_code
     if fetcher.evidence_set:
         es = fetcher.evidence_set
-        es_meta = {"reference_id": es.reference_id, "name": es.name}
+        es_meta = {"reference_id": es.reference_id, "name": es.name, "frequency": es.frequency}
         if es.instructions is not None:
             es_meta["instructions"] = es.instructions
         if es.description is not None:
             es_meta["description"] = es.description
         meta["evidence_set"] = es_meta
+    if result.inputs is not None:
+        meta["inputs"] = result.inputs
+    # Only when the fetcher received a pattern: a run without patterns writes the envelope it always has.
+    if result.config_patterns:
+        meta["config_patterns"] = result.config_patterns
     return meta
 
 
 def wrap_outputs(
-    result: InvocationResult, fetcher: Fetcher, run_id: str, run_dir: Path
+    result: InvocationResult, fetcher: Fetcher, run_id: str, run_dir: Path,
+    skip: frozenset = frozenset(),
 ) -> None:
     """Wrap each JSON output file from one invocation in an envelope, in place.
 
     Non-JSON files and already-enveloped files are left untouched. A failure to
     wrap a single file is logged and skipped — it never aborts the run.
 
+    Names in `skip` are left raw: a later invocation of the run wrote over them,
+    so they hold that invocation's data, not this one's (see
+    `InvocationResult.overwritten`).
+
     An issue-report fetcher is skipped entirely. Its output is the source tool's
-    own file, which Paramify's assessment intake parses directly, so wrapping it
+    own file, which Paramify's file intake preset parses directly, so wrapping it
     would break the parse. The guard is on `kind` rather than the file extension
     because a JSON scan report is still a scan report — its identity lives in the
     sidecar index instead (see framework/issue_reports.py).
+
+    An inventory output is also checked against the inventory contract, and the
+    verdict goes in `metadata.inventory` (see framework/inventory.py). The
+    payload is left as the fetcher wrote it.
     """
     if fetcher.is_issue_report:
         return
 
     meta = build_metadata(result, fetcher, run_id)
     for name in result.outputs:
-        if not name.endswith(".json"):
+        if not name.endswith(".json") or name in skip:
             continue
         path = run_dir / name
         try:
-            raw = json.loads(path.read_text())
-        except (OSError, json.JSONDecodeError) as e:
+            raw = json.loads(path.read_text(), parse_constant=_invalid_json_constant)
+        except (OSError, ValueError) as e:
             logger.warning("envelope: skipping %s (cannot read as JSON: %s)", name, e)
             continue
         if is_enveloped(raw):
             continue
+        file_meta = meta
+        if fetcher.is_inventory:
+            file_meta = {**meta, "inventory": inventory.check(raw, result.exit_code)}
+            if file_meta["inventory"].get("problems"):
+                logger.warning(
+                    "envelope: %s breaks the inventory contract: %s",
+                    name, "; ".join(file_meta["inventory"]["problems"]),
+                )
         envelope = {
             "schema_version": ENVELOPE_SCHEMA_VERSION,
-            "metadata": meta,
+            "metadata": file_meta,
             "payload": raw,
         }
-        path.write_text(json.dumps(envelope, indent=2))
+        # default=str for the same reason api.py uses it on _run_metadata.json:
+        # metadata carries the manifest's target values verbatim, and YAML gives
+        # an unquoted `since: 2026-01-01` back as a datetime.date, which json
+        # cannot serialize. Without this the run aborts mid-manifest on a
+        # TypeError that run_cmd does not catch, leaving the collected file
+        # unenveloped and no _run_metadata.json at all.
+        try:
+            serialized = json.dumps(envelope, indent=2, default=str, allow_nan=False)
+        except ValueError as e:
+            logger.warning("envelope: skipping %s (cannot serialize as JSON: %s)", name, e)
+            continue
+        path.write_text(serialized)

@@ -1,13 +1,29 @@
 name: azure_databricks_workspace_configuration
-version: 0.1.0
-description: >
-  For each Azure Databricks workspace in the subscription, reports the network
-  isolation and encryption posture: whether the control plane allows public network
-  access, whether secure cluster connectivity (no public IP) is enabled, whether the
-  workspace is injected into a customer-managed VNet, whether managed-disk encryption
-  uses a customer-managed key from Key Vault (with the key name, version, vault URI
-  and rotation flag), and the workspace SKU — the tier gates the isolation features.
+version: 0.2.1
+description: >-
+  Shows whether each Databricks workspace blocks public access, runs clusters without public IPs in its own virtual network, and encrypts managed disks with a customer-managed key.
 category: azure
+
+config_schema:
+  resource_exclusions:
+    type: patterns
+    prefixes: [rg, location, id]
+    bare: false
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Resources outside the authorization boundary, to leave out of scope, as
+      case-insensitive glob patterns listed in the manifest, each with a
+      prefix: rg:<resource group> (read from the resource id), location:<region>
+      (the region's name without spaces, such as eastus2; a resource with no
+      location never matches one) or id:<resource id> (also matches that
+      resource's child resources). * matches any run of characters and ? one
+      character. A matching Databricks workspace is listed under excluded with the
+      pattern and left out of every count and verdict. A pattern
+      without one of these prefixes fails the run. Set it once under platforms.azure.config for every Azure
+      fetcher that has this field; fetchers without it ignore it. Each item is a
+      pattern, or a pattern with a reason. Empty: every
+      resource is in scope.
 
 supports_targets: true
 
@@ -48,8 +64,41 @@ ksis:
 evidence_set:
   reference_id: EVD-AZURE-DBRICKS-CONFIG
   name: Azure Databricks Workspace Configuration
-  instructions: >
-    Script: fetcher.py. Azure SDK calls: resource.providers.get("Microsoft.Databricks"),
-    then azure-mgmt-databricks AzureDatabricksManagementClient
-    workspaces.list_by_subscription(). Reader is sufficient — both are GETs, and no
-    Databricks workspace-API call is made.
+  instructions: |
+    Script: azure/databricks_workspace_configuration/fetcher.py
+
+    Access: Reader on the subscription.
+
+    Commands Executed:
+    - subscriptions.list() — picks a subscription when none is set
+    - providers.get("Microsoft.Databricks") — tells "not registered" from "no workspaces"
+    - workspaces.list_by_subscription() — every workspace with its SKU, network settings and managed-disk encryption; no Databricks workspace API call is made
+
+    Output: azure_databricks_workspace_configuration_<subscription>.json — each Databricks workspace with its SKU, public network access, secure cluster connectivity, virtual network and the key (name, version, vault URI, rotation flag) that encrypts its managed disks, plus the workspaces left out and why.
+
+    Summary fields:
+
+    Which workspaces are left out of scope?
+    - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every workspace is in scope
+    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no workspace, such as a mistyped name; null when the workspace list could not be read
+    - excluded_databricks_workspaces — Number of workspaces left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, and no other count includes them; null when the workspace list could not be read
+    - in_scope_databricks_workspaces — Number of workspaces read and in scope; null when the workspace list could not be read; 0 means there are none or the patterns took out every workspace, which a check can catch by requiring more than 0
+
+    Which workspaces were checked?
+    - total_workspaces — Number of in-scope Azure Databricks workspaces; every count and percentage below covers only these; reads 0, not null, when the workspace list could not be read, so read it together with in_scope_databricks_workspaces
+    - premium_sku_workspaces — Number of workspaces on the Premium SKU, the tier needed for private connectivity and customer-managed keys
+    - provider_registration_status — Whether Microsoft.Databricks is registered on the subscription: registered, not_registered or unknown
+
+    Is the workspace cut off from the public internet?
+    - public_network_access_disabled_workspaces — Number of workspaces with public network access Disabled, so the workspace UI and API are reached only through private endpoints
+    - publicly_accessible_workspaces — Number of workspaces whose public network access is Enabled or not returned
+    - no_public_ip_workspaces — Number of workspaces with secure cluster connectivity (no public IP) on, so cluster nodes get no public IP addresses; a setting Azure didn't return counts as off
+    - vnet_injected_workspaces — Number of workspaces deployed into a customer-managed virtual network (VNet injection) instead of one Azure manages
+    - network_isolated_workspaces — Number of workspaces with public network access Disabled and secure cluster connectivity on (VNet injection isn't required)
+    - network_isolated_percentage — Percentage of workspaces that are network isolated = network_isolated_workspaces / total_workspaces × 100 (a whole number, rounded down; reads 0 when total_workspaces is 0)
+
+    Are managed disks encrypted with a customer-managed key?
+    - customer_managed_key_workspaces — Number of workspaces whose cluster managed disks are encrypted with a customer-managed key (a Key Vault URI is set, or the key source is Microsoft.Keyvault); the disks are always encrypted, so what varies is whose key
+    - platform_managed_key_workspaces — Number of workspaces whose managed disks use the Microsoft-managed key
+    - cmk_percentage — Percentage of workspaces whose managed disks use a customer-managed key = customer_managed_key_workspaces / total_workspaces × 100 (a whole number, rounded down; reads 0 when total_workspaces is 0)
+    - key_rotation_enabled_workspaces — Number of workspaces set to move their managed disks to the newest key version automatically; a setting Azure didn't return counts as off

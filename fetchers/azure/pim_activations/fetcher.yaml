@@ -1,0 +1,107 @@
+name: azure_pim_activations
+version: 0.1.0
+description: >-
+  Shows who activated or was assigned an Azure role through PIM, with justification, ticket, approval and outcome, and which activations are in force now.
+category: azure
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_pim_activations.json
+  aggregation: per_target
+
+target_schema:
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id to collect from. Optional: omit to use the first
+      enabled subscription the ambient credential can see; set one target per
+      subscription to fan out.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: >
+      Deployment environment label (e.g. prod / preprod) written into the
+      evidence metadata. Optional: set per target for multi-subscription runs.
+
+# Ambient identity (DefaultAzureCredential); no per-fetcher secret.
+secrets: []
+
+ksis:
+  - KSI-IAM-JIT      # activations are the JIT model in use, with their justification and approval
+  - KSI-CMT-LMC      # who held an activated privileged role when changes were made, and under what request
+
+evidence_set:
+  reference_id: EVD-AZURE-PIM-ACTIVATIONS
+  name: Azure PIM Role Activations
+  instructions: |
+    Script: azure/pim_activations/fetcher.py
+
+    Access: Reader on the subscription; no Microsoft Graph permission is needed. A tenant with no PIM (no Entra ID P2 or ID Governance licence) reads pim_available false rather than failing.
+
+    Commands Executed:
+    - subscriptions.list() — picks a subscription when none is set
+    - GET Microsoft.Authorization/roleAssignmentScheduleRequests at the subscription scope, with no filter — every PIM request Azure still holds for the subscription and every scope below it (self-activations, admin assignments, extensions, renewals and removals), with the principal, role and scope names; management-group and tenant-root requests are not included; a 400 with the error code AadPremiumLicenseRequired or TenantNotOnboarded means no PIM, and any other failure leaves the request figures null and fails the run
+    - GET Microsoft.Authorization/roleAssignmentScheduleInstances at the subscription scope, with no filter — the assignments in force now, of which only those of type Activated are kept; the same two 400 codes mean no PIM, and any other failure leaves the figures for activations in force null and fails the run
+
+    Output: azure_pim_activations_<subscription>.json — each PIM request with who made it, the role, the scope, the duration asked for, its justification, ticket, approval and outcome, plus the activations in force now.
+
+    Summary fields:
+
+    What was checked?
+    - pim_available — True if PIM refused neither list for want of a licence and at least one list was read; false if the tenant has no PIM (no Entra ID P2 or ID Governance licence), and then the counts from a list PIM refused read 0 while those from a list that failed for another reason read null; null if both lists failed for another reason
+    - collected_at — Timestamp (UTC) of when the evidence was collected
+    - oldest_request_created_on — Time of the oldest request Azure still holds; null if there are none or the requests were not read
+    - newest_request_created_on — Time of the newest request; null if there are none or the requests were not read
+
+    What PIM requests were made?
+    - requests_total — Number of PIM requests Azure still holds, of any type; Azure keeps them for a limited window, shown by the oldest and newest dates; null if the requests were not read
+    - requests_by_type — Number of requests for each request type, as Azure reports it (SelfActivate, AdminAssign, AdminRemove, AdminExtend, SelfExtend, SelfRenew and so on; a request with none is unknown); null if the requests were not read
+    - requests_by_status — Number of requests for each status, as Azure reports it (a request with none is unknown); null if the requests were not read
+    - requests_by_outcome — Number of requests for each outcome that occurs (an outcome with no request is absent); null if the requests were not read:
+      - granted (the request was provisioned or approved)
+      - revoked (it was granted, then ended early by a deactivation or an admin removal)
+      - denied_or_failed (it was denied, canceled, timed out or failed)
+      - pending (it is waiting for approval or still being processed)
+      - unknown (any other status)
+
+    Who activated roles, and how?
+    - self_activations — Number of requests where a person activated a role they were eligible for (type SelfActivate); null if the requests were not read
+    - self_activations_granted — Number of self-activations that took effect, including those later ended early; null if the requests were not read
+    - self_activations_revoked_early — Number of self-activations that were granted and then ended early; null if the requests were not read
+    - self_activations_denied_or_failed — Number of self-activations that were denied, canceled, timed out or failed; null if the requests were not read
+    - self_activations_pending — Number of self-activations still waiting for approval or processing; null if the requests were not read
+    - principals_who_activated — Number of distinct users, groups or apps with at least one granted self-activation; null if the requests were not read
+    - self_activations_by_role — Number of self-activations for each role name, with a role whose name could not be read counted as unknown; null if the requests were not read
+    - self_activations_by_scope_level — Number of self-activations for each scope level (subscription, resource_group, resource, management_group, root or other_subscription); null if the requests were not read
+    - activation_duration_hours_max — Hours: the longest duration asked for in a self-activation that states one; null if none states one or the requests were not read
+    - activation_duration_hours_median — Hours: the median duration asked for in self-activations that state one (the upper of the two middle values when their count is even); null if none states one or the requests were not read
+
+    Were activations justified and approved?
+    - self_activations_without_justification — Number of self-activations with no justification text; null if the requests were not read
+    - self_activations_without_ticket — Number of self-activations with no ticket number; null if the requests were not read
+    - self_activations_without_approval — Number of self-activations that did not go through an approval; null if the requests were not read
+
+    Do over-broad roles stand out?
+    - self_activations_of_over_broad_roles — Number of self-activations of Owner, Contributor, User Access Administrator or Role Based Access Control Administrator, the four built-in roles treated as over-broad; null if the requests were not read
+    - over_broad_activations_without_justification — Number of self-activations of the four over-broad roles with no justification text; null if the requests were not read
+    - over_broad_activations_without_approval — Number of self-activations of the four over-broad roles that did not go through an approval; null if the requests were not read
+
+    Was standing access granted through PIM?
+    - admin_assign_requests — Number of requests where an administrator assigned a role directly (type AdminAssign) rather than a person activating one; null if the requests were not read
+    - admin_assign_requests_of_over_broad_roles — Number of direct assignments of the four over-broad roles; null if the requests were not read
+    - admin_assign_requests_without_expiration — Number of direct assignments with no end date and no duration, which grant permanent access; null if the requests were not read
+    - admin_remove_requests — Number of requests that removed an assignment (type AdminRemove); null if the requests were not read
+
+    What is active right now?
+    - currently_active_activations — Number of activations in force now (assignments of type Activated), whether or not a request for them is still held; null if the instances were not read
+    - currently_active_over_broad_activations — Number of activations in force now of the four over-broad roles; null if the instances were not read
+    - currently_active_activations_without_end — Number of activations in force now with no end date; null if the instances were not read

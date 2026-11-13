@@ -1,0 +1,112 @@
+name: azure_app_gateway_tls_listeners
+version: 0.2.1
+description: >-
+  Shows whether each Application Gateway listener accepts only encrypted traffic, which minimum TLS version it enforces, and whether the gateway runs in FIPS mode.
+category: azure
+
+config_schema:
+  resource_exclusions:
+    type: patterns
+    prefixes: [rg, location, id]
+    bare: false
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Resources outside the authorization boundary, to leave out of scope, as
+      case-insensitive glob patterns listed in the manifest, each with a
+      prefix: rg:<resource group> (read from the resource id), location:<region>
+      (the region's name without spaces, such as eastus2; a resource with no
+      location never matches one) or id:<resource id> (also matches that
+      resource's child resources). * matches any run of characters and ? one
+      character. A matching application gateway is listed under excluded with the
+      pattern and left out of every count and verdict; its listeners
+      leave with it. The gateway count check against Resource Graph
+      still covers every gateway.
+      A pattern
+      without one of these prefixes fails the run. Set it once under platforms.azure.config for every Azure
+      fetcher that has this field; fetchers without it ignore it. Each item is a
+      pattern, or a pattern with a reason. Empty: every
+      resource is in scope.
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_app_gateway_tls_listeners.json
+  aggregation: per_target
+
+target_schema:
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id to collect from. Optional — omit to use the first
+      enabled subscription the ambient credential can see ("collect where
+      deployed"); set one target per subscription to fan out.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: >
+      Deployment environment label (e.g. prod / preprod) written into the evidence
+      metadata. Optional — set per target for multi-subscription runs.
+
+secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
+
+ksis:
+  - KSI-SVC-SIN   # inbound traffic is encrypted: listener protocol and minimum TLS version
+  - KSI-CNA-MAT   # sc-8: no plaintext listener exposed on the gateway
+
+evidence_set:
+  reference_id: EVD-AZURE-APPGW-TLS-LISTENERS
+  name: Azure Application Gateway TLS Listeners
+  instructions: |
+    Script: azure/app_gateway_tls_listeners/fetcher.py
+
+    Access: Reader on the subscription.
+
+    Commands Executed:
+    - subscriptions.list() — picks a subscription when none is set
+    - providers.get("Microsoft.Network") — tells "networking not in use" from "no gateways"
+    - application_gateways.list_all() — every gateway with its listeners, routing rules, redirects, TLS policies and FIPS setting
+    - Resource Graph count of microsoft.network/applicationgateways — confirms the gateway list is complete; a mismatch is counted again after 30 seconds, and the run fails if it persists
+
+    Output: azure_app_gateway_tls_listeners_<subscription>.json — each listener (layer 7 HTTP/HTTPS and layer 4 TCP/TLS) with its protocol, public or private frontend, redirect behaviour, TLS policy source and minimum TLS version, plus the gateways left out and why.
+
+    Summary fields:
+
+    Which resources are left out of scope?
+    - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
+    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no application gateway, such as a mistyped name; null when the gateway list could not be read
+    - excluded_application_gateways — Number of application gateways left out of scope because a pattern matched; each is listed under excluded with the pattern, its listeners leave with it, and no other count includes it; null when the gateway list could not be read
+
+    Which gateways and listeners were checked?
+    - in_scope_application_gateways — Number of application gateways read and in scope; null when the gateway list could not be read
+    - in_scope_listeners — Number of listeners on in-scope gateways; null when the gateway list could not be read
+    - total_application_gateways — Number of in-scope application gateways assessed
+    - running_application_gateways — Number of in-scope application gateways whose operational state is Running; a stopped gateway is still assessed
+    - total_listeners — Number of listeners on in-scope gateways, layer 7 and layer 4
+    - l7_listeners — Number of layer 7 listeners (HTTP or HTTPS)
+    - l4_listeners — Number of layer 4 listeners (TCP or TLS)
+    - completeness_match — True if the gateway count matches Resource Graph's count, which still covers every gateway including excluded ones; false if not; null if either count could not be read
+    - provider_registration_status — Whether the networking provider (Microsoft.Network) is registered on the subscription: registered, not_registered or unknown
+
+    Do listeners accept only encrypted traffic?
+    - encrypted_listeners — Number of listeners that use HTTPS or TLS
+    - http_redirect_only_listeners — Number of HTTP listeners that only redirect to HTTPS: every routing rule on the listener redirects, and every redirect targets an HTTPS listener or an https:// URL
+    - plaintext_listeners — Number of listeners that are not secure: HTTP listeners that do not only redirect to HTTPS (including ones with no routing rule or whose rule type cannot be resolved) and every TCP listener, even when the client's TLS passes through, because the gateway does not terminate or inspect it
+    - public_plaintext_listeners — Number of plaintext_listeners on a frontend IP configuration that carries a public IP
+
+    Do encrypted listeners require TLS 1.2 or later?
+    - listeners_below_tls12 — Number of encrypted listeners whose effective minimum TLS version is TLS 1.0 or 1.1; the policy comes from the listener's SSL profile, else the gateway, else the platform default, and a predefined policy name maps through Microsoft's table (AppGwSslPolicy20150501 is TLS 1.0, AppGwSslPolicy20170401 is TLS 1.1, and AppGwSslPolicy20170401S, 20220101 and 20220101S are TLS 1.2), while a legacy policy with only disabled protocols gets the lowest version not disabled
+    - listeners_tls_version_unknown — Number of encrypted listeners whose effective minimum TLS version could not be determined, because no policy is set or reported or the policy name is not a known predefined one
+
+    Is FIPS mode on?
+    - gateways_fips_enabled — Number of in-scope application gateways with FIPS mode on
+    - gateways_fips_disabled — Number of in-scope application gateways with FIPS mode off
+    - gateways_fips_not_reported — Number of in-scope application gateways where the API returns no FIPS setting; not read as off

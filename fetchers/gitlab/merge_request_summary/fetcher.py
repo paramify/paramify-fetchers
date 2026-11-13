@@ -22,19 +22,14 @@ from urllib.parse import quote
 import requests
 from dotenv import load_dotenv
 
+# The shared failure-reporting helper lives in fetchers/_lib/ — the same import
+# mechanism as a category `_shared` module, one directory up.
+SCRIPT_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(SCRIPT_DIR.parents[1] / "_lib"))
+
+from fetcher_status import report_failure  # noqa: E402
+
 logger = logging.getLogger("gitlab_merge_request_summary")
-
-
-def report_failure(reason: str, code: str | None = None) -> None:
-    """Report why this run failed; the runner puts it in the envelope's metadata.error.
-
-    Without it the runner falls back to the tail of stderr — which on the way out
-    is the "Evidence saved" line. See docs/fetcher_contract.md § Output.
-    """
-    path = os.environ.get("FETCHER_STATUS_FILE")
-    if not path:
-        return
-    Path(path).write_text(json.dumps({"error": reason} | ({"code": code} if code else {})))
 
 
 def current_timestamp() -> str:
@@ -335,7 +330,6 @@ def main() -> int:
         api_token = get_env("GITLAB_API_TOKEN")
         project_id = get_env("GITLAB_PROJECT_ID")
     except RuntimeError as e:
-        logger.error("%s", e)
         report_failure(str(e), "bad_config")
         return 1
 
@@ -364,7 +358,6 @@ def main() -> int:
     # Last line on stderr wins: the runner reads its tail into the envelope's metadata.error.
     if result.get("status") != "success":
         reason = result.get("message", "unknown error")
-        logger.error("collection failed: %s", reason)
         report_failure(reason)
         return 1
     return 0

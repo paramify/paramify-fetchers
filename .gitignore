@@ -5,6 +5,8 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+# Written by pytest-textual-snapshot when a TUI snapshot does not match.
+snapshot_report.html
 
 # --- Virtualenv ---
 .venv/
@@ -16,6 +18,16 @@ venv/
 .env
 .env.*
 !.env.example
+
+# --- Customer-side sync state (validator key -> Paramify id); never commit ---
+.paramify/
+
+# --- Platform-onboarding working state (onboard-platform skill); never commit ---
+# One directory per platform: the claim, the cited research, the slate and its
+# approval, the approved-sandbox registry, and the teardown script. Local and
+# disposable — it exists so a delegated subagent and the next session can read
+# what this one found. Holds no secret values; credentials stay ${env:VAR}.
+.onboarding/
 
 # --- Generated collect output (runner writes evidence/run-<timestamp>/) ---
 /evidence/
@@ -60,6 +72,20 @@ fetchers/demo/access_review/
 fetchers/demo/audit_logging/
 fetchers/demo/encryption_at_rest/
 fetchers/demo/vuln_scan/
+
+# --- EKS demo deploy bundle (demo-only, NOT public) ---
+# Restored from 549b98a^ for the live customer demo. Commit 549b98a deliberately
+# removed deploy/k8s/ from the public tree ("we don't want to prescribe that level
+# of deployment"), and that call stands — this is presenter-local material only.
+# Recover it again with: git checkout 549b98a^ -- deploy/k8s/
+deploy/k8s/
+
+# --- ECS/Fargate demo deploy bundle (demo-only, NOT public) ---
+# Same call as deploy/k8s/ above: presenter-local material, not deployment advice
+# we want to prescribe in the public tree. Also holds secrets.json (real
+# credentials), which .dockerignore keeps out of the image but only this keeps
+# out of git.
+deploy/ecs/
 
 # --- Claude Code agent worktrees (tool-generated; each is its own git repo) ---
 .claude/worktrees/

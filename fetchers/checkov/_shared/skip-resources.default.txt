@@ -1,7 +1,7 @@
 # Default Skip Resources - Non-Production Resources (Terraform)
-# Failed checks for matching resources are filtered out post-scan, and the
-# summary is recalculated. Users add more via CHECKOV_SKIP_RESOURCES (config);
-# the two lists are merged.
+# Failed checks for matching resources are moved to skipped_checks post-scan
+# (they still count in total_checks), and the summary is recalculated. Users
+# add more via CHECKOV_SKIP_RESOURCES (config); the two lists are merged.
 # Format: one resource pattern per line. Wildcards (*) supported. # = comment.
 
 # Example entries (uncomment and customize as needed):

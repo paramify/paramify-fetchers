@@ -1,0 +1,117 @@
+name: azure_zone_redundancy
+version: 0.1.1
+description: >-
+  Shows whether each compute, network, storage, database and backup resource is spread across availability zones, which regions it runs in, and whether those regions support zones.
+category: azure
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_zone_redundancy.json
+  aggregation: per_target
+
+config_schema:
+  resource_exclusions:
+    type: patterns
+    prefixes: [rg, location, id]
+    bare: false
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Resources outside the authorization boundary, to leave out of scope, as
+      case-insensitive glob patterns listed in the manifest, each with a
+      prefix: rg:<resource group> (read from the resource id), location:<region>
+      (the region's name without spaces, such as eastus2) or id:<resource id>
+      (also matches that resource's child resources). * matches any run of
+      characters and ? one character. A matching resource is listed under excluded
+      with the pattern and left out of every count, the regions in use included. A
+      pattern without one of these prefixes fails the run. Set it once under
+      platforms.azure.config for every Azure fetcher that has this field; fetchers
+      without it ignore it. Can be ${env:VAR}. Empty: every resource is in scope.
+
+target_schema:
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id to collect from. Optional — omit to use the first
+      enabled subscription the ambient credential can see; set one target per
+      subscription to fan out.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: Deployment environment label (e.g. prod) written into the evidence metadata.
+
+secrets: []          # DefaultAzureCredential only — see _categories/azure.yaml
+
+ksis:
+  - KSI-CNA-OFA   # zone and region spread of each resource, against the regions' zone support
+
+evidence_set:
+  reference_id: EVD-AZURE-ZONE-REDUNDANCY
+  name: Azure Zone Redundancy
+  instructions: |
+    Script: azure/zone_redundancy/fetcher.py
+
+    Access: Reader on the subscription.
+
+    Commands Executed:
+    - subscriptions.list() — picks a subscription when none is set
+    - GET subscriptions/{subscription}/locations — every region of the cloud with its availability zones and paired regions
+    - Azure Resource Graph: Resources, filtered to the assessed types — each resource's region, zones, sku and the properties its zone configuration is read from, paged to the end
+
+    Output: azure_zone_redundancy_<subscription>.json — each assessed resource with its region, zones and zone configuration, and each region in use with whether it supports zones.
+
+    Summary fields:
+
+    Which resources were assessed?
+    - resources_assessed — Number of resources of the assessed types in the subscription
+    - resource_types_assessed — List of the resource types assessed: scale sets, application gateways, public IPs, NAT gateways, Azure Firewalls, Bastion hosts, Redis caches, virtual machines, managed disks, AKS clusters, load balancers, storage accounts, App Service plans, Backup vaults, Recovery Services vaults, Cosmos DB accounts, PostgreSQL and MySQL flexible servers, and SQL databases (the master database left out)
+    - resources_by_type — Number of resources for each type
+    - resource_list_read — True if Resource Graph returned the resource list; false if it failed, and then every count, list and verdict that comes from the resources is null, not 0, and the run fails
+
+    How is each resource spread across zones?
+    - resources_by_zone_configuration — Number of resources for each zone configuration:
+      - zone_redundant (placed in two or more zones, a zone-redundant storage or high-availability setting, or a Redis cache with automatic zonal allocation)
+      - zonal (pinned to one zone)
+      - regional (no zone placement; for a type whose zones array is read, an empty array)
+      - mixed (a cluster, load balancer or account whose node pools, frontends or replicas differ)
+      - unknown (a configuration the fetcher could not read)
+    - resources_by_type_and_zone_configuration — Number of resources for each type and zone configuration
+    - zone_redundant_resources — Number of resources that are zone redundant
+    - zonal_resources — Number of resources that are zonal
+    - regional_resources — Number of resources that are regional
+    - zonal_or_zone_redundant_resources — Number of resources placed in at least one zone
+    - mixed_resources — Number of resources that are mixed
+    - unknown_resources — Number of resources whose zone configuration is unknown
+    - geo_redundant_resources — Number of storage accounts, vaults and Cosmos DB accounts whose data is also kept in another region (GRS or GZRS storage, geo-redundant vault storage, two or more Cosmos DB locations)
+
+    Do the regions in use support zones, and is more than one region in use?
+    - region_support_read — True if the region list was read; false if it failed, so region zone support reads null
+    - regions_in_use — Number of regions holding at least one assessed resource
+    - regions — List of the regions in use
+    - multi_region — True if assessed resources run in two or more regions
+    - regions_with_zone_support_in_use — Number of regions in use that have availability zones
+    - regions_without_zone_support_in_use — Number of regions in use with no availability zones, where nothing can be zone redundant
+    - resources_in_regions_without_zone_support — Number of assessed resources in regions with no availability zones
+    - resources_in_unlisted_regions — Number of assessed resources whose region the region list does not name, so its zone support is unknown
+
+    Of the resources that could be zone redundant, how many are?
+    - zone_redundant_capable_resources — Number of assessed resources of a type that has a zone-redundant mode; a virtual machine or NAT gateway sits in at most one zone, a managed disk follows its VM, and a Basic SKU public IP or load balancer has no zones, so those are classified but not held to zone redundancy
+    - zone_capable_resources — Number of zone-redundant-capable resources in regions that have availability zones; null when the region list was not read
+    - zone_redundant_in_zone_capable_regions — Number of those resources that are zone redundant; null when the region list was not read
+    - zone_redundant_percentage — Percentage of zone-capable resources that are zone redundant: zone_redundant_in_zone_capable_regions * 100 / zone_capable_resources, 0 when there are none; null when the region list was not read
+    - all_zone_capable_resources_zone_redundant — True if every zone-capable resource is zone redundant; false if any is not; null if any is unknown, there are none, or the region list was not read
+
+    What was left out of scope?
+    - resource_exclusion_patterns — List of the resource_exclusions patterns as given
+    - resource_exclusion_patterns_unmatched — List of the patterns that matched nothing, such as a mistyped name; null if the resource list was not read
+    - excluded_resources — Number of resources a pattern took out of scope
+    - in_scope_resources — Number of resources assessed

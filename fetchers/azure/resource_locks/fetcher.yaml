@@ -1,0 +1,119 @@
+name: azure_resource_locks
+version: 0.1.1
+description: >-
+  Shows every management lock in the subscription and whether each log workspace, backup vault, key vault and storage account is locked against deletion.
+category: azure
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_resource_locks.json
+  aggregation: per_target
+
+target_schema:
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id. Optional - omit to use the first enabled subscription the
+      ambient credential can see.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: Deployment environment label (e.g. prod) written into the evidence metadata.
+
+config_schema:
+  protected_types:
+    type: string
+    required: false
+    env: AZURE_LOCK_PROTECTED_TYPES
+    description: >
+      Resource types that must be locked against deletion, as case-insensitive
+      provider/type names separated by commas or spaces, such as
+      microsoft.operationalinsights/workspaces. Default: Log Analytics workspaces,
+      Backup vaults, Recovery Services vaults, key vaults and storage accounts. An entry
+      that is not of the form provider/type (or provider/type/child, such as
+      microsoft.sql/servers/databases), or a list with no entry, fails the run; one that
+      matches no resource is reported in the log and in protected_resource_types_unmatched.
+  resource_exclusions:
+    type: patterns
+    prefixes: [rg, location, id]
+    bare: false
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Resources outside the authorization boundary, to leave out of scope,
+      as case-insensitive glob patterns listed in the manifest, each with
+      a prefix: rg:<resource group> (read from the resource id),
+      location:<region> (the region's name without spaces, such as
+      usgovvirginia; a resource with no location never matches one) or
+      id:<resource id> (also matches that resource's child resources). *
+      matches any run of characters and ? one character. A matching resource is listed under excluded with the pattern and left out of every count and judgement; locks are never excluded. A pattern that matches nothing is reported; a bare pattern fails the run.
+
+secrets: []          # DefaultAzureCredential only - see _categories/azure.yaml
+
+ksis:
+  - KSI-MLA-ALA   # log stores locked so that even a privileged deletion needs a deliberate second step
+  - KSI-RPL-ABO   # backup vaults locked against deletion
+  - KSI-CNA-DFP   # locks as a defined restriction on what any role may do to a resource
+
+evidence_set:
+  reference_id: EVD-AZURE-RESOURCE-LOCKS
+  name: Azure Resource Locks
+  instructions: |
+    Script: azure/resource_locks/fetcher.py
+
+    Access: Reader on the subscription.
+
+    Commands Executed:
+    - subscriptions.list() — picks a subscription when none is set
+    - GET Microsoft.Authorization/locks at subscription scope — every management lock in the subscription, at the subscription, a resource group, a resource or a child resource, with its level, notes and owners
+    - GET resources — every resource in the subscription with its type, so each one can be matched to the locks whose scope covers it
+    - GET resourceGroups — every resource group, to count how many are locked
+
+    Output: azure_resource_locks_<subscription>.json — every lock with its scope; each resource of a protected type with the locks in effect on it; the other resources that have a lock; the resource groups; and the resources left out of scope.
+
+    Summary fields:
+
+    What locks exist?
+    - locks_read — True if the lock list was read; false if it failed, and then every lock field and every resource's lock fields read null and the run fails
+    - locks — Number of management locks in the subscription at any scope; a lock acts on the management plane only, so data inside a locked resource, such as blobs in a storage account or rows in a workspace, is not covered; null if the lock list was not read
+    - locks_by_level — Number of locks for each level; null if the lock list was not read:
+      - cannotdelete (the scope and the resources beneath it in Azure Resource Manager can be read and changed, not deleted)
+      - readonly (the scope and the resources beneath it can only be read, so some operations such as listing storage keys also fail)
+      - unknown (the API reported no level)
+    - locks_by_scope_kind — Number of locks for each scope kind; a lock on a child resource counts as resource; null if the lock list was not read:
+      - subscription (placed on the subscription, covering everything in it)
+      - resource_group (placed on a resource group, covering every resource in it)
+      - resource (placed on one resource or one of its children)
+    - subscription_lock_levels — List of the levels of the locks placed on the subscription itself; null if the lock list was not read
+    - subscription_delete_locked — True if a lock on the subscription itself prevents deletion of everything in it; false if there is none; null if the lock list was not read
+    - resource_groups — Number of resource groups in the subscription; null if the resource group list was not read
+    - resource_groups_delete_locked — Number of resource groups with a lock placed on the group itself, which covers every resource in it; null if the lock list was not read
+
+    Are the protected resources locked against deletion?
+    - protected_resource_types — List of the resource types treated as protected (protected_types setting, or the default list)
+    - protected_resource_types_unmatched — List of the protected types with no resource in scope, such as a mistyped name; null if the resource list was not read
+    - resources_read — True if the resource list was read; false if it failed, and then every resource count below is null
+    - resources — Number of resources in scope of any type; null if the resource list was not read
+    - resources_delete_locked — Number of resources of any type with a cannotdelete or readonly lock in effect, placed on the resource, its resource group or the subscription; null if the lock or resource list was not read
+    - resources_read_only — Number of resources of any type under a readonly lock, which can break operations the resource needs; null if the lock or resource list was not read
+    - protected_resources — Number of resources whose type is protected; null if the resource list was not read
+    - protected_resources_delete_locked — Number of protected resources with a cannotdelete or readonly lock in effect on the resource, its resource group or the subscription; a lock on a child of the resource does not count, and the data inside the resource is not protected by any lock; null if the lock or resource list was not read
+    - protected_resources_unlocked — Number of protected resources with no such lock in effect; null if the lock or resource list was not read
+    - protected_resources_by_type — Number of resources and of delete-locked resources for each protected type; both null if the lock or resource list was not read
+    - protected_resource_lock_percentage — Percentage of protected resources locked against deletion: protected_resources_delete_locked * 100 / protected_resources, 0 when there are none; null if the lock or resource list was not read
+    - all_protected_resources_locked — True if every protected resource is locked against deletion; false if any is not; null if there is no protected resource or a list was not read
+
+    What was left out of scope?
+    - resource_exclusion_patterns — List of the resource_exclusions patterns as given
+    - resource_exclusion_patterns_unmatched — List of the patterns that matched nothing, such as a mistyped name; null if the resource list was not read
+    - excluded_resources — Number of resources a pattern took out of scope; null if the resource list was not read
+    - in_scope_resources — Number of resources assessed; null if the resource list was not read

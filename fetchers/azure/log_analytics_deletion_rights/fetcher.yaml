@@ -1,0 +1,102 @@
+name: azure_log_analytics_deletion_rights
+version: 0.2.1
+description: >-
+  Shows who can delete log data from each Log Analytics workspace, by purging it, deleting it or shortening its retention, and through which role.
+category: azure
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_log_analytics_deletion_rights.json
+  aggregation: per_target
+
+target_schema:
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id to collect from. Optional — omit to use the first
+      enabled subscription the ambient credential can see; set one target per
+      subscription to fan out.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: Deployment environment label (e.g. prod) written into the evidence metadata.
+  workspaces:
+    type: string
+    required: false
+    env: SENTINEL_WORKSPACES
+    description: >
+      Comma-separated workspace names or resource ids to limit collection to.
+      Optional — omit to collect every Log Analytics workspace in the subscription.
+
+config_schema:
+  resource_exclusions:
+    type: patterns
+    prefixes: [rg, location, id]
+    bare: false
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Resources outside the authorization boundary, to leave out of scope, as
+      case-insensitive glob patterns listed in the manifest, each with a
+      prefix: rg:<resource group> (read from the resource id), location:<region>
+      (the region's name without spaces, such as eastus2; a resource with no
+      location never matches one) or id:<resource id> (also matches that
+      resource's child resources). * matches any run of characters and ? one
+      character. A matching Log Analytics workspace is listed under excluded with the
+      pattern and left out of every count; its role assignments, eligible
+      assignments and role definitions are not read. An in-scope workspace keeps
+      every role assignment that applies at it, wherever it was made (resource
+      group, subscription, management group or root), and a SENTINEL_WORKSPACES
+      filter applies first, and a workspace it names that a
+      pattern takes out fails the run as bad_config. A pattern
+      without one of these prefixes fails the run. Set it once under platforms.azure.config for every Azure
+      fetcher that has this field; fetchers without it ignore it. Each item is a
+      pattern, or a pattern with a reason. Empty: every resource is in scope.
+
+secrets: []          # DefaultAzureCredential only — see _categories/azure.yaml
+
+ksis:
+  - KSI-MLA-OSM      # Operating SIEM capability — tamper-resistant logging: who can delete it
+
+evidence_set:
+  reference_id: EVD-AZURE-LOG-ANALYTICS-DELETION-RIGHTS
+  name: Azure Log Analytics Deletion Rights
+  instructions: |
+    Script: azure/log_analytics_deletion_rights/fetcher.py
+
+    Access: Reader on the subscription. Optional: permission to read directory objects in Microsoft Graph, to show principal names; without it names read as null. Optional: Entra ID P2, which PIM-eligible assignments need; without it they aren't read and a note says so.
+
+    Commands Executed:
+    - GET /subscriptions — picks a subscription when none is set
+    - GET Microsoft.OperationalInsights/workspaces — every workspace
+    - GET Microsoft.SecurityInsights/onboardingStates (per workspace) — whether Sentinel is on
+    - GET Microsoft.Authorization/roleAssignments at the workspace's scope (per workspace) — active assignments made there or inherited from above
+    - GET Microsoft.Authorization/roleEligibilityScheduleInstances at the workspace's scope (per workspace) — PIM-eligible assignments
+    - GET each role definition (per role) — whether the role grants a deletion action
+    - Microsoft Graph POST /directoryObjects/getByIds — principal names
+
+    Output: azure_log_analytics_deletion_rights_<subscription>.json — for each workspace, every principal that can delete its data, with the role, scope and whether the right is explicit or from a wildcard, plus the workspaces left out and why.
+
+    Summary fields:
+
+    How many workspaces were read?
+    - workspaces_collected — Number of in-scope workspaces read, Sentinel or not
+
+    Who can delete log data?
+    - max_principals_with_deletion_rights — Number of distinct principals (users, groups or apps) with a deletion right on the workspace where that number is highest, counting only workspaces whose role assignments were read; null if none was read. A deletion right is purge, Delete Data, deleting the workspace, or changing the workspace's or a table's retention (shortening it deletes everything older), through an active or PIM-eligible assignment net of the role's notActions. Group members are not expanded
+    - workspaces_with_explicit_grants — Number of workspaces where at least one principal holds a deletion right through a role that names the action exactly (such as Data Purger) rather than through a wildcard (such as Log Analytics Contributor's Microsoft.OperationalInsights/*)
+
+    Which workspaces are left out of scope?
+    - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every workspace is in scope
+    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no workspace, such as a mistyped name; null when the workspace list could not be read
+    - excluded_workspaces — Number of workspaces left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, and no other count includes it; null when the workspace list could not be read
+    - in_scope_workspaces — Number of workspaces found and in scope; 0 means none was found or the patterns took out every workspace, which a check can catch by requiring more than 0; null when the workspace list could not be read

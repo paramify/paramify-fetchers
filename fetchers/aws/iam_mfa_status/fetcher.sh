@@ -1,6 +1,7 @@
 #!/bin/bash
 # Reports MFA enforcement for the root account and every IAM user, including
-# whether each MFA device is hardware or virtual, for MFA evidence.
+# whether each MFA device is a FIDO security key, hardware TOTP or virtual, for
+# MFA evidence.
 # Output: $EVIDENCE_DIR/aws_iam_mfa_status.json
 # Optional env (else the AWS CLI ambient identity/region): AWS_PROFILE, AWS_DEFAULT_REGION
 # Required tools: aws, jq
@@ -25,7 +26,7 @@ _TARGET_ID="$(aws_target_id)"
 OUTPUT_JSON="$OUTPUT_DIR/aws_iam_mfa_status_${_TARGET_ID}.json"
 _FETCHER_TMP_JSON="$(mktemp -t aws_iam_mfa_status.XXXXXX.json)"
 _FAILURE_LOG="$(mktemp -t aws_iam_mfa_status_fail.XXXXXX)"
-trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG"' EXIT
+trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG" "$_AWS_ERR_LOG"' EXIT
 
 log_info() { printf '%s INFO aws_iam_mfa_status %s\n' "$(date -u +'%Y-%m-%d %H:%M:%S')" "$*" >&2; }
 log_error() { printf '%s ERROR aws_iam_mfa_status %s\n' "$(date -u +'%Y-%m-%d %H:%M:%S')" "$*" >&2; }
@@ -86,10 +87,12 @@ if [ $ec -ne 0 ]; then
     log_error "Failed to list IAM users"
 else
     echo "$usernames" | jq -r '.[]' | while read -r username; do
-        # MFA devices for the user. SerialNumber shape decides the type: an ARN
-        # (arn:aws:iam::<acct>:mfa/<name>) is a VIRTUAL device; anything else
-        # (a bare hardware serial like GAHT12345678) is a HARDWARE device —
-        # mirrors Prowler's serial-number classification.
+        # MFA devices for the user. SerialNumber shape decides the type, as in
+        # Prowler's serial-number classification:
+        #   arn:<partition>:iam::<acct>:u2f/<name>  -> "fido" (FIDO/U2F security key)
+        #   arn:<partition>:iam::<acct>:mfa/<name>  -> "virtual" (authenticator app)
+        #   a bare serial such as GAHT12345678     -> "hardware" (hardware TOTP token)
+        # Any other ARN shape is "unknown" rather than guessed.
         mfa_devices=$(aws iam list-mfa-devices --user-name "$username" --query 'MFADevices[*].[SerialNumber,EnableDate]' --output json 2>/dev/null)
         if [ $? -ne 0 ]; then
             echo "aws iam list-mfa-devices ($username) failed" >> "$_FAILURE_LOG"
@@ -106,7 +109,14 @@ else
                     $devices[] | {
                         "SerialNumber": .[0],
                         "EnableDate": .[1],
-                        "Type": (if (.[0] | startswith("arn:")) then "virtual" else "hardware" end)
+                        "Type": (
+                            (.[0] // "") as $serial
+                            | if $serial == "" then "unknown"
+                              elif ($serial | startswith("arn:") | not) then "hardware"
+                              elif ($serial | test(":u2f/")) then "fido"
+                              elif ($serial | test(":mfa/")) then "virtual"
+                              else "unknown" end
+                        )
                     }
                 ]
             }')
@@ -115,11 +125,4 @@ else
     done
 fi
 
-failure_count=$(wc -l < "$_FAILURE_LOG" 2>/dev/null | tr -d ' ')
-failure_count=${failure_count:-0}
-if [ "$failure_count" -gt 0 ]; then
-    log_error "Encountered $failure_count AWS API failures during collection"
-    exit 1
-fi
-
-log_info "Evidence saved to $OUTPUT_JSON"
+aws_finish

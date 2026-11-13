@@ -1,0 +1,79 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 300" width="960" height="300" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <style>
+    .bg { fill: #ffffff; }
+    .lane { fill: #f6f8fa; stroke: #d0d7de; }
+    .box { fill: #ffffff; stroke: #d0d7de; }
+    .you { fill: #fff8e5; stroke: #d4a72c; }
+    .h { fill: #1f2328; font-size: 15px; font-weight: 700; }
+    .sub { fill: #59636e; font-size: 12px; }
+    .t { fill: #1f2328; font-size: 13px; font-weight: 600; }
+    .c { fill: #59636e; font-size: 11.5px; font-family: 'SF Mono', Menlo, Consolas, monospace; }
+    .arrow { stroke: #8c959f; stroke-width: 2; fill: none; }
+    .head { fill: #8c959f; }
+    .key { fill: #59636e; font-size: 12px; }
+    @media (prefers-color-scheme: dark) {
+      .bg { fill: #0d1117; }
+      .lane { fill: #161b22; stroke: #30363d; }
+      .box { fill: #0d1117; stroke: #30363d; }
+      .you { fill: #2b2111; stroke: #9e6a03; }
+      .h, .t { fill: #e6edf3; }
+      .sub, .c, .key { fill: #9198a1; }
+      .arrow { stroke: #6e7681; }
+      .head { fill: #6e7681; }
+    }
+  </style>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" class="head"/>
+    </marker>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="960" height="300" rx="12"/>
+
+  <!-- Lane 1 -->
+  <rect class="lane" x="16" y="16" width="290" height="236" rx="10"/>
+  <text class="h" x="32" y="44">1 · Where you are</text>
+  <rect class="box" x="32" y="64" width="258" height="76" rx="8"/>
+  <text class="t" x="46" y="90">Fetch the release tags</text>
+  <text class="c" x="46" y="112">git fetch --tags</text>
+  <text class="sub" x="46" y="130">v0.4.0-beta … v0.5.1-beta arrive</text>
+  <rect class="box" x="32" y="160" width="258" height="76" rx="8"/>
+  <text class="t" x="46" y="186">Name the one you're on</text>
+  <text class="c" x="46" y="208">git describe</text>
+  <text class="sub" x="46" y="226">v0.3.1-beta</text>
+  <path class="arrow" d="M161 140 V158" marker-end="url(#a)"/>
+
+  <!-- Lane 2 -->
+  <rect class="lane" x="335" y="16" width="290" height="236" rx="10"/>
+  <text class="h" x="351" y="44">2 · What changed</text>
+  <rect class="box" x="351" y="64" width="258" height="76" rx="8"/>
+  <text class="t" x="365" y="90">Read every release you cross</text>
+  <text class="c" x="365" y="112">CHANGELOG.md at the target</text>
+  <text class="sub" x="365" y="130">Breaking · Deprecated · Removed</text>
+  <rect class="you" x="351" y="160" width="258" height="76" rx="8"/>
+  <text class="t" x="365" y="186">Pick the target tag</text>
+  <text class="sub" x="365" y="208">here v0.5.1-beta, which crosses</text>
+  <text class="sub" x="365" y="226">0.4.0-beta's breaking change</text>
+  <path class="arrow" d="M480 140 V158" marker-end="url(#a)"/>
+
+  <!-- Lane 3 -->
+  <rect class="lane" x="654" y="16" width="290" height="236" rx="10"/>
+  <text class="h" x="670" y="44">3 · Move to it</text>
+  <rect class="box" x="670" y="64" width="258" height="76" rx="8"/>
+  <text class="t" x="684" y="90">Switch and reinstall</text>
+  <text class="c" x="684" y="112">git switch --detach &lt;tag&gt;</text>
+  <text class="sub" x="684" y="130">releases add dependencies</text>
+  <rect class="you" x="670" y="160" width="258" height="76" rx="8"/>
+  <text class="t" x="684" y="186">Validate each manifest</text>
+  <text class="c" x="684" y="208">paramify validate</text>
+  <text class="sub" x="684" y="226">set what it names, run again</text>
+  <path class="arrow" d="M799 140 V158" marker-end="url(#a)"/>
+
+  <!-- cross-lane arrows -->
+  <path class="arrow" d="M290 198 H312 V102 H349" marker-end="url(#a)"/>
+  <path class="arrow" d="M609 198 H631 V102 H668" marker-end="url(#a)"/>
+
+  <!-- key -->
+  <rect class="you" x="16" y="266" width="16" height="16" rx="3"/>
+  <text class="key" x="40" y="279">= a decision you make</text>
+</svg>

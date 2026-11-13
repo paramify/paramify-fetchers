@@ -1,0 +1,16 @@
+validator: oci_cloud_guard_target_present
+cases:
+  - name: oci_cloud_guard_target_present_passes
+    expect: PASS
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"cloud_guard_enabled": true, "configuration_assessment_percentage": 100, "total_targets": 3}}'
+
+  - name: oci_cloud_guard_target_present_fails
+    expect: FAIL
+    note: >
+      The point of the validator: its partners' zeros are only meaningful when
+      something was counted.
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"cloud_guard_enabled": true, "configuration_assessment_percentage": 100, "total_targets": 0}}'
+
+  - name: summary_key_renamed
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0}, "summary": {"cloud_guard_enabled": true, "configuration_assessment_percentage": 100, "total-targets": 3}}'

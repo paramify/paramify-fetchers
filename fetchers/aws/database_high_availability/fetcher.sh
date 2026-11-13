@@ -24,7 +24,7 @@ _TARGET_ID="$(aws_target_id "$REGION")"
 OUTPUT_JSON="$OUTPUT_DIR/aws_database_high_availability_${_TARGET_ID}.json"
 _FETCHER_TMP_JSON="$(mktemp -t aws_database_high_availability.XXXXXX.json)"
 _FAILURE_LOG="$(mktemp -t aws_database_high_availability_fail.XXXXXX)"
-trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG"' EXIT
+trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG" "$_AWS_ERR_LOG"' EXIT
 
 log_info() { printf '%s INFO aws_database_high_availability %s\n' "$(date -u +'%Y-%m-%d %H:%M:%S')" "$*" >&2; }
 log_error() { printf '%s ERROR aws_database_high_availability %s\n' "$(date -u +'%Y-%m-%d %H:%M:%S')" "$*" >&2; }
@@ -54,15 +54,11 @@ ec=$?
 if [ $ec -ne 0 ]; then
     echo "aws rds describe-db-instances failed (exit=$ec)" >> "$_FAILURE_LOG"
 else
-    echo "$rds_instances" | jq -c '.[]' | while read -r instance; do
-        instance_id=$(echo "$instance" | jq -r '.DBInstanceIdentifier')
-        log_info "Processing RDS instance: $instance_id"
-
-        # Add to JSON
-        jq --argjson instance "$instance" \
-           '.results += [{"Type": "RDS_Instance", "InstanceInfo": $instance}]' \
-           "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
-    done
+    # One pass over the whole list, fed on stdin (not --argjson: a large list
+    # overflows the argv limit). Appending per item rewrote the file N times.
+    printf '%s' "$rds_instances" | jq --slurpfile items /dev/stdin \
+       '.results += [$items[0][]? | {"Type": "RDS_Instance", "InstanceInfo": .}]' \
+       "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
 fi
 
 # Get Aurora clusters
@@ -71,15 +67,9 @@ ec=$?
 if [ $ec -ne 0 ]; then
     echo "aws rds describe-db-clusters failed (exit=$ec)" >> "$_FAILURE_LOG"
 else
-    echo "$aurora_clusters" | jq -c '.[]' | while read -r cluster; do
-        cluster_id=$(echo "$cluster" | jq -r '.DBClusterIdentifier')
-        log_info "Processing Aurora cluster: $cluster_id"
-
-        # Add to JSON
-        jq --argjson cluster "$cluster" \
-           '.results += [{"Type": "Aurora_Cluster", "ClusterInfo": $cluster}]' \
-           "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
-    done
+    printf '%s' "$aurora_clusters" | jq --slurpfile items /dev/stdin \
+       '.results += [$items[0][]? | {"Type": "Aurora_Cluster", "ClusterInfo": .}]' \
+       "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
 fi
 
 # Generate summary
@@ -97,11 +87,4 @@ if [ -f "$OUTPUT_JSON" ]; then
     log_info "Single-AZ Deployments: $single_az_count"
 fi
 
-failure_count=$(wc -l < "$_FAILURE_LOG" 2>/dev/null | tr -d ' ')
-failure_count=${failure_count:-0}
-if [ "$failure_count" -gt 0 ]; then
-    log_error "Encountered $failure_count AWS API failures during collection"
-    exit 1
-fi
-
-log_info "Evidence saved to $OUTPUT_JSON"
+aws_finish

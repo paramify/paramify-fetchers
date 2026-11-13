@@ -1,10 +1,11 @@
 name: gcp_cloud_sql_encryption_status
-version: 0.1.0
+version: 0.1.1
 description: >
   For each Cloud SQL instance in the project, reports whether disk encryption at
   rest uses a customer-managed key (CMEK) or the Google-managed key, the KMS key
   name/version where set, plus backup configuration (server-side backup
-  protection). Cloud SQL is always encrypted at rest by default, so the evidence
+  protection) and point-in-time recovery, read per engine (the binary log on
+  MySQL, the PITR toggle on PostgreSQL and SQL Server). Cloud SQL is always encrypted at rest by default, so the evidence
   that varies is CMEK vs Google-managed, not "encrypted: true/false".
 category: gcp
 
@@ -45,5 +46,5 @@ evidence_set:
   reference_id: EVD-GCP-CLOUDSQL-ENC
   name: Cloud SQL Encryption
   instructions: >
-    Script: fetcher.py. Google Cloud client library call: sqladmin
+    Script: gcp/cloud_sql_encryption_status/fetcher.py. Google Cloud client library call: sqladmin
     instances.list(). One evidence file per project.

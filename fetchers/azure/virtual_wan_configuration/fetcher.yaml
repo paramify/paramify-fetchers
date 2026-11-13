@@ -1,0 +1,134 @@
+name: azure_virtual_wan_configuration
+version: 0.2.1
+description: >-
+  Shows whether Virtual WAN hubs are secured by a firewall and whether each site-to-site VPN link uses encryption, IKEv2 and strong IPsec algorithms.
+category: azure
+
+config_schema:
+  resource_exclusions:
+    type: patterns
+    prefixes: [rg, location, id]
+    bare: false
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Resources outside the authorization boundary, to leave out of scope, as
+      case-insensitive glob patterns listed in the manifest, each with a
+      prefix: rg:<resource group> (read from the resource id), location:<region>
+      (the region's name without spaces, such as eastus2; a resource with no
+      location never matches one) or id:<resource id> (also matches that
+      resource's child resources). * matches any run of characters and ? one
+      character. A matching virtual WAN, virtual hub, hub VPN gateway (its
+      connections leave with it), VPN site, point-to-site gateway or VPN
+      server configuration is listed under excluded with the pattern and
+      left out of every count and verdict. A hub also leaves with its
+      virtual WAN (reason virtual_wan_matched), a VPN site with its
+      virtual WAN, and a hub's VPN or point-to-site gateway with its hub
+      (reason virtual_hub_matched).
+      A pattern
+      without one of these prefixes fails the run. Set it once under platforms.azure.config for every Azure
+      fetcher that has this field; fetchers without it ignore it. Each item is a
+      pattern, or a pattern with a reason. Empty: every
+      resource is in scope.
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_virtual_wan_configuration.json
+  aggregation: per_target
+
+target_schema:
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id to collect from. Optional — omit to use the first
+      enabled subscription the ambient credential can see ("collect where
+      deployed"); set one target per subscription to fan out.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: >
+      Deployment environment label (e.g. prod / preprod) written into the evidence
+      metadata. Optional — set per target for multi-subscription runs.
+
+secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
+
+ksis:
+  - KSI-CNA-ULN   # hub-and-spoke logical networking and transit controls
+  - KSI-CNA-RNT   # secured hubs route traffic through a firewall
+  - KSI-SVC-SIN   # VPN encryption and IKE/IPsec settings on site links
+
+evidence_set:
+  reference_id: EVD-AZURE-VIRTUAL-WAN-CONFIG
+  name: Azure Virtual WAN, Hub and VPN Configuration
+  instructions: |
+    Script: azure/virtual_wan_configuration/fetcher.py
+
+    Access: Reader on the subscription.
+
+    Commands Executed:
+    - subscriptions.list() — picks a subscription when none is set
+    - providers.get("Microsoft.Network") — tells "not registered" from "no Virtual WANs"
+    - virtual_wans.list() — every Virtual WAN, its type, whether VPN encryption is turned off and whether branch and VNet transit is allowed
+    - virtual_hubs.list() — every hub with its address space, SKU, routing preference, Azure Firewall and security partner provider
+    - vpn_gateways.list() — every hub site-to-site VPN gateway with its connections and site-link connections, including IKE version, IPsec policy and status; shared keys are never recorded
+    - vpn_sites.list() — the branch sites the hubs connect to, with their device and address space; site keys are never recorded
+    - p2_svpn_gateways.list() — every hub point-to-site (client) VPN gateway
+    - vpn_server_configurations.list() — each server configuration's tunnel protocols and authentication types; RADIUS secrets are never recorded
+
+    Output: azure_virtual_wan_configuration_<subscription>.json — each Virtual WAN, hub, VPN gateway with its connections and site links, VPN site, point-to-site gateway and server configuration, plus the resources left out and why.
+
+    Summary fields:
+
+    Which resources are left out of scope?
+    - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
+    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no Virtual WAN, hub, VPN gateway, VPN site, point-to-site gateway or server configuration, such as a mistyped name; null when a resource list could not be read
+    - excluded_virtual_wans — Number of Virtual WANs left out of scope because a pattern matched; each is listed under excluded with the pattern, and the hubs and VPN sites under it leave with it, naming the WAN in matched_id; no other count includes them; null when the list could not be read
+    - excluded_virtual_hubs — Number of virtual hubs left out of scope because a pattern matched them or their Virtual WAN; each is listed under excluded, and its VPN gateways and point-to-site gateways leave with it; null when the hub list, or with patterns set the Virtual WAN list, could not be read
+    - excluded_vpn_gateways — Number of hub site-to-site VPN gateways left out of scope because a pattern matched them, their hub or that hub's Virtual WAN; null when the VPN gateway list, or with patterns set the hub or Virtual WAN list, could not be read
+    - excluded_vpn_sites — Number of VPN sites left out of scope because a pattern matched them or their Virtual WAN; null when the VPN site list, or with patterns set the Virtual WAN list, could not be read
+    - excluded_p2s_vpn_gateways — Number of point-to-site VPN gateways left out of scope because a pattern matched them, their hub or that hub's Virtual WAN; null when the point-to-site gateway list, or with patterns set the hub or Virtual WAN list, could not be read
+    - excluded_vpn_server_configurations — Number of VPN server configurations left out of scope because a pattern matched; null when the list could not be read
+    - in_scope_virtual_wans — Number of Virtual WANs read and in scope; null when the list could not be read
+    - in_scope_virtual_hubs — Number of virtual hubs read and in scope; null when the list, or with patterns set the list of their Virtual WANs, could not be read
+    - in_scope_vpn_gateways — Number of hub VPN gateways read and in scope; null when the list, or with patterns set the hub or Virtual WAN list, could not be read
+    - in_scope_vpn_sites — Number of VPN sites read and in scope; null when the list, or with patterns set the list of their Virtual WANs, could not be read
+    - in_scope_p2s_vpn_gateways — Number of point-to-site VPN gateways read and in scope; null when the list, or with patterns set the hub or Virtual WAN list, could not be read
+    - in_scope_vpn_server_configurations — Number of VPN server configurations read and in scope; null when the list could not be read
+
+    What was checked?
+    - total_virtual_wans — Number of in-scope Virtual WANs
+    - total_virtual_hubs — Number of in-scope virtual hubs
+    - total_vpn_gateways — Number of in-scope hub site-to-site VPN gateways
+    - total_vpn_connections — Number of connections from those gateways to branch sites
+    - total_vpn_link_connections — Number of site-link connections across all those connections, one tunnel per branch site link
+    - total_vpn_sites — Number of in-scope VPN sites, which are branch locations
+    - total_p2s_vpn_gateways — Number of in-scope hub point-to-site (client) VPN gateways
+    - total_vpn_server_configurations — Number of in-scope VPN server configurations for point-to-site clients
+    - provider_registration_status — Whether the networking provider (Microsoft.Network) is registered on the subscription: registered, not_registered or unknown
+
+    Is VPN traffic encrypted and are hubs secured?
+    - vpn_encryption_disabled_wans — Number of Virtual WANs with VPN encryption turned off; should be 0
+    - secured_hubs — Number of secured hubs, which are hubs with an Azure Firewall or a security partner provider
+    - secured_hub_percentage — Percentage of hubs that are secured = secured_hubs / total_virtual_hubs × 100 (rounded down to a whole number); 0 when total_virtual_hubs is 0
+
+    Do site links use IKEv2?
+    - ikev2_link_connections — Number of site-link connections whose protocol is IKEv2
+    - ikev1_link_connections — Number of site-link connections whose protocol is IKEv1
+    - ike_version_unknown_link_connections — Number of site-link connections where Azure returned no protocol, so the IKE version is unknown
+
+    Do site links avoid weak IPsec algorithms?
+    - explicit_ipsec_policy_link_connections — Number of site-link connections with a custom IPsec and IKE policy
+    - azure_default_ipsec_policy_link_connections — Number of site-link connections with no custom policy, so Virtual WAN's default policy applies
+    - weak_ipsec_policy_link_connections — Number of site-link connections with at least one weak algorithm (DES, 3DES, MD5, SHA1, DH group 1 or 2, PFS group 1 or 2, or None) in their custom policy; a link on the default policy always counts, because that default offers DH group 2, SHA1 and PFS None, listed per link with an (azure_default) suffix
+
+    Are the site links up?
+    - connected_link_connections — Number of site-link connections whose status is Connected; Azure leaves the status empty at the connection level, so it is read per site link

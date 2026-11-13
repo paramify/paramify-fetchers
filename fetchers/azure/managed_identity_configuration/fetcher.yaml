@@ -1,0 +1,147 @@
+name: azure_managed_identity_configuration
+version: 0.2.1
+description: >-
+  Lists every managed identity with what it is attached to, which outside systems can sign in as it, and what its Azure roles and Microsoft Graph permissions let it do.
+category: azure
+
+config_schema:
+  resource_exclusions:
+    type: patterns
+    prefixes: [rg, location, id]
+    bare: false
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Resources outside the authorization boundary, to leave out of scope,
+      as case-insensitive glob patterns listed in the manifest, each with
+      a prefix: rg:<resource group> (read from the resource id),
+      location:<region> (the region's name without spaces, such as
+      eastus2; a resource with no location never matches one) or
+      id:<resource id> (also matches that resource's child resources). *
+      matches any run of characters and ? one character. A matching user-
+      assigned identity is listed under excluded with the pattern and left
+      out of every count and verdict. A system-assigned identity follows
+      the resource it belongs to: a pattern matching that resource's id,
+      resource group or region takes the identity out. An in-scope
+      identity keeps every role assignment and attached resource, even at
+      an excluded scope or on an excluded resource; they are its own
+      access. An identity a pattern matches stays in scope while it holds an
+      Azure role at an in-scope scope (the subscription or wider, a group or
+      resource no pattern matches, or a user-assigned identity kept this way),
+      since whoever controls it reaches into the boundary through it; it
+      carries kept_by_identity_rule, the pattern it was kept despite. If the
+      role-assignment list couldn't be read, every identity a pattern
+      matches stays this way, since what it reaches is unknown.
+      Excluded identities get no federated-credential or
+      Microsoft Graph reads. A pattern without one of these prefixes fails the
+      run.
+      Set it once under platforms.azure.config for every Azure fetcher
+      that has this field; fetchers without it ignore it. Each item is a
+      pattern, or a pattern with a reason. Empty: every resource is in scope.
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_managed_identity_configuration.json
+  aggregation: per_target
+
+target_schema:
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id to collect from. Optional — omit to use the first
+      enabled subscription the ambient credential can see ("collect where
+      deployed"); set one target per subscription to fan out.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: >
+      Deployment environment label (e.g. prod / preprod) written into the evidence
+      metadata. Optional — set per target for multi-subscription runs.
+
+secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
+
+ksis:
+  - KSI-IAM-SNU   # non-user identities and the outside systems federated to sign in as them
+  - KSI-IAM-ELP   # what each identity's roles and Graph permissions let it do
+
+evidence_set:
+  reference_id: EVD-AZURE-MANAGED-IDENTITY-CONFIG
+  name: Azure Managed Identity Configuration
+  instructions: |
+    Script: azure/managed_identity_configuration/fetcher.py
+
+    Access: Reader on the subscription. Optional: permission to read service principals in Microsoft Graph (a signed-in member user has it by default; a service principal needs Application.Read.All); without it, graph_access reads not_authorized and every identity's Graph permissions read unknown.
+
+    Commands Executed:
+    - subscriptions.list() — picks a subscription when none is set
+    - providers.get() for Microsoft.ManagedIdentity — tells an unregistered provider apart from no identities
+    - user_assigned_identities.list_by_subscription() — user-assigned identities
+    - Resources | where isnotnull(identity) (Resource Graph) — every resource's identity block: its system-assigned identity and the user-assigned identities attached to it, paged to the end and checked against the reported total
+    - role_definitions.list() at the subscription scope — each role's name and the permissions it grants, from which its capabilities are worked out rather than read off its name
+    - role_assignments.list_for_subscription() — every role assignment visible from this subscription, matched to identities by principal id; assignments an identity holds in other subscriptions are not read
+    - GET {identity}/federatedIdentityCredentials (per user-assigned identity) — outside systems trusted to sign in as the identity, with any claims-matching expression; read on the newer API version and retried on the older one when ARM rejects it as invalid, unknown or unregistered
+    - GET /servicePrincipals/{id}/appRoleAssignments (Microsoft Graph, per identity) — Graph application permissions granted to the identity; a 401 or 403 reads graph_access not_authorized, a 404 reads as no permissions, and any other error leaves that identity's permissions unknown and fails the run
+    - GET /servicePrincipals/{id} (Microsoft Graph, per API the permissions belong to) — the permission names; no secret or token is read
+
+    Output: azure_managed_identity_configuration_<subscription>.json — each user-assigned identity with the resources it is attached to and its federated credentials, each resource's system-assigned identity, and every identity's role assignments and Graph permissions; identities the resource_exclusions patterns take out are listed under excluded instead. Lists that could not be read are null and set metadata.partial_failure.
+
+    Summary fields:
+
+    What managed identities exist?
+    - total_identities — Number of managed identities in scope, user-assigned and system-assigned
+    - total_user_assigned_identities — Number of user-assigned identities in scope (standalone identities that resources can share)
+    - total_system_assigned_identities — Number of system-assigned identities in scope (one tied to a single resource and deleted with it)
+    - system_assigned_identities_by_resource_type — Number of system-assigned identities for each Azure resource type that holds one, with one key per type present (for example microsoft.web/sites)
+    - provider_registration_status — Whether Microsoft.ManagedIdentity is registered on the subscription: registered, not_registered or unknown
+
+    Which resources are left out of scope?
+    - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
+    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no identity or resource holding one, such as a mistyped name, or null when the user-assigned identity list, the resource list or the role assignment list could not be read
+    - excluded_user_assigned_identities — Number of user-assigned identities a pattern took out, each listed under excluded with the pattern and counted nowhere else; null if the user-assigned identity list could not be read. An identity a pattern matches stays in scope while it holds an Azure role at an in-scope scope (the subscription or wider, a group or resource no pattern matches, or a user-assigned identity kept this way), or while the role assignment list could not be read; its record carries kept_by_identity_rule, the pattern it was kept despite
+    - excluded_system_assigned_identities — Number of system-assigned identities a pattern took out because it matched the resource the identity belongs to (its id, resource group or region), counted nowhere else and kept in scope by the same rule; null if the resource list could not be read
+    - in_scope_user_assigned_identities — Number of user-assigned identities in scope; null if the user-assigned identity list could not be read
+    - in_scope_system_assigned_identities — Number of system-assigned identities in scope; null if the resource list could not be read
+
+    Is every user-assigned identity attached to something?
+    - user_assigned_identities_no_resource_attached — Number of user-assigned identities that no resource in this subscription names, not counting any whose attachments could not be read; a resource in another subscription, a deployment script or a federated workload may still use one, and sign-in activity is not read
+    - unattached_identities_with_roles — Number of user-assigned identities that no resource in this subscription names, have no federated credential and hold at least one role assignment (standing access with no visible owner); an identity whose federated credential list could not be read is counted here too
+    - federated_only_identities_with_roles — Number of user-assigned identities that no resource in this subscription names, have a federated credential and hold at least one role assignment (an outside workload uses them, so they are never attached to a resource by design)
+
+    Which outside systems can sign in as an identity?
+    - user_assigned_identities_with_federated_credentials — Number of user-assigned identities with at least one federated credential (trust that lets an outside system sign in as the identity without a secret)
+    - total_federated_credentials — Number of federated credentials across all user-assigned identities in scope
+    - federated_credentials_by_issuer_kind — Number of federated credentials for each kind of outside system that issues the token, with only the kinds present listed:
+      - github_actions (GitHub Actions workflows)
+      - azure_devops (Azure DevOps pipelines)
+      - aks_workload_identity (pods in an AKS cluster)
+      - google (Google Cloud)
+      - aws (Amazon Web Services)
+      - other (any other issuer)
+    - federated_credentials_broad_subject — Number of federated credentials with a broad subject: any GitHub pull request can sign in, a claims-matching expression is set, or the subject contains a "*"
+    - federated_credentials_nonstandard_audience — Number of federated credentials with no audience, or an audience other than api://AzureADTokenExchange (or its government and China cloud variants)
+
+    What can each identity do in Azure?
+    - identities_with_broad_role — Number of identities holding a role named Owner, Contributor, User Access Administrator or Role Based Access Control Administrator anywhere visible from this subscription; an assignment's condition, which may narrow it, is recorded but not applied
+    - identities_with_subscription_or_higher_role — Number of identities with a role assigned at subscription, management group or root scope
+    - identities_full_control — Number of identities holding a role with "*" among its actions, counted whatever its notActions subtract, so Contributor counts too
+    - identities_can_grant_access — Number of identities holding a role that allows Microsoft.Authorization/roleAssignments/write after its notActions, so the identity can grant access to others
+    - identities_can_read_keys — Number of identities holding a role that allows an operation returning a data-plane credential (storage, AI services, AI Search, Cosmos DB, Redis, Event Hubs and Service Bus keys, Foundry connection secrets, App Service settings or API Management subscription keys)
+    - identities_full_data_access — Number of identities holding a role with a data action of "*" or ending in "/*", giving full access to a service's data
+    - identities_without_role_assignments — Number of identities with no role assignment visible from this subscription
+    - identities_role_assignments_unknown — Number of identities whose role assignments are unknown because the role assignment list could not be read
+    - role_assignments_unresolved_role — Number of role assignments to managed identities whose role definition isn't visible at the subscription scope, so what the role allows is unknown and the capability counts above leave it out
+
+    What can each identity do in Microsoft Graph?
+    - graph_access — Whether Microsoft Graph could be read: read; not_authorized (the credential can't read service principals, so every identity's Graph permissions are unknown); failed (the Graph client couldn't connect, or the Azure clients couldn't be created, with the same effect); or not_read (there were no identities to look up)
+    - identities_with_graph_roles — Number of identities with at least one app role assignment, on Microsoft Graph or any other API, a default-access assignment included
+    - identities_with_privileged_graph_roles — Number of identities granted a privileged Microsoft Graph application permission, the same judgement azure_entra_service_principals applies, made only for Graph's own permissions and ignoring case: any with ReadWrite or FullControl in the name, Mail.Send, tenant-wide reads of mail, files, sites, chats, calendars, contacts and notes (such as Mail.Read or Files.Read.All), and any that lets the holder grant itself more access, take over users' sign-in or change the tenant's security controls (such as User.ManageIdentities.All); other APIs' permissions are not judged and default access is not privileged
+    - identities_graph_roles_unknown — Number of identities whose Graph application permissions could not be read, or that hold one whose name or API could not be resolved

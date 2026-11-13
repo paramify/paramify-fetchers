@@ -36,4 +36,4 @@ ksis:
 evidence_set:
   reference_id: EVD-CONFIG-MONITORING
   name: AWS Config Monitoring
-  instructions: 'Script: aws_config_monitoring.sh. Commands executed: aws configservice describe-configuration-recorders, aws configservice describe-configuration-recorder-status, aws configservice describe-delivery-channels'
+  instructions: 'Script: aws/config_monitoring/fetcher.sh. Commands executed: aws configservice describe-configuration-recorders, aws configservice describe-configuration-recorder-status, aws configservice describe-delivery-channels'

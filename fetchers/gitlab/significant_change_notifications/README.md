@@ -31,7 +31,7 @@ from "the template was never installed."
 ## Fanout-capable
 
 Single-target per invocation; the runner fans out across projects via
-`supports_targets: true`. See [`docs/run_manifest_reference.md`](../../../docs/run_manifest_reference.md).
+`supports_targets: true`. See [`docs/run_manifest_guide.md`](../../../docs/run_manifest_guide.md#3-fan-out-with-targets).
 
 ## Required env vars
 
@@ -263,7 +263,7 @@ collection is still readable.
 
 ## Vendored schema
 
-[`schemas/fedramp_scn_2026-06-24.json`](schemas/fedramp_scn_2026-06-24.json) is
+[`fetchers/_lib/schemas/fedramp_scn_2026-06-24.json`](../../_lib/schemas/fedramp_scn_2026-06-24.json) is
 FedRAMP's schema with one edit: the remote `$ref` for
 `certificationPackageOverviewUri` (into
 `fedramp-common-definitions-schema-2026-06-24.json`) is inlined verbatim, so

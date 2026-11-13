@@ -1,0 +1,52 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "aws_security_groups",
+  "fetcher_version": "0.2.0",
+  "source": "live",
+  "captured_on": "2026-09-28",
+  "reviewed": false,
+  "collections": [
+    {
+      "path": "results[]",
+      "records": 9,
+      "fields": {
+        "GroupId": 9,
+        "Rules": 4
+      }
+    },
+    {
+      "path": "results[].Rules[]",
+      "records": 4,
+      "fields": {
+        "Direction": 4,
+        "Protocol": 4,
+        "FromPort": 4,
+        "ToPort": 4,
+        "CIDRs": 4
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "profile": "example-profile",
+      "region": "us-east-2",
+      "datetime": "2026-09-28T17:13:23Z",
+      "account_id": "111111111111",
+      "arn": "arn:aws:iam::111111111111:user/user1@example.com"
+    },
+    "results": [
+      {
+        "GroupId": "sg-0d872cf6541e08d43",
+        "Rules": [
+          {
+            "Direction": "INBOUND RULES",
+            "Protocol": "tcp",
+            "FromPort": 443,
+            "ToPort": 443,
+            "CIDRs": "0.0.0.0/0"
+          }
+        ]
+      }
+    ]
+  }
+}

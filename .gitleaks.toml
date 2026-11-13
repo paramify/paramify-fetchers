@@ -85,3 +85,111 @@ condition = "AND"
 paths = ['''tests/test_gcp_platform_fetchers\.py$''']
 regexes = ['''(?m)^\s*"(?:key_algorithm|keyAlgorithm)": "KEY_ALG_RSA_2048",\s*$''']
 regexTarget = "line"
+
+# --- False positive: Entra password-protection directory-setting template ---- #
+# `5cf42378-d67d-4f36-ba46-e8b86229381d` is Microsoft's PUBLISHED template id for
+# the "Password Rule Settings" directory setting (Entra password protection). Like
+# the Service Management API id above, it is a fixed, documented constant, the
+# same in every tenant; the entra_authentication_policy fetcher needs the literal
+# to find that setting among a tenant's directory settings.
+#
+# generic-api-key fires because the constant's name ends in `_ID` and a UUID
+# clears the rule's entropy threshold (3.81) — name-plus-entropy, not a leak.
+#
+# Scoped to that one fetcher path and the exact known-public GUID, so assigning
+# any OTHER value to this constant is still reported. `(?m)` is required for the
+# reason documented on the Service Management API entry.
+[[allowlists]]
+description = "Microsoft-published Entra password rule settings template id is a public constant"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''fetchers/azure/entra_authentication_policy/fetcher\.py$''']
+regexes = ['''(?m)^PASSWORD_RULE_TEMPLATE_ID = "5cf42378-d67d-4f36-ba46-e8b86229381d"\s*$''']
+regexTarget = "line"
+
+# --- False positive: base64 placeholder keys in Azure DevOps audit-stream tests #
+# tests/test_azure_devops_audit_streams.py defines two fixture "keys" that the
+# fetcher must never write into evidence; the tests assert they are absent from
+# the output. They are base64 of plain-English placeholders, not credentials:
+#   GRID_KEY = base64("secret-key-do-not-write")
+#   LAW_KEY  = base64("law-shared-key-do-not-write")
+#
+# generic-api-key fires because the names end in `_KEY` and base64 clears the
+# rule's entropy threshold — name-plus-entropy, not a leak.
+#
+# Scoped to that one test path and the two exact literals, so any other value
+# assigned to these names, or a real key elsewhere in the file, is still
+# reported. `(?m)` is required for the reason documented on the Service
+# Management API entry.
+[[allowlists]]
+description = "Base64 placeholder keys in the Azure DevOps audit-stream tests are not credentials"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''tests/test_azure_devops_audit_streams\.py$''']
+regexes = [
+    '''(?m)^GRID_KEY = "c2VjcmV0LWtleS1kby1ub3Qtd3JpdGU="\s*$''',
+    '''(?m)^LAW_KEY = "bGF3LXNoYXJlZC1rZXktZG8tbm90LXdyaXRl"\s*$''',
+]
+regexTarget = "line"
+
+# --- False positive: canary secret in the Cornerstone fetcher tests ---------- #
+# tests/test_cornerstone_fetchers.py (branch feat/cornerstone-training-fetchers,
+# commit 5bcb762) defines a deliberate canary:
+#   SECRET = "csod-s3cr3t-that-must-never-appear-91ab"
+# It is a made-up client secret the tests feed to the fetcher and then assert is
+# ABSENT from the evidence it writes. It never authenticated to anything; its
+# whole job is to be recognisable if it leaks into output.
+#
+# generic-api-key fires because the name is `SECRET` and the value clears the
+# rule's entropy threshold — name-plus-entropy, not a leak. CI's `gitleaks git`
+# walks every ref the checkout fetches, so this branch's commit turns the scan
+# red on unrelated PRs; this entry unblocks that all-refs scan.
+#
+# Scoped to that one test path and the exact literal, so any other value
+# assigned to SECRET, or a real credential elsewhere in the file, is still
+# reported. `(?m)` is required for the reason documented on the Service
+# Management API entry.
+[[allowlists]]
+description = "Canary client secret in the Cornerstone tests is asserted absent from evidence, not a credential"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''tests/test_cornerstone_fetchers\.py$''']
+regexes = ['''(?m)^SECRET = "csod-s3cr3t-that-must-never-appear-91ab"\s*$''']
+regexTarget = "line"
+
+# --- False positive: GCP key-algorithm enum in evidence samples -------------- #
+# The same `KEY_ALG_RSA_2048` enum name as the entry above, this time in the
+# committed evidence sample for gcp_iam_service_accounts (docs/evidence_samples.md):
+# the sample shows one service-account key's metadata, and `key_algorithm` is
+# one of its fields. Samples are sanitized output — they carry no key material,
+# and long hex ids in them are replaced with counters.
+#
+# Scoped to sample.json files and the exact enum literal, so any other value
+# under that field is still reported. `(?m)` is required for the reason
+# documented on the Service Management API entry.
+[[allowlists]]
+description = "GCP KEY_ALG_RSA_2048 is an algorithm enum name in evidence samples"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''fetchers/[^/]+/[^/]+/sample\.json$''']
+regexes = ['''(?m)^\s*"key_algorithm": "KEY_ALG_RSA_2048",\s*$''']
+regexTarget = "line"
+
+# --- False positive: the same public app id in the Conditional Access tests --- #
+# The Microsoft-published Service Management API app id from the entry above
+# also appears in the fetcher's test table (commit 1e74306a, branch fde-963),
+# as the app id paired with the "mfa_required_for_azure_management_api" case.
+# generic-api-key fires on the `_api` in the case name plus the UUID — same
+# name-plus-entropy shape, not a leak. The commit stays in history, and CI scans
+# every fetched branch, so this line must be allowlisted for every PR.
+#
+# Scoped to that test path and that exact tuple line, so any other GUID on it is
+# still reported. `(?m)` is required for the reason documented on the Service
+# Management API entry.
+[[allowlists]]
+description = "Microsoft-published Service Management API app id in the Conditional Access test table is a public constant"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''tests/test_azure_entra_conditional_access_policies\.py$''']
+regexes = ['''(?m)^\s*\("mfa_required_for_azure_management_api", "797f4846-ba00-4fd7-ba43-dac1f8f63013"\),\s*$''']
+regexTarget = "line"

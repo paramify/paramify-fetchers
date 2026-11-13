@@ -6,7 +6,7 @@ documented in framework/schemas/*.json and parsed by config_loader / manifest_lo
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Mapping, Optional, Tuple, TypeVar
 
 
 @dataclass
@@ -45,6 +45,30 @@ def effective_secrets(fetcher, platform_spec=None) -> List["Secret"]:
     return list(merged.values())
 
 
+T = TypeVar("T")
+
+
+def platform_category(fetcher: "Fetcher") -> Optional[str]:
+    """The category whose platform block this fetcher takes; None for a comparator, which takes none."""
+    return None if fetcher.is_comparator else fetcher.category
+
+
+def platform_for(fetcher: "Fetcher", platforms: Mapping[str, T]) -> Optional[T]:
+    """The fetcher's entry in `platforms` (a spec, a manifest block, or raw config), by platform_category."""
+    category = platform_category(fetcher)
+    return platforms.get(category) if category else None
+
+
+def config_hint(fetcher: "Fetcher", name: str) -> str:
+    """Where to set required config field `name` when nothing supplies it."""
+    if fetcher.is_comparator:
+        return (
+            f"set it on this entry: paramify manifest set-config {fetcher.name} {name}=<value>; "
+            f"a comparator ignores platforms.{fetcher.category}.config"
+        )
+    return f"set it under platforms.{fetcher.category}.config or the fetcher's config"
+
+
 @dataclass
 class TargetField:
     name: str
@@ -53,6 +77,15 @@ class TargetField:
     env: Optional[str] = None
     default: Any = None
     description: Optional[str] = None
+
+
+# How often a set expects a new artifact — the `frequency` enum on Paramify's
+# /evidence endpoints (API 0.10.0). Every fetcher defaults to THREE_DAY.
+EVIDENCE_FREQUENCIES = (
+    "NOT_SET", "DAILY", "THREE_DAY", "WEEKLY", "BIWEEKLY",
+    "MONTHLY", "QUARTERLY", "BIANNUAL", "ANNUAL",
+)
+DEFAULT_EVIDENCE_FREQUENCY = "THREE_DAY"
 
 
 @dataclass
@@ -67,6 +100,7 @@ class EvidenceSet:
     name: str
     instructions: Optional[str] = None
     description: Optional[str] = None
+    frequency: str = DEFAULT_EVIDENCE_FREQUENCY
 
 
 @dataclass
@@ -85,6 +119,32 @@ class IssueReport:
 
 
 @dataclass
+class Validator:
+    """A validator from the central validators/ registry (validators/<cat>/<key>.yaml).
+
+    A first-class, deduplicated object: defined once, it names every evidence set
+    it applies to via `evidence_sets` (reference_ids). `key` is the stable
+    repo-side identity; the Paramify id is resolved per instance at sync time and
+    never stored here. See framework/schemas/validator_schema.json and
+    docs/validators_guide.md.
+    """
+    key: str
+    name: str
+    type: str
+    statement: str
+    evidence_sets: List[str]
+    regex: Optional[str] = None
+    rules_summary: Optional[str] = None
+    role: Optional[str] = None
+    validation_rules: List[Any] = field(default_factory=list)
+    attestation_rules: List[Any] = field(default_factory=list)
+    path: Optional[Path] = None
+    #: The registry directory the validator sits in (`validators/<category>/`),
+    #: which is the service axis the uploaders tag it by.
+    category: Optional[str] = None
+
+
+@dataclass
 class ConfigField:
     """A non-secret config knob a fetcher (or platform) accepts.
 
@@ -99,6 +159,11 @@ class ConfigField:
     env: Optional[str] = None
     default: Any = None
     description: Optional[str] = None
+    #: For type `patterns`: the prefixes a pattern may start with (rg for rg:...), and whether one may have none.
+    prefixes: Tuple[str, ...] = ()
+    bare: bool = True
+    #: For type `patterns`: whether `manifest exclude`/`unexclude` may change it. An allowlist sets False.
+    exclusion: bool = True
 
 
 @dataclass
@@ -122,10 +187,18 @@ class Fetcher:
     ksis: List[str] = field(default_factory=list)
     kind: str = "evidence"
     issue_report: Optional["IssueReport"] = None
+    #: The fetchers whose evidence from the same run this one reads. Non-empty
+    #: makes it a comparator (comparators/<category>/<name>/).
+    depends_on: List[str] = field(default_factory=list)
 
     @property
     def entry_path(self) -> Path:
         return self.path / self.runtime_entry
+
+    @property
+    def is_comparator(self) -> bool:
+        """True when this fetcher's source is other fetchers' evidence from the same run."""
+        return bool(self.depends_on)
 
     @property
     def is_issue_report(self) -> bool:
@@ -137,6 +210,27 @@ class Fetcher:
         can read that block without a second guard.
         """
         return self.kind == "issue_report"
+
+    @property
+    def is_inventory(self) -> bool:
+        """True when this fetcher's evidence is an asset inventory.
+
+        An inventory is evidence in every other respect (enveloped, sent to its
+        evidence set by the evidence uploader). The difference is the payload
+        contract, checked when the output is enveloped, and that the uploader
+        only sends one the run collected completely. See framework/inventory.py.
+        """
+        return self.kind == "inventory"
+
+    @property
+    def is_discovery(self) -> bool:
+        """True when this fetcher enumerates a platform rather than collecting evidence.
+
+        Decides where the runner points EVIDENCE_DIR (<run>/discovery/), which is
+        also what keeps the output away from both uploaders: they read the run
+        dir's top level and issue-reports/, never discovery/.
+        """
+        return self.kind == "discovery"
 
 
 @dataclass
@@ -172,8 +266,20 @@ class PlatformSpec:
     config_schema: Dict[str, ConfigField] = field(default_factory=dict)
     secrets: List["Secret"] = field(default_factory=list)
     passthrough_env: List[str] = field(default_factory=list)
+    #: Env vars that constitute an explicit identity CHOICE when a target sets
+    #: one (AWS_PROFILE). Setting one supersedes `credential_env` for that
+    #: invocation — see executor._drop_superseded_credentials.
+    selector_env: List[str] = field(default_factory=list)
+    #: Static credential vars a selector displaces. Listed separately from
+    #: passthrough_env because they stay passable for ambient (target-less)
+    #: collection; they are only dropped when a target names an identity.
+    credential_env: List[str] = field(default_factory=list)
     requires: "Requires" = field(default_factory=lambda: Requires())
     description: Optional[str] = None
+    #: How the service is named to people (`AWS`, `Okta`): the custom tag the
+    #: uploaders put on every resource of this category. Declared, not derived —
+    #: no rule turns `aws` into `AWS`. None means the category gets no service tag.
+    display_name: Optional[str] = None
 
 
 @dataclass
@@ -196,6 +302,7 @@ class ManifestEntry:
     config: Dict[str, Any] = field(default_factory=dict)
     secrets: Dict[str, str] = field(default_factory=dict)
     targets: List[TargetInstance] = field(default_factory=list)
+    paramify: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -203,6 +310,7 @@ class Manifest:
     output_dir: Path
     entries: List[ManifestEntry]
     platforms: Dict[str, PlatformConfig] = field(default_factory=dict)
+    paramify: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -221,6 +329,17 @@ class InvocationResult:
     # What the fetcher reported via $FETCHER_STATUS_FILE, already secret-redacted
     # by the executor (the only place the injected values are still in scope).
     # None when the fetcher wrote nothing readable, which is not an error — the
-    # envelope then falls back to the stderr tail. See docs/fetcher_contract.md.
+    # envelope then falls back to the stderr tail. See docs/fetcher_contract_guide.md, step 4.
     error: Optional[str] = None
     error_code: Optional[str] = None
+    # A comparator's inputs, as the runner records them in `metadata.inputs`.
+    inputs: Optional[List[Dict[str, Any]]] = None
+    # The manifest entry this invocation belongs to (see manifest_loader.entry_keys);
+    # every target of a fan-out shares it.
+    entry_key: Optional[str] = None
+    # The pattern lists the fetcher received, per field, for `metadata.config_patterns`; None when it got none.
+    config_patterns: Optional[Dict[str, List[Dict[str, Any]]]] = None
+    # Files that existed before this invocation and that it wrote over, in the
+    # `outputs` path convention. They now hold this invocation's data, whatever
+    # an earlier invocation's record says, so they are never wrapped or uploaded.
+    overwritten: List[str] = field(default_factory=list)

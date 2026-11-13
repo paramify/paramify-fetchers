@@ -18,6 +18,10 @@ evidence/
 .env.*
 **/.env
 **/.env.*
+# Demo deploy bundles keep a local secrets.json of REAL credentials next to their
+# scripts (deploy/*/demo/secrets.json). The build context would otherwise copy it
+# straight into the image; `**/` is required because matching is path-anchored.
+**/secrets.json
 # Manifests ARE baked into the image: `manifests/` (the folder the TUI builds
 # into) is copied in at build time so the scheduler can run them by path. Build
 # and test your manifests before `docker compose build`; rebuild to pick up edits.

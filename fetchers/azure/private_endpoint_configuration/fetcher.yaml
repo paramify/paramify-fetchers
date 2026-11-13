@@ -1,0 +1,135 @@
+name: azure_private_endpoint_configuration
+version: 0.3.1
+description: >-
+  Shows each private endpoint's target service and approval status, whether the target's public network access is closed, and whether the endpoint subnet's network security group applies to endpoint traffic.
+category: azure
+
+config_schema:
+  resource_exclusions:
+    type: patterns
+    prefixes: [rg, location, id]
+    bare: false
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Resources outside the authorization boundary, to leave out of scope, as
+      case-insensitive glob patterns listed in the manifest, each with a
+      prefix: rg:<resource group> (read from the resource id), location:<region>
+      (the region's name without spaces, such as eastus2; a resource with no
+      location never matches one) or id:<resource id> (also matches that
+      resource's child resources). * matches any run of characters and ? one
+      character. A matching private endpoint is listed under excluded with the
+      pattern and left out of every count and verdict, and so is a target resource
+      only excluded endpoints connect to. An excluded endpoint gets none of the
+      per-endpoint reads (zone groups, Resource Graph lookups), so a failure
+      reading it cannot fail the run. The patterns are matched against the
+      endpoints only: an in-scope endpoint whose target resource a pattern would
+      match stays in scope with its verdicts, and that target still counts. A
+      pattern without one of these prefixes fails the run. Set it once under
+      platforms.azure.config for every Azure fetcher that has this field; fetchers
+      without it ignore it. Each item is a pattern, or a pattern with a reason. Empty:
+      every resource is in scope.
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_private_endpoint_configuration.json
+  aggregation: per_target
+
+target_schema:
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id to collect from. Optional — omit to use the first
+      enabled subscription the ambient credential can see ("collect where
+      deployed"); set one target per subscription to fan out.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: >
+      Deployment environment label (e.g. prod / preprod) written into the evidence
+      metadata. Optional — set per target for multi-subscription runs.
+
+secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
+
+ksis:
+  - KSI-CNA-RNT   # PaaS reached over private endpoints, with public network access disabled on the target
+  - KSI-CNA-ULN   # the subnets each endpoint is placed in, and whether their NSG filters endpoint traffic
+  - KSI-CNA-MAT   # target resources' public network access
+
+evidence_set:
+  reference_id: EVD-AZURE-PRIVATE-ENDPOINT-CONFIG
+  name: Azure Private Endpoint Configuration
+  instructions: |
+    Script: azure/private_endpoint_configuration/fetcher.py
+
+    Access: Reader on the subscription. Optional: Reader on the other subscriptions the endpoints connect to; without it, targets there read not_visible, and their public access state (target_public_network_access_state) reads not_visible too.
+
+    Commands Executed:
+    - subscriptions.list() — picks a subscription when none is set
+    - providers.get("Microsoft.Network") — tells "networking not in use" from "no endpoints"
+    - private_endpoints.list_by_subscription() — every private endpoint with its connections and subnet
+    - private_dns_zone_groups.list() (per endpoint) — the zone groups that publish the endpoint's DNS records; a failed read leaves the answer null, counted as not published
+    - Resource Graph query on the target resources and the endpoints' network interfaces, not scoped to a subscription — each target's existence and public network access, and each endpoint's private IPs
+    - Resource Graph query on the endpoints' virtual networks — each endpoint subnet's network policy, network security group and route table
+    - Resource Graph query on resource groups, not scoped to a subscription, with subscriptions.list() — the resource groups and subscriptions the credential can read, so a missing target or subnet reads not_found only where its resource group is readable, and not_visible otherwise
+
+    Output: azure_private_endpoint_configuration_<subscription>.json — each endpoint with its connections, approval, subnet, private IPs, zone groups and each target's public access, plus the endpoints left out and why.
+
+    Summary fields:
+
+    Which resources are left out of scope?
+    - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
+    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no private endpoint, such as a mistyped name; null when the endpoint list could not be read
+    - excluded_private_endpoints — Number of private endpoints left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, and no other count includes it or a target only it connects to; 0 when the endpoint list could not be read
+    - in_scope_private_endpoints — Number of private endpoints read and in scope; 0 means none was read or the patterns took out every endpoint
+
+    Which endpoints were checked?
+    - total_private_endpoints — Number of in-scope private endpoints
+    - connections_by_target_type — Number of connections for each target resource type, with the type in lower case because ARM keeps the creator's casing
+    - provider_registration_status — Whether the networking provider (Microsoft.Network) is registered on the subscription: registered, not_registered or unknown
+
+    Is every connection approved?
+    - approved_endpoints — Number of endpoints whose every connection, automatic or manual, is Approved
+    - not_approved_endpoints — Number of endpoints that are not approved: total_private_endpoints minus approved_endpoints
+    - approved_percentage — Percentage of endpoints that are approved = approved_endpoints / total_private_endpoints × 100 (rounded down to a whole number); 0 when total_private_endpoints is 0
+    - endpoints_by_connection_status — Number of endpoints for each connection status; Mixed counts an endpoint whose connections differ and None one with no connection, and both appear only when present:
+      - Approved (the target owner approved the connection)
+      - Pending (waiting for the target owner to approve)
+      - Rejected (the target owner refused it)
+      - Disconnected (the connection was removed, usually because the target was deleted)
+
+    Do the endpoints publish DNS records?
+    - endpoints_with_private_dns_zone_group — Number of endpoints with a private DNS zone group that publishes their records
+    - endpoints_without_private_dns_zone_group — Number of endpoints not known to have one: those with none, plus those whose zone group list could not be read
+    - endpoints_private_dns_zone_group_unknown — Number of endpoints whose zone group list could not be read
+
+    Are the targets closed to the public Internet?
+    - total_target_resources — Number of distinct target resources the in-scope endpoints connect to, counted even when the target sits in an excluded resource group or region; an App Service slot is checked as the slot, not its parent site
+    - target_resources_found — Number of targets that were read
+    - target_resources_not_found — Number of targets not found though the credential can read their resource group, so the endpoint points at a deleted resource
+    - target_resources_not_visible — Number of targets whose subscription or resource group the credential cannot read, a deleted resource group included
+    - target_resources_lookup_unknown — Number of targets whose lookup failed
+    - target_resources_public_access_disabled — Number of found targets whose public network access is Disabled or SecuredByPerimeter, which sits behind a Network Security Perimeter
+    - target_resources_public_access_not_disabled — Number of found targets whose public network access is not closed: found minus disabled
+    - target_resources_public_access_enabled — Number of found targets whose public network access is Enabled
+    - target_resources_public_access_unset — Number of found targets with no public network access value, kept apart from enabled because its meaning depends on the service
+    - target_resources_public_access_firewall_deny_default — Number of found targets whose public access is not closed but whose firewall default action is Deny, so they are reachable only from allow-listed networks
+    - target_public_access_disabled_percentage — Percentage of found targets with public access closed = target_resources_public_access_disabled / target_resources_found × 100 (rounded down to a whole number); 0 when target_resources_found is 0
+
+    Does the endpoint subnet's network security group apply?
+    - total_endpoint_subnets — Number of distinct subnets the in-scope endpoints sit in
+    - endpoints_subnet_lookup_not_read — Number of endpoints whose subnet could not be read
+    - endpoint_subnets_with_nsg — Number of read subnets with a network security group attached
+    - endpoint_subnets_nsg_applies — Number of read subnets where Azure applies the group to endpoint traffic: the network policy is Enabled or NetworkSecurityGroupEnabled
+    - endpoint_subnets_with_nsg_not_applied — Number of read subnets with a group attached that Azure does not apply to their endpoints
+    - endpoints_nsg_enforced — Number of endpoints in a subnet where the group applies and one is attached; it shows the group is in the path, not what its rules allow
+    - endpoints_subnet_policies_disabled — Number of endpoints in a read subnet whose network policy is Disabled

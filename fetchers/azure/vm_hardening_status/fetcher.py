@@ -15,6 +15,7 @@ when agents are. Extensions come from a per-VM virtual_machine_extensions.list()
 import logging
 import os
 import sys
+from collections import Counter
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -25,6 +26,7 @@ from azure_common import (  # noqa: E402
     NOT_REGISTERED,
     REGISTRATION_UNKNOWN,
     Collector,
+    arm_client_kwargs,
     basename,
     build_payload,
     classify_failure_code,
@@ -33,12 +35,14 @@ from azure_common import (  # noqa: E402
     failure_reason,
     model_attr,
     provider_registration_status,
+    report_failure,
     resolve_subscription,
     resource_group_from_id,
     sanitize_for_filename,
     write_evidence,
-    write_status,
 )
+from resource_exclusions import ResourceExclusions  # noqa: E402
+from scope_exclusions import excluded_item  # noqa: E402
 
 logger = logging.getLogger("azure_vm_hardening_status")
 
@@ -124,6 +128,33 @@ def project_storage_profile(profile) -> dict:
     }
 
 
+def project_patch_settings(os_profile) -> dict:
+    """Read the OS patch settings off an `OSProfile`: Windows `PatchSettings` or `LinuxPatchSettings`.
+
+    Both carry the same two fields. `patch_mode` is how patches are applied
+    (AutomaticByPlatform, AutomaticByOS, Manual, or ImageDefault for Linux) and
+    `assessment_mode` whether Azure assesses missing patches (AutomaticByPlatform or
+    ImageDefault). An OS without the settings reads as `os: None`, not as Manual.
+    """
+    windows = model_attr(os_profile, "windows_configuration")
+    linux = model_attr(os_profile, "linux_configuration")
+    if windows is not None and model_attr(windows, "patch_settings") is not None:
+        settings, os_name = model_attr(windows, "patch_settings"), "windows"
+    elif linux is not None and model_attr(linux, "patch_settings") is not None:
+        settings, os_name = model_attr(linux, "patch_settings"), "linux"
+    else:
+        return {"os": "windows" if windows is not None else ("linux" if linux is not None else None),
+                "patch_mode": None, "assessment_mode": None, "bypass_platform_safety_checks_on_user_schedule": None}
+    by_platform = model_attr(settings, "automatic_by_platform_settings")
+    return {
+        "os": os_name,
+        "patch_mode": model_attr(settings, "patch_mode"),
+        "assessment_mode": model_attr(settings, "assessment_mode"),
+        "bypass_platform_safety_checks_on_user_schedule": model_attr(
+            by_platform, "bypass_platform_safety_checks_on_user_schedule"),
+    }
+
+
 def project_virtual_machine(vm) -> dict:
     """Read a `VirtualMachine` model's attributes into a flat snake_case dict.
 
@@ -165,6 +196,7 @@ def project_virtual_machine(vm) -> dict:
             if linux_configuration is not None
             else None
         ),
+        "patch_settings": project_patch_settings(os_profile),
         # Extensions come from the per-VM enrichment call: ARM omits `resources` on the
         # list response (see the module docstring).
         "extensions": [],
@@ -235,6 +267,7 @@ def project_scale_set(scale_set) -> dict:
             if linux_configuration is not None
             else None
         ),
+        "patch_settings": project_patch_settings(model_attr(vm_profile, "os_profile")),
         "image_reference": project_image_reference(
             model_attr(model_attr(vm_profile, "storage_profile"), "image_reference")
         ),
@@ -352,6 +385,30 @@ def extension_record(extension: dict) -> dict:
     }
 
 
+AUTOMATIC_PATCH_MODES = {"automaticbyplatform", "automaticbyos"}
+
+
+def patch_settings_record(settings) -> dict:
+    """Normalize the projected patch settings and derive the two readings a reviewer wants.
+
+    `automatic_patching` is True for AutomaticByPlatform (Azure orchestrates the updates) or
+    AutomaticByOS (Windows Update installs them in the guest), False for Manual or ImageDefault, and None when Azure returned no patch mode: an absent
+    setting is "unknown", never "manual". `assessment_automatic` reads the same way.
+    """
+    settings = settings if isinstance(settings, dict) else {}
+    # An empty string is no setting, not a setting that fails to match the automatic modes.
+    mode = settings.get("patch_mode") or None
+    assessment = settings.get("assessment_mode") or None
+    return {
+        "os": settings.get("os"),
+        "patch_mode": mode,
+        "assessment_mode": assessment,
+        "bypass_platform_safety_checks_on_user_schedule": settings.get("bypass_platform_safety_checks_on_user_schedule"),
+        "automatic_patching": (None if mode is None else str(mode).lower() in AUTOMATIC_PATCH_MODES),
+        "assessment_automatic": (None if assessment is None else str(assessment).lower() == "automaticbyplatform"),
+    }
+
+
 def virtual_machine_record(vm: dict) -> dict:
     """Normalize one projected VM into an evidence record with its derived readings."""
     resource_id = vm.get("id")
@@ -377,6 +434,8 @@ def virtual_machine_record(vm: dict) -> dict:
         # --- disks ---
         "storage_profile": storage_profile,
         "managed_disks_only": uses_managed_disks_only(storage_profile),
+        # --- patching (copied as read; see patch_settings_record) ---
+        "patch_settings": patch_settings_record(vm.get("patch_settings")),
         # --- credentials (null on a non-Linux VM: the setting does not exist) ---
         "linux_configuration": (
             {
@@ -392,6 +451,21 @@ def virtual_machine_record(vm: dict) -> dict:
         # --- guest agents (filled in by the per-VM enrichment call) ---
         "extensions": [extension_record(e) for e in (vm.get("extensions") or [])],
     }
+
+
+def follow_scale_sets(machines: list[dict], exclusions: ResourceExclusions) -> tuple[list[dict], list[dict]]:
+    """A scale set's virtual machines leave with it: each Flexible-mode VM has its own id and may sit in another group."""
+    kept, excluded = [], []
+    for vm in machines:
+        set_id = vm.get("virtual_machine_scale_set_id")
+        pattern = exclusions.match(set_id) if set_id and exclusions else None
+        if pattern is None:
+            kept.append(vm)
+        else:
+            excluded.append(excluded_item(
+                "virtual_machine", vm.get("name"), pattern, "scale_set_matched", id=vm.get("id"),
+                resource_group=vm.get("resource_group"), location=vm.get("location"), matched_id=set_id))
+    return kept, excluded
 
 
 def scale_set_record(scale_set: dict) -> dict:
@@ -412,6 +486,7 @@ def scale_set_record(scale_set: dict) -> dict:
         "upgrade_policy_mode": scale_set.get("upgrade_policy_mode"),
         "security_profile": _security_profile_record(scale_set.get("security_profile")),
         "trusted_launch_enabled": trusted_launch_enabled(scale_set.get("security_profile")),
+        "patch_settings": patch_settings_record(scale_set.get("patch_settings")),
         "linux_configuration": (
             {
                 "disable_password_authentication": bool(
@@ -478,7 +553,25 @@ def summarize(virtual_machines: list[dict], scale_sets: list[dict]) -> dict:
         "empty_scale_sets": sum(1 for s in scale_sets if not s["instance_ids"]),
         "trusted_launch_scale_sets": sum(1 for s in scale_sets if s["trusted_launch_enabled"]),
         "total_scale_set_instances": sum(s["instance_count"] for s in scale_sets),
+        **summarize_patching(virtual_machines, scale_sets),
     }
+
+
+def summarize_patching(virtual_machines: list[dict], scale_sets: list[dict]) -> dict:
+    """Patch mode and assessment mode across VMs and scale sets; unknown counted apart, never as manual."""
+    def counts(records: list[dict], prefix: str) -> dict:
+        ps = [r.get("patch_settings") or {} for r in records]
+        return {
+            f"{prefix}_automatic_patching": sum(1 for p in ps if p.get("automatic_patching") is True),
+            f"{prefix}_manual_or_image_default_patching": sum(1 for p in ps if p.get("automatic_patching") is False),
+            f"{prefix}_patch_mode_unknown": sum(1 for p in ps if p.get("automatic_patching") is None),
+            f"{prefix}_automatic_patch_assessment": sum(1 for p in ps if p.get("assessment_automatic") is True),
+            f"{prefix}_patch_assessment_unknown": sum(1 for p in ps if p.get("assessment_automatic") is None),
+            # Which automatic mode: AutomaticByPlatform (Azure) vs AutomaticByOS (Windows Update in the guest).
+            f"{prefix}_patch_modes": dict(sorted(Counter(
+                str(p["patch_mode"]) for p in ps if p.get("patch_mode") is not None).items())),
+        }
+    return {**counts(virtual_machines, "vms"), **counts(scale_sets, "scale_sets")}
 
 
 # --- collection (lazy azure imports) ---
@@ -500,10 +593,14 @@ def scale_set_name_from_id(resource_id: str | None) -> str | None:
     return None
 
 
+KINDS = ("virtual_machine", "scale_set")
+
+
 def collect_compute(
-    subscription_id, cred, collector: Collector
-) -> tuple[list[dict], list[dict]]:
-    """Two subscription-wide list calls plus two per-resource enrichments.
+    subscription_id, cred, collector: Collector, exclusions: ResourceExclusions | None = None,
+    excluded: list | None = None,
+) -> tuple[list[dict] | None, list[dict] | None]:
+    """Two subscription-wide list calls plus two per-resource enrichments; a list that wasn't read is None.
 
     Both `list_all()` calls return ItemPaged (the SDK follows nextLink itself).
     `virtual_machine_extensions.list()` returns a `VirtualMachineExtensionsListResult`,
@@ -516,11 +613,11 @@ def collect_compute(
     def _client():
         from azure.mgmt.compute import ComputeManagementClient  # lazy
 
-        return ComputeManagementClient(credential=cred, subscription_id=subscription_id)
+        return ComputeManagementClient(credential=cred, subscription_id=subscription_id, **arm_client_kwargs())
 
     client = collector.guard("compute.ComputeManagementClient (init)", _client)
     if client is None:
-        return [], []
+        return None, None
 
     virtual_machines = collector.guard(
         "compute.virtual_machines.list_all",
@@ -528,8 +625,13 @@ def collect_compute(
             virtual_machine_record(project_virtual_machine(vm))
             for vm in client.virtual_machines.list_all()
         ],
-        default=[],
     )
+    vms_read = virtual_machines is not None
+    virtual_machines = virtual_machines or []
+    exclusions = exclusions or ResourceExclusions()
+    virtual_machines, out_vms = exclusions.split(virtual_machines, "virtual_machine")
+    virtual_machines, out_members = follow_scale_sets(virtual_machines, exclusions)
+    out_vms += out_members
     for vm in virtual_machines:
         group, name = vm.get("resource_group"), vm.get("name")
         if not group or not name:
@@ -561,8 +663,12 @@ def collect_compute(
             scale_set_record(project_scale_set(s))
             for s in client.virtual_machine_scale_sets.list_all()
         ],
-        default=[],
     )
+    sets_read = scale_sets is not None
+    scale_sets = scale_sets or []
+    scale_sets, out_sets = exclusions.split(scale_sets, "scale_set")
+    if excluded is not None:
+        excluded += sorted(out_vms + out_sets, key=lambda e: (e["kind"], e["id"] or ""))
     for scale_set in scale_sets:
         group = scale_set.get("resource_group")
         name = scale_set_name_from_id(scale_set.get("id")) or scale_set.get("name")
@@ -588,8 +694,8 @@ def collect_compute(
         scale_set["instance_count"] = len(scale_set["instance_ids"])
 
     return (
-        sorted(virtual_machines, key=lambda r: r.get("id") or ""),
-        sorted(scale_sets, key=lambda r: r.get("id") or ""),
+        sorted(virtual_machines, key=lambda r: r.get("id") or "") if vms_read else None,
+        sorted(scale_sets, key=lambda r: r.get("id") or "") if sets_read else None,
     )
 
 
@@ -610,8 +716,10 @@ def main() -> int:
     subscription_id = sub["subscription_id"]
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
-    virtual_machines: list[dict] = []
-    scale_sets: list[dict] = []
+    virtual_machines: list[dict] | None = None
+    scale_sets: list[dict] | None = None
+    exclusions = ResourceExclusions.from_env()
+    excluded: list[dict] = []
     registration = REGISTRATION_UNKNOWN
     if subscription_id and cred is not None:
         # Asked BEFORE the list calls, so a zero-VM result is legible: Azure returns
@@ -625,7 +733,9 @@ def main() -> int:
                 "machines in use; reporting status not_registered",
                 subscription_id,
             )
-        virtual_machines, scale_sets = collect_compute(subscription_id, cred, collector)
+        virtual_machines, scale_sets = collect_compute(
+            subscription_id, cred, collector, exclusions, excluded
+        )
     elif not subscription_id:
         collector.record(
             "resolve_subscription",
@@ -635,6 +745,14 @@ def main() -> int:
             ),
         )
 
+    exclusions.record_invalid(collector)
+    if virtual_machines is None or scale_sets is None:
+        exclusions.mark_unread()
+    exclusions.warn_unmatched(logger)
+    in_scope = {"virtual_machines": None if virtual_machines is None else len(virtual_machines),
+                "scale_sets": None if scale_sets is None else len(scale_sets)}
+    virtual_machines, scale_sets = virtual_machines or [], scale_sets or []
+
     evidence = build_payload(
         subscription_id=subscription_id,
         subscription_source=sub["subscription_source"],
@@ -643,10 +761,12 @@ def main() -> int:
             "virtual_machines": virtual_machines,
             "virtual_machine_scale_sets": scale_sets,
             "provider_registration_status": registration,
+            "excluded": excluded,
         },
         summary={
             **summarize(virtual_machines, scale_sets),
             "provider_registration_status": registration,
+            **exclusions.summary(excluded, KINDS, in_scope),
         },
     )
 
@@ -657,10 +777,7 @@ def main() -> int:
     path = write_evidence(output_dir, filename, evidence)
 
     if not collector.ok:
-        logger.error(
-            "Encountered %d Azure API failure(s) during collection", len(collector.failures)
-        )
-        write_status(
+        report_failure(
             failure_reason(collector.failures), classify_failure_code(collector.failures)
         )
         return 1

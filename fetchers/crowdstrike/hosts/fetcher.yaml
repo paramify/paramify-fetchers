@@ -49,7 +49,7 @@ evidence_set:
   reference_id: EVD-CS-HOSTS
   name: CrowdStrike Falcon Managed Hosts
   instructions: >-
-    Script: fetcher.py. Authenticates at POST /oauth2/token, enumerates host IDs
+    Script: crowdstrike/hosts/fetcher.py. Authenticates at POST /oauth2/token, enumerates host IDs
     via GET /devices/queries/devices-scroll/v1 (offset-token pagination), and
     resolves them in batches of 100 via POST /devices/entities/devices/v2.
     Summarizes platform, product type, OS build, sensor version, reduced

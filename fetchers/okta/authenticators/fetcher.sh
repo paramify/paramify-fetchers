@@ -16,6 +16,10 @@
 
 set -o pipefail
 
+# The one place a fetcher reports WHY it failed (docs/fetcher_contract_guide.md, step 6).
+source "$(dirname "$0")/../../_lib/status.sh"
+FETCHER="okta_authenticators"   # attributes report_failure's log line to this fetcher
+
 # Interim v0.x: fetcher loads .env if present. The framework's runner +
 # secret resolver will replace this when the framework lands.
 [ -f .env ] && { set -a; . .env; set +a; }
@@ -24,11 +28,11 @@ OUTPUT_DIR="${EVIDENCE_DIR:-./evidence}"
 mkdir -p "$OUTPUT_DIR"
 
 if [ -z "${OKTA_API_TOKEN:-}" ]; then
-    echo "ERROR okta_authenticators: OKTA_API_TOKEN is not set" >&2
+    report_failure "OKTA_API_TOKEN is not set" bad_config
     exit 1
 fi
 if [ -z "${OKTA_ORG_URL:-}" ]; then
-    echo "ERROR okta_authenticators: OKTA_ORG_URL is not set" >&2
+    report_failure "OKTA_ORG_URL is not set" bad_config
     exit 1
 fi
 
@@ -163,7 +167,10 @@ failure_count=$(wc -l < "$_FAILURE_LOG" 2>/dev/null | tr -d ' ')
 failure_count=${failure_count:-0}
 
 if [ "$failure_count" -gt 0 ]; then
-    log_error "Encountered $failure_count API failures during collection"
+    # The log holds the "<METHOD> <url>" of each failed call -- the first few are
+    # the useful reason, so report those rather than only a count.
+    _FAILED_CALLS="$(head -n 3 "$_FAILURE_LOG" | sed 's/$/;/' | tr '\n' ' ')"
+    report_failure "$failure_count Okta API call(s) failed during collection - $_FAILED_CALLS" partial_failure
     exit 1
 fi
 

@@ -1,5 +1,5 @@
 name: aws_vpc_flow_logs
-version: 0.1.0
+version: 0.2.0
 description: Lists each VPC with whether flow logging is enabled and, when it is, the flow log destination and traffic type.
 category: aws
 
@@ -33,4 +33,4 @@ ksis:
 evidence_set:
   reference_id: EVD-VPC-FLOW-LOGS
   name: VPC Flow Logs
-  instructions: 'Script: fetcher.sh. Commands executed: aws ec2 describe-vpcs, aws ec2 describe-flow-logs.'
+  instructions: 'Script: aws/vpc_flow_logs/fetcher.sh. Commands executed: aws ec2 describe-vpcs, aws ec2 describe-flow-logs.'

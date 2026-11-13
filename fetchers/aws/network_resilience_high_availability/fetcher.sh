@@ -26,7 +26,7 @@ _TARGET_ID="$(aws_target_id "$REGION")"
 OUTPUT_JSON="$OUTPUT_DIR/aws_network_resilience_high_availability_${_TARGET_ID}.json"
 _FETCHER_TMP_JSON="$(mktemp -t aws_network_resilience_high_availability.XXXXXX.json)"
 _FAILURE_LOG="$(mktemp -t aws_network_resilience_high_availability_fail.XXXXXX)"
-trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG"' EXIT
+trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG" "$_AWS_ERR_LOG"' EXIT
 
 log_info() { printf '%s INFO aws_network_resilience_high_availability %s\n' "$(date -u +'%Y-%m-%d %H:%M:%S')" "$*" >&2; }
 log_error() { printf '%s ERROR aws_network_resilience_high_availability %s\n' "$(date -u +'%Y-%m-%d %H:%M:%S')" "$*" >&2; }
@@ -52,11 +52,11 @@ if [ $subnets_exit -ne 0 ]; then
     echo "aws ec2 describe-subnets failed (exit=$subnets_exit)" >> "$_FAILURE_LOG"
     log_error "Failed to describe subnets"
 else
-    echo "$subnets" | jq -c '.[]' | while read -r subnet; do
-        jq --argjson subnet "$subnet" \
-           '.results += [{"Type": "VPC_Subnet", "SubnetInfo": $subnet}]' \
-           "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
-    done
+    # One pass over the whole list, fed on stdin (not --argjson: a large list
+    # overflows the argv limit). Appending per item rewrote the file N times.
+    printf '%s' "$subnets" | jq --slurpfile items /dev/stdin \
+       '.results += [$items[0][]? | {"Type": "VPC_Subnet", "SubnetInfo": .}]' \
+       "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
 fi
 
 nat_gateways=$(aws ec2 describe-nat-gateways --query 'NatGateways[*]' --output json 2>/dev/null)
@@ -65,18 +65,11 @@ if [ $nat_exit -ne 0 ]; then
     echo "aws ec2 describe-nat-gateways failed (exit=$nat_exit)" >> "$_FAILURE_LOG"
     log_error "Failed to describe NAT gateways"
 else
-    echo "$nat_gateways" | jq -c '.[]' | while read -r nat; do
-        jq --argjson nat "$nat" \
-           '.results += [{"Type": "NAT_Gateway", "NATInfo": $nat}]' \
-           "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
-    done
+    # One pass over the whole list, fed on stdin (not --argjson: a large list
+    # overflows the argv limit). Appending per item rewrote the file N times.
+    printf '%s' "$nat_gateways" | jq --slurpfile items /dev/stdin \
+       '.results += [$items[0][]? | {"Type": "NAT_Gateway", "NATInfo": .}]' \
+       "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
 fi
 
-failure_count=$(wc -l < "$_FAILURE_LOG" 2>/dev/null | tr -d ' ')
-failure_count=${failure_count:-0}
-if [ "$failure_count" -gt 0 ]; then
-    log_error "Encountered $failure_count AWS API failures during collection"
-    exit 1
-fi
-
-log_info "Evidence saved to $OUTPUT_JSON"
+aws_finish

@@ -13,10 +13,13 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-# Import okta_iam_core from the category's _shared/ directory.
+# Import okta_iam_core from the category's _shared/ directory, and the shared
+# failure-reporting helper from fetchers/_lib/ (same mechanism, one level up).
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR.parent / "_shared"))
+sys.path.insert(0, str(SCRIPT_DIR.parents[1] / "_lib"))
 
+from fetcher_status import report_failure  # noqa: E402
 from okta_iam_core import OktaIAMEvidenceFetcher  # type: ignore
 
 logger = logging.getLogger("okta_passwordless_authentication")
@@ -46,7 +49,15 @@ def main() -> int:
     logger.info("Evidence saved to %s", output_path)
 
     if fetcher.client.api_failures:
-        logger.error("Encountered %d API failures during collection", len(fetcher.client.api_failures))
+        failures = fetcher.client.api_failures
+        summary = "; ".join(
+            f"{f.get('endpoint', '?')}: {f.get('type', '')} {f.get('message', '')}".strip()
+            for f in failures[:3]
+        )
+        report_failure(
+            f"{len(failures)} Okta API call(s) failed during collection - {summary}",
+            "partial_failure",
+        )
         return 1
     return 0
 

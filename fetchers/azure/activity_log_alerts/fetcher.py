@@ -13,16 +13,27 @@ case-insensitively.
 import logging
 import os
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR.parent / "_shared"))
+from alert_routing import (  # noqa: E402
+    add_referenced_groups,
+    collect_action_groups,
+    collect_processing_rules,
+    matching_processing_rules,
+    route,
+    tri_state,
+)
+from arm_rest import arm_rest_client  # noqa: E402
 from azure_common import (  # noqa: E402
     NOT_REGISTERED,
     REGISTRATION_UNKNOWN,
     Collector,
+    arm_client_kwargs,
     build_payload,
     classify_failure_code,
     coverage_percentage,
@@ -30,12 +41,13 @@ from azure_common import (  # noqa: E402
     failure_reason,
     model_attr,
     provider_registration_status,
+    report_failure,
     resolve_subscription,
     resource_group_from_id,
     sanitize_for_filename,
     write_evidence,
-    write_status,
 )
+from resource_exclusions import ResourceExclusions  # noqa: E402
 
 logger = logging.getLogger("azure_activity_log_alerts")
 
@@ -79,10 +91,22 @@ MONITORED_OPERATIONS = {
     "delete_security_solution": ("Microsoft.Security/securitySolutions/delete",),
 }
 
+# App Service deployment and configuration changes, kept out of the CIS map so its totals do not move.
+CHANGE_OPERATIONS = {
+    "create_update_web_app": ("Microsoft.Web/sites/write", "Microsoft.Web/sites/slots/write"),
+    "update_web_app_configuration": ("Microsoft.Web/sites/config/write", "Microsoft.Web/sites/slots/config/write"),
+    "deploy_web_app": ("Microsoft.Web/sites/deployments/write", "Microsoft.Web/sites/slots/deployments/write"),
+    "swap_web_app_slots": (
+        "Microsoft.Web/sites/slotsswap/action",
+        "Microsoft.Web/sites/slots/slotsswap/action",
+    ),
+}
+
 # monitor_alert_service_health_exists is not an operationName alert: it needs BOTH
 # category == ServiceHealth and properties.incidentType == Incident on one rule.
 SERVICE_HEALTH_CATEGORY = "servicehealth"
 SERVICE_HEALTH_INCIDENT_TYPE = "incident"
+KINDS = ("activity_log_alert", "action_group", "processing_rule")
 
 
 # --- projection: the only code that touches an azure-mgmt model ---
@@ -214,13 +238,17 @@ def alert_record(alert: dict) -> dict:
     }
 
 
-def operation_coverage(alerts: list[dict]) -> dict:
-    """Which of MONITORED_OPERATIONS at least one enabled alert fires on."""
+def operation_coverage(alerts: list[dict], operations_map=MONITORED_OPERATIONS) -> dict:
+    """Which operations in `operations_map` at least one of `alerts` fires on."""
     covered = {name for alert in alerts for name in alert["monitored_operations"]}
     return {
         key: any(operation.lower() in covered for operation in operations)
-        for key, operations in MONITORED_OPERATIONS.items()
+        for key, operations in operations_map.items()
     }
+
+
+def with_routing(alert: dict, groups: dict, processing_rules: list[dict]) -> dict:
+    return {**alert, **route(alert["enabled"], alert["action_groups"], alert["scopes"], groups, processing_rules)}
 
 
 def summarize(alerts: list[dict]) -> dict:
@@ -246,21 +274,50 @@ def summarize(alerts: list[dict]) -> dict:
             key for key, is_covered in coverage.items() if not is_covered
         ),
         "service_health_alert_configured": any(alert["service_health_alert"] for alert in alerts),
+        **routing_summary(alerts),
+    }
+
+
+def coverage_reaching_human(alerts: list[dict], operations_map: dict) -> dict:
+    """Per operation: True if an alert that reaches a person covers it, None if only one that might, else False."""
+    sure = operation_coverage([a for a in alerts if a.get("reaches_human") is True], operations_map)
+    maybe = operation_coverage([a for a in alerts if a.get("enabled") and a.get("reaches_human") is None], operations_map)
+    return {key: True if sure[key] else None if maybe[key] else False for key in operations_map}
+
+
+def routing_summary(alerts: list[dict]) -> dict:
+    """Coverage again, counting only alerts that reach a person, plus the App Service change map."""
+    enabled = [a for a in alerts if a.get("enabled")]
+    change = coverage_reaching_human(alerts, CHANGE_OPERATIONS)
+    return {
+        "alerts_routing_to_enabled_receiver": sum(1 for a in enabled if a.get("routes_to_enabled_receiver") is True),
+        "alerts_routing_unknown": sum(1 for a in enabled if a.get("routes_to_enabled_receiver") is None),
+        "alerts_suppressed": sum(1 for a in enabled if a.get("suppressed") is True),
+        "alerts_possibly_suppressed": sum(1 for a in enabled if a.get("suppressed") is None),
+        "alerts_reaching_human": sum(1 for a in enabled if a.get("reaches_human") is True),
+        "alerts_reaching_human_unknown": sum(1 for a in enabled if a.get("reaches_human") is None),
+        "monitored_operation_coverage_reaching_human": coverage_reaching_human(alerts, MONITORED_OPERATIONS),
+        "change_operation_coverage": change,
+        "change_operations_covered": sum(1 for v in change.values() if v is True),
+        "change_operations_possibly_covered": sum(1 for v in change.values() if v is None),
+        "change_operations_total": len(CHANGE_OPERATIONS),
+        "all_change_operations_covered": tri_state(change.values()),
+        "uncovered_change_operations": sorted(k for k, v in change.items() if v is False),
     }
 
 
 # --- collection (lazy azure imports) ---
 
-def collect_activity_log_alerts(subscription_id, cred, collector: Collector) -> list[dict]:
-    """One activity_log_alerts.list_by_subscription_id() call."""
+def collect_activity_log_alerts(subscription_id, cred, collector: Collector) -> list[dict] | None:
+    """One activity_log_alerts.list_by_subscription_id() call; None when it couldn't be read."""
     from azure.mgmt.monitor import MonitorManagementClient
 
     def _client():
-        return MonitorManagementClient(credential=cred, subscription_id=subscription_id)
+        return MonitorManagementClient(credential=cred, subscription_id=subscription_id, **arm_client_kwargs())
 
     client = collector.guard("monitor.MonitorManagementClient (init)", _client)
     if client is None:
-        return []
+        return None
 
     def _list():
         # ItemPaged: the SDK follows nextLink itself.
@@ -269,10 +326,8 @@ def collect_activity_log_alerts(subscription_id, cred, collector: Collector) -> 
             for a in client.activity_log_alerts.list_by_subscription_id()
         ]
 
-    alerts = collector.guard(
-        "monitor.activity_log_alerts.list_by_subscription_id", _list, default=[]
-    )
-    return sorted(alerts, key=lambda r: r.get("id") or "")
+    alerts = collector.guard("monitor.activity_log_alerts.list_by_subscription_id", _list)
+    return None if alerts is None else sorted(alerts, key=lambda r: r.get("id") or "")
 
 
 def main() -> int:
@@ -292,7 +347,14 @@ def main() -> int:
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
     alerts: list[dict] = []
+    group_records: list[dict] = []
+    processing_rules: list[dict] = []
+    exclusions = ResourceExclusions.from_env()
+    excluded: list[dict] = []
+    excluded_processing: list[dict] = []
     registration = REGISTRATION_UNKNOWN
+    alerts_mgmt = REGISTRATION_UNKNOWN
+    read = {"activity_log_alerts": False, "action_groups": False, "processing_rules": False}
     if subscription_id and cred is not None:
         # ARM returns an empty list, not an error, for an unregistered provider.
         registration = provider_registration_status(
@@ -304,7 +366,38 @@ def main() -> int:
                 "activity log alerts can exist; reporting status not_registered",
                 subscription_id,
             )
-        alerts = collect_activity_log_alerts(subscription_id, cred, collector)
+        listed = collect_activity_log_alerts(subscription_id, cred, collector)
+        read["activity_log_alerts"] = listed is not None
+        alerts, excluded = exclusions.split(listed or [], "activity_log_alert")
+        alerts_mgmt = provider_registration_status(collector, subscription_id, cred, "Microsoft.AlertsManagement")
+        rest = collector.guard("arm_rest.ARMPipelineClient (init)", lambda: arm_rest_client(cred))
+        if rest is not None:
+            # An unregistered provider has none to read.
+            read["action_groups"] = registration == NOT_REGISTERED
+            read["processing_rules"] = alerts_mgmt == NOT_REGISTERED
+            if registration != NOT_REGISTERED:
+                groups = collector.guard(
+                    "Microsoft.Insights/actionGroups list", lambda: collect_action_groups(rest, subscription_id)
+                )
+                group_records = groups["groups"] if groups else []
+                read["action_groups"] = groups is not None
+            if alerts_mgmt != NOT_REGISTERED:
+                apr = collector.guard(
+                    "Microsoft.AlertsManagement/actionRules list",
+                    lambda: collect_processing_rules(rest, subscription_id, datetime.now(timezone.utc)),
+                )
+                processing_rules = apr["rules"] if apr else []
+                read["processing_rules"] = apr is not None
+            by_id = {(g["id"] or "").lower(): g for g in group_records}
+            # Other subscriptions' groups are read only for in-scope alerts' routes and in-scope processing rules.
+            in_scope_processing, excluded_processing = exclusions.split(processing_rules, "processing_rule")
+            referenced = [g for a in alerts for g in a["action_groups"]]
+            referenced += [g for a in alerts for m in matching_processing_rules(a["scopes"], processing_rules)
+                           for g in m["rule"]["added_action_group_ids"]]
+            referenced += [g for p in in_scope_processing for g in p["added_action_group_ids"]]
+            add_referenced_groups(rest, referenced, by_id, collector)
+            alerts = [with_routing(a, by_id, processing_rules) for a in alerts]
+            processing_rules = in_scope_processing
     elif not subscription_id:
         collector.record(
             "resolve_subscription",
@@ -313,6 +406,19 @@ def main() -> int:
                 "ambient Azure credential that can list subscriptions)"
             ),
         )
+
+    # Routing is resolved against every group and processing rule first, so an in-scope alert keeps its verdict.
+    exclusions.record_invalid(collector)
+    group_records, excluded_groups = exclusions.split(group_records, "action_group")
+    excluded += excluded_groups + excluded_processing
+    if not all(read.values()):
+        exclusions.mark_unread()
+    exclusions.warn_unmatched(logger)
+    counts = exclusions.summary(excluded, KINDS, {"activity_log_alerts": len(alerts), "action_groups": len(group_records),
+                                                  "processing_rules": len(processing_rules)})
+    for name, ok in read.items():  # unknown, not none, when that list wasn't read
+        if not ok:
+            counts.update({f"excluded_{name}": None, f"in_scope_{name}": None})
 
     evidence = build_payload(
         subscription_id=subscription_id,
@@ -324,9 +430,20 @@ def main() -> int:
             "monitored_operations": {
                 key: list(operations) for key, operations in MONITORED_OPERATIONS.items()
             },
+            "change_operations": {
+                key: list(operations) for key, operations in CHANGE_OPERATIONS.items()
+            },
+            "action_groups": sorted(group_records, key=lambda g: (g["id"] or "").lower()),
+            "processing_rules": sorted(processing_rules, key=lambda p: (p["id"] or "").lower()),
             "provider_registration_status": registration,
+            "alerts_management_registration_status": alerts_mgmt,
+            "excluded": excluded,
         },
-        summary={**summarize(alerts), "provider_registration_status": registration},
+        summary={
+            **summarize(alerts),
+            "provider_registration_status": registration,
+            **counts,
+        },
     )
 
     filename = (
@@ -335,10 +452,7 @@ def main() -> int:
     path = write_evidence(output_dir, filename, evidence)
 
     if not collector.ok:
-        logger.error(
-            "Encountered %d Azure API failure(s) during collection", len(collector.failures)
-        )
-        write_status(
+        report_failure(
             failure_reason(collector.failures), classify_failure_code(collector.failures)
         )
         return 1

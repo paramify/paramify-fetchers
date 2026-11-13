@@ -1,0 +1,68 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "aws_resource_inventory",
+  "fetcher_version": "0.1.0",
+  "source": "live",
+  "captured_on": "2026-09-28",
+  "reviewed": false,
+  "collections": [
+    {
+      "path": "results.indexes[]",
+      "records": 2,
+      "fields": {
+        "Arn": 2,
+        "Region": 2,
+        "Type": 2
+      }
+    },
+    {
+      "path": "results.views[]",
+      "records": 1,
+      "fields": {
+        "ViewArn": 1,
+        "Filters": 1,
+        "IncludedProperties": 1
+      }
+    },
+    {
+      "path": "results.views[].IncludedProperties[]",
+      "records": 1,
+      "fields": {
+        "Name": 1
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "profile": "example-profile",
+      "region": "us-east-2",
+      "datetime": "2026-09-28T17:13:12Z",
+      "account_id": "111111111111",
+      "arn": "arn:aws:iam::111111111111:user/user1@example.com"
+    },
+    "results": {
+      "indexes": [
+        {
+          "Arn": "arn:aws:resource-explorer-2:us-east-1:111111111111:index/00000000-0000-4000-8000-222222222222",
+          "Region": "us-east-1",
+          "Type": "LOCAL"
+        }
+      ],
+      "views": [
+        {
+          "ViewArn": "arn:aws:resource-explorer-2:us-east-2:111111111111:view/us-east-2/00000000-0000-4000-8000-333333333333",
+          "Filters": {
+            "FilterString": ""
+          },
+          "IncludedProperties": [
+            {
+              "Name": "tags"
+            }
+          ]
+        }
+      ],
+      "default_view_arn": "arn:aws:resource-explorer-2:us-east-2:111111111111:view/us-east-2/00000000-0000-4000-8000-333333333333",
+      "resource_count": null
+    }
+  }
+}

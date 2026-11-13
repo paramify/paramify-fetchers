@@ -1,17 +1,19 @@
 """Discover fetchers in the repo and validate their fetcher.yaml files.
 
-Walks `fetchers/<category>/<short_name>/fetcher.yaml`, skipping any directory
-that starts with `_` (e.g. _shared, _categories, _template).
+Walks `fetchers/<category>/<short_name>/fetcher.yaml` and
+`comparators/<category>/<short_name>/fetcher.yaml`, skipping any directory that
+starts with `_` (e.g. _shared, _categories, _template).
 """
 
 import json
 from pathlib import Path
 from typing import Dict, Optional
 
-import yaml
 from jsonschema import Draft202012Validator
 
+from framework import yaml_io
 from framework.contract import (
+    DEFAULT_EVIDENCE_FREQUENCY,
     ConfigField,
     EvidenceSet,
     Fetcher,
@@ -40,32 +42,43 @@ def _parse_config_schema(raw: Optional[dict]) -> dict:
             env=spec.get("env"),
             default=spec.get("default"),
             description=spec.get("description"),
+            prefixes=tuple(spec.get("prefixes") or ()),
+            bare=spec.get("bare", True),
+            exclusion=spec.get("exclusion", True),
         )
     return out
 
 
-def discover_fetchers(repo_root: Path) -> Dict[str, Fetcher]:
-    """Walk fetchers/*/*/fetcher.yaml. Returns {fetcher_name: Fetcher}.
+def _fetcher_dirs(tree_root: Path):
+    for category_dir in sorted(tree_root.iterdir()):
+        if not category_dir.is_dir() or category_dir.name.startswith("_"):
+            continue
+        for fetcher_dir in sorted(category_dir.iterdir()):
+            if fetcher_dir.is_dir() and not fetcher_dir.name.startswith("_"):
+                yield fetcher_dir
 
-    Raises ValueError on schema-invalid yaml or duplicate fetcher names.
+
+def discover_fetchers(repo_root: Path) -> Dict[str, Fetcher]:
+    """Walk fetchers/*/*/fetcher.yaml and comparators/*/*/fetcher.yaml into one namespace.
+
+    Raises ValueError on schema-invalid yaml or duplicate names. A comparator's
+    inputs are checked by `validate` and `run`, not here.
     """
     schema = _load_schema(repo_root)
     validator = Draft202012Validator(schema)
 
     fetchers: Dict[str, Fetcher] = {}
-    fetchers_root = repo_root / "fetchers"
+    trees = [repo_root / "fetchers"]
+    if (repo_root / "comparators").is_dir():
+        trees.append(repo_root / "comparators")
 
-    for category_dir in sorted(fetchers_root.iterdir()):
-        if not category_dir.is_dir() or category_dir.name.startswith("_"):
-            continue
-        for fetcher_dir in sorted(category_dir.iterdir()):
-            if not fetcher_dir.is_dir() or fetcher_dir.name.startswith("_"):
-                continue
+    for tree_root in trees:
+        for fetcher_dir in _fetcher_dirs(tree_root):
             yaml_path = fetcher_dir / "fetcher.yaml"
             if not yaml_path.exists():
                 continue
 
-            data = yaml.safe_load(yaml_path.read_text())
+            data = yaml_io.load_path(yaml_path)
             errors = list(validator.iter_errors(data))
             if errors:
                 detail = "\n".join(f"  {e.message}" for e in errors)
@@ -121,6 +134,7 @@ def _parse_fetcher(data: dict, path: Path) -> Fetcher:
             name=raw_es["name"],
             instructions=raw_es.get("instructions"),
             description=raw_es.get("description") or data["description"],
+            frequency=raw_es.get("frequency", DEFAULT_EVIDENCE_FREQUENCY),
         )
 
     issue_report = None
@@ -161,6 +175,7 @@ def _parse_fetcher(data: dict, path: Path) -> Fetcher:
         ksis=list(data.get("ksis") or []),
         kind=data.get("kind", "evidence"),
         issue_report=issue_report,
+        depends_on=list(data.get("depends_on") or []),
     )
 
 
@@ -180,7 +195,7 @@ def discover_platforms(repo_root: Path) -> Dict[str, PlatformSpec]:
 
     for yaml_path in sorted(categories_dir.glob("*.yaml")):
         category = yaml_path.stem
-        data = yaml.safe_load(yaml_path.read_text()) or {}
+        data = yaml_io.load_path(yaml_path) or {}
         errors = list(validator.iter_errors(data))
         if errors:
             detail = "\n".join(f"  {e.message}" for e in errors)
@@ -193,11 +208,14 @@ def discover_platforms(repo_root: Path) -> Dict[str, PlatformSpec]:
             config_schema=_parse_config_schema(data.get("config_schema")),
             secrets=_parse_secrets(data.get("secrets")),
             passthrough_env=list(auth.get("passthrough_env") or []),
+            selector_env=list(auth.get("selector_env") or []),
+            credential_env=list(auth.get("credential_env") or []),
             requires=Requires(
                 tools=list(requires.get("tools") or []),
                 python_packages=list(requires.get("python_packages") or []),
             ),
             description=data.get("description"),
+            display_name=data.get("display_name"),
         )
 
     return platforms

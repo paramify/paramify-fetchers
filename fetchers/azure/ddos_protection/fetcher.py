@@ -1,0 +1,332 @@
+#!/usr/bin/env python3
+"""Azure DDoS Protection coverage of every public IP, and the DDoS plans behind it, for one subscription."""
+
+import logging
+import os
+import sys
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(SCRIPT_DIR.parent / "_shared"))
+from azure_common import (  # noqa: E402
+    NOT_REGISTERED,
+    REGISTRATION_UNKNOWN,
+    Collector,
+    arm_client_kwargs,
+    arm_id_key,
+    build_payload,
+    classify_failure_code,
+    credential,
+    failure_reason,
+    model_attr,
+    provider_registration_status,
+    report_failure,
+    resolve_subscription,
+    resource_group_from_id,
+    sanitize_for_filename,
+    vnet_id_of,
+    write_evidence,
+)
+from ddos_coverage import (  # noqa: E402
+    EFFECTIVE_PROTECTION,
+    attachment,
+    effective_protection,
+    vnet_by_resource,
+    vnet_has_plan,
+)
+from resource_exclusions import ResourceExclusions  # noqa: E402
+
+logger = logging.getLogger("azure_ddos_protection")
+
+
+# --- projection: the only code here that touches an azure-mgmt model ---
+
+def _ids(models) -> list:
+    return [model_attr(m, "id") for m in (models or []) if model_attr(m, "id")]
+
+
+def project_plan(plan) -> dict:
+    return {
+        "id": model_attr(plan, "id"),
+        "name": model_attr(plan, "name"),
+        "location": model_attr(plan, "location"),
+        "virtual_network_ids": _ids(model_attr(plan, "virtual_networks")),
+        "public_ip_address_ids": _ids(model_attr(plan, "public_ip_addresses")),
+    }
+
+
+def project_virtual_network(vnet) -> dict:
+    return {
+        "id": model_attr(vnet, "id"),
+        "name": model_attr(vnet, "name"),
+        "location": model_attr(vnet, "location"),
+        "enable_ddos_protection": model_attr(vnet, "enable_ddos_protection"),
+        "ddos_protection_plan_id": model_attr(model_attr(vnet, "ddos_protection_plan"), "id"),
+        "subnet_ip_configuration_ids": [
+            i
+            for s in (model_attr(vnet, "subnets") or [])
+            for i in _ids(model_attr(s, "ip_configurations")) + _ids(model_attr(s, "application_gateway_ip_configurations"))
+        ],
+    }
+
+
+def project_public_ip(ip) -> dict:
+    sku = model_attr(ip, "sku")
+    ddos = model_attr(ip, "ddos_settings")
+    return {
+        "id": model_attr(ip, "id"),
+        "name": model_attr(ip, "name"),
+        "location": model_attr(ip, "location"),
+        "ip_address": model_attr(ip, "ip_address"),
+        "sku_name": model_attr(sku, "name"),
+        "sku_tier": model_attr(sku, "tier"),
+        "ip_configuration_id": model_attr(model_attr(ip, "ip_configuration"), "id"),
+        "nat_gateway_id": model_attr(model_attr(ip, "nat_gateway"), "id"),
+        "protection_mode": model_attr(ddos, "protection_mode"),
+        "ddos_protection_plan_id": model_attr(model_attr(ddos, "ddos_protection_plan"), "id"),
+    }
+
+
+def project_network_interface(nic) -> dict:
+    return {
+        "id": model_attr(nic, "id"),
+        "subnet_ids": [
+            model_attr(model_attr(ipc, "subnet"), "id") for ipc in (model_attr(nic, "ip_configurations") or [])
+        ],
+    }
+
+
+def project_load_balancer(lb) -> dict:
+    pools = model_attr(lb, "backend_address_pools") or []
+    addresses = [a for p in pools for a in (model_attr(p, "load_balancer_backend_addresses") or [])]
+    return {
+        "id": model_attr(lb, "id"),
+        "backend_ip_configuration_ids": [i for p in pools for i in _ids(model_attr(p, "backend_ip_configurations"))]
+        + [i for a in addresses if (i := model_attr(model_attr(a, "network_interface_ip_configuration"), "id"))],
+        "backend_virtual_network_ids": [
+            i for i in [
+                *(model_attr(model_attr(p, "virtual_network"), "id") for p in pools),
+                *(model_attr(model_attr(a, "virtual_network"), "id") for a in addresses),
+                *(vnet_id_of(model_attr(model_attr(a, "subnet"), "id")) for a in addresses),
+            ] if i
+        ],
+    }
+
+
+# --- pure transforms (flat snake_case dicts in, evidence records out) ---
+
+def public_ip_record(ip: dict, resource_vnets: dict, vnets_by_id: dict) -> dict:
+    attached_to, resource_id = attachment(ip)
+    vnet = vnets_by_id.get(resource_vnets.get(arm_id_key(resource_id))) if resource_id else None
+    return {
+        "id": ip.get("id"),
+        "name": ip.get("name"),
+        "location": ip.get("location"),
+        "resource_group": resource_group_from_id(ip.get("id")),
+        "ip_address": ip.get("ip_address"),
+        "sku_name": ip.get("sku_name"),
+        "sku_tier": ip.get("sku_tier"),
+        "attached_to_type": attached_to,
+        "attached_resource_id": resource_id,
+        "internet_facing": attached_to != "unattached",
+        "virtual_network_id": vnet.get("id") if vnet else None,
+        "protection_mode": ip.get("protection_mode"),
+        "ip_ddos_protection_plan_id": ip.get("ddos_protection_plan_id"),
+        "virtual_network_ddos_protection_plan_id": vnet.get("ddos_protection_plan_id") if vnet else None,
+        "effective_protection": effective_protection(ip, attached_to, vnet),
+    }
+
+
+def virtual_network_record(vnet: dict, plan_ids: set, ips: list[dict]) -> dict:
+    key = arm_id_key(vnet.get("id"))
+    attached = [i for i in ips if i["internet_facing"] and arm_id_key(i["virtual_network_id"]) == key]
+    plan_id = vnet.get("ddos_protection_plan_id")
+    return {
+        "id": vnet.get("id"),
+        "name": vnet.get("name"),
+        "location": vnet.get("location"),
+        "resource_group": resource_group_from_id(vnet.get("id")),
+        "enable_ddos_protection": bool(vnet.get("enable_ddos_protection")),
+        "ddos_protection_plan_id": plan_id,
+        "ddos_protection_plan_in_subscription": (arm_id_key(plan_id) in plan_ids) if plan_id else None,
+        "has_ddos_plan": vnet_has_plan(vnet),
+        "attached_public_ips": len(attached),
+        "unprotected_attached_public_ips": sum(1 for i in attached if i["effective_protection"] in ("none", "disabled")),
+    }
+
+
+def plan_record(plan: dict) -> dict:
+    return {
+        "id": plan.get("id"),
+        "name": plan.get("name"),
+        "location": plan.get("location"),
+        "resource_group": resource_group_from_id(plan.get("id")),
+        "virtual_network_ids": sorted(plan.get("virtual_network_ids") or []),
+        "public_ip_address_ids": sorted(plan.get("public_ip_address_ids") or []),
+    }
+
+
+def summarize(plans: list[dict], vnets: list[dict], ips: list[dict]) -> dict:
+    facing = [i for i in ips if i["internet_facing"]]
+    with_ips = [v for v in vnets if v["attached_public_ips"]]
+    return {
+        "total_ddos_protection_plans": len(plans),
+        "total_virtual_networks": len(vnets),
+        "virtual_networks_with_ddos_plan": sum(1 for v in vnets if v["has_ddos_plan"]),
+        "virtual_networks_with_attached_public_ips": len(with_ips),
+        "virtual_networks_with_attached_public_ips_without_plan": sum(1 for v in with_ips if not v["has_ddos_plan"]),
+        "total_public_ips": len(ips),
+        "attached_public_ips": len(facing),
+        "attached_public_ips_by_effective_protection": {
+            p: sum(1 for i in facing if i["effective_protection"] == p) for p in EFFECTIVE_PROTECTION
+        },
+        "attached_public_ips_unprotected": sum(1 for i in facing if i["effective_protection"] in ("none", "disabled")),
+    }
+
+
+def build_records(
+    raw_plans: list[dict], raw_vnets: list[dict], raw_ips: list[dict], raw_nics: list[dict], raw_lbs: list[dict] = (),
+):
+    resource_vnets = vnet_by_resource(raw_vnets, raw_nics, raw_lbs)
+    vnets_by_id = {arm_id_key(v["id"]): v for v in raw_vnets}
+    ips = [public_ip_record(i, resource_vnets, vnets_by_id) for i in raw_ips]
+    plan_ids = {arm_id_key(p["id"]) for p in raw_plans}
+    vnets = [virtual_network_record(v, plan_ids, ips) for v in raw_vnets]
+    plans = [plan_record(p) for p in raw_plans]
+
+    def by_id(records):
+        return sorted(records, key=lambda r: arm_id_key(r.get("id")))
+
+    return by_id(plans), by_id(vnets), by_id(ips)
+
+
+def build_scoped(raw_plans, raw_vnets, raw_ips, raw_nics, raw_lbs, exclusions: ResourceExclusions):
+    """Verdicts are worked out against every plan, VNet and public IP; excluded ones then leave the lists and counts."""
+    plans, vnets, ips = build_records(raw_plans, raw_vnets, raw_ips, raw_nics, raw_lbs)
+    plans, out_plans = exclusions.split(plans, "ddos_protection_plan", resource_group=lambda r: None)
+    ips, out_ips = exclusions.split(ips, "public_ip", resource_group=lambda r: None)
+    in_vnets, out_vnets = exclusions.split(vnets, "virtual_network", resource_group=lambda r: None)
+    # A VNet's attached-IP counts cover only the in-scope IPs; each IP's own protection verdict is unchanged.
+    plan_ids = {arm_id_key(p["id"]) for p in raw_plans}
+    by_id = {arm_id_key(v["id"]): v for v in raw_vnets}
+    vnets = [virtual_network_record(by_id[arm_id_key(v["id"])], plan_ids, ips) for v in in_vnets]
+    return plans, vnets, ips, out_plans + out_vnets + out_ips
+
+
+# --- collection (lazy azure imports) ---
+
+def collect(subscription_id, cred, collector: Collector):
+    """DDoS protection plans, VNets with their subnets' back-references, public IPs, NICs and load balancers; the
+    first three are None when their list wasn't read."""
+    from azure.mgmt.network import NetworkManagementClient
+
+    client = collector.guard(
+        "network.NetworkManagementClient (init)",
+        lambda: NetworkManagementClient(
+            credential=cred, subscription_id=subscription_id, **arm_client_kwargs()
+        ),
+    )
+    if client is None:
+        return None, None, None, [], []
+
+    plans = collector.guard(
+        "network.ddos_protection_plans.list",
+        lambda: [project_plan(p) for p in client.ddos_protection_plans.list()],
+    )
+    vnets = collector.guard(
+        "network.virtual_networks.list_all",
+        lambda: [project_virtual_network(v) for v in client.virtual_networks.list_all()],
+    )
+    ips = collector.guard(
+        "network.public_ip_addresses.list_all",
+        lambda: [project_public_ip(i) for i in client.public_ip_addresses.list_all()],
+    )
+    nics = collector.guard(
+        "network.network_interfaces.list_all",
+        lambda: [project_network_interface(n) for n in client.network_interfaces.list_all()],
+        default=[],
+    )
+    lbs = collector.guard(
+        "network.load_balancers.list_all",
+        lambda: [project_load_balancer(lb) for lb in client.load_balancers.list_all()],
+        default=[],
+    )
+    return plans, vnets, ips, nics, lbs
+
+
+def main() -> int:
+    logging.basicConfig(
+        level=os.environ.get("LOG_LEVEL", "INFO"),
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+    )
+    logging.getLogger("azure").setLevel(logging.WARNING)
+    load_dotenv()
+
+    output_dir = Path(os.environ.get("EVIDENCE_DIR", "./evidence"))
+    collector = Collector(logger)
+
+    sub = resolve_subscription(collector)
+    subscription_id = sub["subscription_id"]
+    cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
+
+    raw: tuple = (None, None, None, [], [])
+    registration = REGISTRATION_UNKNOWN
+    if subscription_id and cred is not None:
+        registration = provider_registration_status(collector, subscription_id, cred, "Microsoft.Network")
+        if registration == NOT_REGISTERED:
+            logger.warning(
+                "Microsoft.Network is not registered on subscription %s — reporting status not_registered",
+                subscription_id,
+            )
+        raw = collect(subscription_id, cred, collector)
+    elif not subscription_id:
+        collector.record(
+            "resolve_subscription",
+            RuntimeError(
+                "no subscription id (set AZURE_SUBSCRIPTION_ID or configure an "
+                "ambient Azure credential that can list subscriptions)"
+            ),
+        )
+
+    exclusions = ResourceExclusions.from_env()
+    exclusions.record_invalid(collector)
+    read = {"ddos_protection_plans": raw[0] is not None, "virtual_networks": raw[1] is not None,
+            "public_ips": raw[2] is not None}
+    plans, vnets, ips, excluded = build_scoped(*(r or [] for r in raw), exclusions)
+    if not all(read.values()):
+        exclusions.mark_unread()
+    exclusions.warn_unmatched(logger)
+    evidence = build_payload(
+        subscription_id=subscription_id,
+        subscription_source=sub["subscription_source"],
+        collector=collector,
+        results={
+            "ddos_protection_plans": plans,
+            "virtual_networks": vnets,
+            "public_ip_addresses": ips,
+            "provider_registration_status": registration,
+            "excluded": excluded,
+        },
+        summary={
+            **summarize(plans, vnets, ips),
+            "provider_registration_status": registration,
+            **exclusions.summary(excluded, ("ddos_protection_plan", "virtual_network", "public_ip"), {
+                name: len(rows) if read[name] else None for name, rows in
+                (("ddos_protection_plans", plans), ("virtual_networks", vnets), ("public_ips", ips))}),
+        },
+    )
+
+    filename = f"azure_ddos_protection_{sanitize_for_filename(subscription_id or 'unknown')}.json"
+    path = write_evidence(output_dir, filename, evidence)
+
+    if not collector.ok:
+        report_failure(failure_reason(collector.failures), classify_failure_code(collector.failures))
+        return 1
+    logger.info("Evidence saved to %s", path)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

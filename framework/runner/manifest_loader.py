@@ -2,11 +2,11 @@
 
 import json
 from pathlib import Path
-from typing import List
+from typing import Any, Dict, List, Sequence
 
-import yaml
 from jsonschema import Draft202012Validator
 
+from framework import yaml_io
 from framework.contract import Manifest, ManifestEntry, PlatformConfig, TargetInstance
 
 
@@ -56,9 +56,39 @@ def parse_manifest(data: dict) -> Manifest:
             config=entry.get("config") or {},
             secrets=entry.get("secrets") or {},
             targets=targets,
+            paramify=entry.get("paramify") or {},
         ))
 
-    return Manifest(output_dir=output_dir, entries=entries, platforms=platforms)
+    return Manifest(output_dir=output_dir, entries=entries, platforms=platforms,
+                    paramify=run.get("paramify") or {})
+
+
+def entry_keys(entries: Sequence[ManifestEntry]) -> List[str]:
+    """A stable key per manifest entry: the fetcher name, with `#n` added to the
+    second and later entries that use the same fetcher (`aws_iam_mfa`, `aws_iam_mfa#1`)."""
+    seen: Dict[str, int] = {}
+    keys = []
+    for e in entries:
+        n = seen.get(e.use, 0)
+        seen[e.use] = n + 1
+        keys.append(e.use if n == 0 else f"{e.use}#{n}")
+    return keys
+
+
+def resolved_paramify(manifest: Manifest, entry: ManifestEntry) -> Dict[str, Any]:
+    """The `paramify` settings that apply to one entry: its own values win over the
+    manifest's. A key set in neither is absent.
+
+    `stack` and `stack_name` are a pair: the label comes only from the level that
+    set the stack, so an entry's own stack never takes the run-level label (that
+    would warn of a rename that never happened).
+    """
+    merged = {**manifest.paramify, **entry.paramify}
+    source = entry.paramify if "stack" in entry.paramify else manifest.paramify
+    merged.pop("stack_name", None)
+    if "stack" in source and "stack_name" in source:
+        merged["stack_name"] = source["stack_name"]
+    return merged
 
 
 def load_manifest(path: Path, repo_root: Path) -> Manifest:
@@ -66,7 +96,7 @@ def load_manifest(path: Path, repo_root: Path) -> Manifest:
 
     Raises ValueError if the file is schema-invalid.
     """
-    data = yaml.safe_load(path.read_text())
+    data = yaml_io.load_path(path)
     errors = schema_errors(data, repo_root)
     if errors:
         detail = "\n".join(f"  {e}" for e in errors)

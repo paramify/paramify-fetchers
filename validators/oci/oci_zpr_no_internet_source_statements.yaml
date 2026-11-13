@@ -1,0 +1,24 @@
+key: oci_zpr_no_internet_source_statements
+name: OCI No ZPR Statements Allowing the Internet as a Source
+type: AUTOMATED
+role: configuration
+statement: >
+  No parsed ZPR policy statement allows 0.0.0.0/0 or ::/0 to connect to
+  anything. Judged over statements the parser understood; an unparsed
+  statement is counted in unparsed_statements and never read as restrictive.
+  Does NOT assert anything about all-endpoints sources, unrestricted
+  destinations or missing protocol clauses, each counted separately in the
+  evidence. Pair with oci_zpr_enabled. Fails when any such statement exists,
+  and when the summary key is renamed.
+regex: '"statements_allowing_internet_source":\s*(?<statements_allowing_internet_source>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-OCI-ZPR

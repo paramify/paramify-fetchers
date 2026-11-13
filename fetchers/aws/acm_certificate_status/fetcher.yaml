@@ -1,5 +1,5 @@
 name: aws_acm_certificate_status
-version: 0.1.0
+version: 0.2.0
 description: For each ACM certificate in the target region, reports validation status, expiry (NotAfter / days remaining), key algorithm, renewal eligibility, and the resources currently using the certificate.
 category: aws
 
@@ -33,4 +33,4 @@ ksis:
 evidence_set:
   reference_id: EVD-ACM-CERT
   name: ACM Certificate Status
-  instructions: 'Script: fetcher.sh. Commands executed: aws acm list-certificates, aws acm describe-certificate.'
+  instructions: 'Script: aws/acm_certificate_status/fetcher.sh. Commands executed: aws acm list-certificates, aws acm describe-certificate.'

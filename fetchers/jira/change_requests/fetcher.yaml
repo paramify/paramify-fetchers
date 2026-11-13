@@ -1,0 +1,155 @@
+name: jira_change_requests
+version: 0.1.0
+description: >-
+  Collects the Jira tickets a change control board works from (change requests,
+  internal connection requests and configuration or traffic-policy exceptions):
+  CCB approver and approval time, change type and risk, deployment time, test and
+  security review results, watchers and comment counts, status history, and for
+  exceptions the expiry and last review date, with per-ticket findings such as
+  deployed without approval, approved after deployment, deployed with failed
+  tests, and exceptions open past expiry or overdue for review.
+category: jira
+
+supports_targets: false
+
+runtime:
+  type: python
+  entry: fetcher.py
+  timeout: 900
+
+output:
+  type: json
+  path: jira_change_requests.json
+
+# JIRA_EMAIL / JIRA_API_TOKEN / JIRA_BASE_URL are declared on the category.
+secrets: []
+
+config_schema:
+  jql:
+    type: string
+    required: true
+    env: JIRA_CHANGE_JQL
+    description: >-
+      JQL that selects the change, internal connection and exception tickets,
+      e.g. `project = CCB`. Include closed tickets.
+  field_names:
+    type: string
+    required: false
+    env: JIRA_CHANGE_FIELDS
+    description: >-
+      JSON object overriding the Jira field names looked up for each role. Keys:
+      change_type, risk, approver, approved_at, security_review, test_results,
+      deployed_at, exception_expiry, last_reviewed. Defaults: "Change Type",
+      "Change Risk", "CCB Approver", "CCB Approval Date", "Security Impact
+      Analysis", "Test Results", "Deployed At", "Exception Expiry", "Last
+      Reviewed" (the names used while building the fetcher, so a new site
+      usually needs its own). A value may also be a field id such as
+      customfield_10045, or several ids (comma-separated or a JSON list) when
+      team-managed projects each have their own copy of the field. An empty
+      value turns that role's checks off; metadata.checks_disabled lists the
+      findings that can then no longer be produced. Names that match no field,
+      or several fields, are listed in metadata.field_problems and fail the run
+      as partial; for several, metadata.field_candidates lists the ids to
+      choose from. Turning off approver or approved_at with no
+      approved_statuses is refused as bad_config.
+  approved_statuses:
+    type: string
+    required: false
+    env: JIRA_CHANGE_APPROVED_STATUSES
+    description: >-
+      Comma-separated status names that mean "approved by the CCB", for sites that
+      record approval as a workflow transition instead of approver fields.
+  preapproved_change_types:
+    type: string
+    required: false
+    env: JIRA_CHANGE_PREAPPROVED_TYPES
+    default: Standard
+    description: >-
+      Comma-separated change types that are pre-approved and need no CCB
+      approval. Set to an empty value when no change type is pre-approved
+      (required if the change_type field is turned off).
+  exception_issue_types:
+    type: string
+    required: false
+    env: JIRA_EXCEPTION_ISSUE_TYPES
+    default: Configuration Exception
+    description: Comma-separated issue types treated as exceptions.
+  connection_issue_types:
+    type: string
+    required: false
+    env: JIRA_CONNECTION_ISSUE_TYPES
+    default: Internal Connection
+    description: Comma-separated issue types treated as internal connection requests.
+  not_deployed_resolutions:
+    type: string
+    required: false
+    env: JIRA_NOT_DEPLOYED_RESOLUTIONS
+    default: Won't Do,Won't Fix,Cancelled,Canceled,Duplicate,Rejected,Declined
+    description: >-
+      Comma-separated resolutions of done tickets that were never deployed; such
+      tickets are reported as cancelled, not as deployed changes.
+  exception_review_days:
+    type: integer
+    required: false
+    env: JIRA_EXCEPTION_REVIEW_DAYS
+    default: 365
+    description: An open exception not reviewed within this many days is flagged.
+  max_items:
+    type: integer
+    required: false
+    env: JIRA_CHANGE_MAX_ITEMS
+    default: 2000
+    description: >-
+      Stop after this many tickets; hitting the cap fails the run as partial and
+      sets metadata.items_truncated.
+
+evidence_set:
+  reference_id: EVD-JIRA-CHANGE-REQUESTS
+  name: Jira Change Requests and CCB Approvals
+  instructions: >-
+    Script: jira/change_requests/fetcher.py. Basic auth (account email + API token) to the Jira Cloud
+    REST API v3; Browse Projects on the CCB project is enough. Reads GET
+    /rest/api/3/myself, resolves the configured field names and checks pinned
+    ids with GET /rest/api/3/field, reads the done-category statuses with GET
+    /rest/api/3/status, pages POST /rest/api/3/search/jql (summary, type, status,
+    created, resolutiondate, labels, components, issuelinks, watches, comment
+    count, and the resolved custom fields), and reads full status and custom
+    field history with POST /rest/api/3/changelog/bulkfetch. Approval is taken
+    from the approver and approval date fields, or from a transition into a
+    configured approved status (who last set the approval fields is kept as
+    approval_recorded_by). A change is deployed when its deployed-at field is
+    set or it is done with a resolution other than the not-deployed list;
+    deployment time is that field, else the first time it entered any
+    done-category status (last_done_at and reopened record a later move). A
+    date-only approval date is compared at day granularity: a later day is
+    approved_after_deploy, the same day is recorded as unknown
+    (approval_order_granularity: day) and never a finding. Findings per ticket:
+    approval_time_unparseable,
+    deployed_without_approval (pre-approved change types excepted),
+    approved_after_deploy, deployed_with_failed_tests,
+    deployed_without_passing_tests, connection_without_security_review,
+    connection_without_risk, deployed_without_notification_trail (no comments
+    and at most one watcher, since Jira makes the reporter a watcher; watcher
+    and comment counts show visibility, not who was notified),
+    exception_without_approval, exception_review_overdue,
+    exception_open_past_expiry. A finding is produced only when the field it
+    reads is turned on; metadata.checks_disabled lists the rest. A ticket whose
+    history read failed lists approval_unknown under unknown (never
+    deployed_without_approval) when approval is status-based, and
+    status_history_known is false. Changelog times are rendered in the
+    ticket's own UTC offset so they compare with date-only fields the way
+    field timestamps do. Summary counts are null, not zero, when the search
+    did not finish or hit the cap. metadata.partial_failure is true whenever
+    the run is incomplete (a failed call, a hit cap or an unresolved field).
+    Comment bodies are not collected. Output: jira_change_requests.json
+  description: >-
+    Change, internal connection and exception tickets with their CCB approval,
+    deployment, testing and review trail, evidencing that changes are approved
+    before deployment, recorded and visible to the board, and that exceptions are
+    approved, reviewed and closed when no longer needed.
+
+# The evidence supports change management (CMT-LMC). Exception and internal
+# connection tickets do not by themselves evidence the CNA KSIs about network
+# restriction, so those are not claimed here.
+ksis:
+  - KSI-CMT-LMC

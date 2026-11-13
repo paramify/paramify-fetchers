@@ -1,0 +1,98 @@
+name: oci_bastion_sessions
+version: 0.1.0
+description: >-
+  Shows whether each Bastion gives genuinely just-in-time access: its session lifetime, client allow-list and static jump hosts, plus the sessions opened through it.
+category: oci
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: oci_bastion_sessions.json
+  aggregation: per_target
+
+target_schema:
+  region:
+    type: string
+    required: false
+    env: OCI_REGION
+    description: >
+      Region to collect from, e.g. us-ashburn-1. Optional — omit to use the
+      credential's own region. Every list call here is regional, so a tenancy
+      subscribed to several regions needs one target per region;
+      metadata.regions_not_collected names any this run missed.
+  compartment_id:
+    type: string
+    required: false
+    env: OCI_COMPARTMENT_ID
+    description: >
+      Compartment OCID to collect from. Optional — omit to collect from the
+      tenancy root; set one target per compartment to fan out.
+  include_subcompartments:
+    type: boolean
+    required: false
+    default: true
+    env: OCI_INCLUDE_SUBCOMPARTMENTS
+    description: >
+      Walk compartments beneath the root as well. On by default — bastions are
+      created alongside the private subnets they serve, not in the tenancy root.
+  environment:
+    type: string
+    required: false
+    env: OCI_ENVIRONMENT
+    description: >
+      Deployment environment label (e.g. prod / preprod) written into the
+      evidence metadata. Optional — set per target for multi-compartment runs.
+
+secrets: []
+
+ksis:
+  - KSI-IAM-JIT
+  - KSI-IAM-ELP
+
+evidence_set:
+  reference_id: EVD-OCI-BASTION-JIT
+  name: Just-in-Time Administrative Access
+  instructions: |
+    Script: oci/bastion_sessions/fetcher.py
+
+    Access: inspect and read all-resources in the compartments in scope.
+
+    Commands Executed:
+    - identity.list_compartments — the compartments beneath the target
+    - bastion.list_bastions (per compartment) — bastions
+    - bastion.get_bastion (per bastion) — session lifetime, concurrent-session limit and client allow-list, which the listing leaves out
+    - bastion.list_sessions (per bastion) — the sessions opened through it
+    - identity.list_region_subscriptions — the regions this run did not cover
+
+    Output: oci_bastion_sessions_<compartment>_<region>.json — every bastion with its just-in-time settings and every session with its type, target and the operating-system account assumed.
+
+    Summary fields:
+
+    Which bastions exist?
+    - bastion_service_readable — True if the Bastion listing was read in at least one compartment; false if every listing failed, so the zeros below mean nothing was read
+    - total_bastions — Number of bastions
+    - active_bastions — Number of bastions in the ACTIVE state
+    - bastion_names — List of bastion names with the last characters of their OCID
+    - bastions_with_unreadable_detail — Number of bastions whose detail could not be read; their settings are unknown and they are left out of the settings counts below
+
+    Who may connect, and for how long?
+    - bastions_with_cidr_allow_list — Number of bastions (detail read) whose client allow-list excludes some of the internet
+    - bastions_open_to_any_client_ip — Number of bastions (detail read) whose allow-list is empty or covers the whole address space, which OCI treats as no restriction
+    - cidr_restriction_percentage — Percentage of bastions with a restricting allow-list = bastions_with_cidr_allow_list / bastions whose detail was read × 100, a whole number; 0 when none was read
+    - bastions_at_maximum_session_ttl — Number of bastions set to OCI's maximum session lifetime of 10800 seconds (3 hours)
+    - bastions_with_session_ttl_over_one_hour — Number of bastions whose maximum session lifetime exceeds 3600 seconds
+    - shortest_max_session_ttl_seconds — Number of seconds of the shortest maximum session lifetime across bastions; null when none was read
+    - longest_max_session_ttl_seconds — Number of seconds of the longest maximum session lifetime across bastions; null when none was read
+    - bastions_with_static_jump_hosts — Number of bastions with static jump host addresses, which is standing rather than just-in-time access
+
+    What sessions have been opened?
+    - total_sessions — Number of sessions recorded across all bastions
+    - active_sessions — Number of sessions in the ACTIVE or CREATING state
+    - sessions_by_type — List of session types in use (MANAGED_SSH, PORT_FORWARDING, DYNAMIC_PORT_FORWARDING)
+    - distinct_session_targets — Number of distinct target resources that sessions reached
+    - os_usernames_assumed — List of operating-system usernames assumed by managed SSH sessions

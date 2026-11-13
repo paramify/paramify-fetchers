@@ -29,7 +29,7 @@ _TARGET_ID="$(aws_target_id "$REGION")"
 OUTPUT_JSON="$OUTPUT_DIR/aws_network_firewall_rules_${_TARGET_ID}.json"
 _FETCHER_TMP_JSON="$(mktemp -t aws_network_firewall_rules.XXXXXX.json)"
 _FAILURE_LOG="$(mktemp -t aws_network_firewall_rules_fail.XXXXXX)"
-trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG"' EXIT
+trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG" "$_AWS_ERR_LOG"' EXIT
 
 log_info() { printf '%s INFO aws_network_firewall_rules %s\n' "$(date -u +'%Y-%m-%d %H:%M:%S')" "$*" >&2; }
 log_error() { printf '%s ERROR aws_network_firewall_rules %s\n' "$(date -u +'%Y-%m-%d %H:%M:%S')" "$*" >&2; }
@@ -103,13 +103,39 @@ else
                         echo "aws network-firewall describe-rule-group ($rg_arn) failed" >> "$_FAILURE_LOG"
                         continue
                     fi
-                    rg_data=$(echo "$rule_group" | jq '{
+                    # A stateful group's rules come from exactly one of three
+                    # sources, and before 0.2.0 only the first was counted, so a
+                    # group written in Suricata or as a domain list reported 0:
+                    #   StatefulRules   -- one rule per entry;
+                    #   RulesString     -- Suricata text: one rule per line that
+                    #                      is not blank or a # comment, after
+                    #                      joining backslash-continued lines;
+                    #   RulesSourceList -- a domain allow/deny list: one per
+                    #                      domain in Targets (AWS expands each
+                    #                      into a rule per TargetType; the
+                    #                      count is of domains, not of those).
+                    # StatefulRuleSource names which one was counted (null for
+                    # a stateless group or a group with no rules source).
+                    rg_data=$(echo "$rule_group" | jq '
+                        (.RuleGroup.RulesSource // {}) as $src
+                        | (if $src.StatefulRules != null then "StatefulRules"
+                           elif $src.RulesString != null then "RulesString"
+                           elif $src.RulesSourceList != null then "RulesSourceList"
+                           else null end) as $kind
+                        | {
                         "RuleGroupArn": .RuleGroupResponse.RuleGroupArn,
                         "RuleGroupName": .RuleGroupResponse.RuleGroupName,
                         "Type": .RuleGroupResponse.Type,
                         "Capacity": .RuleGroupResponse.Capacity,
-                        "StatefulRuleCount": (.RuleGroup.RulesSource.StatefulRules | length? // 0),
-                        "StatelessRuleCount": (.RuleGroup.RulesSource.StatelessRulesAndCustomActions.StatelessRules | length? // 0)
+                        "StatefulRuleCount": (
+                            if $kind == "StatefulRules" then ($src.StatefulRules | length)
+                            elif $kind == "RulesString" then
+                                [$src.RulesString | gsub("\\\\[ \t]*\r?\n"; " ") | split("\n")[]
+                                 | gsub("^\\s+|\\s+$"; "") | select(. != "" and (startswith("#") | not))] | length
+                            elif $kind == "RulesSourceList" then ($src.RulesSourceList.Targets // [] | length)
+                            else 0 end),
+                        "StatelessRuleCount": ($src.StatelessRulesAndCustomActions.StatelessRules | length? // 0),
+                        "StatefulRuleSource": $kind
                     }')
                     policy_data=$(echo "$policy_data" | jq --argjson rg "$rg_data" '.RuleGroups += [$rg]')
                 done
@@ -122,11 +148,4 @@ else
     done
 fi
 
-failure_count=$(wc -l < "$_FAILURE_LOG" 2>/dev/null | tr -d ' ')
-failure_count=${failure_count:-0}
-if [ "$failure_count" -gt 0 ]; then
-    log_error "Encountered $failure_count AWS API failures during collection"
-    exit 1
-fi
-
-log_info "Evidence saved to $OUTPUT_JSON"
+aws_finish

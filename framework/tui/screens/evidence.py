@@ -18,11 +18,12 @@ from textual import on
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
-from textual.widgets import Button, DataTable, Static
+from textual.widgets import Button, Static
 
 from framework import api
 from framework.issue_reports import ISSUE_REPORTS_DIR
 from framework.tui import palette
+from framework.tui.components.table import DataTable
 from framework.tui.modals import PreviewModal
 
 
@@ -164,7 +165,7 @@ class EvidencePage(Vertical):
             try:
                 text = api.preview_issue_report(p)
             except Exception as exc:
-                self.notify(f"Cannot read issue report: {exc}", severity="error", timeout=8)
+                self.notify(f"Cannot read scan report: {exc}", severity="error", timeout=8)
                 return
             self.app.push_screen(PreviewModal(text, title=p.name))
             return

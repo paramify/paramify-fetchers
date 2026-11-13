@@ -1,334 +1,295 @@
 ---
 name: suggest-validator
 description: >
-  Suggest a regex validator for a fetcher's evidence. Use after a fetcher has
-  been run against a real tenant and produced a populated evidence file — reads
-  that file, finds the field that proves the control is being implemented, and
-  proposes a regex (with an explanation and its failure modes) the user can use
-  as-is or refine into their own validator. Triggers on "suggest a validator",
-  "regex validator", "validate this evidence", "what regex proves this control".
-  Read-only: it writes nothing into the repo.
+  Author regex validators for a Paramify evidence set and record them in the
+  central validators/ registry. Works from real evidence — a local fetcher run,
+  or an artifact pulled from the workspace — and from the solution capability's
+  narrative, so the validators assert the claim an assessor actually reads
+  rather than whatever the payload happens to contain. Proposes candidate
+  assertions for the user to choose from, proves each one can fail, and writes
+  it to validators/<category>/<key>.yaml. Use this whenever the user mentions
+  validators, validating evidence, or proving a control — "suggest a
+  validator", "author a validator", "regex validator", "validate this
+  evidence", "what regex proves this control", "does this evidence prove the
+  control", "add a validator for this fetcher" — and also when they ask what
+  *could* be validated about an evidence file, which is this skill's Phase 3.
 ---
 
-# Suggest a Validator
+# Author a Validator
 
-This skill is the third beat in the fetcher lifecycle, after `create-fetcher`
-(build) and `wire-manifest` (run): once a fetcher has produced **real** evidence,
-it proposes a regex that asserts the evidence actually proves what it's supposed
-to. The output is a suggestion for the user — a starting point for the validator
-they'll attach in Paramify, not an artifact this repo stores or executes.
+The third beat in the fetcher lifecycle, after `create-fetcher` (build) and
+`wire-manifest` (run). Once real evidence exists, this authors the validators
+that assert it proves what it is supposed to, and records them in the registry.
 
-**Golden rules**
-- **Read-only.** This skill writes nothing — no files, no schema edits, no
-  manifest changes. Its entire job is: read one evidence file → propose a regex
-  → show it matching. The user takes the regex from here.
-- **It needs real, populated evidence.** A fake-cred smoke-test run (what
-  `create-fetcher` produces) yields an empty payload — empty lists, zeroed
-  counts. You cannot author a meaningful "proves the control" regex from that.
-  If the newest evidence looks empty, say so and stop (Phase 1).
-- **Anchor on the key name plus a value pattern**, never on byte position or
-  whitespace. `"completion_rate":\s*(?<completion_rate>100|[1-9][0-9])`, not a
-  brittle slice of pretty-printed JSON. Key ordering and indentation vary
-  between runs.
-- **Every suggestion ships with three lines: what it asserts, what it does NOT
-  assert, and when it (correctly) fails.** A regex without its failure mode is a
-  false sense of coverage.
-- **The regex runs over the evidence JSON file as written to disk** — i.e. the
-  envelope (`schema_version`+`metadata`+`payload`), since that's the file
-  Paramify's validator sees. So avoid anchor keys that collide with envelope
-  metadata (`fetcher_name`, `fetcher_version`, `category`, `run_id`, `target`,
-  `collected_at`, `status`, `exit_code`, `error`, `evidence_set`,
-  `schema_version`) unless you pin a payload-specific value too. The one
-  sanctioned exception is `exit_code` in a Phase 3b error rule, where the
-  envelope *is* the subject of the check.
+**The shape of the work:** establish three things — the evidence file, the
+narrative it is supposed to substantiate, and the control that narrative serves
+— then propose what could be asserted, let the user choose, and build only
+those. Phases 1–3 are an interview and should feel like one. Phases 4–6 are
+mechanical and each has a reference file.
 
----
+**Read these when you reach them, not before:**
 
-## Phase 0 — Locate the fetcher and its newest real evidence
+| File | When |
+|---|---|
+| `references/authoring.md` | Phase 4 — roles, rule forms, the regex engine |
+| `references/proving.md` | Phase 5 — case files and the three directions |
+| `references/registry.md` | Phase 6 — file layout, naming, sync |
 
-1. **Which fetcher?** The one the user just tested, or a name they give.
-   `paramify list` shows discovered fetchers if
-   unsure. Read its `fetchers/<category>/<short_name>/fetcher.yaml` — you need its
-   `evidence_set` and `description` in Phase 2.
+Two bundled scripts save re-deriving the same thing every run:
+`scripts/find_evidence.py` (Phase 1) and `scripts/score_evidence.py` (Phase 5).
 
-2. **Find the newest successful evidence file.** Evidence lands under
-   `evidence/run-<timestamp>/<fetcher_name>*.json` (fanout fetchers write one
-   file per target: `<fetcher_name>_<target>.json`). Run dir names sort
-   chronologically, so newest = last:
-   ```bash
-   .venv/bin/python - <<'PY'
-   import json, glob
-   FETCHER = "<fetcher_name>"            # e.g. knowbe4_module_based_summary
-   for path in sorted(glob.glob(f"evidence/run-*/{FETCHER}*.json"), reverse=True):
-       meta = json.load(open(path)).get("metadata", {})
-       print(f'{meta.get("status","?"):8s} {path}')
-   PY
-   ```
-   Pick the newest with `status: success`. For a fanout fetcher, pick one
-   representative file (the largest is usually the most populated) and note the
-   sibling target files share its shape.
+## Golden rules
 
-3. **No evidence at all?** If nothing matches, the fetcher hasn't been run yet.
-   Stop and route the user to run it first (`wire-manifest` → `paramify run`),
-   against a **real tenant** — this skill has nothing to read without that.
+- **One control needs a validator *set*, not a validator.** An evidence set
+  passes only when every validator on it passes, so the work is deciding which
+  two or three assertions cover the claim.
+- **It needs real, populated evidence.** A fake-cred smoke test (what
+  `create-fetcher` produces) yields an empty payload, and you cannot author a
+  meaningful "proves the control" regex from that.
+- **Uncountable must never read as zero.** The costliest failure and the
+  hardest to see: a validator that concludes compliance from a *count* reads a
+  renamed upstream key as zero violations, and therefore as compliant. Every
+  count-based assertion needs something proving the field was there to count.
+- **Every validator ships with three things: what it asserts, what it does NOT
+  assert, and when it correctly fails.** A regex without its failure mode is a
+  false sense of coverage. The first two go in `statement`; the third is
+  Phase 5.
 
 ---
 
-## Phase 1 — Confirm the evidence is real (not empty / not a smoke test)
+## Phase 1 — Which evidence, and where is it
 
-Before reading for content, sanity-check the payload isn't hollow. Scan it: if
-every list is empty and every numeric summary value is `0`, it's almost
-certainly a smoke-test or empty-tenant run.
+**Ask what the validators are for before hunting for files.** A fetcher name, a
+control, an evidence set reference — any of those narrows the search. Hunting
+first means sifting hundreds of files with no way to tell which one matters.
+
+Then resolve it, in this order:
+
+**1a. Local runs first.** This is the evidence the user just produced, it is
+already gitignored, and it costs nothing to read.
 
 ```bash
-.venv/bin/python - <<'PY'
-import json
-d = json.load(open("<path>"))
-p = d.get("payload", d)
-def signal(o):
-    if isinstance(o, dict):  return any(signal(v) for v in o.values())
-    if isinstance(o, list):  return len(o) > 0 and any(signal(x) for x in o)
-    if isinstance(o, (int, float)): return o != 0
-    if isinstance(o, str):   return bool(o.strip())
-    return False
-print("HAS DATA" if signal(p) else "LOOKS EMPTY — stop and ask the user to re-run against a populated tenant")
-PY
+python .claude/skills/suggest-validator/scripts/find_evidence.py <fetcher_name>
 ```
 
-- **LOOKS EMPTY:** stop. Tell the user the regex would be guesswork without real
-  data, and that they should run once against a tenant that actually has the
-  thing being measured (users with MFA, completed trainings, encrypted buckets).
-- **HAS DATA:** continue — but treat this as triage, not proof. This check is
-  coarse: **static descriptive fields can mask empty measurements.** A payload
-  that carries a control name, a `ksi` string, or a `related_controls` list will
-  read as HAS DATA even if every *measured* value (the MFA percentages, the
-  enabled-counts) is empty or zero. (The okta smoke-test payloads do exactly
-  this.) So the authoritative emptiness check is field-specific and
-  happens once you've picked the critical field (Phase 2) and run the match
-  (Phase 4): if your chosen metric matches **0 times** on a `success` run, the
-  evidence is empty *for that metric* — loop back here and ask for a populated
-  run.
-- A genuinely-zero tenant is possible and valid — if the user confirms the zeros
-  are real, you can still propose a presence regex, but say plainly it can't
-  assert a non-zero posture.
+Newest first, with the run status and whether the payload carries any measured
+value. Pick the newest `success` that looks populated. For a fanout fetcher
+(one file per target) take the largest as representative and note the siblings
+share its shape.
 
----
+**1b. The workspace, when nothing local fits.** Some evidence this repo never
+produced — a customer upload, another team's fetcher — and it is only readable
+from Paramify:
 
-## Phase 2 — Identify the critical field
-
-The "critical field" is the one whose presence (and value) demonstrates the
-control is **being implemented** — not just that the fetcher ran. Let the
-evidence's *intent* guide the pick:
-
-1. **What is this evidence supposed to prove?** Read `fetcher.yaml`'s
-   `description` and `evidence_set.name`/`.instructions`. Many fetchers name their
-   KSI directly in the description (e.g. `KSI-IAM-APM`, `KSI-CMT-VTD`); some
-   payloads even carry `ksi`/`related_controls` inline (the okta ones do). That
-   intent tells you which number matters.
-
-2. **Pick the anchor, preferring the strongest signal available:**
-   - **(a) A rollup metric that quantifies posture** — a rate, percentage, or
-     count. Strongest, because a non-zero value means the control is working, not
-     merely configured. *Examples in this repo:*
-     `payload.results.summary.training_module_summary.<module>.completion_rate`
-     (knowbe4); `payload.summary.phishing_resistant_mfa_percentage` (okta).
-   - **(b) A status/enum whose value denotes compliance** — `"status":"Passed"`,
-     `"enabled":true`, `"StorageEncrypted":true`. Good when there's no rollup.
-   - **(c) Presence of a non-empty list of the key entity** — weakest; proves
-     "we found some" but says nothing about coverage. Use only as a fallback.
-
-3. **Avoid trivially-true and colliding anchors.** Skip keys that are present in
-   every run regardless of posture, and skip envelope-metadata keys (see the
-   golden rule) unless you pin a payload-specific value. Note that `"status"`
-   appears in *both* envelope metadata (`"success"`) and some payloads
-   (`"Passed"`) — anchoring on the key+value disambiguates.
-
-If two fields are equally defensible, present both and let the user choose —
-don't agonize.
-
----
-
-## Phase 3 — Build the regex(es)
-
-Construct a **presence** regex (matches the upstream "verify the critical field
-exists" model) and, when a value carries meaning, a stronger **value/threshold**
-variant. Rules:
-
-- Anchor on the key: `"<key>"\s*:\s*<value-pattern>`.
-- Be whitespace-tolerant (`\s*`) so pretty- vs compact-printing both match.
-- Non-zero count/percent (1–100): `(?:100|[1-9][0-9]?)`. Any positive int:
-  `[1-9][0-9]*`. High-only (≥90): `(?:100|9[0-9])`.
-- Boolean/enum: `true`, or `"Passed"` — pin the *compliant* value.
-- Non-empty array of objects: `"<key>"\s*:\s*\[\s*\{` (note in the explanation
-  that this one is the most formatting-sensitive).
-- **Paramify's validator engine is ECMAScript (JavaScript) regex** — write for
-  that flavor. The `g` and `s` flags are applied automatically; `m` is not, so
-  `^`/`$` match the whole document and you should span lines with `[\s\S]*?`.
-  The common constructs (`\s`, `(?:…)`, classes, lookaheads) are identical in
-  Python and JS, so most patterns port cleanly — but **named groups do not**:
-  JS uses `(?<name>…)`, Python uses `(?P<name>…)`, and each fails to compile in
-  the other. Always emit `(?<name>…)`.
-- **Name every capture group.** `(?<alb_total_count>\d+)` is self-documenting
-  where a bare `(\d+)` forces the reader to count parentheses. Derive the name
-  from the key being captured, in `snake_case` (`BackupRetentionPeriod` →
-  `backup_retention_period`); names must be unique within one pattern.
-  Naming does **not** renumber anything — `(?<x>…)` is still group 1 — so
-  Paramify's rule table, which references groups by number, is unaffected.
-  (Adding the Phase 3b error anchor *does* shift the numbers, because it puts a
-  group in front of yours — see that section.)
-
-**Worked example (from a populated knowbe4 run — `evidence/` is gitignored, so
-this is the shape to copy, not a file you can open):**
-
-> Presence: `"completion_rate"\s*:\s*(?<completion_rate>100|[1-9][0-9])`
-> - **Asserts:** a `completion_rate` of 10–100 exists — real, non-zero training
->   completion data was returned.
-> - **Does NOT assert:** a coverage threshold across all modules; just that one
->   meaningful rate is present.
-> - **Fails when:** the payload is empty, all rates are single-digit, or the
->   field is absent — exactly the "evidence doesn't prove the control" case.
->
-> Stronger: `"completion_rate"\s*:\s*(?<completion_rate>100|9[0-9])` requires ≥90%.
-> Alternative anchor: `"status"\s*:\s*"(?<enrollment_status>Passed)"` proves ≥1
-> passing completion (simpler, weaker — silent on coverage).
-
-Tailor the same pattern to the fetcher in front of you.
-
----
-
-## Phase 3b — Add an error state (recommended)
-
-Paramify validation rules carry a **disposition** of Pass, Fail, or **Error**.
-The distinction matters: a Fail means the evidence was collected and the control
-looks bad; an Error means the evidence never arrived, so compliance is *unknown*.
-Without an Error rule, an expired token or a network timeout is indistinguishable
-from a real compliance failure — the fetcher returns no payload, the regex finds
-nothing, and the artifact reports Fail.
-
-**The envelope already carries the signal.** `wrap_outputs` sets
-`"status": "success" if exit_code == 0 else "failed"`, so `status` and
-`exit_code` are perfectly redundant — anchor on `exit_code` alone. It is numeric,
-appears once in the envelope, and avoids the `status` key collision (the
-envelope says `failed` while a payload may say `error` — two different
-vocabularies for the same event).
-
-The envelope contributes only that one `exit_code`, but a fetcher that wraps a
-subprocess can serialize its own into the payload. Confirm the Phase 4 match
-count is exactly 1 before trusting the rules below: Rule 01 only fires on *zero*
-matches, so a second `exit_code` reads as healthy while Match Group 1 silently
-binds to whichever match comes first.
-
-Build the pattern as **the error anchor first, then the compliance pattern in an
-optional group**, so it matches exactly once whether or not the payload arrived:
-
-```
-"exit_code":\s*(?<exit_code>-?\d+)(?:[\s\S]*?<your Phase 3 pattern>)?
+```bash
+paramify artifacts list                     # every evidence set + artifact count
+paramify artifacts list EVD-FOO             # that set's artifacts, newest first
+paramify artifacts pull EVD-FOO             # -> ./evidence/pulled/, gitignored
 ```
 
-Suggested rules (Paramify evaluates Error rules first, then Fail, then Pass —
-so an error short-circuits the compliance rules regardless of Index order):
+`pull` reports whether what landed is **enveloped**. If it is not, stop and say
+so: a workspace holds PDFs, screenshots and spreadsheets, and a regex validator
+authored against one is authored against a shape this repo does not produce.
+What you pulled is real workspace evidence — it stays out of commits and out of
+case files.
 
-| Index | Operation | Criteria | Value | Disposition |
-|-------|-----------|----------|-------|-------------|
-| 01 | Match Count | Equals | `0` | Error |
-| 02 | Match Group 1 (`exit_code`) | Not Equals | `0` | Error |
-| 03+ | Match Group 2+ (your Phase 3 group(s)) | … | … | Pass |
+**1c. A path from the user, when neither works.** Ask for a path, not a paste:
+evidence payloads run to thousands of lines and pasting real tenant data into
+the conversation is the thing Phase 5 forbids for case files.
 
-**The anchor renumbers your groups.** `exit_code` takes group 1, so the Phase 3
-groups shift up — the first one you named is now group 2. A rule you already
-wrote against group 1 will read the exit code instead of your evidence field, so
-renumber those rules when you adopt this pattern. The Phase 4 snippet prints
-`m.groups` in pattern order, so — with every group named, as Phase 3 requires —
-the Nth entry is group N. Read the numbering off that instead of counting
-parentheses.
+**Nothing anywhere?** The fetcher has not been run. Route the user to
+`wire-manifest` → `paramify run` against a **real tenant** and stop — this
+skill has nothing to read without that.
 
-Rule 01 is the **drift canary**. Because the compliance half is optional, a
-well-formed envelope always yields exactly one match — so zero matches means the
-`exit_code` anchor itself is gone (envelope restructured, file truncated, wrong
-artifact). That case would otherwise pass silently, since a Match Group rule with
-nothing to read does not fail. Rule 01 turns that silence into an Error.
+### Before reading further: is it actually populated?
 
-**Do not pin `schema_version`.** It reads like prudent version-safety but fails
-in the dangerous direction: a bump to `2.0` that leaves `exit_code` untouched
-would stop the pattern matching entirely, and a zero-match validator passes
-silently rather than erroring. Rule 01 gives strictly better coverage — it fires
-on *any* structural change that breaks the anchor, not just a version bump, and
-it fails loudly. If a workspace wants an explicit envelope-contract check, that
-belongs in one dedicated validator applied across all fetcher evidence sets, not
-duplicated into every per-fetcher validator.
+The script's verdict is triage and it is wrong in **both** directions.
 
-Note this is the one sanctioned exception to the envelope-key golden rule:
-anchoring on `exit_code` is deliberate, because here the envelope *is* the
-subject of the check.
+- **False "populated": static descriptive fields mask empty measurements.** A
+  payload carrying a control name, a `ksi` string, or a `related_controls` list
+  reads as full even when every *measured* value is zero. The authoritative
+  check is field-specific and happens in Phase 5: if your chosen metric matches
+  **0 times** on a `success` run, the evidence is empty *for that metric*.
+- **False "HOLLOW": some fetchers are inverted, where empty IS compliant.**
+  Findings-style fetchers — access analyzer, guard duty, vulnerability scanning
+  — report problems. Zero findings means the control is working. **Do not stop
+  on these.** The population you must prove non-empty is the *scanner*, not the
+  findings: that an analyzer exists and is `ACTIVE`, that the findings array is
+  present.
+
+A genuinely-zero tenant is valid. If the user confirms the zeros are real, you
+can still author a presence assertion — but say plainly it cannot assert a
+non-zero posture.
 
 ---
 
-## Phase 4 — Show it matching, then hand it over
+## Phase 2 — What is this supposed to prove
 
-1. **Prove the regex hits the real file.** Verify in **Node**, not Python —
-   Paramify runs ECMAScript, so testing in the target flavor is what makes the
-   check meaningful (and `(?<name>…)` will not compile under Python `re` at all).
-   Avoid `grep -P`; BSD grep on macOS lacks it.
-   ```bash
-   node -e '
-   const fs = require("fs");
-   const t = fs.readFileSync("<path>", "utf8");
-   const re = new RegExp(String.raw`<your regex>`, "gs");
-   let m, n = 0;
-   while ((m = re.exec(t)) !== null) {
-     if (n < 5) console.log("match:", m.groups ?? m[0].slice(0, 80));
-     n++;
-   }
-   console.log(n + " match(es)");
-   '
-   ```
-   The `gs` flags mirror Paramify, which applies `g` and `s` automatically.
-   A non-zero match count on real evidence = the suggestion works. If it matches
-   **0 times on a `success` run**, the evidence is empty for this metric (Phase 1
-   triage missed it because static fields masked the emptiness) — go back to
-   Phase 1 and ask the user for a populated run.
+Evidence on its own does not tell you what matters in it. A payload has fifty
+fields; two of them bear on the control. The narrative is what separates them.
 
-   **Test both directions.** A regex that only ever matches proves nothing — run
-   it against a payload that *should* fail (an empty smoke-test file of the same
-   fetcher, or a copy with the key value edited below threshold). What failure
-   looks like depends on which pattern you built:
+**2a. The solution capability, from the workspace.** A capability carries the
+narrative an assessor reads — the claim the evidence substantiates:
 
-   - **A plain Phase 3 pattern** drops to **0 matches**.
-   - **A Phase 3b pattern still matches once.** The compliance half is optional —
-     that is exactly what Rule 01's canary depends on — so the count stays 1 and
-     the *group* carries the signal: the snippet prints `{"exit_code":"0"}` with
-     your compliance name absent from the object. Do **not** "fix" this by
-     removing the optional wrapper; that deletes the canary and makes a missing
-     envelope indistinguishable from a missing metric.
+```bash
+paramify capabilities list --family "Audit"     # narrow by family or subfamily
+paramify capabilities show "Audit Logging Criteria"
+```
 
-   If you added a Phase 3b error rule, also run it against a `failed` run and
-   confirm `exit_code` captures non-zero. That contrast is what makes it a
-   validator and not just a field-finder.
+`show` prints the written narratives. That sentence is the input to Phase 3.
 
-2. **Hand over the regex, the explanation, and the boundary.** State plainly:
-   this is a *suggested* validator derived from one evidence sample — use it
-   as-is or as a starting point, and confirm it against more runs and against
-   Paramify's regex engine. The repo neither stores nor enforces it.
+**The capability → evidence set link is not readable** — it is write-only in
+the API — so nothing can tell you which capability a set belongs to. Show the
+user the candidates and let them pick. If the capability has no narrative
+written yet, say so: there is no claim to validate against, and asserting
+something plausible instead is how a validator ends up proving the wrong thing.
+
+**2b. A Paramify export, when the API is not reachable.** Ask the user to
+attach or point at their export and read the capability from there.
+
+**2c. The control itself.** `GET /projects/{id}/control-implementations`
+returns control *ids* only (`3.1.1 a.`), not text, so the text comes from:
+
+1. `framework/reference/ksis.yaml` for FedRAMP 20x KSIs — in the repo,
+   authoritative, no network.
+2. The fetcher's own `ksis:` and `evidence_set.instructions` in
+   `fetchers/<category>/<name>/fetcher.yaml`.
+3. Web search, last — for an unfamiliar framework. **Show the user what you
+   found and have them confirm it** before it informs a single regex. A
+   hallucinated or wrong-revision control text produces a validator that is
+   confidently wrong, and nothing downstream catches it.
+
+**2d. Establish the polarity out loud.** Does more data mean better posture, or
+worse? A coverage rate or an enabled flag is *normal* polarity: higher and
+present is compliant. Findings, violations and exposures are *inverted*: zero
+is compliant and a non-empty list is the failure. Getting this backwards
+produces a validator that is exactly wrong and reads as plausible either way.
+
+---
+
+## Phase 3 — Propose, then let the user choose
+
+You now have the evidence, the narrative, and the control. Lay out what *could*
+be asserted and let the user pick — this is the step that decides what gets
+built, and it is theirs to make.
+
+Present each candidate as: **what it asserts**, **the field it reads**, and
+**why it bears on the narrative**. One or two lines each. Something like:
+
+> 1. **Every bucket is encrypted** — `payload.results.summary.encryption_percentage`
+>    is 100. Directly substantiates "data at rest is encrypted"; fails the
+>    moment one bucket is created without it.
+> 2. **No bucket is publicly readable** — zero matches for `"isPublic": true`.
+>    The narrative claims access is restricted, and a public bucket contradicts
+>    it regardless of encryption.
+> 3. **The collection succeeded** — `exit_code` is 0. Not a compliance claim;
+>    it stops a failed collection from reading as a clean verdict.
+
+Rank them by how directly they bear on the narrative, and say which ones you
+would pick and why. Note what each one does *not* cover — that gap is what the
+next candidate in the list is for.
+
+**Prefer the strongest anchor available:**
+
+- **(a) A rollup metric** — a rate, percentage or count. Strongest, because a
+  non-zero value means the control is *working*, not merely configured.
+- **(b) A status or enum whose value denotes compliance** — `"status":"ACTIVE"`,
+  `"enabled":true`. Good when there is no rollup.
+- **(c) A count of violations that must be zero** — the only option for
+  inverted polarity, and the only way to assert something about *every* item in
+  a list. Carries the counting trap; Phase 4 handles it.
+
+Skip anchors that are trivially true — keys present in every run regardless of
+posture — and flag any candidate you are proposing only because it is easy to
+match. Two well-chosen assertions beat five that cannot fail.
+
+Then build only what the user picks.
+
+---
+
+## Phase 4 — Build the set
+
+**Read `references/authoring.md` now.** It has the three roles
+(`completeness` / `configuration` / `integrity`), the two rule forms and when
+each needs an integrity partner, and the regex engine's real behaviour —
+ECMAScript not Python, `MATCH_GROUP` reads the first match only, and why the
+collection-health guards are written positively.
+
+---
+
+## Phase 5 — Prove it, in three directions
+
+**Read `references/proving.md` now.** Write the case files, then run
+`paramify validators check --select <key>`. Stop on any failure.
+
+The three directions are compliant (it passes), non-compliant (it fails), and
+**key renamed** (it does not pass). The third is the one that gets skipped and
+the one the whole phase exists for.
+
+**Then run it against the real evidence, and report the result.**
+
+```bash
+python .claude/skills/suggest-validator/scripts/score_evidence.py <evidence.json>
+```
+
+With no `--select` it runs every validator whose `evidence_sets` matches the
+set the file names — the same set Paramify would apply — and prints each rule's
+two sides and whether it held. A FAIL here is a legitimate outcome — the tenant may genuinely not meet the
+narrative, and saying so is the point of the exercise. But that reading is only
+available when the synthetic compliant case passes:
+
+- synthetic compliant PASSes, real evidence FAILs → the tenant is
+  non-compliant. Report it as a finding.
+- synthetic compliant FAILs → the validator is broken. It cannot pass on a
+  hand-built good artifact, so it is not measuring what it claims.
+
+Without that discriminator, "the evidence doesn't meet the narrative" becomes
+the excuse that ships a bad regex.
+
+---
+
+## Phase 6 — Record it, and hand back
+
+**Read `references/registry.md` now** for the file layout, the naming rules,
+reuse-before-you-create, and the registry gate
+(`pytest tests/test_validators_registry.py -q`).
+
+When you hand back, report for each validator: its key, its role, what it
+asserts, and when it correctly fails. Say plainly that these are derived from
+one evidence sample — templates to confirm against more runs.
+
+**Syncing is a separate, explicit step and the user's call.**
+`paramify validators sync` writes to a live workspace, often production. Offer
+it; do not run it as the closing move of an interview.
 
 ---
 
 ## Anti-patterns
 
-- Authoring a regex from an empty/smoke-test payload (Phase 1 exists to stop
-  this) — it'll match nothing real or, worse, match the always-present zeros.
-- Anchoring on byte offsets or exact whitespace instead of `"key"\s*:\s*value`.
-- Handing over a regex without its failure mode — a validator that can't fail
-  proves nothing.
-- Anchoring on an envelope-metadata key (`status`, `category`, `name`, …) without
-  pinning a payload value, so it matches the wrapper instead of the evidence.
-  (`exit_code` in a Phase 3b error rule is the deliberate exception.)
-- Emitting Python-flavored syntax — `(?P<name>…)` is a hard compile error in
-  Paramify's ECMAScript engine. Use `(?<name>…)`.
-- Leaving capture groups unnamed, or pinning `schema_version` for
-  version-safety — see Phase 3b for why that fails silently.
-- Handing over a compliance regex with no Error rule, so a failed collection
-  reports as a compliance Fail and hides the real problem.
-- Writing anything to disk or to `fetcher.yaml`. This skill only reads and
-  suggests; the validator's home is Paramify, decided by the user.
-- Demonstrating the match with `grep -P` (unavailable on macOS) or with Python
-  `re` (wrong flavor) — use Node so the shown match reflects Paramify's engine.
+- **Hunting for evidence before asking what it is for.** Phase 1 sifts hundreds
+  of files with no criterion otherwise.
+- **Authoring against the fetcher description instead of the narrative.** The
+  description says what was collected; the narrative says what it must prove.
+  They are not the same, and only one of them is what an assessor reads.
+- **Asking the user to paste an evidence file.** Ask for a path.
+- **Taking a web-searched control text as authoritative** without showing the
+  user. Wrong-revision control text produces a confidently wrong validator.
+- **Authoring against a non-enveloped artifact** pulled from the workspace — a
+  PDF or a screenshot is not a shape a regex validator can read.
+- **Concluding compliance from a count without proving the counted field
+  exists.** Invisible in review, because the validator looks and tests fine.
+- **Stopping on "looks empty" for a findings-style fetcher**, where zero
+  findings is the compliant state. Check the polarity first.
+- **Getting the polarity backwards** — asserting a findings list is non-empty,
+  or that a coverage rate is merely present.
+- **Using `MATCH_GROUP` to assert something about every item in a list.** It
+  reads the first match only; invert to a violation count.
+- **Emitting Python-flavored syntax** — `(?P<name>…)` is a hard compile error
+  in ECMAScript. Use `(?<name>…)`.
+- **Building the whole set before showing the user the options.** Phase 3 is
+  the user's decision, not a formality to narrate after the fact.
+- **Handing over a validator without its failure mode,** or without running
+  directions 2 and 3. A validator that cannot fail proves nothing.
+- **Copying a validator to a second file** because it applies to a second
+  evidence set. Add the `reference_id` to the existing file's `evidence_sets`.
+- **Syncing on your own initiative.** It writes to a live workspace.

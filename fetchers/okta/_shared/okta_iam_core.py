@@ -134,6 +134,23 @@ def lookup_aaguid_model_name(aaguid: str) -> str:
     return AAGUID_MODEL_NAMES.get(aaguid, f"Unknown Model ({aaguid})")
 
 
+def account_list_from_env(var_name: str) -> List[str]:
+    """Read a comma- or newline-separated list of Okta logins/emails from an env var.
+
+    Some collectors accept an explicit list of accounts to treat as service
+    accounts or Super Admins, for tenants whose Okta configuration does not make
+    that discoverable on its own (no userType=Service, admin role granted outside
+    a group, and so on). Those lists are tenant-specific, so they are configured
+    per run and never hardcoded here. Empty is the correct default -- the
+    name-independent detection methods stand on their own.
+
+    Returns the entries lowercased, ready to compare against a profile's
+    email/login.
+    """
+    raw = os.getenv(var_name, "")
+    return [entry.strip().lower() for entry in raw.replace("\n", ",").split(",") if entry.strip()]
+
+
 class OktaAPIClient:
     """
     Okta API Client based on official documentation.
@@ -1334,12 +1351,10 @@ class OktaIAMEvidenceFetcher:
                 except Exception:
                     pass
         
-        # Known service account emails (explicitly identified - for backward compatibility)
+        # Service accounts the tenant declares explicitly (OKTA_KNOWN_SERVICE_ACCOUNTS).
         # NOTE: This method is name-dependent and should be phased out in favor of
         # more reliable methods like userType, API tokens, OAuth clients, etc.
-        known_service_accounts = [
-            "infosec@paramify.com"  # Explicitly known service account
-        ]
+        known_service_accounts = account_list_from_env("OKTA_KNOWN_SERVICE_ACCOUNTS")
         
         # Analyze each user for definitive service account indicators only
         print("  → Analyzing users for definitive service account indicators...")
@@ -1377,9 +1392,9 @@ class OktaIAMEvidenceFetcher:
                 indicators.append("service_account_group_member")
                 is_service_account = True
             
-            # Method 5: Known service account emails (for backward compatibility)
+            # Method 5: Service accounts named in OKTA_KNOWN_SERVICE_ACCOUNTS
             # NOTE: This is name-dependent and should be phased out. Consider setting userType=Service instead.
-            if email in [e.lower() for e in known_service_accounts] or login in [e.lower() for e in known_service_accounts]:
+            if email in known_service_accounts or login in known_service_accounts:
                 indicators.append(f"known_service_account={email or login}")
                 is_service_account = True
             
@@ -1811,20 +1826,18 @@ class OktaIAMEvidenceFetcher:
         admins = []
         admin_user_ids = set()
         
-        # Known Super Admin emails (for explicit checking)
-        known_super_admin_emails = [
-            "isaac.teuscher@paramify.com",
-            "mike@paramify.com"
-        ]
+        # Super Admins the tenant declares explicitly (OKTA_KNOWN_SUPER_ADMINS).
+        known_super_admin_emails = account_list_from_env("OKTA_KNOWN_SUPER_ADMINS")
         
-        # Method 0: Explicitly check known Super Admin emails
-        print("      Method 0: Explicitly checking known Super Admin emails...")
+        # Method 0: Explicitly check the configured Super Admin logins
+        if known_super_admin_emails:
+            print(f"      Method 0: Explicitly checking {len(known_super_admin_emails)} configured Super Admin login(s)...")
         for user in all_users:
             email = user.get("profile", {}).get("email", "").lower()
             login = user.get("profile", {}).get("login", "").lower()
             
-            if email in [e.lower() for e in known_super_admin_emails] or login in [e.lower() for e in known_super_admin_emails]:
-                print(f"        ✓ Found known Super Admin: {email or login}")
+            if email in known_super_admin_emails or login in known_super_admin_emails:
+                print(f"        ✓ Found configured Super Admin: {email or login}")
                 try:
                     # Get full user details
                     user_detail = self.client.get_user(user["id"])
@@ -2187,11 +2200,12 @@ class OktaIAMEvidenceFetcher:
             email = user.get("profile", {}).get("email", "").lower()
             status = user.get("status", "unknown")
             is_admin = "✓ ADMIN" if user["id"] in admin_user_ids else ""
-            is_super = "⭐ SUPER ADMIN" if email in [e.lower() for e in known_super_admin_emails] or login in [e.lower() for e in known_super_admin_emails] else ""
+            is_super = "⭐ SUPER ADMIN" if email in known_super_admin_emails or login in known_super_admin_emails else ""
             print(f"          - {login} ({status}) {is_admin} {is_super}")
         
-        # Highlight known Super Admins
-        print(f"\n      ⭐ Known Super Admins (Isaac & Mike):")
+        # Highlight the configured Super Admins
+        if known_super_admin_emails:
+            print(f"\n      ⭐ Configured Super Admins:")
         for email in known_super_admin_emails:
             found = any(
                 user.get("profile", {}).get("email", "").lower() == email.lower() or
@@ -2244,8 +2258,8 @@ class OktaIAMEvidenceFetcher:
             is_super_admin = (
                 is_super or
                 admin_type == "SUPER_ADMIN" or
-                email in [e.lower() for e in known_super_admin_emails] or
-                login in [e.lower() for e in known_super_admin_emails]
+                email in known_super_admin_emails or
+                login in known_super_admin_emails
             )
             
             # Check if Read-Only Admin

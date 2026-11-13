@@ -26,6 +26,7 @@ from azure_common import (  # noqa: E402
     NOT_REGISTERED,
     REGISTRATION_UNKNOWN,
     Collector,
+    arm_client_kwargs,
     build_payload,
     classify_failure_code,
     coverage_percentage,
@@ -33,12 +34,13 @@ from azure_common import (  # noqa: E402
     failure_reason,
     model_attr,
     provider_registration_status,
+    report_failure,
     resolve_subscription,
     resource_group_from_id,
     sanitize_for_filename,
     write_evidence,
-    write_status,
 )
+from resource_exclusions import ResourceExclusions  # noqa: E402
 
 logger = logging.getLogger("azure_disk_encryption_status")
 
@@ -234,7 +236,11 @@ def summarize(disks: list[dict]) -> dict:
 
 # --- collection (lazy azure imports) ---
 
-def collect_disks(subscription_id, cred, collector: Collector) -> list[dict]:
+KINDS = ("disk",)
+
+
+def collect_disks(subscription_id, cred, collector: Collector, exclusions: ResourceExclusions | None = None,
+                  excluded: list | None = None) -> list[dict] | None:
     """One subscription-wide disks.list().
 
     The list response carries the whole projection (no per-disk GET needed) and is an
@@ -246,17 +252,21 @@ def collect_disks(subscription_id, cred, collector: Collector) -> list[dict]:
     def _client():
         from azure.mgmt.compute import ComputeManagementClient  # lazy
 
-        return ComputeManagementClient(credential=cred, subscription_id=subscription_id)
+        return ComputeManagementClient(credential=cred, subscription_id=subscription_id, **arm_client_kwargs())
 
     client = collector.guard("compute.ComputeManagementClient (init)", _client)
     if client is None:
-        return []
+        return None
 
     disks = collector.guard(
         "compute.disks.list",
         lambda: [disk_record(project_disk(d)) for d in client.disks.list()],
-        default=[],
     )
+    if disks is None:
+        return None
+    disks, out = (exclusions or ResourceExclusions()).split(disks, "disk")
+    if excluded is not None:
+        excluded += sorted(out, key=lambda e: e["id"] or "")
     return sorted(disks, key=lambda r: r.get("id") or "")
 
 
@@ -277,7 +287,9 @@ def main() -> int:
     subscription_id = sub["subscription_id"]
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
-    disks: list[dict] = []
+    disks: list[dict] | None = None
+    exclusions = ResourceExclusions.from_env()
+    excluded: list[dict] = []
     registration = REGISTRATION_UNKNOWN
     if subscription_id and cred is not None:
         # Asked BEFORE the list call, so a zero-disk result is legible: Azure returns
@@ -291,7 +303,7 @@ def main() -> int:
                 "disks in use; reporting status not_registered",
                 subscription_id,
             )
-        disks = collect_disks(subscription_id, cred, collector)
+        disks = collect_disks(subscription_id, cred, collector, exclusions, excluded)
     elif not subscription_id:
         collector.record(
             "resolve_subscription",
@@ -301,6 +313,13 @@ def main() -> int:
             ),
         )
 
+    exclusions.record_invalid(collector)
+    listed = disks is not None
+    if not listed:
+        exclusions.mark_unread()
+    exclusions.warn_unmatched(logger)
+    disks = disks or []
+
     evidence = build_payload(
         subscription_id=subscription_id,
         subscription_source=sub["subscription_source"],
@@ -308,8 +327,13 @@ def main() -> int:
         results={
             "disks": disks,
             "provider_registration_status": registration,
+            "excluded": excluded,
         },
-        summary={**summarize(disks), "provider_registration_status": registration},
+        summary={
+            **summarize(disks),
+            "provider_registration_status": registration,
+            **exclusions.summary(excluded, KINDS, {"disks": len(disks) if listed else None}),
+        },
     )
 
     filename = (
@@ -319,10 +343,7 @@ def main() -> int:
     path = write_evidence(output_dir, filename, evidence)
 
     if not collector.ok:
-        logger.error(
-            "Encountered %d Azure API failure(s) during collection", len(collector.failures)
-        )
-        write_status(
+        report_failure(
             failure_reason(collector.failures), classify_failure_code(collector.failures)
         )
         return 1

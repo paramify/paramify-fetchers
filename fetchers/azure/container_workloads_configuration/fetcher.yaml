@@ -1,0 +1,158 @@
+name: azure_container_workloads_configuration
+version: 0.2.1
+description: >-
+  Shows whether Container Apps and Container Instances are exposed to the Internet, require sign-in, keep secrets out of their configuration, pin their images and export their logs.
+category: azure
+
+config_schema:
+  resource_exclusions:
+    type: patterns
+    prefixes: [rg, location, id]
+    bare: false
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Resources outside the authorization boundary, to leave out of scope,
+      as case-insensitive glob patterns listed in the manifest, each with
+      a prefix: rg:<resource group> (read from the resource id),
+      location:<region> (the region's name without spaces, such as
+      eastus2; a resource with no location never matches one) or
+      id:<resource id> (also matches that resource's child resources). *
+      matches any run of characters and ? one character. A matching
+      Container Apps environment, container app, job or Container
+      Instances container group is listed under excluded with the pattern
+      and left out of every count and verdict; an app or job also leaves
+      with its managed environment (the environment's id is in
+      matched_id). Excluded resources get no further reads. A pattern
+      without one of these prefixes fails the run. Set it once under
+      platforms.azure.config for every Azure fetcher that has this field;
+      fetchers without it ignore it. Each item is a pattern, or a pattern with a reason. Empty: every resource is in scope.
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_container_workloads_configuration.json
+  aggregation: per_target
+
+target_schema:
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id to collect from. Optional — omit to use the first
+      enabled subscription the ambient credential can see ("collect where
+      deployed"); set one target per subscription to fan out.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: >
+      Deployment environment label (e.g. prod / preprod) written into the evidence
+      metadata. Optional — set per target for multi-subscription runs.
+
+secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
+
+ksis:
+  - KSI-CNA-ULN   # internal-only environments and VNet placement of container groups
+  - KSI-CNA-MAT   # internet-facing ingress, public IPs and insecure HTTP
+  - KSI-SVC-SIN   # mTLS and encryption between containers, customer-managed keys
+  - KSI-SVC-ASM   # secrets from Key Vault rather than stored in the app, identity-based registry pulls
+  - KSI-MLA-LET   # environment and container group logs exported
+  - KSI-CMT-RMV   # images pinned by digest rather than running a mutable tag
+
+evidence_set:
+  reference_id: EVD-AZURE-CONTAINER-WORKLOADS-CONFIG
+  name: Azure Container Workloads Configuration
+  instructions: |
+    Script: azure/container_workloads_configuration/fetcher.py
+
+    Access: Reader on the subscription.
+
+    Commands Executed:
+    - subscriptions.list() — picks a subscription when none is set
+    - providers.get("Microsoft.App") and providers.get("Microsoft.ContainerInstance") — report whether each provider is registered
+    - managed_environments.list_by_subscription() — Container Apps environments with their network, encryption and log settings
+    - container_apps.list_by_subscription() — Container Apps with their ingress, secrets, registries and containers
+    - container_apps_auth_configs.list_by_container_app() (per app) — the app's built-in authentication (Easy Auth) settings
+    - jobs.list_by_subscription() — Container Apps jobs with their secrets, registries and containers
+    - container_groups.list() — Container Instances groups with their IP address, registry credentials, volumes and containers
+    - diagnostic_settings.list() (per environment and container group) — whether logs are exported
+
+    Output: azure_container_workloads_configuration_<subscription>.json — each environment, app, job and container group with its exposure, authentication, secret handling, images and log export, plus the resources left out and why; no secret value is read, and secrets are recorded by name only. Lists that could not be read are null and set metadata.partial_failure.
+
+    Summary fields:
+
+    Which resources are left out of scope?
+    - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
+    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no environment, app, job or container group, such as a mistyped name; null when a container workload list could not be read
+    - excluded_environments — Number of Container Apps environments left out of scope because a pattern matched; each is listed under excluded with the pattern, and no other count includes it; null when the list could not be read
+    - excluded_container_apps — Number of Container Apps left out of scope because a pattern matched, or with their environment, which names the environment in matched_id; null when the list could not be read
+    - excluded_jobs — Number of Container Apps jobs left out of scope the same way; null when the list could not be read
+    - excluded_container_groups — Number of Container Instances container groups left out of scope because a pattern matched; null when the list could not be read
+    - in_scope_environments — Number of environments read and in scope; null when the list could not be read
+    - in_scope_container_apps — Number of Container Apps read and in scope; null when the list could not be read
+    - in_scope_jobs — Number of Container Apps jobs read and in scope; null when the list could not be read
+    - in_scope_container_groups — Number of container groups read and in scope; null when the list could not be read
+
+    What was checked?
+    - total_environments — Number of in-scope Container Apps environments
+    - total_container_apps — Number of in-scope Container Apps; 0 proves nothing about ingress or sign-in, since there are no apps yet
+    - total_jobs — Number of in-scope Container Apps jobs
+    - total_container_groups — Number of in-scope Container Instances container groups
+    - total_containers — Number of containers, init containers included, across the in-scope apps, jobs and container groups
+    - provider_registration_status_container_apps — Whether the Container Apps provider (Microsoft.App) is registered on the subscription: registered, not_registered or unknown
+    - provider_registration_status_container_instances — Whether the Container Instances provider (Microsoft.ContainerInstance) is registered on the subscription: registered, not_registered or unknown
+
+    Are Container Apps environments isolated and encrypted?
+    - environments_internal_only — Number of environments whose network exposure is internal: the virtual network configuration is internal, so there is no public endpoint
+    - environments_private — Number of environments whose network exposure is private: not internal, but public network access is Disabled
+    - environments_public — Number of environments whose network exposure is public: not internal and public network access is on, where unset counts as on and a consumption-only environment without a virtual network is public
+    - environments_without_vnet — Number of environments not placed in a virtual network subnet
+    - environments_mtls_enabled — Number of environments with mutual TLS between apps turned on; off by default
+    - environments_peer_traffic_encryption_enabled — Number of environments that encrypt traffic between apps inside the environment; off by default
+    - environments_zone_redundant — Number of environments spread across availability zones
+
+    Are Container Apps environment logs exported?
+    - environments_without_log_destination — Number of environments whose app log destination is none or unset
+    - environments_audit_logs_exported — Number of environments with logs exported: the app log destination is log-analytics, where the environment sends logs to the workspace itself, or it is azure-monitor and a diagnostic setting with a destination enables ContainerAppSystemLogs, ContainerAppConsoleLogs or the audit or allLogs group
+    - environments_audit_logs_unknown — Number of environments whose app log destination is azure-monitor and whose diagnostic settings could not be read
+
+    Are Container Apps open to the Internet without sign-in?
+    - container_apps_internet_facing — Number of Container Apps with external ingress in an environment whose network exposure is public, so an internal or private environment is not internet-facing; an app whose environment is not in the subscription's list counts as public
+    - container_apps_allow_insecure — Number of Container Apps whose ingress also accepts plain HTTP
+    - container_apps_without_ip_restrictions — Number of internet-facing Container Apps with no client IP restriction rules on their ingress
+    - container_apps_internet_facing_without_auth — Number of internet-facing Container Apps where sign-in is not required, so the container itself must authenticate callers; sign-in is required when Easy Auth is on and redirects or rejects callers who are not signed in (RedirectToLoginPage, Return401 or Return403), and not when Easy Auth is off or set to AllowAnonymous
+    - container_apps_allow_anonymous — Number of Container Apps with Easy Auth on but set to AllowAnonymous, so it does not stop callers who are not signed in
+    - container_apps_auth_unknown — Number of Container Apps where it is unknown whether sign-in is required: the auth settings could not be read, or Easy Auth is on with no action set for callers who are not signed in
+
+    Do apps and jobs keep secrets out of their configuration?
+    - workloads_with_secrets_stored_in_app — Number of Container Apps and jobs with at least one secret held in their own configuration rather than as a Key Vault reference
+    - workloads_registries_password_based — Number of Container Apps and jobs that pull images from at least one registry with a password secret instead of a managed identity
+    - workloads_plain_env_vars_with_secret_like_names — Number of Container Apps and jobs with at least one environment variable set as a plain value, not a secret reference, whose name contains secret, password, passwd, pwd, apikey, token, connectionstring, connstr, accesskey, privatekey, credential, sastoken or clientsecret; a match means review it, not that a secret is confirmed
+    - workloads_without_managed_identity — Number of Container Apps and jobs with no managed identity, identity type None or unset
+
+    Are container images pinned to a known source?
+    - containers_with_mutable_image_tag — Number of containers whose image has no tag or the tag latest and no digest, so what runs can change without a deployment
+    - containers_image_pinned_by_digest — Number of containers whose image is pinned by an @sha256 digest
+    - image_registries — List of every registry host images are pulled from, which is the first part of the image name when it looks like a host and otherwise docker.io, for comparison with an approved list; the fetcher does not judge registries
+
+    Are Container Instances exposed or holding secrets?
+    - container_groups_public_ip — Number of container groups whose IP address type is Public
+    - container_groups_in_vnet — Number of container groups that run in a virtual network subnet
+    - container_groups_registries_password_based — Number of container groups with at least one image registry credential that has a user name and no managed identity
+    - container_groups_plain_env_vars_with_secret_like_names — Number of container groups with at least one environment variable set as a plain value, not a secure value, whose name contains one of the words listed for workloads_plain_env_vars_with_secret_like_names
+    - container_groups_without_managed_identity — Number of container groups with no managed identity, identity type None or unset
+    - container_groups_customer_managed_key — Number of container groups with encryption properties set, which is a customer-managed key
+    - container_groups_confidential_compute — Number of container groups with a confidential compute policy set
+    - container_groups_azure_file_volumes — Number of container groups with at least one Azure Files volume, whose storage account key is stored in the container group definition
+
+    Are Container Instances logs exported?
+    - container_groups_log_analytics_configured — Number of container groups with their own Log Analytics setting (diagnostics.logAnalytics), the usual way a container group ships its logs
+    - container_groups_logs_exported — Number of container groups with logs exported: the Log Analytics setting is set, or a diagnostic setting with a destination enables ContainerInstanceLog, ContainerEvent or the allLogs group
+    - container_groups_logs_unknown — Number of container groups whose diagnostic settings could not be read

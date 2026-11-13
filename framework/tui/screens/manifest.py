@@ -11,38 +11,74 @@ from __future__ import annotations
 from typing import Dict, List, Optional
 
 import yaml
+from rich.console import RenderableType
 from rich.text import Text
-from textual import on
+from textual import on, work
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
-from textual.widgets import Button, DataTable, Input, Static
+from textual.widgets import Button, Input, Static
 
-from framework import api
-from framework.tui import palette, render
+from framework import api, patterns
+from framework.contract import ManifestEntry
+from framework.issue_reports import CLOSE_AFTER_RUN, CLOSE_NEVER
+from framework.runner.manifest_loader import entry_keys
+from framework.tui import kinds, palette, render
+from framework.tui.components.detail import ShowDetail
 from framework.tui.components.forms import env_name_from_ref
 from framework.tui.components.keys import BUTTON_ROW_BINDINGS, ButtonRowNav
+from framework.tui.components.table import DataTable
 from framework.tui.modals import (
     ConfirmModal,
     FormModal,
     MultiPickerModal,
     PickerModal,
     PreviewModal,
+    TargetsModal,
 )
 
+APPROVALS = ("MANUAL", "SUBMISSION_WITH_PASSING_VALIDATORS", "SUBMISSION")
+NO_REQUESTS = ("direct", "evidence", "refuse")
+DELIVERIES = ("auto", "direct")
 
-class ManifestPage(ButtonRowNav, Vertical):
+
+def _cell(value) -> str:
+    """One target field as table text. An unset field reads as a dash rather than
+    an empty cell, so a missing required value is visible at a glance."""
+    if value is None or value == "":
+        return "—"
+    return str(value)
+
+
+def _target_summary(target: dict) -> str:
+    """A target on one line, for confirmations. Secrets are named, never valued —
+    the manifest holds ${env:VAR} references, and printing them invites the habit
+    of putting the credential itself there."""
+    vals = {k: v for k, v in (target or {}).items() if k != "secrets"}
+    return "  ".join(f"{k}={v}" for k, v in vals.items()) or "(empty)"
+
+
+# The owner picker's "remove the owner" choice; no username can be empty.
+_NO_OWNER = "\0none"
+
+class ManifestPanel(ButtonRowNav, Vertical):
+    """The manifest editor: settings row, entries table, and (with detail=True)
+    the selected entry's detail beside the table.
+
+    With detail=False the detail pane is left out and ShowDetail bubbles to the
+    page that hosts the panel, which shows it in a shared pane.
+    """
+
     HINTS = [
-        ("a", "add"), ("e", "edit"), ("x", "remove"), ("t", "target"),
+        ("a", "add"), ("e", "entry"), ("x", "remove"), ("t", "targets"),
         ("A", "assessment"), ("s", "save"), ("v", "validate"), ("p", "preview"),
     ]
 
     BINDINGS = [
         Binding("a", "add_fetcher", "Add"),
-        Binding("e", "edit_entry", "Edit"),
+        Binding("e", "edit_entry", "Entry"),
         Binding("x", "remove_entry", "Remove"),
-        Binding("t", "add_target", "Add target"),
-        Binding("T", "remove_target", "Rm target", show=False),
+        Binding("t", "edit_targets", "Targets"),
         Binding("A", "pick_assessment", "Assessment"),
         Binding("s", "save", "Save"),
         Binding("v", "validate", "Validate"),
@@ -50,33 +86,52 @@ class ManifestPage(ButtonRowNav, Vertical):
         *BUTTON_ROW_BINDINGS,
     ]
 
+    def __init__(self, *, detail: bool = True, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self._has_detail = detail
+        if not detail:
+            self.add_class("no-detail")
+
     def compose(self) -> ComposeResult:
         with Horizontal(id="manifest-top"):
             yield Static("output dir:", classes="inline-label")
             # select_on_focus off: Textual selects the whole value on focus, so
             # the first keystroke replaced the existing path wholesale.
             yield Input(placeholder="./evidence", id="manifest-output-dir", select_on_focus=False)
+            yield Static("stack:", classes="inline-label")
+            yield Button("—", id="manifest-stack")
+            yield Static("owner:", classes="inline-label after-button")
+            yield Button("—", id="manifest-owner")
             yield Button("Add fetcher", variant="primary", id="btn-add")
             yield Button("Save", id="btn-save")
         with Horizontal(id="manifest-body"):
             with Vertical(id="manifest-entries-panel", classes="panel"):
                 yield DataTable(id="manifest-entries")
                 yield Static("", id="manifest-empty-hint", classes="empty-hint")
-            with VerticalScroll(id="manifest-detail-scroll", classes="panel"):
-                yield Static(render.empty_detail("No fetcher selected."), id="manifest-detail")
+            if self._has_detail:
+                with VerticalScroll(id="manifest-detail-scroll", classes="panel"):
+                    yield Static(render.empty_detail("No fetcher selected."), id="manifest-detail")
         yield Static(id="manifest-issues")
 
     def on_mount(self) -> None:
-        self._selected: Optional[str] = None
+        self._selected: Optional[str] = None  # the fetcher (use) of the selected row
+        self._selected_key: Optional[str] = None  # its entry key: x, x#1
+        self._key_use: Dict[str, str] = {}
         self._errors: List[str] = []
-        # {use: merged config view}, rebuilt with the table (api.effective_config)
+        # {entry key: merged config view}, rebuilt with the table (api.effective_config)
         self._config_view: Dict[str, List[dict]] = {}
         self.query_one("#manifest-entries-panel", Vertical).border_title = "fetchers"
-        self.query_one("#manifest-detail-scroll", VerticalScroll).border_title = "detail"
+        if self._has_detail:
+            self.query_one("#manifest-detail-scroll", VerticalScroll).border_title = "detail"
         dt = self.query_one("#manifest-entries", DataTable)
         dt.cursor_type = "row"
         dt.zebra_stripes = True
-        dt.add_columns("fetcher", "mode", "secrets", "config", "targets", "status")
+        # kind + sends to: the two kinds go to different places, and a scan
+        # report goes nowhere until the manifest names its assessment. Sends to
+        # is last because it is the widest: on a narrow terminal it is what runs
+        # off the edge, not status (the detail pane shows it in full). No mode
+        # column: targets already reads "—" for a fetcher that runs once.
+        dt.add_columns("fetcher", "kind", "secrets", "config", "targets", "status", "sends to")
         self.rebuild()
 
     # -- state access ----------------------------------------------------- #
@@ -93,6 +148,16 @@ class ManifestPage(ButtonRowNav, Vertical):
 
     def _entry(self, use: str) -> dict:
         return next((e for e in self._entries() if e.get("use") == use), {})
+
+    def _selected_entry_key(self) -> Optional[str]:
+        """The selected row's entry key (`x`, `x#1`), so a write reaches that entry, not the first."""
+        use = self._selected
+        if use is None:
+            return None
+        return self._selected_key if self._key_use.get(self._selected_key or "") == use else use
+
+    def _keyed_entry(self, key: Optional[str]) -> dict:
+        return next((e for k, e in self._keyed() if k == key), {})
 
     def _descriptors(self) -> Dict[str, dict]:
         cat = getattr(self.app, "catalog_data", None)
@@ -118,6 +183,9 @@ class ManifestPage(ButtonRowNav, Vertical):
         if odi.value != out:
             odi.value = out
 
+        self.query_one("#manifest-stack", Button).label = self._stack_label()
+        self.query_one("#manifest-owner", Button).label = (self._run().get("paramify") or {}).get("owner") or "—"
+
         descriptors = self._descriptors()
         entries = self._entries()
         # One discovery pass shared by validate + effective_config: each would
@@ -131,36 +199,40 @@ class ManifestPage(ButtonRowNav, Vertical):
             self._errors = api.validate(self._manifest, self.app.root_path, **discovered)
         except Exception as exc:  # never let a validation crash kill the UI
             self._errors = [f"validation error: {exc}"]
-        by_use = self._bucket_errors(self._errors, entries)
+        # One row per entry, keyed by entry key (`x`, `x#1`): two entries of one
+        # fetcher used to share a key, which the table refuses. Everything a row
+        # shows is read by that key too, so each row shows its own entry.
+        keys = entry_keys([ManifestEntry(use=str(e.get("use", "?"))) for e in entries])
+        by_key = self._bucket_errors(self._errors, entries)
         try:
-            self._config_view = api.effective_config(
-                self._manifest, [e.get("use", "") for e in entries],
-                self.app.root_path, **discovered,
-            )
+            self._config_view = api.effective_config(self._manifest, keys, self.app.root_path, **discovered)
         except Exception:  # never let a config-merge failure kill the UI
             self._config_view = {}
 
         dt.clear()
         row_keys: List[str] = []
-        for e in entries:
+        self._key_use = {}
+        for e, ekey in zip(entries, keys):
             use = e.get("use", "?")
+            self._key_use[ekey] = use
             d = descriptors.get(use)
             fanout = bool(d and d.get("supports_targets"))
             sset, stot = self._secret_counts(d, e)
-            cset, ctot = self._config_counts(self._config_view.get(use))
+            cset, ctot = self._config_counts(self._config_view.get(ekey))
             ntargets = len(e.get("targets") or [])
-            errs = by_use.get(use, [])
+            errs = by_key.get(ekey, [])
             status = palette.pill("✓", "ok") if not errs else palette.pill(f"⚠ {len(errs)}", "warn")
             dt.add_row(
                 use,
-                "fanout" if fanout else "single",
+                render.kind_pill(kinds.kind_of(d)) if d else "—",
                 f"{sset}/{stot}",
                 f"{cset}/{ctot}",
                 str(ntargets) if fanout else "—",
                 status,
-                key=use,
+                render.destination_cell(d, self._config_view.get(ekey)) if d else "—",
+                key=ekey,
             )
-            row_keys.append(use)
+            row_keys.append(ekey)
 
         self._set_empty(
             None
@@ -170,14 +242,18 @@ class ManifestPage(ButtonRowNav, Vertical):
 
         # preserve selection across rebuilds
         if row_keys:
-            target = self._selected if self._selected in row_keys else row_keys[0]
-            self._selected = target
+            if self._selected_key in row_keys:
+                target = self._selected_key
+            else:
+                target = next((k for k in row_keys if self._key_use[k] == self._selected), row_keys[0])
+            self._selected_key = target
+            self._selected = self._key_use[target]
             try:
                 dt.move_cursor(row=dt.get_row_index(target))
             except Exception:
                 pass
         else:
-            self._selected = None
+            self._selected = self._selected_key = None
 
         self._refresh_detail()
         self._set_issues(self._errors)
@@ -190,17 +266,25 @@ class ManifestPage(ButtonRowNav, Vertical):
         self.query_one("#manifest-entries-panel", Vertical).set_class(bool(hint), "empty")
 
     def _refresh_detail(self) -> None:
-        detail = self.query_one("#manifest-detail", Static)
+        # A panel with its own pane writes it at once; otherwise the host shows it.
+        if self._has_detail:
+            self.query_one("#manifest-detail", Static).update(self.current_detail())
+        else:
+            self.post_message(ShowDetail(self.current_detail()))
+
+    def current_detail(self) -> RenderableType:
+        """What the detail pane shows for the selected entry."""
         use = self._selected
         if not use or self._manifest is None:
-            detail.update(render.empty_detail("No fetcher selected — press 'a' to add one."))
-            return
-        entry = self._entry(use)
+            return render.empty_detail("No fetcher selected — press 'a' to add one.")
+        # The selected entry (`x#1`), not the first that uses this fetcher.
+        key = self._selected_entry_key()
+        entry = self._keyed_entry(key)
         d = self._descriptors().get(use)
         # Bucket against the full entry list so index-prefixed (entry[i]) errors
         # attribute correctly, then take this entry's slice.
-        errs = self._bucket_errors(self._errors, self._entries()).get(use, [])
-        detail.update(render.entry_detail(d, entry, errs, self._config_view.get(use)))
+        errs = self._bucket_errors(self._errors, self._entries()).get(key, [])
+        return render.entry_detail(d, entry, errs, self._config_view.get(key))
 
     def _set_issues(self, errors: List[str]) -> None:
         issues = self.query_one("#manifest-issues", Static)
@@ -236,11 +320,12 @@ class ManifestPage(ButtonRowNav, Vertical):
 
     @staticmethod
     def _bucket_errors(errors: List[str], entries: List[dict]) -> Dict[str, List[str]]:
-        # api.validate() uses two prefix conventions: "<use>: ..." / "<use> ..."
-        # for known entries, and "entry[<i>] uses unknown fetcher: <use>" for
-        # undiscovered ones. Attribute both so an unknown-fetcher row never shows
-        # a misleading ✓.
-        uses = [e.get("use") for e in entries]
+        """{entry key: its errors}. api.validate() uses two prefix conventions:
+        "<entry key>: ..." / "<entry key> ..." for known entries, and
+        "entry[<i>] uses unknown fetcher: <use>" for undiscovered ones. Attribute
+        both so an unknown-fetcher row never shows a misleading ✓, and so an
+        error about `x#1` shows on that row only."""
+        keys = entry_keys([ManifestEntry(use=str(e.get("use", "?"))) for e in entries])
         out: Dict[str, List[str]] = {}
         for msg in errors or []:
             target = None
@@ -249,13 +334,10 @@ class ManifestPage(ButtonRowNav, Vertical):
                     idx = int(msg[6 : msg.index("]")])
                 except ValueError:
                     idx = -1
-                if 0 <= idx < len(uses):
-                    target = uses[idx]
+                if 0 <= idx < len(keys):
+                    target = keys[idx]
             if target is None:
-                for u in uses:
-                    if u and (msg.startswith(f"{u}:") or msg.startswith(f"{u} ")):
-                        target = u
-                        break
+                target = next((k for k in keys if msg.startswith(f"{k}:") or msg.startswith(f"{k} ")), None)
             if target:
                 out.setdefault(target, []).append(msg)
         return out
@@ -279,10 +361,43 @@ class ManifestPage(ButtonRowNav, Vertical):
             "help": field.get("description") or "",
         }
 
+    @staticmethod
+    def _patterns_spec(field: dict, cfg: dict, m: dict, category: Optional[str]) -> dict:
+        """A pattern list opens on the entry's own list, or on the category's, which it inherits until edited."""
+        name = field["name"]
+        where = f"platforms.{category}"
+        inherited = api.category_patterns(m, category, name)
+        n = len(inherited)
+        held = f"{n} pattern{'' if n == 1 else 's'}"
+        if name in cfg:
+            value = patterns.to_lines(cfg[name])
+            note = "this entry's own list"
+            if inherited:
+                note = f"{note}; replaces {where}'s {held}" if value else f"empty here: {where}'s {held} don't apply"
+        elif inherited:
+            value = patterns.to_lines([it.as_manifest() for it in inherited])
+            note = f"inherits {where} ({held}) until edited here"
+        else:
+            value, note = "", ""
+        return {
+            "key": name,
+            "label": name,
+            "kind": "patterns",
+            "value": value,
+            "placeholder": "one per line: pattern  # reason",
+            "required": field.get("required", False),
+            "help": api.grammar_text(field.get("prefixes") or (), field.get("bare", True)),
+            "prefixes": tuple(field.get("prefixes") or ()),
+            "bare": field.get("bare", True),
+            "note": note,
+        }
+
     # -- events ----------------------------------------------------------- #
 
     def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
-        self._selected = event.row_key.value
+        key = event.row_key.value
+        self._selected_key = key
+        self._selected = self._key_use.get(key, key)
         self._refresh_detail()
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
@@ -306,8 +421,148 @@ class ManifestPage(ButtonRowNav, Vertical):
         if self._manifest is None or value == (self._run().get("output_dir") or ""):
             return  # blur fires on every focus change; only a real change commits
         api.set_output_dir(self._manifest, value)
+        self._autosave()
         self.notify("Output dir updated.")
         self.rebuild()
+
+    def _stack_label(self) -> str:
+        block = self._run().get("paramify") or {}
+        return str(block.get("stack_name") or block.get("stack") or "—")
+
+    @on(Button.Pressed, "#manifest-stack")
+    def _on_stack(self) -> None:
+        self.action_pick_stack()
+
+    def action_pick_stack(self) -> None:
+        """Choose the Paramify stack uploads go to.
+
+        With a token the choice is a list read from the workspace (id and name
+        stored). Without one there is nothing to list, so the value is typed and
+        stored as the stack alone.
+        """
+        m = self._manifest
+        if m is None:
+            return
+        # upload_readiness loads `.env` first, as list_stacks does: a token kept
+        # only there must not drop the picker to typed, unchecked text.
+        if api.upload_readiness(self.app.root_path)["token_present"]:
+            self._pick_stack_online(m)
+        else:
+            self._type_stack(m)
+
+    @work(thread=True, exclusive=True, group="stacks")
+    def _pick_stack_online(self, m: dict) -> None:
+        try:
+            stacks = api.list_stacks(self.app.root_path)
+        except Exception as exc:
+            self.app.call_from_thread(self.notify, f"Could not list stacks: {exc}", severity="error")
+            return
+        self.app.call_from_thread(self._show_stack_picker, m, stacks)
+
+    def _show_stack_picker(self, m: dict, stacks: List[dict]) -> None:
+        names = {s["id"]: s["name"] for s in stacks}
+
+        def done(choice: Optional[str]) -> None:
+            if choice is None:
+                return
+            api.set_stack(m, choice, names.get(choice))
+            self._autosave()
+            self.notify("Stack updated.")
+            self.rebuild()
+
+        self.app.push_screen(
+            PickerModal("Paramify stack", [(s["id"], f"{s['name']}  ({s['id']})") for s in stacks]),
+            done,
+        )
+
+    def _type_stack(self, m: dict) -> None:
+        current = (self._run().get("paramify") or {}).get("stack") or ""
+        spec = {"key": "stack", "label": "stack", "kind": "text", "value": current,
+                "placeholder": "stack id or name", "required": False,
+                "help": "no API token: the value is stored as typed"}
+
+        def done(result: Optional[dict]) -> None:
+            if result is None:
+                return
+            value = (result.get("stack") or {}).get("stack")
+            if value and value != current:
+                api.set_stack(m, value)
+                self._autosave()
+                self.notify("Stack updated.")
+                self.rebuild()
+
+        self.app.push_screen(
+            FormModal("Paramify stack", {"stack": [spec]},
+                      subtitle="Set a token to pick from the workspace's stacks."),
+            done,
+        )
+
+    @on(Button.Pressed, "#manifest-owner")
+    def _on_owner(self) -> None:
+        self.action_pick_owner()
+
+    def action_pick_owner(self) -> None:
+        """Choose whose channel uploads use when a stack has one channel per owner.
+
+        With a token the choice is a list of the owners of the workspace's
+        channels. Without one the username is typed and stored as given.
+        """
+        m = self._manifest
+        if m is None:
+            return
+        if api.upload_readiness(self.app.root_path)["token_present"]:
+            self._pick_owner_online(m)
+        else:
+            self._type_owner(m)
+
+    @work(thread=True, exclusive=True, group="owners")
+    def _pick_owner_online(self, m: dict) -> None:
+        try:
+            owners = api.list_channel_owners(self.app.root_path)
+        except Exception as exc:
+            self.app.call_from_thread(self.notify, f"Could not list channel owners: {exc}", severity="error")
+            return
+        self.app.call_from_thread(self._show_owner_picker, m, owners)
+
+    def _set_owner(self, m: dict, owner: Optional[str]) -> None:
+        api.set_owner(m, owner)
+        self._autosave()
+        self.notify("Owner updated." if owner else "Owner removed.")
+        self.rebuild()
+
+    def _show_owner_picker(self, m: dict, owners: List[dict]) -> None:
+        def done(choice: Optional[str]) -> None:
+            if choice is not None:
+                self._set_owner(m, None if choice == _NO_OWNER else choice)
+
+        options = [(o["owner"], f"{o['owner']}  ({o['sets']} evidence set{'s' if o['sets'] != 1 else ''})")
+                   for o in owners]
+        if (self._run().get("paramify") or {}).get("owner"):
+            options.append((_NO_OWNER, "(no owner)"))
+        self.app.push_screen(
+            PickerModal("Paramify channel owner", options,
+                        subtitle="Used only where a stack has one channel per owner."),
+            done,
+        )
+
+    def _type_owner(self, m: dict) -> None:
+        current = (self._run().get("paramify") or {}).get("owner") or ""
+        spec = {"key": "owner", "label": "owner", "kind": "text", "value": current,
+                "placeholder": "Paramify username", "required": False,
+                "help": "no API token: the value is stored as typed; blank removes it"}
+
+        def done(result: Optional[dict]) -> None:
+            if result is None:
+                return
+            value = ((result.get("owner") or {}).get("owner") or "").strip()
+            if value != current:
+                self._set_owner(m, value or None)
+
+        self.app.push_screen(
+            FormModal("Paramify channel owner", {"owner": [spec]},
+                      subtitle="Set a token to pick from the workspace's channel owners."),
+            done,
+        )
 
     @on(Button.Pressed, "#btn-add")
     def _on_btn_add(self) -> None:
@@ -325,16 +580,16 @@ class ManifestPage(ButtonRowNav, Vertical):
             return
         existing = {e.get("use") for e in self._entries()}
         cat = getattr(self.app, "catalog_data", None)
-        groups = []
-        if cat:
-            for c in cat["categories"]:
-                # Pass every fetcher (not just addable ones): the picker shows the
-                # already-added ones greyed out so a fully-added category — e.g.
-                # datadog once all 13 are in — still appears instead of vanishing.
-                names = [f["name"] for f in c["fetchers"]]
-                if names:
-                    groups.append((c["name"], names))
-        if not groups:
+        # Grouped like the catalog, kind first: a platform that ships both kinds
+        # (wiz) would otherwise list its evidence and its scan reports as one.
+        # Every fetcher is passed (not just addable ones): the picker shows the
+        # already-added ones greyed out so a fully-added category — e.g. datadog
+        # once all 13 are in — still appears instead of vanishing.
+        sections = [
+            (kinds.heading(kind), [(c, [f["name"] for f in fs]) for c, fs in groups])
+            for kind, groups in kinds.sections(cat)
+        ]
+        if not sections:
             self.notify("No fetchers discovered.")
             return
 
@@ -346,9 +601,14 @@ class ManifestPage(ButtonRowNav, Vertical):
             # is only needed for the edge case where a name differs. (Per-target
             # secrets are not wired here — each target usually needs its own cred.)
             descriptors = self._descriptors()
+            try:
+                fetchers = api.discover(self.app.root_path)["fetchers"]
+            except Exception:  # never let a discovery failure kill the UI
+                fetchers = {}
+            # A comparator brings its inputs with it.
+            added = [a for name in names for a in api.add_entry(m, name, fetchers)]
             wired = False
-            for name in names:
-                api.add_entry(m, name)
+            for name in added:
                 d = descriptors.get(name)
                 if d:
                     for s in d.get("secrets", []):
@@ -356,8 +616,9 @@ class ManifestPage(ButtonRowNav, Vertical):
                             api.set_secret(m, name, s["name"], s["env"])
                             wired = True
             self._selected = names[-1]
+            self._autosave()
             self.rebuild()
-            n = len(names)
+            n = len(added)
             noun = "fetcher" if n == 1 else "fetchers"
             if wired:
                 self.notify(f"Added {n} {noun} — secrets wired to default env vars (e to change).")
@@ -367,7 +628,7 @@ class ManifestPage(ButtonRowNav, Vertical):
         self.app.push_screen(
             MultiPickerModal(
                 "Add fetchers",
-                groups,
+                sections,
                 subtitle="enter/space opens a platform or toggles a fetcher · ✓ = already in manifest · type to filter",
                 disabled=existing,
             ),
@@ -382,10 +643,15 @@ class ManifestPage(ButtonRowNav, Vertical):
         if d is None:
             self.notify("Unknown fetcher — cannot edit.", severity="warning")
             return
-        entry = self._entry(use)
+        # Every write below targets this exact entry, not the first with this fetcher.
+        ekey = self._selected_entry_key()
+        entry = next((e for k, e in self._keyed() if k == ekey), None) or self._entry(use)
         cfg = entry.get("config") or {}
         secs = entry.get("secrets") or {}
-        config_specs = [self._config_spec(c, cfg.get(c["name"])) for c in d.get("config", [])]
+        category = d.get("category")
+        config_specs = [self._patterns_spec(c, cfg, m, category) if c.get("type") == patterns.TYPE
+                        else self._config_spec(c, cfg.get(c["name"])) for c in d.get("config", [])]
+        lists = {c["name"] for c in d.get("config", []) if c.get("type") == patterns.TYPE}
         secret_specs = [
             {
                 "key": s["name"], "label": s["name"], "kind": "secret",
@@ -396,30 +662,171 @@ class ManifestPage(ButtonRowNav, Vertical):
             }
             for s in d.get("secrets", []) if not s.get("per_target")
         ]
-        if not config_specs and not secret_specs:
-            hint = " — press 't' to add targets" if d.get("supports_targets") else ""
-            self.notify(f"{use} has no entry-level config or secrets to edit{hint}.")
-            return
-        groups = {"config": config_specs, "secrets": secret_specs}
+        pf = entry.get("paramify") or {}
+        paramify_specs = [
+            {"key": "stack", "label": "stack", "kind": "text", "value": pf.get("stack"),
+             "placeholder": "inherit", "required": False, "help": "stack id or name; blank inherits"},
+            {"key": "owner", "label": "owner", "kind": "text", "value": pf.get("owner"),
+             "placeholder": "inherit", "required": False,
+             "help": "Paramify username; picks the channel when a stack has one per owner; blank inherits"},
+            {"key": "approval", "label": "approval", "kind": "select", "value": pf.get("approval") if pf.get("approval") in APPROVALS else None,
+             "options": [(v, v) for v in APPROVALS], "required": False, "help": "blank inherits"},
+            {"key": "no_request", "label": "no_request", "kind": "select", "value": pf.get("no_request") if pf.get("no_request") in NO_REQUESTS else None,
+             "options": [(v, v) for v in NO_REQUESTS], "required": False, "help": "blank inherits"},
+            {"key": "delivery", "label": "delivery", "kind": "select", "value": pf.get("delivery") if pf.get("delivery") in DELIVERIES else None,
+             "options": [(v, v) for v in DELIVERIES], "required": False, "help": "blank inherits"},
+        ]
+        groups = {"config": config_specs, "secrets": secret_specs, "paramify": paramify_specs}
 
         def done(result: Optional[dict]) -> None:
             if result is None:
                 return
             for k, v in (result.get("config") or {}).items():
-                api.set_fetcher_config(m, use, k, v)
+                if k in lists:
+                    api.set_pattern_list(m, use, k, patterns.parse(v)[0], category, entry_key=ekey)
+                else:
+                    api.set_fetcher_config(m, use, k, v, entry_key=ekey)
             for name, env in (result.get("secrets") or {}).items():
-                api.set_secret(m, use, name, env)
+                api.set_secret(m, use, name, env, entry_key=ekey)
+            self._set_entry_paramify(entry, result.get("paramify") or {})
+            self._autosave()
             self.rebuild()
             self.notify(f"Updated {use}.")
 
+        # Entry level only. 104 of the 138 fanout fetchers declare no entry
+        # config, so for those this form is nothing but secrets — indistinguishable
+        # from the target editor failing to open unless it says where targets live.
+        # Short enough to survive the card width — a subtitle that clips takes the
+        # targets pointer with it, which is the half that answers "why is this
+        # form only secrets?". The ENV-VAR rule is also on the secrets group label.
+        subtitle = "Secrets take the ENV VAR NAME, not the value."
+        if d.get("supports_targets"):
+            # Leads, and the secrets note is trimmed to fit beside it: the card
+            # clips rather than wraps, and this is the half that answers "why is
+            # this form only secrets?". The ENV-VAR rule is also on the group label.
+            subtitle = "Targets: press 't'.   ·   Secrets take the ENV VAR NAME."
+        self.app.push_screen(
+            FormModal(f"Edit {use} — entry config and secrets", groups, subtitle=subtitle),
+            done,
+        )
+
+    def _keyed(self) -> List[tuple]:
+        entries = self._entries()
+        return list(zip(entry_keys([ManifestEntry(use=str(e.get("use", "?"))) for e in entries]), entries))
+
+    def _set_entry_paramify(self, entry: dict, values: dict) -> None:
+        """Write the entry's `paramify` block from the form; a blank field removes its key."""
+        block = dict(entry.get("paramify") or {})
+        for key in ("stack", "owner", "approval", "no_request", "delivery"):
+            if values.get(key):
+                block[key] = values[key]
+            else:
+                block.pop(key, None)
+        if block.get("stack") != (entry.get("paramify") or {}).get("stack"):
+            block.pop("stack_name", None)  # a name belongs to the id it was stored with
+        if block:
+            entry["paramify"] = block
+        else:
+            entry.pop("paramify", None)
+
+    def action_edit_targets(self) -> None:
+        """Open the fanout targets of the selected fetcher as an editable table.
+
+        A fanout fetcher runs once per target, so the targets are the run plan.
+        The page only ever showed their count, and there was no way to change one
+        — a typo meant removing the target and retyping every field.
+        """
+        use, m = self._selected, self._manifest
+        if not use or m is None:
+            return
+        d = self._descriptors().get(use)
+        if not d or not d.get("supports_targets"):
+            self.notify("This fetcher does not support targets.", severity="warning")
+            return
+        key = self._selected_entry_key()  # the selected entry, not the first with this fetcher
+
+        fields = [t["name"] for t in d.get("target_schema", [])]
+        per_target_secrets = [s for s in d.get("secrets", []) if s.get("per_target")]
+
+        def rows() -> List[List[str]]:
+            out = []
+            for t in (self._keyed_entry(key).get("targets") or []):
+                row = [_cell(t.get(f)) for f in fields]
+                if per_target_secrets:
+                    wired = len(t.get("secrets") or {})
+                    row.append(f"{wired}/{len(per_target_secrets)}" if wired else "—")
+                out.append(row)
+            return out
+
+        columns = [*fields] + (["secrets"] if per_target_secrets else [])
+        self.app.push_screen(
+            TargetsModal(
+                f"Targets — {use}",
+                columns,
+                rows,
+                on_add=self.action_add_target,
+                on_edit=lambda i: self._edit_target(use, i, key),
+                on_remove=lambda i: self._remove_target_at(use, i, key),
+                subtitle="the fetcher runs once per target",
+            )
+        )
+
+    def _edit_target(self, use: str, index: int, key: Optional[str] = None) -> None:
+        m = self._manifest
+        d = self._descriptors().get(use) or {}
+        targets = self._keyed_entry(key or use).get("targets") or []
+        if m is None or not 0 <= index < len(targets):
+            return
+        current = targets[index]
+        current_secrets = current.get("secrets") or {}
+        value_specs = [
+            self._config_spec(t, current.get(t["name"])) for t in d.get("target_schema", [])
+        ]
+        secret_specs = [
+            {
+                "key": s["name"], "label": s["name"], "kind": "secret",
+                "value": env_name_from_ref(current_secrets.get(s["name"])) or (s.get("env") or ""),
+                "placeholder": s.get("env") or "", "required": True, "help": "",
+            }
+            for s in d.get("secrets", []) if s.get("per_target")
+        ]
+
+        def done(result: Optional[dict]) -> None:
+            if result is None:
+                return
+            api.set_target(
+                m, use, index,
+                result.get("values") or {},
+                secret_env=(result.get("secrets") or None),
+                entry_key=key,
+            )
+            self._autosave()
+            self.rebuild()
+            self.notify(f"Updated target {index} of {use}.")
+
         self.app.push_screen(
             FormModal(
-                f"Edit {use}",
-                groups,
-                subtitle="Secret fields take the env var NAME (e.g. KNOWBE4_API_KEY), not the credential.",
+                f"Edit target {index} — {use}",
+                {"values": value_specs, "secrets": secret_specs},
+                subtitle="target fields + per-target secrets",
             ),
             done,
         )
+
+    def _remove_target_at(self, use: str, index: int, key: Optional[str] = None) -> None:
+        m = self._manifest
+        if m is None:
+            return
+        summary = _target_summary((self._keyed_entry(key or use).get("targets") or [])[index])
+
+        def done(ok: bool) -> None:
+            if ok:
+                api.remove_target(m, use, index, entry_key=key)
+                self._autosave()
+                self.rebuild()
+                self.notify(f"Removed target {index} from {use}.")
+
+        self.app.push_screen(ConfirmModal(f"Remove target {index} ({summary}) from '{use}'?"), done)
 
     def action_add_target(self) -> None:
         use, m = self._selected, self._manifest
@@ -443,7 +850,9 @@ class ManifestPage(ButtonRowNav, Vertical):
             if result is None:
                 return
             values = result.get("values") or {}
-            api.add_target(m, use, values, secret_env=(result.get("secrets") or None))
+            api.add_target(m, use, values, secret_env=(result.get("secrets") or None),
+                           entry_key=self._selected_entry_key())
+            self._autosave()
             self.rebuild()
             # api.validate() does not check required target fields, so warn here:
             # an empty/invalid required field would otherwise be dropped silently.
@@ -465,31 +874,6 @@ class ManifestPage(ButtonRowNav, Vertical):
             done,
         )
 
-    def action_remove_target(self) -> None:
-        use, m = self._selected, self._manifest
-        if not use or m is None:
-            return
-        targets = self._entry(use).get("targets") or []
-        if not targets:
-            self.notify("No targets to remove.")
-            return
-        options = []
-        for i, t in enumerate(targets):
-            vals = {k: v for k, v in t.items() if k != "secrets"}
-            summary = "  ".join(f"{k}={v}" for k, v in vals.items()) or "(empty)"
-            options.append((str(i), f"[{i}] {summary}"))
-
-        def done(idx: Optional[str]) -> None:
-            if idx is not None:
-                api.remove_target(m, use, int(idx))
-                self.rebuild()
-                self.notify("Target removed.")
-
-        self.app.push_screen(
-            PickerModal(f"Remove target from {use}", options, subtitle="Pick a target to remove"),
-            done,
-        )
-
     def action_pick_assessment(self) -> None:
         """Point the selected issue-report entry at a Paramify assessment.
 
@@ -503,19 +887,40 @@ class ManifestPage(ButtonRowNav, Vertical):
         """
         use, m = self._selected, self._manifest
         if not use or m is None:
+            # Silence here read as a broken key on a new, empty manifest.
+            self.notify("Add a scan report first (a), then select it.",
+                        severity="warning")
             return
         d = self._descriptors().get(use)
-        if not d or d.get("kind") != "issue_report":
+        if not d or kinds.kind_of(d) != kinds.SCAN_REPORT:
             self.notify(
-                "Only issue-report fetchers go to an assessment.", severity="warning"
+                "Only scan reports go to an assessment; evidence goes to the "
+                "evidence set its fetcher names.", severity="warning"
             )
             return
 
         assessment_type = (d.get("issue_report") or {}).get("assessment_type")
+        self.notify("Loading assessments…")
+        self._assessments_worker(use, assessment_type)
+
+    @work(thread=True, exclusive=True, group="assessments")
+    def _assessments_worker(self, use: str, assessment_type: Optional[str]) -> None:
+        # Off the UI thread: listing assessments is a network call, and a slow or
+        # unreachable workspace froze the whole app while it ran.
         try:
             assessments = api.list_assessments(assessment_type)
         except (RuntimeError, ValueError) as exc:
-            self.notify(f"Cannot list assessments: {exc}", severity="error", timeout=12)
+            self.app.call_from_thread(
+                self.notify, f"Cannot list assessments: {exc}", severity="error", timeout=12
+            )
+            return
+        self.app.call_from_thread(self._show_assessment_picker, use, assessment_type, assessments)
+
+    def _show_assessment_picker(
+        self, use: str, assessment_type: Optional[str], assessments: List[dict]
+    ) -> None:
+        m = self._manifest
+        if m is None:
             return
         if not assessments:
             scope = f" of type {assessment_type}" if assessment_type else ""
@@ -532,17 +937,50 @@ class ManifestPage(ButtonRowNav, Vertical):
         def done(chosen_id: Optional[str]) -> None:
             if chosen_id is None:
                 return
-            api.set_assessment(m, use, by_id[chosen_id])
+            chosen = by_id[chosen_id]
+            api.set_assessment(m, use, chosen)
+            self._autosave()
             self.rebuild()
-            self.notify(
-                f"{use} → {api.assessment_display_name(by_id[chosen_id])}"
-            )
+            # Asked right after the assessment because it is a fact about how
+            # that assessment's cycles are filled, and the uploader will not
+            # guess it. Escape keeps the assessment and leaves the policy as it was.
+            self._pick_close_cycle(use, api.assessment_display_name(chosen))
 
         self.app.push_screen(
             PickerModal(
                 f"Assessment for {use}",
                 options,
-                subtitle=f"{assessment_type or 'any type'} — its reports are intaken here",
+                subtitle=f"{assessment_type or 'any type'} — the scan report is sent to this assessment's pipeline",
+            ),
+            done,
+        )
+
+    def _pick_close_cycle(self, use: str, assessment_label: str) -> None:
+        m = self._manifest
+        if m is None:
+            return
+        options = [
+            (CLOSE_AFTER_RUN,
+             "after_run — one report per cycle: close after each complete run"),
+            (CLOSE_NEVER,
+             "never — several files per cycle: close in Paramify or with "
+             "`paramify issues close`"),
+        ]
+
+        def done(policy: Optional[str]) -> None:
+            if policy is None:
+                self.notify(f"{use} → {assessment_label}")
+                return
+            api.set_close_cycle(m, use, policy)
+            self._autosave()
+            self.rebuild()
+            self.notify(f"{use} → {assessment_label}, close_cycle={policy}")
+
+        self.app.push_screen(
+            PickerModal(
+                f"How is {assessment_label}'s cycle closed?",
+                options,
+                subtitle="Closing auto-closes every open issue the cycle never saw",
             ),
             done,
         )
@@ -551,15 +989,43 @@ class ManifestPage(ButtonRowNav, Vertical):
         use, m = self._selected, self._manifest
         if not use or m is None:
             return
+        # Only the selected entry; another entry of the same fetcher stays.
+        key = self._selected_entry_key()
 
         def done(ok: bool) -> None:
             if ok:
-                api.remove_entry(m, use)
+                api.remove_entry(m, use, entry_key=key)
                 self._selected = None
+                self._autosave()
                 self.rebuild()
                 self.notify(f"Removed {use}.")
 
         self.app.push_screen(ConfirmModal(f"Remove '{use}' from the manifest?"), done)
+
+    def _autosave(self) -> None:
+        """Write the manifest through after a mutation.
+
+        Edits used to live in memory until 's', so quitting — or a crash, or
+        simply not knowing the key — discarded them with nothing on screen to say
+        the file and the view had diverged. Saving on every mutation removes the
+        divergence instead of trying to surface it.
+
+        A save that cannot happen keeps the change in memory and says so: a
+        manifest the schema refuses or a path that will not take a write is worth
+        reporting, but not worth throwing away the edit that triggered it. 's'
+        retries once the cause is fixed.
+        """
+        m = self._manifest
+        if m is None:
+            return
+        try:
+            api.dump_manifest(m, self.app.manifest_path, self.app.root_path)
+        except Exception as exc:  # noqa: BLE001 — every failure keeps the edit
+            self.notify(
+                f"Change not saved: {exc} — fix, then press 's'.",
+                severity="error",
+                timeout=12,
+            )
 
     def action_save(self) -> None:
         m = self._manifest

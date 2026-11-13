@@ -1,25 +1,31 @@
 """Catalog browser — read-only view of every discovered fetcher.
 
-Backed entirely by the App's cached `api.catalog(root)`. Left panel: a category
--> fetcher Tree with a live search filter. Right panel: the selected fetcher's
-contract. Panels are titled and their border follows focus (.panel CSS).
+Backed entirely by the App's cached `api.catalog(root)`. Left panel: a kind ->
+category -> fetcher Tree with a live search filter. Kind comes first because it,
+not the platform, decides where a fetcher's output goes (see tui/kinds.py), and
+a platform that ships both kinds would otherwise mix them in one folder. Right
+panel: the selected fetcher's contract, or what a kind is when its heading is
+highlighted. Panels are titled and their border follows focus (.panel CSS).
+
+A panel made with detail=False leaves the right panel out: it posts ShowDetail
+for the page that hosts it to show in a shared pane.
 """
 
 from __future__ import annotations
 
-from typing import Optional
-
+from rich.console import RenderableType
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widgets import Input, Static, Tree
 
-from framework.tui import render
+from framework.tui import kinds, render
+from framework.tui.components.detail import ShowDetail
 from framework.tui.components.keys import FILTER_NAV_BINDINGS, FilterListNav
 
 
-class CatalogPage(FilterListNav, Horizontal):
-    """Two-pane fetcher catalog: tree on the left, contract detail on the right."""
+class CatalogPanel(FilterListNav, Horizontal):
+    """Fetcher catalog: a tree, and (with detail=True) the contract beside it."""
 
     HINTS = [("↑↓/jk", "navigate"), ("/", "filter"), ("tab", "pane")]
 
@@ -35,18 +41,25 @@ class CatalogPage(FilterListNav, Horizontal):
 
     _filter: str = ""
 
+    def __init__(self, *, detail: bool = True, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self._has_detail = detail
+        self._data = None  # what the highlighted node carries: a fetcher, a kind heading, or None
+
     def compose(self) -> ComposeResult:
         with Vertical(id="catalog-left", classes="panel"):
             yield Input(placeholder="/ filter fetchers…", id="catalog-search")
             yield Tree("fetchers", id="catalog-tree")
-        with VerticalScroll(id="catalog-detail-scroll", classes="panel"):
-            yield Static(render.empty_detail(), id="catalog-detail")
+        if self._has_detail:
+            with VerticalScroll(id="catalog-detail-scroll", classes="panel"):
+                yield Static(render.empty_detail(), id="catalog-detail")
 
     def on_mount(self) -> None:
         self.query_one("#catalog-tree", Tree).show_root = False
-        detail = self.query_one("#catalog-detail-scroll", VerticalScroll)
-        detail.can_focus = True
-        detail.border_title = "contract"
+        if self._has_detail:
+            detail = self.query_one("#catalog-detail-scroll", VerticalScroll)
+            detail.can_focus = True
+            detail.border_title = "contract"
         self.rebuild()
 
     # -- data ------------------------------------------------------------- #
@@ -64,14 +77,18 @@ class CatalogPage(FilterListNav, Horizontal):
 
         flt = self._filter.strip().lower()
         total = 0
-        for cat in data["categories"]:
-            matches = [f for f in cat["fetchers"] if _matches(f, flt)]
-            if not matches:
-                continue
-            cat_node = tree.root.add(f"{cat['name']}  ({len(matches)})", expand=bool(flt))
-            for fetcher in matches:
-                cat_node.add_leaf(fetcher["name"], data=fetcher)
-                total += 1
+        for kind, groups in kinds.sections(data, keep=lambda f: _matches(f, flt)):
+            count = sum(len(fetchers) for _, fetchers in groups)
+            # The heading's data is the kind itself, so highlighting it can say
+            # what the section holds; categories carry none.
+            kind_node = tree.root.add(
+                f"{kinds.heading(kind)}  ({count})", data=(kind, count), expand=True
+            )
+            for category, fetchers in groups:
+                cat_node = kind_node.add(f"{category}  ({len(fetchers)})", expand=bool(flt))
+                for fetcher in fetchers:
+                    cat_node.add_leaf(fetcher["name"], data=fetcher)
+            total += count
 
         tree.root.expand()
         panel.border_title = f"fetchers ({total})"
@@ -93,6 +110,9 @@ class CatalogPage(FilterListNav, Horizontal):
 
     def action_next_pane(self) -> None:
         tree = self.query_one("#catalog-tree", Tree)
+        if not self._has_detail:
+            tree.focus()
+            return
         right = self.query_one("#catalog-detail-scroll", VerticalScroll)
         on_left = tree.has_focus or self.query_one("#catalog-search", Input).has_focus
         (right if on_left else tree).focus()
@@ -106,8 +126,8 @@ class CatalogPage(FilterListNav, Horizontal):
     def _nav(self, down: bool) -> None:
         # j/k drive whatever pane is focused: scroll the detail when it holds
         # focus, otherwise move the tree cursor (matches the arrow-key routing).
-        right = self.query_one("#catalog-detail-scroll", VerticalScroll)
-        if right.has_focus:
+        right = self.query("#catalog-detail-scroll").first() if self._has_detail else None
+        if right is not None and right.has_focus:
             right.action_scroll_down() if down else right.action_scroll_up()
         else:
             tree = self.query_one("#catalog-tree", Tree)
@@ -115,9 +135,25 @@ class CatalogPage(FilterListNav, Horizontal):
 
     # -- helpers ---------------------------------------------------------- #
 
-    def _show(self, fetcher: Optional[dict]) -> None:
-        detail = self.query_one("#catalog-detail", Static)
-        detail.update(render.fetcher_detail(fetcher) if fetcher else render.empty_detail())
+    def _show(self, data) -> None:
+        self._data = data
+        self._emit_detail()
+
+    def _emit_detail(self) -> None:
+        # A panel with its own pane writes it at once; otherwise the host shows it.
+        if self._has_detail:
+            self.query_one("#catalog-detail", Static).update(self.current_detail())
+        else:
+            self.post_message(ShowDetail(self.current_detail()))
+
+    def current_detail(self) -> RenderableType:
+        """What the detail pane shows for the highlighted node."""
+        data = self._data
+        if isinstance(data, dict):
+            return render.fetcher_detail(data)
+        if isinstance(data, tuple):
+            return render.kind_detail(*data)
+        return render.empty_detail()
 
     def focus_search(self) -> None:
         self.query_one("#catalog-search", Input).focus()

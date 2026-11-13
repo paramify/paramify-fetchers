@@ -1,0 +1,149 @@
+name: azure_dns_configuration
+version: 0.6.1
+description: >-
+  Shows the targets, TTL and failover method of each in-scope public DNS record, whether each public zone uses DNSSEC, and which virtual networks each private zone is linked to.
+category: azure
+
+config_schema:
+  scope_exclusions:
+    type: patterns
+    required: false
+    env: AZURE_DNS_SCOPE_EXCLUSIONS
+    description: >
+      Public record sets to leave out of scope, as case-insensitive glob patterns
+      listed in the manifest (* matches any run of characters, dots included,
+      ? one character, and [ ] one character from a set, such as [0-9]). Each
+      pattern is matched against a record set's relative name (www, @) and its FQDN
+      (www.example.com, the trailing dot optional). A relative name applies in every
+      public zone; use the FQDN to exclude one zone's record. A matching record set
+      is listed under excluded with the pattern and left out of every count, though
+      each zone's number_of_record_sets is Azure's own count and still includes it.
+      A prefix such as route: fails the run. Each item is a pattern, or a pattern with
+      a reason. Empty: every record
+      set is in scope.
+  resource_exclusions:
+    type: patterns
+    prefixes: [rg, location, id]
+    bare: false
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Resources outside the authorization boundary, to leave out of scope, as
+      case-insensitive glob patterns listed in the manifest, each with a
+      prefix: rg:<resource group> (read from the resource id), location:<region>
+      (the region's name without spaces, such as eastus2; a resource with no
+      location never matches one) or id:<resource id> (also matches that
+      resource's child resources). * matches any run of characters and ? one
+      character. A matching public or private DNS zone is listed under excluded
+      with the pattern and left out of every count and verdict, with its record
+      sets and virtual network links, which are then not read. A DNS zone is
+      global, so location: matches one only as location:global. An alias record
+      or virtual network link in an in-scope zone still counts when the resource
+      or virtual network it points at is excluded. Record-set scope_exclusions
+      then apply to the zones left in scope. A pattern
+      without one of these prefixes fails the run. Set it once under platforms.azure.config for every Azure
+      fetcher that has this field; fetchers without it ignore it. Each item is a
+      pattern, or a pattern with a reason. Empty: every
+      resource is in scope.
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_dns_configuration.json
+  aggregation: per_target
+
+target_schema:
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id to collect from. Optional — omit to use the first
+      enabled subscription the ambient credential can see ("collect where
+      deployed"); set one target per subscription to fan out.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: >
+      Deployment environment label (e.g. prod / preprod) written into the evidence
+      metadata. Optional — set per target for multi-subscription runs.
+
+secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
+
+ksis:
+  - KSI-SVC-SIN   # DNSSEC signing of public zones (sc-20, sc-21, sc-22)
+  - KSI-CNA-MAT   # every public record and what it points at
+  - KSI-RPL-ABO   # each production endpoint's targets, TTL and failover method
+  - KSI-RPL-TRC   # the configured failover path and TTL of each endpoint (configuration, not a recovery test)
+
+evidence_set:
+  reference_id: EVD-AZURE-DNS-CONFIG
+  name: Azure DNS Zone Configuration and DNSSEC
+  instructions: |
+    Script: azure/dns_configuration/fetcher.py
+
+    Access: Reader on the subscription.
+
+    Commands Executed:
+    - subscriptions.list() — picks a subscription when none is set
+    - providers.get() for Microsoft.Network — tells "no zones because the provider isn't registered" apart from "no zones"
+    - zones.list() — every public DNS zone
+    - GET {zone id}/dnssecConfigs/default (per in-scope public zone) — the zone's DNSSEC state and signing keys, through the DNSSEC preview API because the SDK has no DNSSEC call
+    - record_sets.list_all_by_dns_zone() (per in-scope public zone) — every record set with its type, TTL and values, and for an alias record its alias target (the Azure resource or record set in the zone it follows)
+    - private_zones.list() — every private DNS zone
+    - virtual_network_links.list() (per in-scope private zone) — the virtual networks linked to the zone and whether they auto-register records
+
+    Output: azure_dns_configuration_<subscription>.json — each public zone with its DNSSEC state, signing keys and in-scope record sets, each private zone with its virtual network links, and the zones and record sets left out of scope with the pattern each matched.
+
+    Summary fields:
+
+    What was checked?
+    - total_public_zones — Number of in-scope public DNS zones in the subscription
+    - total_private_zones — Number of in-scope private DNS zones in the subscription
+    - provider_registration_status — Whether Microsoft.Network is registered on the subscription: registered, not_registered or unknown
+
+    Which zones are left out of scope?
+    - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every zone is in scope
+    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no public or private DNS zone, such as a mistyped name, or null when a zone list couldn't be read
+    - excluded_public_dns_zones — Number of public DNS zones left out of scope because a pattern matched their resource group or id (or location:global); each is listed under excluded with the pattern, and no other count includes them or their record sets; null if the public zone list couldn't be read
+    - excluded_private_dns_zones — Number of private DNS zones left out of scope the same way; their virtual network links leave with them; null if the private zone list couldn't be read
+    - in_scope_public_dns_zones — Number of public DNS zones read and in scope; 0 means there are none or the patterns took out every one, which a check can catch by requiring more than 0; null if the public zone list couldn't be read
+    - in_scope_private_dns_zones — Number of private DNS zones read and in scope; null if the private zone list couldn't be read
+
+    Which record sets are left out of scope?
+    - scope_exclusion_patterns — List of the configured scope_exclusions patterns: case-insensitive globs matched against each public record set's relative name and FQDN. A relative name such as www matches that name in every public zone. A record set is in scope unless one matches it; empty when none are set, so every record set is in scope
+    - scope_exclusion_patterns_unmatched — List of configured patterns that matched no public record set, such as a mistyped name
+    - excluded_record_sets — Number of public record sets left out of scope because a pattern matched their name; each is listed under excluded with the pattern, and no other count includes them
+    - in_scope_record_sets — Number of public record sets read in in-scope zones and in scope; 0 means the patterns took out every record set, which a check can catch by requiring more than 0
+
+    Are public zones signed with DNSSEC?
+    - dnssec_enabled_public_zones — Number of public zones with DNSSEC enabled: a DNSSEC configuration exists, its provisioning state is Succeeded and it has at least one signing key
+    - dnssec_disabled_public_zones — Number of public zones without DNSSEC enabled (no DNSSEC configuration, or one that hasn't succeeded or has no signing key)
+    - dnssec_unknown_public_zones — Number of public zones whose DNSSEC configuration couldn't be read; the run fails when this is above 0
+    - dnssec_percentage — Percentage of public zones with DNSSEC enabled = dnssec_enabled_public_zones / total_public_zones × 100 (a whole number, 0–100); 0 when total_public_zones is 0. Zones with unknown DNSSEC (dnssec_unknown_public_zones) count in the total but not as enabled, so they lower it
+
+    What records do the public zones publish?
+    - total_public_record_sets — Number of in-scope record sets across all public zones (a record set is every record of one type at one name)
+    - public_zones_record_sets_unread — Number of public zones whose record sets couldn't be read; the run fails when this is above 0
+    - public_record_sets_by_type — Number of in-scope public record sets of each type, such as A, AAAA, CNAME, MX, TXT, NS, SOA, SRV, CAA and PTR; DS, TLSA and NAPTR record sets are counted, but the SDK has no fields for their values, so their targets are empty
+    - public_alias_record_sets — Number of in-scope public record sets that are aliases: instead of a fixed value they follow an Azure resource or another record set in the zone. Each record set's alias_target_type says which: front_door (a Front Door endpoint), traffic_manager (a Traffic Manager profile), cdn_endpoint (an Azure CDN endpoint, whose failover method reads cdn), public_ip (a public IP address), record_set (another record set in the zone) or other
+
+    How does each public endpoint fail over?
+    - public_endpoint_record_sets — Number of in-scope public endpoint record sets (A, AAAA and CNAME, the records that send clients to a server)
+    - public_endpoint_record_sets_empty — Number of in-scope public endpoint record sets with no value and no alias target, so they answer nothing. Dangling records aren't detected: an alias whose target resource was deleted, or a CNAME to a host that no longer exists, isn't counted here
+    - public_endpoint_record_sets_by_failover_method — Number of in-scope public endpoint record sets for each failover method, the way traffic moves to another region (each record set's failover_method; it is null for other record types and for empty record sets, which are left out here). A record that points at another record set in the zone, through an alias or a CNAME to a name in the zone, takes that record set's own method, even when that record set is out of scope; only one link is followed:
+      - front_door (an alias to a Front Door endpoint or a CNAME to an azurefd.net host; Front Door moves traffic between its origins. Only azurefd.net host names are recognised)
+      - traffic_manager (an alias to a Traffic Manager profile or a CNAME to a trafficmanager.net or usgovtrafficmanager.net host; Traffic Manager answers with a healthy endpoint)
+      - cdn (an alias to an Azure CDN endpoint or a CNAME to an azureedge.net host; the CDN endpoint's origins decide)
+      - record_update (a fixed address or host name, or an alias to another resource such as a public IP; moving traffic means changing the record, and resolvers can keep the old answer for up to its TTL)
+
+    Which networks resolve the private zones?
+    - total_private_zone_virtual_network_links — Number of virtual network links across all private zones
+    - private_zones_without_links — Number of private zones linked to no virtual network (a zone whose links couldn't be read also counts here, and the run fails)
+    - auto_registration_links — Number of virtual network links with auto-registration on, so virtual machines in the network get DNS records in the zone automatically
