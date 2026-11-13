@@ -12,6 +12,13 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`wiz_inventory`**, the Wiz cloud resource inventory, as a pipeline fetcher (`kind: inventory`, `id_scheme:
+  wiz-resource-id`). One record per resource from `cloudResourcesV2` under `payload.data`, keyed by the Wiz resource
+  id, with its cloud ID (`external_id`), account, region, type, IPs, OS, image, environment and owner, and internet
+  exposure; `asset_type` is the Wiz resource type. The Wiz id is the `Asset ID` column of
+  `wiz_vulnerability_findings`, so a scan report can link to it. Other tags only with `include_tags`; a run with any
+  collection failure writes no records. Scoped by resource type, account and project; needs only `read:resources`. See
+  `fetchers/wiz/inventory/README.md`.
 - TUI: a pipeline fetcher's "sends to" cell ends in `· pipeline`, its detail pane names the pipeline type and ID
   scheme, and its entry form hides `delivery` and offers `no_request` as `evidence` or `refuse` only. `P` on the
   Manifest tab opens the preset sheet. The upload log flags a pipeline batch that is submitted but not yet approved.
