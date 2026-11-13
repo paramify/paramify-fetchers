@@ -31,7 +31,8 @@ SUMMARY_KEYS = (
     "changes_checked", "changes_excluded", "changes_by_application", "changes_needing_record",
     "changes_matched", "changes_ambiguous", "changes_unmatched", "changes_without_caller",
     "changes_recorded", "changes_without_record", "changes_recorded_without_approval",
-    "changes_recorded_approval_not_required",
+    "changes_recorded_approval_not_required", "changes_recorded_approval_not_judged",
+    "changes_recorded_before_approval_field",
     "changes_without_approved_record", "changes_approved_after_change", "percent_recorded",
     "changes_needing_record_by_origin", "changes_without_record_by_origin", "changes_without_approved_record_by_origin",
     "changes_without_record_by_caller", "changes_by_application_by_caller", "changes_excluded_by_caller",
@@ -159,6 +160,11 @@ def records(files, cfg):
         start = when((results.get("window") or {}).get("start"))
         cover_from.append(start + cfg["after"] if start else None)
         org = (f.target or {}).get("organization_url") or (f.metadata.get("target") or {}).get("organization_url")
+        chosen = results.get("selection") or {}
+        # Where the work items fetcher brought in an approval field partway, a change made before that date is
+        # judged the older way, by its approval_before_field route.
+        field_from = when(chosen.get("approval_field_from"))
+        older = str(chosen.get("approval_before_field") or "states_and_comments").lower() if field_from else None
         for item in results.get("work_items") or []:
             kind = str(item.get("type")).lower()
             if kind not in wanted or item.get("state_category") == "Removed":
@@ -172,19 +178,49 @@ def records(files, cfg):
             # An open item, or one in a state the fetcher couldn't place, covers changes only so long after it last moved.
             last = max(t for t in (created, when(item.get("changed_date"))) if t)
             approval = item.get("approval")
+            # The work items fetcher left it out of approval judging (approval_before_field exclude): not unapproved.
+            judged = item.get("approval_route") != "exclude"
+            ref = {
+                "organization": org, "project": item.get("project"), "id": item.get("id"),
+                "type": item.get("type"), "state": item.get("state"),
+                "approved": bool(approval) if item.get("approval_read") and judged else None,
+                "approved_at": (approval or {}).get("at"),
+                "approval_required": not cfg["approval_types"] or kind in cfg["approval_types"],
+                "approval_judged": judged,
+            }
+            prior = None
+            if field_from:
+                ref["change_before_approval_field"] = False
+                prior = {"from": field_from,
+                         "ref": {**ref, **older_verdict(item, older), "change_before_approval_field": True}}
             out.append({
                 "logins": logins(item, cfg["people"]),
                 "from": created - before,
                 "to": end + cfg["after"] if end else last + cfg["open_days"],
-                "ref": {
-                    "organization": org, "project": item.get("project"), "id": item.get("id"),
-                    "type": item.get("type"), "state": item.get("state"),
-                    "approved": bool(approval) if item.get("approval_read") else None,
-                    "approved_at": (approval or {}).get("at"),
-                    "approval_required": not cfg["approval_types"] or kind in cfg["approval_types"],
-                },
+                "ref": ref,
+                "prior": prior,
             })
     return out, sorted(types), sorted(unselected), cover_from
+
+
+def older_verdict(item, route):
+    """The record's approval by the older route, for a change made before approval_field_from."""
+    if "before_field_approval" in item:
+        approval, read = item.get("before_field_approval"), item.get("approval_read")
+    elif item.get("approval_route") == route:
+        approval, read = item.get("approval"), item.get("approval_read")
+    else:
+        # Evidence that doesn't record it: unknown, so not approved.
+        approval, read = None, False
+    judged = route != "exclude"
+    return {"approved": bool(approval) if read and judged else None, "approved_at": (approval or {}).get("at"),
+            "approval_judged": judged}
+
+
+def judged_as(record, at):
+    """The record as it judges a change made at `at`: the older route's verdict before approval_field_from."""
+    prior = record["prior"]
+    return prior["ref"] if prior and at < prior["from"] else record["ref"]
 
 
 def selection_read(files):
@@ -231,10 +267,12 @@ def check_with(cfg):
             elif str(caller_type or "").lower() not in ("", "user"):
                 status = "application"
             else:
-                found = [i["ref"] for i in items if caller.lower() in i["logins"] and at and i["from"] <= at <= i["to"]]
+                found = [judged_as(i, at) for i in items
+                         if caller.lower() in i["logins"] and at and i["from"] <= at <= i["to"]]
                 status = "unmatched" if not found else "matched" if len(found) == 1 else "ambiguous"
-            # Several candidates count as approved only when every one of them is, or needs no approval.
-            approved = all(w["approved"] or not w["approval_required"] for w in found) if found else None
+            # Several candidates count as approved only when every one of them is, needs no approval, or wasn't judged.
+            approved = all(w["approved"] or not w["approval_required"] or not w["approval_judged"]
+                           for w in found) if found else None
             required = any(w["approval_required"] for w in found) if found else None
             results.append({
                 "change_id": c.get("change_id"), "timestamp": c.get("timestamp"),
@@ -304,6 +342,12 @@ def summarize(results, items, types, unselected, cover_from, origins):
         "changes_recorded_without_approval": recorded - approved,
         "changes_recorded_approval_not_required": sum(
             1 for r in needing if r["status"] in RECORDED and r["approval_required"] is False),
+        "changes_recorded_approval_not_judged": sum(
+            1 for r in needing if r["status"] in RECORDED and r["approval_required"]
+            and not any(w["approval_judged"] for w in r["work_items"] if w["approval_required"])),
+        "changes_recorded_before_approval_field": sum(
+            1 for r in needing if r["status"] in RECORDED
+            and any(w.get("change_before_approval_field") for w in r["work_items"])),
         "changes_without_approved_record": len(needing) - approved,
         "changes_approved_after_change": sum(1 for r in needing if r["approved_after_change"]),
         "percent_recorded": recorded * 100 // len(needing) if needing else 0,

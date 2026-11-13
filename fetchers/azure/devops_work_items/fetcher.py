@@ -45,10 +45,20 @@ APPROVAL_STATES_ENV = "AZURE_DEVOPS_APPROVAL_STATES"
 APPROVAL_PATTERN_ENV = "AZURE_DEVOPS_APPROVAL_PATTERN"
 APPROVAL_TYPES_ENV = "AZURE_DEVOPS_APPROVAL_TYPES"
 APPROVAL_MENTIONS_ENV = "AZURE_DEVOPS_APPROVAL_MENTIONS"
+APPROVAL_FIELD_ENV = "AZURE_DEVOPS_APPROVAL_FIELD"
+APPROVAL_SOURCE_ENV = "AZURE_DEVOPS_APPROVAL_SOURCE"
+APPROVAL_FIELD_FROM_ENV = "AZURE_DEVOPS_APPROVAL_FIELD_FROM"
+APPROVAL_BEFORE_FIELD_ENV = "AZURE_DEVOPS_APPROVAL_BEFORE_FIELD"
+EMERGENCY_TYPES_ENV = "AZURE_DEVOPS_EMERGENCY_TYPES"
 DEFAULT_TYPES = ("Change Request",)
 DEFAULT_TAGS = ("Security",)
 DEFAULT_LOOKBACK_DAYS = 90
 DEFAULT_APPROVAL_STATES = ("Approved",)
+# Where an approval is read from: state moves and comments (as before the approval field), the field, or either.
+HISTORY, FIELD, BOTH, EXCLUDE = "states_and_comments", "field", "both", "exclude"
+APPROVAL_SOURCES = (HISTORY, FIELD, BOTH)
+BEFORE_FIELD_ROUTES = (HISTORY, BOTH, EXCLUDE)
+REFERENCE_NAME = re.compile(r"[A-Za-z_]\w*(?:\.\w+)+")
 # A line starting "Approved" with no question mark, so "Approved?" doesn't count.
 DEFAULT_APPROVAL_PATTERN = r"^\W*approved\b[^?\n]*$"
 MENTION = "@mention"
@@ -138,16 +148,60 @@ def approval_mentions() -> bool:
     raise ValueError(f"{APPROVAL_MENTIONS_ENV} must be true or false, got {raw!r}")
 
 
-def approval_types(types: Sequence[str]) -> List[str]:
-    """Selected change types that need an approval, as the selection spells them; none named means every one."""
+def named_types(env: str, types: Sequence[str], meaning: str, none: bool = False) -> List[str]:
+    """Selected change types an env names, as the selection spells them; a name outside the selection is bad_config.
+    With none, "none" names no type."""
     spelt = {t.lower(): t for t in types}
-    named = list(dict.fromkeys(v.strip().lower() for v in (os.environ.get(APPROVAL_TYPES_ENV) or "").split(",")
-                               if v.strip()))
+    raw = (os.environ.get(env) or "").strip()
+    named = [] if none and raw.lower() == "none" else \
+        list(dict.fromkeys(v.strip().lower() for v in raw.split(",") if v.strip()))
     unknown = [n for n in named if n not in spelt]
     if unknown:
-        raise ValueError(f"{APPROVAL_TYPES_ENV} names {unknown}, which aren't in {TYPES_ENV}, so the type meant would "
-                         f"need no approval; selected types are {', '.join(types) or 'none'}")
-    return [spelt[n] for n in named] if named else list(types)
+        raise ValueError(f"{env} names {unknown}, which aren't in {TYPES_ENV}, so the type meant would {meaning}; "
+                         f"selected types are {', '.join(types) or 'none'}")
+    return [spelt[n] for n in named]
+
+
+def approval_types(types: Sequence[str]) -> List[str]:
+    """Selected change types that need an approval; none named means every one."""
+    return named_types(APPROVAL_TYPES_ENV, types, "need no approval") or list(types)
+
+
+def emergency_types(types: Sequence[str]) -> List[str]:
+    """Selected change types whose approval may come after the change; none by default."""
+    return named_types(EMERGENCY_TYPES_ENV, types, "still need its approval before the change", none=True)
+
+
+def choice(env: str, allowed: Sequence[str]) -> str:
+    raw = (os.environ.get(env) or "").strip().lower() or allowed[0]
+    if raw not in allowed:
+        raise ValueError(f"{env} must be one of {', '.join(allowed)}, got {raw!r}")
+    return raw
+
+
+def approval_field_settings() -> Tuple[Optional[str], str, Optional[datetime], str]:
+    """The approval field's reference name, the approval source, the date the field counts from, and the route for
+    items finished before it."""
+    field = (os.environ.get(APPROVAL_FIELD_ENV) or "").strip() or None
+    if field and not REFERENCE_NAME.fullmatch(field):
+        raise ValueError(f"{APPROVAL_FIELD_ENV} must be a field's reference name, such as Custom.ChangeApprover, not its "
+                         f"display name; got {field!r}")
+    source = choice(APPROVAL_SOURCE_ENV, APPROVAL_SOURCES)
+    if source != HISTORY and not field:
+        raise ValueError(f"{APPROVAL_SOURCE_ENV} is {source}, which needs {APPROVAL_FIELD_ENV}")
+    raw = (os.environ.get(APPROVAL_FIELD_FROM_ENV) or "").strip()
+    since = None
+    if raw:
+        since = parse_time(f"{raw}T00:00:00Z" if re.fullmatch(r"\d{4}-\d{2}-\d{2}", raw) else raw)
+        if since is None:
+            raise ValueError(f"{APPROVAL_FIELD_FROM_ENV} must be a date such as 2026-01-31, got {raw!r}")
+        if source == HISTORY:
+            raise ValueError(f"{APPROVAL_FIELD_FROM_ENV} is set but {APPROVAL_SOURCE_ENV} is {HISTORY}, so the field "
+                             f"never counts")
+    before = choice(APPROVAL_BEFORE_FIELD_ENV, BEFORE_FIELD_ROUTES)
+    if before != HISTORY and since is None:
+        raise ValueError(f"{APPROVAL_BEFORE_FIELD_ENV} is {before}, which needs {APPROVAL_FIELD_FROM_ENV}")
+    return field, source, since, before
 
 
 def call(collector: DevOpsCollector, operation: str, scope: str, fn: Callable[[], Any], default: Any = None) -> Any:
@@ -256,6 +310,16 @@ def comment_text(raw: Any, mentions: bool = False) -> str:
     return "\n".join(lines)
 
 
+def update_time(update: Dict[str, Any]) -> Optional[datetime]:
+    return when(((update.get("fields") or {}).get("System.ChangedDate") or {}).get("newValue")) or \
+        when(update.get("revisedDate"))
+
+
+def field_value(fields: Any, ref: str) -> Any:
+    """A field by reference name, matched without regard to case."""
+    return next((v for k, v in (fields if isinstance(fields, dict) else {}).items() if k.lower() == ref.lower()), None)
+
+
 def state_history(updates: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
     history = []
     for update in updates:
@@ -263,7 +327,7 @@ def state_history(updates: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
         change = (fields or {}).get("System.State")
         if not isinstance(change, dict) or "newValue" not in change:
             continue
-        at = when(((fields or {}).get("System.ChangedDate") or {}).get("newValue")) or when(update.get("revisedDate"))
+        at = update_time(update)
         reason = (fields or {}).get("System.Reason")
         history.append({"from": change.get("oldValue"), "to": change.get("newValue"),
                         "reason": reason.get("newValue") if isinstance(reason, dict) else None, "at": iso(at),
@@ -292,6 +356,56 @@ def current_approval(history: Optional[List[Dict[str, Any]]], comments: Optional
     last = max((h["at"] for h in history or [] if h["at"] and reverses(h)), default="")
     standing = [a for a in found if a["at"] > last]
     return min(standing, key=lambda a: a["at"]) if standing else None
+
+
+def names_same(a: Optional[Dict[str, Any]], b: Optional[Dict[str, Any]]) -> bool:
+    """Same person by login, or by display name where neither value carries a login."""
+    if a and b and not a.get("login") and not b.get("login"):
+        return bool(a.get("display_name")) and a.get("display_name") == b.get("display_name")
+    return same_person(a, b)
+
+
+def field_approval(updates: Optional[List[Dict[str, Any]]], ref: str, value: Any) -> Optional[Dict[str, Any]]:
+    """The person the approval field names now, approving from the last update that set it to that person; when is
+    unknown if the updates weren't read."""
+    by = person(value)
+    if not by:
+        return None
+    at = None
+    for update in updates or []:
+        change = field_value(update.get("fields"), ref)
+        if isinstance(change, dict) and names_same(person(change.get("newValue")), by) and \
+                not names_same(person(change.get("oldValue")), by):
+            at = update_time(update)
+    return {"at": iso(at), "by": by, "source": "field", "state": None}
+
+
+def finished_at(item: Dict[str, Any]) -> Optional[datetime]:
+    """When a finished item reached its current state, as azure_change_work_items reads it."""
+    entered = [when(h.get("at")) for h in item.get("state_history") or [] if h.get("to") == item.get("state")]
+    for at in (when(item.get("closed_date")), when(item.get("resolved_date")),
+               max((t for t in entered if t), default=None), when(item.get("changed_date"))):
+        if at:
+            return at
+    return None
+
+
+def approval_route(item: Dict[str, Any], selection: "Selection") -> str:
+    """How an item's approval is judged: approval_before_field if it finished before field_from, else approval_source
+    (an open item, or one in a state its type no longer defines, included)."""
+    if selection.field_from and item.get("open") is False:
+        done = finished_at(item)
+        if done and done < selection.field_from:
+            return selection.before_field
+    return selection.approval_source
+
+
+def chosen_approval(route: str, history: Optional[Dict[str, Any]],
+                    field: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """The earliest approval the route counts; one whose time is unknown comes last."""
+    found = [a for a in ((history if route in (HISTORY, BOTH) else None), (field if route in (FIELD, BOTH) else None))
+             if a]
+    return min(found, key=lambda a: (a["at"] is None, a["at"] or "")) if found else None
 
 
 def read_updates(client: DevOpsClient, pid: str, wid: int) -> List[Dict[str, Any]]:
@@ -324,8 +438,12 @@ def project_types(client: DevOpsClient, pid: str) -> Dict[str, Dict[str, Any]]:
         if not isinstance(states, list):
             states = client.list(f"{pid}/_apis/wit/workitemtypes/{quote(raw['name'])}/states")
         named = [s for s in states if isinstance(s, dict) and s.get("name")]
+        listed = [raw[key] for key in ("fields", "fieldInstances") if isinstance(raw.get(key), list)]
         types[raw["name"].lower()] = {
             "name": raw["name"],
+            # Reference names of the fields it defines; None when the listing didn't give them.
+            "fields": {str(f.get("referenceName")).lower() for found in listed for f in found if isinstance(f, dict)}
+            if listed else None,
             "states": {str(s["name"]).lower(): s.get("category") or "" for s in named},
             "state_names": [str(s["name"]) for s in named],
             # Workflow order: by category, then as the type lists its states.
@@ -343,6 +461,11 @@ class Selection(NamedTuple):
     pattern: Pattern[str]
     approval_types: List[str]
     mentions: bool
+    approval_field: Optional[str] = None
+    approval_source: str = HISTORY
+    field_from: Optional[datetime] = None
+    before_field: str = HISTORY
+    emergency_types: Sequence[str] = ()
 
 
 def query(types: Dict[str, Dict[str, Any]], pname: str, selection: Selection, days: int) -> str:
@@ -393,6 +516,7 @@ def item_record(raw: Dict[str, Any], pname: str, types: Dict[str, Dict[str, Any]
         "tags": tags,
         "selected_by": selected,
         "approval_required": "type" in selected and str(kind).lower() in {t.lower() for t in selection.approval_types},
+        "emergency_type": "type" in selected and str(kind).lower() in {t.lower() for t in selection.emergency_types},
         "area_path": fields.get("System.AreaPath"),
         "iteration_path": fields.get("System.IterationPath"),
         **{key: person(fields.get(name)) for key, name in PEOPLE.items()},
@@ -407,11 +531,15 @@ def collect_project(client: DevOpsClient, collector: DevOpsCollector, project: D
                     days: int, now: datetime) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
     pid, pname = project["id"], project["name"]
     record: Dict[str, Any] = {"id": pid, "name": pname, "work_item_types_missing": None, "work_items": None,
-                              "states_by_type": None, "undefined_states": None}
+                              "states_by_type": None, "undefined_states": None, "approval_field_types_missing": None}
     types = call(collector, f"wit.workitemtypes.list({pname})", SCOPE_WORK, lambda: project_types(client, pid))
     if types is None:
         return record, []
     record["work_item_types_missing"] = [t for t in selection.types if t.lower() not in types]
+    if selection.approval_field:
+        defined = [types[t.lower()] for t in selection.approval_types if t.lower() in types]
+        record["approval_field_types_missing"] = None if any(t["fields"] is None for t in defined) else \
+            [t["name"] for t in defined if selection.approval_field.lower() not in t["fields"]]
     if not selection.tags and len(record["work_item_types_missing"]) == len(selection.types):
         record.update(work_items=0, states_by_type={}, undefined_states=[])
         return record, []
@@ -449,7 +577,14 @@ def collect_project(client: DevOpsClient, collector: DevOpsCollector, project: D
         item["state_history"] = None if updates is None else state_history(updates)
         item["comments"] = None if comments is None else len(comments)
         ranks = (types.get(str(item["type"]).lower()) or {}).get("ranks") or {}
-        item["approval"] = current_approval(item["state_history"], comments, selection.approval_states, ranks)
+        history = current_approval(item["state_history"], comments, selection.approval_states, ranks)
+        item["field_approval"] = None if not selection.approval_field else field_approval(
+            updates, selection.approval_field, field_value(raw.get("fields"), selection.approval_field))
+        item["approval_route"] = approval_route(item, selection)
+        item["approval"] = chosen_approval(item["approval_route"], history, item["field_approval"])
+        if selection.field_from:
+            # What the older route finds, for azure_change_work_items to judge a change made before the date.
+            item["before_field_approval"] = chosen_approval(selection.before_field, history, item["field_approval"])
         item["approval_read"] = updates is not None and comments is not None
         item["approved_by_requester"] = None if not item["approval"] else \
             same_person(item["approval"]["by"], item["created_by"])
@@ -486,7 +621,7 @@ def link_changes(item: Dict[str, Any], changesets: Dict[int, Optional[Dict[str, 
         not item["links"]["commits"] and not item["links"]["pull_requests"]
     approval = item["approval"]
     item["first_linked_change"] = min((c["created_date"] for c in known if c["created_date"]), default=None)
-    item["changed_before_approval"] = None if not approval or not complete else any(
+    item["changed_before_approval"] = None if not approval or not approval["at"] or not complete else any(
         bool(c["created_date"]) and c["created_date"] < approval["at"] for c in known)
     item["approved_by_change_author"] = None if not approval or not complete else any(
         same_person(approval["by"], c["author"]) or same_person(approval["by"], c["checked_in_by"]) for c in known)
@@ -524,19 +659,26 @@ def summarize(items: List[Dict[str, Any]], projects: List[Dict[str, Any]], liste
     tagged = [i for i in items if "tag" in i["selected_by"]]
     tagged_open = [i for i in tagged if i["open"]]
     history = all(i["approval_read"] for i in change)
+    judged_finished = [i for i in finished if i["approval_route"] != EXCLUDE]
     # An open item may still be waiting on its approval, and a refused one was never meant to get one.
-    needing = [i for i in finished if i["approval_required"] and not refused(i)]
+    needing = [i for i in judged_finished if i["approval_required"] and not refused(i)]
     needing_approved = sum(1 for i in needing if i["approval"])
     # Approved items with linked changes, and those whose every linked change was read.
     linked = [i for i in change if i["approval"] and has_change(i)]
     checked = [i for i in linked if i["changed_before_approval"] is not None]
     every = history and len(checked) == len(linked)
+    field_missing = [p.get("approval_field_types_missing") for p in projects]
     return {
         "lookback_days": days,
         "work_item_types": selection.types,
         "work_item_tags": selection.tags,
         "approval_types": selection.approval_types,
         "approval_mentions": selection.mentions,
+        "approval_source": selection.approval_source,
+        "approval_field": selection.approval_field,
+        "approval_field_from": iso(selection.field_from),
+        "approval_before_field": selection.before_field if selection.field_from else None,
+        "emergency_types": list(selection.emergency_types),
         "projects_collected": sum(1 for p in projects if p["work_items"] is not None),
         "work_item_types_missing": known(sorted({t for p in projects for t in p["work_item_types_missing"] or []})),
         "work_items_total": known(len(items)),
@@ -548,16 +690,25 @@ def summarize(items: List[Dict[str, Any]], projects: List[Dict[str, Any]], liste
         "change_items": known(len(change)),
         "change_items_finished": known(len(finished)),
         "change_items_approved": known(sum(1 for i in change if i["approval"]), history),
+        "change_items_approved_by_field": known(sum(1 for i in change if (i["approval"] or {}).get("source") == FIELD),
+                                                history),
+        "change_items_left_out_of_approval": known(sum(1 for i in change if i["approval_route"] == EXCLUDE)),
+        "approval_field_types_missing": known(sorted({t for m in field_missing for t in m or []}),
+                                              bool(selection.approval_field) and None not in field_missing),
         "finished_change_items_needing_approval": known(len(needing)),
         "finished_change_items_needing_approval_approved": known(needing_approved, history),
         "finished_change_items_approved_percentage": known(coverage_percentage(needing_approved, len(needing)),
                                                            history),
-        "finished_change_items_without_approval": known(ids_of(i for i in finished if not i["approval"]), history),
+        "finished_change_items_without_approval": known(ids_of(i for i in judged_finished if not i["approval"]),
+                                                        history),
         "change_items_approved_by_requester": known(ids_of(i for i in change if i["approved_by_requester"]), history),
         "change_items_with_linked_changes": known(sum(1 for i in change if has_change(i))),
         "finished_change_items_without_linked_change": known(ids_of(i for i in finished if not has_change(i))),
         "change_items_linked_changes_checked": known(len(checked), history),
-        "change_items_changed_before_approval": known(ids_of(i for i in change if i["changed_before_approval"]), every),
+        "change_items_changed_before_approval": known(
+            ids_of(i for i in change if i["changed_before_approval"] and not i["emergency_type"]), every),
+        "emergency_items_approved_after_change": known(
+            ids_of(i for i in change if i["changed_before_approval"] and i["emergency_type"]), every),
         "change_items_approved_by_change_author": known(
             ids_of(i for i in change if i["approved_by_change_author"]), every),
         "tagged_items_open": known(len(tagged_open)),
@@ -576,7 +727,8 @@ def collect(client: DevOpsClient, collector: DevOpsCollector) -> Tuple[Dict[str,
     types = csv_config(TYPES_ENV, DEFAULT_TYPES)
     selection = Selection(types, csv_config(TAGS_ENV, DEFAULT_TAGS),
                           csv_config(APPROVAL_STATES_ENV, DEFAULT_APPROVAL_STATES), approval_pattern(),
-                          approval_types(types), approval_mentions())
+                          approval_types(types), approval_mentions(), *approval_field_settings(),
+                          emergency_types(types))
     if not selection.types and not selection.tags:
         raise ValueError(f"{TYPES_ENV} and {TAGS_ENV} are both empty, so no work item is selected")
     now = datetime.now(timezone.utc)
@@ -589,7 +741,8 @@ def collect(client: DevOpsClient, collector: DevOpsCollector) -> Tuple[Dict[str,
                                partial(collect_project, client, collector, project, selection, days, now))
         if done is None:
             projects.append({"id": project.get("id"), "name": project.get("name"), "work_item_types_missing": None,
-                             "work_items": None, "states_by_type": None, "undefined_states": None})
+                             "work_items": None, "states_by_type": None, "undefined_states": None,
+                             "approval_field_types_missing": None})
             continue
         projects.append(done[0])
         items += done[1]
@@ -603,7 +756,11 @@ def collect(client: DevOpsClient, collector: DevOpsCollector) -> Tuple[Dict[str,
         "window": {"start": iso(now - timedelta(days=days)), "end": iso(now), "lookback_days": days},
         "selection": {"work_item_types": selection.types, "work_item_tags": selection.tags,
                       "approval_states": selection.approval_states, "approval_pattern": selection.pattern.pattern,
-                      "approval_types": selection.approval_types, "approval_mentions": selection.mentions},
+                      "approval_types": selection.approval_types, "approval_mentions": selection.mentions,
+                      "approval_source": selection.approval_source, "approval_field": selection.approval_field,
+                      "approval_field_from": iso(selection.field_from),
+                      "approval_before_field": selection.before_field if selection.field_from else None,
+                      "emergency_types": list(selection.emergency_types)},
         "projects": projects,
         "work_items": items,
         "changesets": [c for _, c in sorted(changesets.items()) if c],

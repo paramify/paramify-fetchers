@@ -47,6 +47,57 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`azure_devops_work_items` 0.3.0: approval from a person field, and types approved after the change.**
+  No new API calls: the field comes from the work item batch, when it was filled
+  from the updates already read, and which types define it from the type listing.
+  With no new setting, approval is read exactly as in 0.2.0.
+  - **`approval_field`** (`AZURE_DEVOPS_APPROVAL_FIELD`) names a person field's
+    reference name, such as `Custom.ChangeApprover`. Each item records whom it names
+    and since when (`field_approval`): from the last update that set it to that
+    person, so a change of person restarts it. A display name is `bad_config`.
+  - **`approval_source`** (`AZURE_DEVOPS_APPROVAL_SOURCE`, `states_and_comments`
+    by default): `field` counts only a filled field as approval, `both` counts it
+    or a state or comment approval, whichever came first. Clearing the field
+    withdraws its approval; a move back or a rejection doesn't.
+  - **`approval_field_from`** (`AZURE_DEVOPS_APPROVAL_FIELD_FROM`, a date) and
+    **`approval_before_field`** (`AZURE_DEVOPS_APPROVAL_BEFORE_FIELD`,
+    `states_and_comments` by default): an item that finished before the date (by
+    its closed date, else its resolved date, else when it entered its current
+    state) is judged by states and comments, by `both`, or left out of every
+    approval figure (`exclude`); an open item follows `approval_source`. Each item records the route that judged it (`approval_route`).
+    `both` or `exclude` without a date is `bad_config`.
+  - **`emergency_types`** (`AZURE_DEVOPS_EMERGENCY_TYPES`, none by default):
+    types whose approval may come after the change, as the comparator's
+    setting of the same name. Their items still need an approval, but a
+    changeset made before it moves from `change_items_changed_before_approval`
+    to the new `emergency_items_approved_after_change`. Each item gains
+    `emergency_type`.
+  - **Summary.** The five settings, plus `change_items_approved_by_field`,
+    `change_items_left_out_of_approval` and `approval_field_types_missing` (the
+    approval types a project defines without the field, as after a misspelt
+    reference name). An approval whose time is unknown leaves the change-order
+    lists `null`, as an unread changeset does. With `approval_field_from` set,
+    each item also records `before_field_approval`, the approval its
+    `approval_before_field` route finds, for `azure_change_work_items` to judge a
+    change made before the date.
+
+- **`azure_change_work_items` 0.3.0: a record left out of approval judging isn't
+  read as unapproved.** When `azure_devops_work_items` left a record out
+  (`approval_route` `exclude`: finished before its `approval_field_from` while its
+  `approval_before_field` is `exclude`), the record's `approved` is `null`, its new
+  `approval_judged` is `false`, and it counts as approved, as a record of a type
+  that needs no approval does. It no longer adds to
+  `changes_recorded_without_approval` or `changes_without_approved_record`. The new
+  `summary.changes_recorded_approval_not_judged` counts recorded changes whose
+  every record needing an approval was left out. Work items evidence from before
+  0.3.0 has no `approval_route`, so every record is judged as before.
+  A change made before a work items file's `approval_field_from` (read from its
+  `results.selection`, so there is no setting here to keep in step) is judged by
+  that file's `approval_before_field` route, from the record's
+  `before_field_approval`, not by the field. Each record on such a change has
+  `change_before_approval_field` `true`, and the new
+  `summary.changes_recorded_before_approval_field` counts these changes.
+
 - **`wiz_vulnerability_findings` 0.4.0: SLA columns.** After the 43 legacy
   columns (unchanged, so existing intake presets keep mapping), the CSV adds the
   Wiz fields Paramify's remediation SLAs depend on: `Is Internet Reachable` and

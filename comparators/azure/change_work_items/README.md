@@ -44,8 +44,20 @@ may be filed later, up to `emergency_hours_before` hours after the change.
 
 A matched or ambiguous change is approved when every work item that records it
 is approved, as `azure_devops_work_items` reads approval: the approval in effect
-(an approval state or an approval comment, quoted text left out, not withdrawn
-since); a record whose approval couldn't be read is not approved.
+(an approval state, an approval comment with quoted text left out, or a filled
+approval field, as its `approval_source` counts them, not withdrawn since); a
+record whose approval couldn't be read is not approved. A record that fetcher
+left out of approval judging (finished before its `approval_field_from` while its
+`approval_before_field` is `exclude`) isn't read as unapproved: each work item
+says so with `approval_judged` false, it counts as approved, and a change whose
+every record needing an approval was left out is counted in
+`changes_recorded_approval_not_judged`.
+Where that fetcher's selection sets `approval_field_from`, a change made
+before that date is judged by its `approval_before_field` route (the approval
+it records as `before_field_approval`), not by the field; each record on such
+a change says so with `change_before_approval_field`, and
+`changes_recorded_before_approval_field` counts the changes. The date comes
+from the work items evidence, so there is no setting here to keep in step.
 An approval may come after the change: such a change still counts as approved,
 and `changes_approved_after_change` counts it unless the late record is one of
 `emergency_types`, which are approved after the fact.
