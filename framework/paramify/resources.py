@@ -8,6 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from urllib.parse import urlencode
 
 from framework.paramify.client import ApiError, Client, ErrorKind
 from framework.paramify_responses import already_present
@@ -16,6 +17,26 @@ _PAGE_SIZE = 100
 # File names per artifacts read: the names go in the URL, so a big entry is
 # read in several requests rather than one URL the server may refuse.
 NAMES_PER_READ = 50
+# Encoded query bytes per artifacts read. The production WAF refuses a query
+# string over 2048 bytes with a bare 403, so long names split the read sooner.
+QUERY_BYTES_PER_READ = 1500
+
+
+def create_name_chunks(names: List[str], params: Dict[str, Any]) -> List[List[str]]:
+    base = len(urlencode(params, doseq=True))
+    chunks: List[List[str]] = []
+    chunk: List[str] = []
+    size = base
+    for name in names:
+        cost = len(urlencode({"originalFileName": name})) + 1  # and its "&"
+        if chunk and (len(chunk) == NAMES_PER_READ or size + cost > QUERY_BYTES_PER_READ):
+            chunks.append(chunk)
+            chunk, size = [], base
+        chunk.append(name)
+        size += cost
+    if chunk:
+        chunks.append(chunk)
+    return chunks or [[]]
 
 
 @dataclass(frozen=True)
@@ -196,15 +217,15 @@ class Resources:
 
         `original_file_names` and `created_on` are repeated parameters
         (`originalFileName`, `createdAt` as YYYY-MM-DD; any listed value
-        matches). The names go out `NAMES_PER_READ` to a request.
+        matches). The names go out at most `NAMES_PER_READ` to a request,
+        and fewer when the encoded query would pass `QUERY_BYTES_PER_READ`.
         """
         params: Dict[str, Any] = {}
         if batch_id:
             params["batchId"] = batch_id
         if created_on:
             params["createdAt"] = [d.isoformat() for d in created_on]
-        names = list(original_file_names or [])
-        chunks = [names[i:i + NAMES_PER_READ] for i in range(0, len(names), NAMES_PER_READ)] or [[]]
+        chunks = create_name_chunks(list(original_file_names or []), params)
         out: List[Artifact] = []
         seen: set = set()
         for chunk in chunks:
