@@ -1665,7 +1665,9 @@ schemas and the `paramify` CLI — not the internal code.
 - **Scan reports are on their own Pipelines tab in the TUI.** The tabs are
   Fetchers, Run, Evidence, Paramify and Pipelines (keys `1` to `5`). The
   Pipelines tab lists the scan-report fetchers in the manifest, with the assessment
-  each one sends to and its close-cycle setting. `i` sends the reports, `j`
+  each one sends to and its close-cycle setting, read as the manifest list
+  reads them: an assessment set for the whole platform counts, and a close
+  policy that is not set reads "close unset". `i` sends the reports, `j`
   lists the pipeline jobs and `C` closes a cycle, as before. The Paramify tab
   keeps the evidence upload and the scripts sync.
 - **Only the TUI panel that has focus has a color.** The other panels have a

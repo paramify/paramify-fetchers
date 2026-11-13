@@ -5,7 +5,7 @@ a different endpoint (an assessment's intake), and its jobs and cycles have
 nothing to do with an evidence set.
 
   * The manifest's scan-report fetchers, each with the assessment it feeds and
-    its close-cycle policy.
+    its close-cycle policy (the manifest list's "sends to" cell).
   * Send (`i`) — post the newest scan run's reports to their assessments.
   * Jobs (`j`) — list recent pipeline jobs; retry or cancel one.
   * Close cycle (`C`) — close an assessment's current cycle by hand.
@@ -22,7 +22,9 @@ from textual.containers import Horizontal, Vertical
 from textual.widgets import Button, RichLog, Static, TabbedContent
 
 from framework import api
-from framework.tui import palette
+from framework.contract import ManifestEntry
+from framework.runner.manifest_loader import entry_keys
+from framework.tui import kinds, palette, render
 from framework.tui.components.keys import BUTTON_ROW_BINDINGS, ButtonRowNav
 from framework.tui.components.table import DataTable
 from framework.tui.modals import ConfirmModal, PickerModal
@@ -78,7 +80,8 @@ class PipelinesPage(ButtonRowNav, Vertical):
 
         fetchers = self.query_one("#pipelines-fetchers", DataTable)
         fetchers.cursor_type = "row"
-        fetchers.add_columns("fetcher", "assessment", "close cycle")
+        # The manifest list's "sends to" cell: the assessment and its close policy.
+        fetchers.add_columns("fetcher", "sends to")
 
         issues = self.query_one("#issues-summary", DataTable)
         issues.cursor_type = "row"
@@ -133,27 +136,35 @@ class PipelinesPage(ButtonRowNav, Vertical):
         self._rebuild_issues()
 
     def _rebuild_fetchers(self) -> None:
-        """The manifest's scan-report fetchers, with what each one feeds."""
+        """The manifest's scan-report fetchers, with where each one sends.
+
+        Kinds come from the App's cached catalog, which is None when discovery
+        failed (the App has said so): the list is then empty, not an error. The
+        destination is the manifest list's cell, read from the merged config, so
+        a platform-level assessment and a ${env:} close policy count, and an
+        unset close policy reads as unset.
+        """
         table = self.query_one("#pipelines-fetchers", DataTable)
         table.clear()
         manifest = getattr(self.app, "manifest", None) or {}
-        kinds = {
-            f["name"]: f.get("kind")
-            for c in api.catalog(self.app.root_path)["categories"] for f in c["fetchers"]
-        }
-        count = 0
-        for entry in (manifest.get("run") or {}).get("fetchers") or []:
-            use = entry.get("use")
-            if kinds.get(use) != "issue_report":
-                continue
-            config = entry.get("config") or {}
-            table.add_row(
-                use,
-                config.get("assessment_name") or config.get("assessment_id") or Text("—", style="dim"),
-                config.get("close_cycle") or "never",
-            )
-            count += 1
-        self.query_one("#pipelines-fetchers-panel", Vertical).border_title = f"scan-report fetchers ({count})"
+        catalog = getattr(self.app, "catalog_data", None) or {}
+        descriptors = {f["name"]: f for c in catalog.get("categories") or [] for f in c["fetchers"]}
+        entries = (manifest.get("run") or {}).get("fetchers") or []
+        keys = entry_keys([ManifestEntry(use=str(e.get("use", "?"))) for e in entries])
+        scans = [
+            (key, entry.get("use"), descriptors[entry.get("use")])
+            for key, entry in zip(keys, entries)
+            if kinds.kind_of(descriptors.get(entry.get("use"))) == kinds.SCAN_REPORT
+        ]
+        views: dict = {}
+        if scans:
+            try:
+                views = api.effective_config(manifest, [key for key, _, _ in scans], self.app.root_path)
+            except Exception:  # never let a config-merge failure kill the UI
+                views = {}
+        for key, use, descriptor in scans:
+            table.add_row(use, render.destination_cell(descriptor, views.get(key)))
+        self.query_one("#pipelines-fetchers-panel", Vertical).border_title = f"scan-report fetchers ({len(scans)})"
 
     def _rebuild_issues(self) -> None:
         """Send readiness for the newest run that collected scan reports.

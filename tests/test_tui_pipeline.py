@@ -246,6 +246,43 @@ def test_pipelines_tab_lists_the_scan_report_fetchers(tmp_path, run_tui):
     assert run_tui(body, path) == ["qualys_vmdr_vulnerability_findings"]
 
 
+def _sends_to(tmp_path, run_tui, edit) -> list:
+    """The Pipelines list's "sends to" cells for a one-scan-report manifest that edit() changes."""
+    manifest = api.init_manifest()
+    api.set_output_dir(manifest, str(tmp_path / "evidence"))
+    api.add_entry(manifest, "qualys_vmdr_vulnerability_findings")
+    edit(manifest["run"])
+    path = tmp_path / "scans.yaml"
+    api.dump_manifest(manifest, path, REPO_ROOT)
+
+    async def body(app, pilot):
+        from framework.tui.components.table import DataTable
+
+        await pilot.press("5")
+        await pilot.pause()
+        table = app.screen.query_one("#pipelines-fetchers", DataTable)
+        return [str(table.get_row_at(i)[1]) for i in range(table.row_count)]
+
+    return run_tui(body, path)
+
+
+def test_an_unset_close_cycle_reads_as_unset_not_never(tmp_path, run_tui):
+    def edit(run):
+        run["fetchers"][0]["config"] = {"assessment_id": "A-1", "assessment_name": "Monthly Scan"}
+
+    assert _sends_to(tmp_path, run_tui, edit) == ["Monthly Scan · close unset"]
+
+
+def test_a_platform_level_assessment_counts(tmp_path, monkeypatch, run_tui):
+    monkeypatch.setenv("SCAN_CLOSE", "after_run")
+
+    def edit(run):
+        run["fetchers"][0]["config"] = {"close_cycle": "${env:SCAN_CLOSE}"}
+        run["platforms"] = {"qualys": {"config": {"assessment_id": "A-9"}}}
+
+    assert _sends_to(tmp_path, run_tui, edit) == ["A-9 · after_run"]
+
+
 def test_a_on_an_empty_manifest_says_what_to_do(tmp_path, run_tui):
     manifest = api.init_manifest()
     api.set_output_dir(manifest, str(tmp_path / "evidence"))
@@ -373,3 +410,31 @@ def test_a_fanout_failure_keeps_the_counts_and_adds_the_reason(tmp_path, run_tui
         assert _info_cell(page, "f") == "1/2 ok  · 1 failed  · scanner down"
 
     run_tui(body, _write_manifest(tmp_path))
+
+
+def test_a_broken_catalog_does_not_stop_the_tui(tmp_path, monkeypatch, run_tui):
+    """A fetcher.yaml that fails discovery: the app says it could not load the
+    catalog and stays up; the Pipelines page lists nothing rather than raising."""
+    path = _write_manifest(tmp_path)
+
+    def broken(root):
+        raise ValueError("fetchers/x/fetcher.yaml: not valid")
+
+    monkeypatch.setattr(api, "catalog", broken)
+
+    async def body(app, pilot):
+        from framework.tui.components.table import DataTable
+        from framework.tui.screens.workspace import WorkspaceScreen
+
+        for key in ("5", "1", "5"):
+            await pilot.press(key)
+            await pilot.pause()
+        table = app.screen.query_one("#pipelines-fetchers", DataTable)
+        notices = [str(n.message) for n in app._notifications]
+        return isinstance(app.screen, WorkspaceScreen), app.is_running, table.row_count, notices
+
+    on_workspace, running, rows, notices = run_tui(body, path)
+    assert on_workspace and running
+    assert rows == 0
+    assert any("Could not load catalog" in n for n in notices), notices
+
