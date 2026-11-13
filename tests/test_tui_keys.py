@@ -32,7 +32,7 @@ from textual.widgets import Button, DataTable, Input, TabbedContent, Tree  # noq
 
 from framework import api  # noqa: E402
 from framework.tui.modals import ConfirmModal, FormModal, MultiPickerModal  # noqa: E402
-from framework.tui.screens.manifest import ManifestPage  # noqa: E402
+from framework.tui.screens.manifest import ManifestPanel  # noqa: E402
 from framework.tui.screens.upload import UploadPage  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -171,7 +171,7 @@ def test_preview_keys_are_ours_not_the_command_palette(tmp_path, monkeypatch, ru
 def test_enter_on_a_manifest_row_opens_the_editor(tmp_path, monkeypatch, run_tui):
     manifest = _write_manifest(tmp_path)
     calls = []
-    monkeypatch.setattr(ManifestPage, "action_edit_entry", lambda self: calls.append(1))
+    monkeypatch.setattr(ManifestPanel, "action_edit_entry", lambda self: calls.append(1))
 
     async def body(app, pilot):
         await pilot.press("2")
