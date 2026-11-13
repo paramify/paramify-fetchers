@@ -19,7 +19,7 @@ def _problems(pane) -> list:
     """Panels squeezed to their border or off the page, controls outside their panel,
     tables that need sideways scrolling."""
     problems = []
-    panels = [p for p in pane.query(".panel") if p.display]
+    panels = [p for p in pane.query(".panel") if p.display and all(a.display for a in p.ancestors)]
     for panel in panels:
         if panel.content_region.height < 1:
             problems.append(f"#{panel.id} is squeezed to its border: {panel.region}")
@@ -97,3 +97,61 @@ def test_paramify_page_holds_fifty_fetchers(size, demo_workspace, no_network, mo
         assert problems == []
     else:
         assert [p for p in problems if "too wide" not in p] == []
+
+
+SHORT = (80, 24)
+
+
+def _paramify_at(size, monkeypatch, demo_workspace, keys=()):
+    """Open the Paramify tab at `size` with the fifty-fetcher status, press `keys`,
+    and return the pane's regions and problems."""
+    from framework import api
+
+    monkeypatch.setattr(api, "paramify_status", lambda *a, **k: _fifty())
+    monkeypatch.setattr(api, "list_artifacts", lambda set_id: [])
+
+    async def drive():
+        app = FetcherApp(manifest_path="manifests/demo.yaml", root_override=str(demo_workspace.root))
+        async with app.run_test(size=size) as pilot:
+            await pilot.press("4")
+            await asyncio.wait_for(app.workers.wait_for_complete(), 30)
+            await pilot.pause()
+            for key in keys:
+                await pilot.press(key)
+                await asyncio.wait_for(app.workers.wait_for_complete(), 30)
+                await pilot.pause()
+            for _ in range(4):  # the layout is measured over a few refreshes
+                await pilot.pause()
+            pane = app.screen.query_one(TabbedContent).active_pane
+            shown = {w.id: w.region for w in pane.query("#pf-detail, #pf-activity-panel") if w.display}
+            return pane.query_one("#pf-grid", DataTable).size.height - 1, shown, _problems(pane)
+
+    return asyncio.run(asyncio.wait_for(drive(), 60))
+
+
+def test_paramify_grid_keeps_its_rows_on_80x24(demo_workspace, no_network, monkeypatch):
+    """On a short terminal the detail gives way: the grid keeps its rows, and
+    nothing runs off the page (80 columns is too narrow for every column)."""
+    rows, shown, problems = _paramify_at(SHORT, monkeypatch, demo_workspace)
+    assert rows >= 7, f"the grid shows only {rows} rows"
+    assert "pf-detail" not in shown, "a detail with no room to show anything"
+    assert [p for p in problems if "too wide" not in p] == []
+
+
+def test_paramify_log_fits_on_80x24(demo_workspace, no_network, monkeypatch):
+    """An action's log still shows on a short terminal, inside the page, and the
+    grid keeps some rows."""
+    from framework import api
+
+    monkeypatch.setattr(api, "scripts_sync", lambda root, config_path=None, **kw: {"ok": True})
+    rows, shown, problems = _paramify_at(SHORT, monkeypatch, demo_workspace, keys=("s",))
+    assert "pf-activity-panel" in shown, "the log of s did not show"
+    assert rows >= 3, f"the grid shows only {rows} rows"
+    assert [p for p in problems if "too wide" not in p] == []
+
+
+def test_paramify_detail_comes_back_on_100x30(demo_workspace, no_network, monkeypatch):
+    rows, shown, problems = _paramify_at((100, 30), monkeypatch, demo_workspace)
+    assert "pf-detail" in shown and shown["pf-detail"].height >= 5
+    assert rows >= 7
+    assert [p for p in problems if "too wide" not in p] == []

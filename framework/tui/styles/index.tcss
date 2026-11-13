@@ -330,8 +330,8 @@ UploadPage {
 }
 
 /* Paramify: a setup grid of what each manifest fetcher has in Paramify. The grid
-   takes the free height; the detail row under it is fixed (10 rows on short
-   terminals, set from Python). */
+   takes the free height; the row under it (the detail, or an action's log) is
+   sized from Python, and gives way on a short terminal. */
 ParamifyPage { height: 1fr; padding: 0 1; }
 #pf-summary { height: auto; padding: 0 1; margin-top: 1; }
 #pf-summary.problem { color: $warning; border-left: tall $warning; }
@@ -349,6 +349,13 @@ ParamifyPage { height: 1fr; padding: 0 1; }
 #pf-caps-panel { width: 1fr; margin-left: 1; }
 #pf-caps { height: 1fr; }
 .panel.empty > #pf-totals, .panel.empty > #pf-filter { display: none; }
+/* A short terminal drops the blank rows, so the list keeps its rows (the row
+   under it gives way, sized from Python). */
+ParamifyPage.short #pf-summary, ParamifyPage.short #pf-lens-tabs { margin-top: 0; }
+ParamifyPage.short #pf-filter { margin-bottom: 0; }
+ParamifyPage.short #pf-totals { height: 1; border-top: none; }
+ParamifyPage.short #pf-detail, ParamifyPage.short #pf-activity-panel { margin-top: 0; }
+ParamifyPage.short #pf-grid-panel { min-height: 0; }
 
 /* Pipelines: the scan-report fetchers, the send panel and its log. */
 PipelinesPage {

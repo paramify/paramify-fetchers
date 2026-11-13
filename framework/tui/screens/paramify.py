@@ -286,13 +286,68 @@ class ParamifyPage(ParamifyWriter, Vertical):
         self.query_one("#pf-grid-panel").border_title = "evidence sets"
         self.query_one("#pf-set-panel").border_title = "evidence set"
         self.query_one("#pf-caps-panel").border_title = "linked capabilities"
+        self._detail_rows = self.DETAIL_ROWS
         self._draw()
 
+    # -- layout ----------------------------------------------------------- #
+
+    # The row under a view's list (the detail, or an action's log) is
+    # DETAIL_ROWS tall, DETAIL_ROWS_TALL from TALL_TERMINAL rows up. On a short
+    # page it gives way so the list keeps MIN_LIST_ROWS rows (its header
+    # included); with less than DETAIL_MIN_ROWS left the detail is hidden, and
+    # an action's log takes DETAIL_MIN_ROWS from the list. Below SHORT_TERMINAL
+    # the page also drops its blank rows (the .short CSS).
+    SHORT_TERMINAL = 32
+    TALL_TERMINAL = 40
+    DETAIL_ROWS = 8
+    DETAIL_ROWS_TALL = 13
+    DETAIL_MIN_ROWS = 5
+    MIN_LIST_ROWS = 8
+
+    # Each view: its list's panel, the list, and the panels that share the row
+    # under it.
+    _VIEW_LAYOUT: dict = {
+        "pf-by-fetcher": ("#pf-grid-panel", "#pf-grid", ("#pf-detail", "#pf-activity-panel")),
+    }
+
     def on_resize(self) -> None:
-        # Spec §7: on a short terminal the grid keeps its rows; the detail gives way.
-        height = 8 if self.app.size.height < 40 else 13
-        self.query_one("#pf-detail").styles.height = height
-        self.query_one("#pf-activity-panel").styles.height = height
+        self.call_after_refresh(self._fit)
+
+    def _fit(self) -> None:
+        """Size the row under the shown view's list to what the page has room for.
+
+        Measured, not CSS: the rows above the list (the summary wraps) and the
+        list panel's own rows (filter, totals) vary, and the list must keep
+        its rows while the detail gives way.
+        """
+        if not self.is_mounted or self.size.height == 0:
+            return
+        short = self.app.size.height < self.SHORT_TERMINAL
+        if self.has_class("short") != short:
+            # The blank rows change what is measured below: measure once they
+            # are gone (the styles apply on the next refresh, the layout after).
+            self.set_class(short, "short")
+            self.call_after_refresh(self.call_after_refresh, self._fit)
+            return
+        view = self.query_one("#pf-lens", ContentSwitcher).current or "pf-by-fetcher"
+        panel_id, list_id, slots = self._VIEW_LAYOUT[view]
+        panel, table = self.query_one(panel_id), self.query_one(list_id)
+        rows = self.DETAIL_ROWS_TALL if self.app.size.height >= self.TALL_TERMINAL else self.DETAIL_ROWS
+        if panel.display and table.display and table.size.height:
+            above = panel.region.y - self.content_region.y
+            around = panel.outer_size.height - table.size.height  # border, filter, totals
+            margin = 0 if short else 1
+            rows = min(rows, self.content_region.height - above - around - margin - self.MIN_LIST_ROWS)
+        self._detail_rows = rows if rows >= self.DETAIL_MIN_ROWS else 0
+        for slot in slots:
+            self.query_one(slot).styles.height = max(self._detail_rows, self.DETAIL_MIN_ROWS)
+        self._place_detail()
+
+    def _place_detail(self) -> None:
+        """The detail shows when there are fetchers, no log in its place, and room."""
+        has_rows = bool((self._status or {}).get("fetchers"))
+        activity = self.query_one("#pf-activity-panel").display
+        self.query_one("#pf-detail").display = has_rows and not activity and self._detail_rows > 0
 
     # -- hints ------------------------------------------------------------ #
 
@@ -421,6 +476,7 @@ class ParamifyPage(ParamifyWriter, Vertical):
     def _draw(self) -> None:
         self._draw_summary()
         self._draw_grid()
+        self.call_after_refresh(self._fit)  # the summary can wrap to more rows, or fewer
 
     def _online(self) -> bool:
         return bool(self._status and self._status["workspace"]["token"])
@@ -476,7 +532,6 @@ class ParamifyPage(ParamifyWriter, Vertical):
     def _draw_grid(self) -> None:
         grid = self.query_one("#pf-grid", DataTable)
         panel = self.query_one("#pf-grid-panel", Vertical)
-        detail = self.query_one("#pf-detail")
         status = self._status
         if status is None:
             return
@@ -498,7 +553,7 @@ class ParamifyPage(ParamifyWriter, Vertical):
                 grid.move_cursor(row=grid.get_row_index(target))
         empty = not rows
         panel.set_class(empty, "empty")
-        detail.display = not empty and not self.query_one("#pf-activity-panel").display
+        self._place_detail()
         self.query_one("#pf-totals", Static).display = online and not empty
         if empty:
             hint = ONLY_SCAN if status["pipelines_count"] else EMPTY
@@ -684,8 +739,7 @@ class ParamifyPage(ParamifyWriter, Vertical):
     def _show_activity(self, shown: bool) -> None:
         """The log and the detail row share one slot under the grid."""
         self.query_one("#pf-activity-panel", Vertical).display = shown
-        has_rows = bool((self._status or {}).get("fetchers"))
-        self.query_one("#pf-detail").display = not shown and has_rows
+        self._place_detail()
         if shown:
             self._activity_key = self._cursor_key()
 

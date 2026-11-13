@@ -1682,8 +1682,9 @@ schemas and the `paramify` CLI — not the internal code.
   each after a preview and a confirm, and the grid then reads the workspace
   again. Without an API token, a bar says how to set one, and the three keys
   are off. A cell or count whose read failed shows `?`, as in `paramify
-  status`, and an uploader config that cannot be read shows in the bar. The
-  tab reads the workspace only when it shows. The scripts force
+  status`, and an uploader config that cannot be read shows in the bar. On a
+  short terminal, such as 80×24, the detail under the grid gives way so the
+  grid keeps its rows. The tab reads the workspace only when it shows. The scripts force
   and reassociate options are no longer in the TUI; `paramify scripts sync`
   keeps them.
 - **Scan reports are on their own Pipelines tab in the TUI.** The tabs are
