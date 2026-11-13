@@ -15,7 +15,7 @@ import json
 import sys
 import time
 from pathlib import Path
-from urllib.parse import parse_qs, urlencode, urlparse
+from urllib.parse import parse_qs, quote, urlencode, urlparse
 
 import pytest
 import requests
@@ -2923,3 +2923,490 @@ def test_workflow_run_configuration_errors(fake, monkeypatch, tmp_path, env):
     fake(runs_routes())
     code, _, status = run_fetcher("workflow_runs", monkeypatch, tmp_path, **env)
     assert code == 1 and status["code"] == "bad_config"
+
+
+# --- image_signing -------------------------------------------------------------------
+
+SIGNING = MODS["image_signing"]
+# A key reference as cosign writes one for a key management service: a name, never key material.
+KMS_KEY = "azurekms://example-vault.vault.azure.net/image-signing"
+IMAGE = "registry.example/app"
+
+
+def workflow(*steps, job=None, env=None):
+    """A workflow file with one job, `promote`."""
+    return yaml.safe_dump({"on": "push", **({"env": env} if env else {}),
+                           "jobs": {"promote": {"runs-on": "ubuntu-latest", **(job or {}), "steps": list(steps)}}})
+
+
+def script(text, **step):
+    return {"run": text, **step}
+
+
+def signing_steps(text, **kw):
+    return SIGNING.analyse("f.yml", workflow(script(text), **kw))["signing_steps"]
+
+
+@pytest.mark.parametrize("command,env,kind,reference", [
+    (f"cosign sign --key {KMS_KEY} {IMAGE}@sha256:0123456789ab", None, "azure_key_vault", KMS_KEY),
+    (f"cosign sign --key={KMS_KEY} {IMAGE}", None, "azure_key_vault", KMS_KEY),
+    (f"cosign sign --key awskms:///alias/image-signing {IMAGE}", None, "aws_kms", "awskms:///alias/image-signing"),
+    (f"cosign sign --key gcpkms://projects/p/locations/global/keyRings/r/cryptoKeys/k {IMAGE}", None, "gcp_kms",
+     "gcpkms://projects/p/locations/global/keyRings/r/cryptoKeys/k"),
+    (f"cosign sign --key hashivault://image-signing {IMAGE}", None, "hashicorp_vault", "hashivault://image-signing"),
+    (f"cosign sign --key k8s://signing/image-signing {IMAGE}", None, "kubernetes_secret", "k8s://signing/image-signing"),
+    (f"cosign sign --key cosign.key {IMAGE}", None, "other", None),
+    (f"cosign sign --key env://COSIGN_PRIVATE_KEY {IMAGE}", None, "environment_variable", None),
+    (f'cosign sign --key "$SIGNING_KEY" {IMAGE}', {"SIGNING_KEY": "env://COSIGN_PRIVATE_KEY"}, "environment_variable", None),
+    (f"cosign sign --sk {IMAGE}", None, "other", None),
+    (f"cosign sign --yes {IMAGE}", None, "keyless", None),
+    # A key named through the workflow's own env is followed, in each way a script can spell it.
+    (f'cosign sign --key "$SIGNING_KEY" {IMAGE}', {"SIGNING_KEY": KMS_KEY}, "azure_key_vault", KMS_KEY),
+    (f"cosign sign --key ${{SIGNING_KEY}} {IMAGE}", {"SIGNING_KEY": KMS_KEY}, "azure_key_vault", KMS_KEY),
+    (f"cosign sign --key ${{{{ env.SIGNING_KEY }}}} {IMAGE}", {"SIGNING_KEY": KMS_KEY}, "azure_key_vault", KMS_KEY),
+    # Not followed: a value that only exists when the workflow runs is never guessed.
+    (f'cosign sign --key "$SIGNING_KEY" {IMAGE}', None, "other", None),
+    (f"cosign sign --key ${{{{ secrets.SIGNING_KEY }}}} {IMAGE}", None, "other", None),
+    (f"cosign sign --key ${{{{ vars.SIGNING_KEY }}}} {IMAGE}", None, "other", None),
+    # The service is known from the scheme, but a reference built from an expression is not a name to record.
+    (f"cosign sign --key azurekms://${{{{ vars.VAULT }}}}/image-signing {IMAGE}", None, "azure_key_vault", None),
+])
+def test_the_signing_key_is_classified_and_only_a_plain_reference_is_kept(command, env, kind, reference):
+    [step] = signing_steps(command, env=env)
+    assert (step["key"], step["key_reference"]) == (kind, reference)
+
+
+def test_step_env_overrides_job_env_overrides_workflow_env():
+    other = "awskms:///alias/other"
+    text = workflow(script(f'cosign sign --key "$K" {IMAGE}', env={"K": KMS_KEY}), script(f'cosign sign --key "$K" {IMAGE}'),
+                    job={"env": {"K": other}}, env={"K": "cosign.key"})
+    first, second = SIGNING.analyse("f.yml", text)["signing_steps"]
+    assert (first["key"], second["key"], second["key_reference"]) == ("azure_key_vault", "aws_kms", other)
+
+
+@pytest.mark.parametrize("text,signs,verifies,others", [
+    (f"cosign sign {IMAGE}", 1, 0, []),
+    (f"/usr/local/bin/cosign sign {IMAGE}", 1, 0, []),
+    (f"docker run gcr.io/projectsigstore/cosign sign {IMAGE}", 1, 0, []),
+    (f"cosign --verbose sign {IMAGE}", 1, 0, []),
+    (f"cosign sign \\\n  --key cosign.key \\\n  {IMAGE}", 1, 0, []),
+    (f"cosign sign {IMAGE}\ncosign sign {IMAGE}-worker", 2, 0, []),
+    (f"cosign sign {IMAGE} && cosign verify --key cosign.pub {IMAGE}", 1, 1, []),
+    (f"cosign verify --key cosign.pub {IMAGE} | jq .", 0, 1, []),
+    # Not image signing: other subcommands are recorded as what they are.
+    ("cosign sign-blob --key cosign.key release.tar.gz", 0, 0, ["sign-blob"]),
+    ("cosign verify-blob --key cosign.pub release.tar.gz", 0, 0, ["verify-blob"]),
+    (f"cosign verify-attestation --key cosign.pub {IMAGE}", 0, 0, ["verify-attestation"]),
+    (f"cosign attest --predicate sbom.json {IMAGE}", 0, 0, ["attest"]),
+    # Not commands at all.
+    (f"# cosign sign {IMAGE}", 0, 0, []),
+    (f"  # cosign sign {IMAGE}", 0, 0, []),
+    (f"make build  # then cosign sign {IMAGE}", 0, 0, []),
+    (f'echo "run cosign sign {IMAGE} by hand"', 0, 0, []),
+    (f"printf 'cosign sign {IMAGE}'", 0, 0, []),
+    (f"mycosign sign {IMAGE}", 0, 0, []),
+    (f"cosign-helper sign {IMAGE}", 0, 0, []),
+    ("cosign version", 0, 0, []),
+    ("cosign signature-of something", 0, 0, []),
+])
+def test_cosign_commands_are_found_in_a_script_and_nothing_else_is(text, signs, verifies, others):
+    row = SIGNING.analyse("f.yml", workflow(script(text)))
+    assert (len(row["signing_steps"]), len(row["verification_steps"]),
+            [s["command"] for s in row["other_cosign_steps"]]) == (signs, verifies, others)
+
+
+def test_a_flag_of_the_next_command_is_not_read_as_this_ones():
+    [step] = signing_steps(f"cosign sign {IMAGE} && cosign verify --key {KMS_KEY} {IMAGE}@sha256:0123456789ab")
+    assert (step["key"], step["names_digest"]) == ("keyless", False)
+
+
+@pytest.mark.parametrize("target,by_digest", [
+    (f"{IMAGE}@sha256:0123456789ab", True), (f"{IMAGE}@${{{{ steps.push.outputs.digest }}}}", True),
+    (f'"{IMAGE}@$DIGEST"', True), (f"{IMAGE}@${{DIGEST}}", True),
+    # A tag, a variable or an address with a user in it is not evidence of a digest.
+    (f"{IMAGE}:1.4.2", False), ('"$IMAGE"', False), ("user@registry.example/app:1.4.2", False),
+])
+def test_a_digest_is_recorded_only_when_the_command_names_one(target, by_digest):
+    assert signing_steps(f"cosign sign --yes {target}")[0]["names_digest"] is by_digest
+
+
+@pytest.mark.parametrize("flags,skipped", [("--tlog-upload=false", True), ("--tlog-upload false", True),
+                                           ("--tlog-upload=FALSE", True), ("--tlog-upload=true", False), ("", False)])
+def test_signing_without_the_transparency_log_is_recorded(flags, skipped):
+    assert signing_steps(f"cosign sign {flags} {IMAGE}")[0]["skips_transparency_log"] is skipped
+
+
+@pytest.mark.parametrize("flags,checks,skips", [
+    ("--key cosign.pub", "key", False),
+    ("--certificate-identity-regexp '^https://github.com/acme/' --certificate-oidc-issuer https://token.example",
+     "certificate_identity", False),
+    ("", "unspecified", False), ("--key cosign.pub --insecure-ignore-tlog", "key", True),
+])
+def test_what_a_verify_step_checks_against(flags, checks, skips):
+    [step] = SIGNING.analyse("f.yml", workflow(script(f"cosign verify {flags} {IMAGE}")))["verification_steps"]
+    assert (step["checks"], step["skips_transparency_log"]) == (checks, skips)
+
+
+@pytest.mark.parametrize("step,job,conditional,continues", [
+    ({}, {}, False, False),
+    ({"if": "github.ref == 'refs/heads/main'"}, {}, True, False),
+    ({}, {"if": "github.event_name == 'push'"}, True, False),
+    ({"continue-on-error": True}, {}, False, True),
+    ({}, {"continue-on-error": True}, False, True),
+    ({"continue-on-error": "${{ matrix.experimental }}"}, {}, False, True),   # an expression can turn it on
+    ({"continue-on-error": False}, {"continue-on-error": "false"}, False, False),
+])
+def test_a_step_that_can_be_skipped_or_fail_quietly_is_marked(step, job, conditional, continues):
+    [row] = SIGNING.analyse("f.yml", workflow(script(f"cosign sign {IMAGE}", **step), job=job))["signing_steps"]
+    assert (row["conditional"], row["continue_on_error"]) == (conditional, continues)
+
+
+def test_a_step_is_located_by_job_number_and_name():
+    text = workflow({"uses": "actions/checkout@v4"}, script(f"cosign sign {IMAGE}", name="Sign the image"),
+                    script(f"cosign sign {IMAGE}"))
+    named, unnamed = SIGNING.analyse("promote.yml", text)["signing_steps"]
+    assert (named["job"], named["step_number"], named["step"]) == ("promote", 2, "Sign the image")
+    assert (unnamed["step_number"], unnamed["step"]) == (3, None)
+
+
+def test_the_installer_and_reusable_workflows_are_noted_because_their_signing_is_not_read():
+    text = yaml.safe_dump({"on": "push", "jobs": {
+        "setup": {"runs-on": "ubuntu-latest", "steps": [{"uses": "Sigstore/Cosign-Installer@v3"},
+                                                        script("./scripts/sign-images.sh")]},
+        "sign": {"uses": "acme/platform/.github/workflows/sign.yml@main"}}})
+    row = SIGNING.analyse("f.yml", text)
+    assert row["installs_cosign"] is True and row["signing_steps"] == []
+    assert row["reusable_workflows_called"] == ["acme/platform/.github/workflows/sign.yml@main"]
+
+
+@pytest.mark.parametrize("text,error", [("jobs: [unclosed", None), ("- a list\n- not a workflow", "not a mapping"),
+                                        ("", "not a mapping")])
+def test_a_file_github_cannot_run_is_reported_not_guessed_at(text, error):
+    row = SIGNING.analyse("f.yml", text)
+    assert row["parsed"] is False and row["signing_steps"] == [] and (error is None or row["error"] == error)
+
+
+@pytest.mark.parametrize("doc", [{"jobs": ["a", "b"]}, {"jobs": {"a": "text"}}, {"jobs": {"a": {"steps": "text"}}},
+                                 {"jobs": {"a": {"steps": [None, "text", {"run": 7}, {"run": None, "name": 3}]}}},
+                                 {"env": ["x"], "jobs": {"a": {"env": "x", "steps": [{"env": 3, "run": "cosign sign i"}]}}}])
+def test_odd_shapes_in_a_workflow_file_do_not_break_the_read(doc):
+    row = SIGNING.analyse("f.yml", yaml.safe_dump(doc))
+    assert row["parsed"] is True and len(row["signing_steps"]) <= 1
+
+
+NOT_COPIED = "TEXT-THAT-MUST-STAY-IN-THE-WORKFLOW"
+PROMOTE = workflow(
+    {"uses": "sigstore/cosign-installer@v3"},
+    script(f"cosign sign --tlog-upload=false --key {KMS_KEY} {IMAGE}@${{{{ steps.push.outputs.digest }}}}\n"
+           f"notes={NOT_COPIED}", name="Sign the image", env={"NOTES": NOT_COPIED}),
+    script(f"cosign verify --key {KMS_KEY} {IMAGE}@sha256:0123456789ab", name="Verify the signature"))
+RELEASE = workflow(script(f"cosign sign --yes {IMAGE}:latest", **{"if": "github.ref == 'refs/heads/main'",
+                                                                  "continue-on-error": True}))
+PLAIN = workflow(script("make test"))
+SIGNING_FILES = {"app": {"image-promote.yml": PROMOTE, "ci.yml": PLAIN},
+                 "site": {"release.yml": RELEASE},
+                 "docs": {"broken.yml": "jobs: [unclosed", "lint.yml": PLAIN},
+                 "tools": {}}
+
+
+def runs_path(name, file):
+    return f"repos/{ORG}/{name}/actions/workflows/{quote(file, safe='')}/runs"
+
+
+def signing_routes(files=None, runs=None, refused=()):
+    files = SIGNING_FILES if files is None else files
+    routes = org_routes([repo(n) for n in files])
+    for n, tree in files.items():
+        routes[f"repos/{ORG}/{n}/.workflows"] = tree or None
+        for f in tree:
+            path = runs_path(n, f)
+            routes[path] = ((403, {"message": "Resource not accessible by integration"}) if (n, f) in refused
+                            else paged(path, "workflow_runs", (runs or {}).get((n, f), [])))
+    return routes
+
+
+def run_calls(fake_github):
+    return sorted({path for path, _ in fake_github.calls if "/actions/workflows/" in path})
+
+
+def test_image_signing_verdicts(fake, monkeypatch, tmp_path):
+    newest = wf_run(5, 1, "image-promote.yml")
+    runs = {("app", "image-promote.yml"): [wf_run(6, 0.5, "image-promote.yml", conclusion=None, status="in_progress"),
+                                           newest, wf_run(4, 2, "image-promote.yml", conclusion="failure"),
+                                           wf_run(3, 3, "image-promote.yml"), wf_run(1, 40, "image-promote.yml")],
+            ("site", "release.yml"): [wf_run(9, 2, "release.yml", conclusion="failure")]}
+    github = fake(signing_routes(runs=runs))
+    code, ev, _ = run_fetcher("image_signing", monkeypatch, tmp_path)
+    assert code == 0 and ev["metadata"]["partial_failure"] is False
+    assert ev["summary"] == {
+        "repositories_total": 4,
+        "workflow_files": 5,
+        "workflow_files_unparsed": ["docs:.github/workflows/broken.yml"],
+        "repositories_signing": ["app", "site"],
+        "signing_workflows": ["app:.github/workflows/image-promote.yml", "site:.github/workflows/release.yml"],
+        "signing_steps": 2,
+        "signing_steps_by_key": {"azure_key_vault": 1, "aws_kms": 0, "gcp_kms": 0, "hashicorp_vault": 0,
+                                 "kubernetes_secret": 0, "environment_variable": 0, "keyless": 1, "other": 0},
+        "signing_steps_naming_a_digest": 1,
+        "signing_steps_skipping_transparency_log": 1,
+        "signing_steps_conditional": ["site:.github/workflows/release.yml:promote:1"],
+        "signing_steps_continue_on_error": ["site:.github/workflows/release.yml:promote:1"],
+        "signing_steps_discarding_failure": [],
+        "verification_workflows": ["app:.github/workflows/image-promote.yml"],
+        "verification_steps": 1,
+        "verification_steps_not_enforced": [],
+        "repositories_signing_without_verification": ["site"],
+        "workflows_mentioning_cosign_without_a_cosign_command": [],
+        "runs_read": True,
+        "signing_workflow_runs": 5,                     # run 1 is outside the window
+        "signing_workflow_runs_successful": 2,
+        "signing_workflows_without_successful_run": ["site:.github/workflows/release.yml"],
+        "latest_successful_signing_run": newest["created_at"],
+        "not_collected": [],
+    }
+    # Runs are read only for the workflows that sign.
+    assert run_calls(github) == [runs_path("app", "image-promote.yml"), runs_path("site", "release.yml")]
+    app = next(r for r in ev["repositories"] if r["repository"] == "app")
+    promote = next(w for w in app["workflows"] if w["file"] == "image-promote.yml")
+    assert promote["installs_cosign"] is True and promote["signing_steps"] == [{
+        "job": "promote", "step": "Sign the image", "step_number": 2, "command": "sign", "names_digest": True,
+        "conditional": False, "continue_on_error": False, "failure_discarded": False, "key": "azure_key_vault",
+        "key_reference": KMS_KEY,
+        "skips_transparency_log": True}]
+    assert promote["runs"] == {"read": True, "total": 4, "successful": 2,
+                               "by_outcome": {"failure": 1, "in_progress": 1, "success": 2},
+                               "latest_run_at": runs[("app", "image-promote.yml")][0]["created_at"],
+                               "latest_outcome": "in_progress", "latest_success_at": newest["created_at"]}
+    assert next(w for w in app["workflows"] if w["file"] == "ci.yml")["runs"] is None
+
+
+def test_no_script_text_or_env_value_reaches_the_evidence(fake, monkeypatch, tmp_path):
+    """Only what is derived from a cosign command is written: a script can hold anything."""
+    fake(signing_routes())
+    _, ev, _ = run_fetcher("image_signing", monkeypatch, tmp_path)
+    written = json.dumps(ev)
+    assert NOT_COPIED not in written and "display_title" not in written and "never collected" not in written
+    assert "make test" not in written and "steps.push.outputs" not in written
+
+
+def test_with_runs_turned_off_no_run_is_read_and_no_run_figure_is_given(fake, monkeypatch, tmp_path):
+    github = fake(signing_routes())
+    code, ev, _ = run_fetcher("image_signing", monkeypatch, tmp_path, GITHUB_IMAGE_SIGNING_INCLUDE_RUNS="false")
+    s = ev["summary"]
+    assert code == 0 and run_calls(github) == [] and ev["metadata"]["since"] is None
+    assert (s["runs_read"], s["signing_workflow_runs"], s["signing_workflow_runs_successful"],
+            s["signing_workflows_without_successful_run"], s["latest_successful_signing_run"]) == (None,) * 5
+    # What the files say is still reported in full.
+    assert (s["signing_steps"], s["repositories_signing_without_verification"]) == (2, ["site"])
+    assert all(w["runs"] is None for r in ev["repositories"] for w in r.get("workflows", []))
+
+
+def test_unreadable_runs_are_unknown_not_zero_and_the_files_are_still_reported(fake, monkeypatch, tmp_path):
+    runs = {("app", "image-promote.yml"): [wf_run(5, 1, "image-promote.yml")]}
+    fake(signing_routes(runs=runs, refused=[("site", "release.yml")]))
+    code, ev, status = run_fetcher("image_signing", monkeypatch, tmp_path)
+    s = ev["summary"]
+    assert code == 1 and ev["metadata"]["partial_failure"] is True and status["code"] == "not_authorized"
+    assert (s["runs_read"], s["signing_workflow_runs"], s["signing_workflow_runs_successful"],
+            s["signing_workflows_without_successful_run"], s["latest_successful_signing_run"]) == (False, None, None,
+                                                                                                None, None)
+    assert (s["signing_steps"], s["verification_steps"], s["not_collected"]) == (2, 1, [])
+    site = next(r for r in ev["repositories"] if r["repository"] == "site")
+    assert site["workflows"][0]["runs"] == {"read": False}
+
+
+def test_more_runs_than_the_cap_fails_rather_than_cutting_the_history(fake, monkeypatch, tmp_path):
+    runs = {("app", "image-promote.yml"): [wf_run(i, 1, "image-promote.yml") for i in range(9, 0, -1)]}
+    fake(signing_routes(runs=runs))
+    code, ev, status = run_fetcher("image_signing", monkeypatch, tmp_path, GITHUB_IMAGE_SIGNING_MAX_RUNS="5")
+    assert code == 1 and status["code"] == "partial_failure" and "GITHUB_IMAGE_SIGNING_MAX_RUNS" in status["error"]
+    assert ev["summary"]["runs_read"] is False and ev["summary"]["signing_workflow_runs"] is None
+
+
+def test_no_signing_anywhere_is_a_complete_answer(fake, monkeypatch, tmp_path):
+    github = fake(signing_routes({"docs": {"lint.yml": PLAIN}, "tools": {}}))
+    code, ev, _ = run_fetcher("image_signing", monkeypatch, tmp_path)
+    s = ev["summary"]
+    assert code == 0 and run_calls(github) == []
+    assert (s["repositories_signing"], s["signing_steps"], s["runs_read"], s["signing_workflow_runs"],
+            s["signing_workflows_without_successful_run"], s["latest_successful_signing_run"]) == ([], 0, True, 0, [], None)
+
+
+def test_a_signing_workflow_that_never_ran_in_the_window_is_named(fake, monkeypatch, tmp_path):
+    fake(signing_routes({"site": {"release.yml": RELEASE}}))
+    code, ev, _ = run_fetcher("image_signing", monkeypatch, tmp_path)
+    s = ev["summary"]
+    assert code == 0 and (s["signing_workflow_runs"], s["signing_workflows_without_successful_run"]) == (
+        0, ["site:.github/workflows/release.yml"])
+
+
+@pytest.mark.parametrize("steps", [
+    [{"uses": "sigstore/cosign-installer@v3"}, script("./scripts/sign-images.sh")],
+    [script('make cosign-sign IMAGE="${IMAGE}" DIGEST="${DIGEST}"')],     # signing behind a make target
+    [script("cosign version")],
+])
+def test_cosign_used_in_a_way_the_file_does_not_show_is_listed_not_counted(fake, monkeypatch, tmp_path, steps):
+    fake(signing_routes({"app": {"promote.yml": workflow(*steps)}, "docs": {"lint.yml": PLAIN}}))
+    _, ev, _ = run_fetcher("image_signing", monkeypatch, tmp_path)
+    s = ev["summary"]
+    assert s["workflows_mentioning_cosign_without_a_cosign_command"] == ["app:.github/workflows/promote.yml"]
+    assert (s["repositories_signing"], s["signing_steps"]) == ([], 0)
+
+
+def test_a_comment_about_cosign_is_not_a_mention():
+    row = SIGNING.analyse("f.yml", workflow(script("# cosign sign would go here\nmake build")))
+    assert row["mentions_cosign"] is False
+
+
+def test_a_workflow_file_name_is_escaped_in_the_runs_path(fake, monkeypatch, tmp_path):
+    github = fake(signing_routes({"app": {"image promote#1.yml": RELEASE}}))
+    code, ev, _ = run_fetcher("image_signing", monkeypatch, tmp_path)
+    assert code == 0 and run_calls(github) == [f"repos/{ORG}/app/actions/workflows/image%20promote%231.yml/runs"]
+
+
+def test_a_workflow_file_with_no_readable_content_makes_its_repository_unknown(fake, monkeypatch, tmp_path):
+    routes = signing_routes({"app": {"image-promote.yml": PROMOTE}, "site": {"release.yml": RELEASE}})
+
+    def graphql(query, variables):
+        status, body = gql_repos(routes, query, variables)
+        for node in body["data"].values():
+            for entry in (node.get("object") or {}).get("entries", []):
+                if entry["name"] == "release.yml":
+                    entry["object"] = {"text": None, "isBinary": False, "isTruncated": True}
+        return status, body
+    routes["graphql"] = graphql
+    github = fake(routes)
+    code, ev, status = run_fetcher("image_signing", monkeypatch, tmp_path)
+    s = ev["summary"]
+    assert code == 1 and status["code"] == "partial_failure" and ev["metadata"]["partial_failure"] is True
+    assert (s["not_collected"], s["repositories_total"], s["repositories_signing"]) == (["site"], 2, ["app"])
+    assert s["repositories_signing_without_verification"] == [] and run_calls(github) == [runs_path("app", "image-promote.yml")]
+    assert next(r for r in ev["repositories"] if r["repository"] == "site") == {"repository": "site", "collected": False}
+
+
+def test_a_failed_read_of_the_workflow_files_leaves_no_figures(fake, monkeypatch, tmp_path):
+    routes = signing_routes()
+    routes["graphql"] = (200, {"errors": [{"type": "FORBIDDEN", "message": "Resource not accessible"}]})
+    github = fake(routes)
+    code, ev, status = run_fetcher("image_signing", monkeypatch, tmp_path)
+    assert code == 1 and status["code"] == "not_authorized" and ev["summary"] == {} and run_calls(github) == []
+
+
+@pytest.mark.parametrize("env", [{"GITHUB_IMAGE_SIGNING_DAYS_BACK": "0"}, {"GITHUB_IMAGE_SIGNING_DAYS_BACK": "367"},
+                                 {"GITHUB_IMAGE_SIGNING_MAX_RUNS": "0"}, {"GITHUB_IMAGE_SIGNING_INCLUDE_RUNS": "maybe"},
+                                 {"GITHUB_IMAGE_SIGNING_DAYS_BACK": "0", "GITHUB_IMAGE_SIGNING_INCLUDE_RUNS": "false"}])
+def test_image_signing_configuration_errors(fake, monkeypatch, tmp_path, env):
+    github = fake(signing_routes())
+    monkeypatch.setenv("GITHUB_ORG", ORG)
+    monkeypatch.setenv("GITHUB_TOKEN", "test-token")
+    monkeypatch.setenv("GITHUB_API_URL", API)
+    monkeypatch.setenv("EVIDENCE_DIR", str(tmp_path))
+    monkeypatch.setenv("FETCHER_STATUS_FILE", str(tmp_path / "status.json"))
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    assert gc.run(SIGNING.NAME, SIGNING.collect, SIGNING.CONFIG) == 1
+    assert json.loads((tmp_path / "status.json").read_text())["code"] == "bad_config"
+    assert not any(path == "graphql" or "/actions/" in path for path, _ in github.calls)
+
+
+def test_a_repository_that_only_verifies_is_not_counted_as_signing(fake, monkeypatch, tmp_path):
+    verify_only = workflow(script(f"cosign verify --key {KMS_KEY} {IMAGE}@sha256:0123456789ab"))
+    github = fake(signing_routes({"deploy": {"deploy.yml": verify_only}, "site": {"release.yml": RELEASE}}))
+    code, ev, _ = run_fetcher("image_signing", monkeypatch, tmp_path)
+    s = ev["summary"]
+    assert code == 0 and s["verification_workflows"] == ["deploy:.github/workflows/deploy.yml"]
+    assert (s["repositories_signing"], s["repositories_signing_without_verification"]) == (["site"], ["site"])
+    assert run_calls(github) == [runs_path("site", "release.yml")]
+
+
+# Shapes taken from public workflow files, where the first version of this fetcher went wrong.
+@pytest.mark.parametrize("text,signs,verifies", [
+    # GitHub's own starter workflow: the command comes after a pipe from echo.
+    ('echo "${TAGS}" | xargs -I {} cosign sign --yes {}@${DIGEST}', 1, 0),
+    (f'echo "Signing {IMAGE}" && cosign sign --yes {IMAGE}', 1, 0),
+    ('for tag in $TAGS; do\n  cosign sign \\\n  -a "sha=${GITHUB_SHA}" \\\n  -y \\\n  "$tag"@${DIGEST}\ndone', 1, 0),
+    (f"test $# -gt 0 && cosign sign {IMAGE}", 1, 0),                  # $# is not a comment
+    (f"cosign.exe sign {IMAGE}", 1, 0),
+    (f"if ! cosign verify --key cosign.pub {IMAGE}; then exit 1; fi", 0, 1),
+    (f'bash -c "cosign sign {IMAGE} && cosign verify --key cosign.pub {IMAGE}"', 1, 1),
+    # A separator or a # inside quotes is text.
+    (f'echo "first; cosign sign {IMAGE}"', 0, 0),
+    (f"echo 'next | cosign sign {IMAGE}'", 0, 0),
+    (f'printf "%s\\n" "see # cosign sign {IMAGE}"', 0, 0),
+    (f"cosign sign {IMAGE} # then cosign verify {IMAGE}", 1, 0),
+    (f'make cosign-sign IMAGE="{IMAGE}"', 0, 0),
+])
+def test_commands_are_split_the_way_a_shell_splits_them(text, signs, verifies):
+    row = SIGNING.analyse("f.yml", workflow(script(text)))
+    assert (len(row["signing_steps"]), len(row["verification_steps"])) == (signs, verifies)
+
+
+def test_the_starter_workflow_line_is_read_in_full():
+    [step] = signing_steps('echo "${TAGS}" | xargs -I {} cosign sign --yes {}@${DIGEST}')
+    assert (step["key"], step["names_digest"], step["failure_discarded"]) == ("keyless", True, False)
+
+
+def test_an_expression_or_a_quoted_pattern_does_not_cut_a_command_short():
+    [sign] = signing_steps(f"cosign sign --key ${{{{ inputs.key || 'cosign.key' }}}} --tlog-upload=false {IMAGE}")
+    assert (sign["key"], sign["skips_transparency_log"]) == ("other", True)
+    text = f"cosign verify --certificate-identity-regexp '^https://github.com/(acme|example)/' --insecure-ignore-tlog {IMAGE}"
+    [verify] = SIGNING.analyse("f.yml", workflow(script(text)))["verification_steps"]
+    assert (verify["checks"], verify["skips_transparency_log"]) == ("certificate_identity", True)
+
+
+@pytest.mark.parametrize("tail,discarded", [
+    ("|| true", True), ("|| :", True), ('|| echo "signing failed"', True), ("||true", True),
+    ("|| exit 1", False), ("|| { echo failed; exit 1; }", False), ("&& true", False), ("; true", False), ("", False),
+    ("| tee sign.log", False),
+])
+def test_a_failure_the_script_throws_away_is_marked(tail, discarded):
+    [step] = signing_steps(f"cosign sign --yes {IMAGE} {tail}")
+    assert step["failure_discarded"] is discarded
+
+
+def test_a_verify_step_that_cannot_fail_the_run_is_listed_as_not_enforced(fake, monkeypatch, tmp_path):
+    text = workflow(script(f"cosign sign --yes {IMAGE} || true", name="sign"),
+                    script(f"cosign verify --key cosign.pub {IMAGE} || true", name="soft verify"),
+                    script(f"cosign verify --key cosign.pub {IMAGE}", name="warn only", **{"continue-on-error": True}),
+                    script(f"cosign verify --key cosign.pub {IMAGE}", name="real verify"))
+    fake(signing_routes({"app": {"promote.yml": text}}))
+    code, ev, _ = run_fetcher("image_signing", monkeypatch, tmp_path)
+    s = ev["summary"]
+    at = "app:.github/workflows/promote.yml:promote"
+    assert code == 0 and (s["verification_steps"], s["verification_steps_not_enforced"]) == (3, [f"{at}:2", f"{at}:3"])
+    assert s["signing_steps_discarding_failure"] == [f"{at}:1"] and s["signing_steps_continue_on_error"] == []
+
+
+def test_no_workflow_shape_can_break_the_read():
+    """Random documents built from the keys a workflow uses, with values of every YAML type."""
+    import random
+    rng = random.Random(20261113)
+    keys = ["jobs", "steps", "run", "uses", "env", "if", "continue-on-error", "name", "on", "a", "promote"]
+    leaves = [None, True, False, 0, 7, 1.5, "", "text", "cosign sign img", "cosign verify img || true", "${{ x }}",
+              "sigstore/cosign-installer@v3", "echo \"unclosed", "it's # cosign", "\\", "$(", "`", "'", '"', "&&", "||"]
+
+    def value(depth):
+        roll = rng.random()
+        if depth > 4 or roll < 0.35:
+            return rng.choice(leaves)
+        if roll < 0.7:
+            return {rng.choice(keys): value(depth + 1) for _ in range(rng.randint(0, 4))}
+        return [value(depth + 1) for _ in range(rng.randint(0, 4))]
+    for _ in range(3000):
+        doc = {"jobs": value(0), "env": value(3)} if rng.random() < 0.8 else value(0)
+        row = SIGNING.analyse("f.yml", yaml.safe_dump(doc))
+        assert isinstance(row["signing_steps"], list) and isinstance(row["parsed"], bool)
+
+
+@pytest.mark.parametrize("text", ["", "'", '"', "\\", "${{", "${{ a", "a ${{ b }} c", "# only a comment", "a\\\nb", "||", "&&;|&",
+                                  "cosign sign 'unclosed", 'cosign sign "a\\"b" img', "x" * 20000 + " cosign sign img"])
+def test_the_splitter_ends_on_any_script(text):
+    assert isinstance(SIGNING.commands(text), list) and SIGNING.segments(text)[-1][1] == ""
+
+
+def test_two_commands_in_one_quoted_string_keep_their_own_flags():
+    text = f'bash -c "cosign sign {IMAGE} && cosign verify --key {KMS_KEY} {IMAGE}@sha256:0123456789ab"'
+    row = SIGNING.analyse("f.yml", workflow(script(text)))
+    [sign], [verify] = row["signing_steps"], row["verification_steps"]
+    assert (sign["key"], sign["key_reference"], sign["names_digest"]) == ("keyless", None, False)
+    assert (verify["checks"], verify["names_digest"]) == ("key", True)
