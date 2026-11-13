@@ -529,7 +529,7 @@ def collect(client, ws: Dict[str, Any], collector) -> Dict[str, Any]:
         **(rule_summary(rules) if rules is not None else {}),
         **covered,
         **({"enabled_rules_quiet": quiet} if rules is not None and listed_tables is not None else {}),
-        **({"enabled_rules_quiet_by_confirmation": (
+        **({"enabled_rules_confirmed_quiet": (
             None if quiet is None else sum(1 for q in quiet if q.get("confirmed_by_configuration"))
         )} if confirmed and rules is not None and listed_tables is not None else {}),
         "workspace_tables_listed": len(listed_tables) if listed_tables is not None else None,
@@ -556,11 +556,11 @@ def _paired_total(workspaces: List[Dict[str, Any]], field: str, pair: str) -> Op
 def summarize(workspaces: List[Dict[str, Any]]) -> Dict[str, Any]:
     collected = [w for w in workspaces if w.get("rules") is not None]
     enabled = [w.get("enabled_rules") or 0 for w in collected]
-    confirmed = [w for w in collected if "enabled_rules_quiet_by_confirmation" in w]
+    confirmed = [w for w in collected if "enabled_rules_confirmed_quiet" in w]
     by_confirmation = (
-        {"enabled_rules_quiet_by_confirmation": None
-         if any(w["enabled_rules_quiet_by_confirmation"] is None for w in confirmed)
-         else sum(w["enabled_rules_quiet_by_confirmation"] for w in confirmed)}
+        {"enabled_rules_confirmed_quiet": None
+         if any(w["enabled_rules_confirmed_quiet"] is None for w in confirmed)
+         else sum(w["enabled_rules_confirmed_quiet"] for w in confirmed)}
         if confirmed else {}
     )
     return {

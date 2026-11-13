@@ -57,7 +57,7 @@ schemas and the `paramify` CLI — not the internal code.
   reads as quiet. Its `enabled_rules_quiet` record carries
   `confirmed_by_configuration: true` and a reason saying the connection is
   confirmed by configuration, not read from the API, and the new
-  `enabled_rules_quiet_by_confirmation` count (per workspace and in the
+  `enabled_rules_confirmed_quiet` count (per workspace and in the
   summary) counts them. A kind that sends no product's alerts fails the run as
   `bad_config`. Left empty, the evidence is unchanged.
 - **`aws_route53_resolver_dns_security`** (`EVD-R53-RESOLVER-DNS-SECURITY`) —

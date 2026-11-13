@@ -1496,9 +1496,9 @@ def test_analytics_rules_confirmed_connection_makes_its_product_quiet_and_is_fla
         "reason": "its product sent no alert in the window, and the AzureSecurityCenter connection is confirmed by "
                   f"{CONFIRMED}, not read from the API"}
     assert "confirmed_by_configuration" not in quiet["ipc"]  # read from the API: unchanged
-    assert ws["enabled_rules_quiet_by_confirmation"] == 1
+    assert ws["enabled_rules_confirmed_quiet"] == 1
     assert (ev["summary"]["enabled_rules_missing_data"], ev["summary"]["enabled_rules_quiet"],
-            ev["summary"]["enabled_rules_quiet_by_confirmation"]) == (3, 2, 1)
+            ev["summary"]["enabled_rules_confirmed_quiet"]) == (3, 2, 1)
     assert [r["name"] for r in ws["enabled_rules_missing_data"] if r["name"] == "mdo"] == ["mdo"]  # not confirmed
     assert_summary_documented("azure/sentinel_analytics_rules", ev["summary"])
 
@@ -1510,7 +1510,7 @@ def test_analytics_rules_confirmed_connection_spares_an_unreadable_connector_lis
     monkeypatch.setenv(CONFIRMED, "AzureSecurityCenter")
     code, ev = run("sentinel_analytics_rules", tmp_path)
     assert [q["name"] for q in ws_a(ev)["enabled_rules_quiet"]] == ["mdc"]
-    assert ev["summary"]["enabled_rules_quiet_by_confirmation"] == 1 and code == 1  # the listing failure still shows
+    assert ev["summary"]["enabled_rules_confirmed_quiet"] == 1 and code == 1  # the listing failure still shows
 
 
 def test_analytics_rules_empty_confirmed_setting_changes_nothing(azure, tmp_path, monkeypatch):
@@ -1519,7 +1519,7 @@ def test_analytics_rules_empty_confirmed_setting_changes_nothing(azure, tmp_path
     code, ev = run("sentinel_analytics_rules", tmp_path)
     ws = ws_a(ev)
     assert code == 0 and ws["enabled_rules_quiet"] == []
-    assert "enabled_rules_quiet_by_confirmation" not in ws and "enabled_rules_quiet_by_confirmation" not in ev["summary"]
+    assert "enabled_rules_confirmed_quiet" not in ws and "enabled_rules_confirmed_quiet" not in ev["summary"]
     assert [r["name"] for r in ws["enabled_rules_missing_data"]] == ["mdc"]
 
 
@@ -1531,7 +1531,7 @@ def test_analytics_rules_unknown_confirmed_kind_is_a_config_error(azure, tmp_pat
     assert code == 1 and ev["metadata"]["partial_failure"] is True
     assert json.loads((tmp_path / "status.json").read_text())["code"] == "bad_config"
     assert "AzureSecurityCentre" in str(ev["metadata"]["api_failures"])
-    assert ws["enabled_rules_quiet"] == [] and "enabled_rules_quiet_by_confirmation" not in ws  # none used
+    assert ws["enabled_rules_quiet"] == [] and "enabled_rules_confirmed_quiet" not in ws  # none used
 
 
 def test_analytics_rules_without_alert_only_rules_missing_data_skip_the_connector_listing(azure, tmp_path):
