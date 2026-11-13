@@ -488,12 +488,24 @@ def file_service_properties_record(properties: dict) -> dict:
     }
 
 
-def summarize(accounts: list[dict]) -> dict:
+CONTAINER_COUNTS = (
+    "total_containers", "containers_with_public_access_level", "anonymously_accessible_containers",
+    "containers_with_immutability_policy", "containers_with_legal_hold",
+)
+REPLICATION_COUNTS = ("geo_replication_live_accounts", "geo_failover_ready_accounts")
+
+
+def summarize(accounts: list[dict] | None) -> dict:
     """CMK coverage is the headline, not an encrypted/total percentage.
+
+    `None` means the account list was not read: every count is null, not 0. A count built from
+    a list that failed for some account (its containers, its replication status) is null too.
 
     Azure Storage encrypts at rest unconditionally, so a generic "encrypted"
     percentage would be a constant 100 and prove nothing.
     """
+    if accounts is None:
+        return {k: None for k in summarize([])}
     cmk = sum(1 for a in accounts if a["customer_managed_key"])
     total = len(accounts)
     return {
@@ -529,8 +541,17 @@ def summarize(accounts: list[dict]) -> dict:
             for a in accounts
             if dig(a, "file_service_properties", "share_delete_retention_policy", "enabled")
         ),
-        **summarize_replication_keys_containers(accounts),
+        **_null_unread(accounts, summarize_replication_keys_containers(accounts)),
     }
+
+
+def _null_unread(accounts: list[dict], counts: dict) -> dict:
+    """Null the counts built from a container list or replication status that failed for some account."""
+    if any(a.get("containers_status") == CONTAINERS_FAILED for a in accounts):
+        counts.update({k: None for k in CONTAINER_COUNTS})
+    if any((a.get("geo_replication_stats") or {}).get("stats_status") == STATS_FAILED for a in accounts):
+        counts.update({k: None for k in REPLICATION_COUNTS})
+    return counts
 
 
 def summarize_replication_keys_containers(accounts: list[dict]) -> dict:
@@ -799,8 +820,10 @@ def main() -> int:
     listed = accounts is not None
     accounts, out = exclude_containers(exclusions, accounts or [])
     excluded += out
-    if not listed or any(a.get("containers_status") == CONTAINERS_FAILED for a in accounts):
+    containers_read = listed and not any(a.get("containers_status") == CONTAINERS_FAILED for a in accounts)
+    if not containers_read:
         exclusions.mark_unread()
+    summary = summarize(accounts if listed else None)
     exclusions.warn_unmatched(logger)
 
     evidence = build_payload(
@@ -813,11 +836,11 @@ def main() -> int:
             "excluded": excluded,
         },
         summary={
-            **summarize(accounts),
+            **summary,
             "provider_registration_status": registration,
             **exclusions.summary(excluded, ("storage_account", "container"), {
                 "storage_accounts": len(accounts) if listed else None,
-                "containers": sum(len(a.get("containers") or []) for a in accounts),
+                "containers": sum(len(a.get("containers") or []) for a in accounts) if containers_read else None,
             }),
         },
     )

@@ -2388,6 +2388,35 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- **Disk, Key Vault, storage and SQL Managed Instance fetchers: an unread list
+  gives null counts, not 0.** When a list the run needs is refused (403),
+  throttled or times out, every total, count and percentage built from it is
+  null. Before, they read 0, which looked like "none found". Each run still
+  fails as `partial_failure`.
+  - `azure_disk_encryption_status` 0.3.0: when the disk list is not read, every
+    disk count and percentage is null (including `total_disks`).
+  - `azure_key_vault_configuration` 0.5.0: when the vault list is not read,
+    every count is null. When any vault's diagnostic settings are not read,
+    `vaults_with_diagnostic_settings`, `vaults_with_audit_logging`,
+    `vaults_without_audit_logging` and `audit_logging_percentage` are null too;
+    `vaults_audit_logging_unknown` still says how many.
+  - `azure_storage_encryption_status` 0.5.0: when the account list is not read,
+    every count is null (`total_storage_accounts` included). When any account's
+    container list is not read, the container counts and `in_scope_containers`
+    and `excluded_containers` are null; when any geo-redundant account's
+    replication status is not read, `geo_replication_live_accounts` and
+    `geo_failover_ready_accounts` are null.
+  - `azure_sql_managed_instance_encryption` 0.4.0: when the instance list is
+    not read, every count is null (`total_managed_instances` and
+    `in_scope_managed_instances` included). The key counts are null when any
+    instance's protector is not read, and the TDE counts when any instance's
+    database list is not read.
+  - `azure_sql_managed_instance_backups` 0.5.0: when the instance list is not
+    read, every instance, database and failover group count is null. The
+    database retention counts are null when any instance's database list is not
+    read, and `instances_in_failover_group` when any instance's failover group
+    membership is unknown.
+
 - **`azure_entra_authentication_policy` no longer shows Microsoft's password
   defaults when the tenant's settings could not be read.** Before, a failed
   `/groupSettings` read fell back to the template, so `password_settings_source`
