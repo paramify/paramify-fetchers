@@ -3603,6 +3603,188 @@ def pull_artifact(evidence_set: dict, artifact: dict, dest_dir) -> dict:
     }
 
 
+# --------------------------------------------------------------------------- #
+# Paramify workspace — setup status
+#
+# One read-only answer to "what does each of this manifest's fetchers have in
+# Paramify?": its evidence set, its script, its validators, the capabilities its
+# pairs prove, and its artifacts. Built from the same reads and the same scripts
+# dry run the syncs use, so the status and a sync never disagree.
+# --------------------------------------------------------------------------- #
+
+# The scripts dry run's item outcomes, as script states.
+_SCRIPT_STATES = {
+    "would_noop": "in_sync",
+    "would_update": "update",
+    "would_create": "create",
+    "would_drift": "drift",
+    "error": "error",
+}
+
+
+def _validator_lock(root: Path, config_path: Optional[Path]) -> Dict[str, str]:
+    """The customer-side {registry key: Paramify validator id} lock that
+    `validators sync` writes, or {} when it is absent or unreadable."""
+    try:
+        syncer = _load_paramify_validator_syncer(root)
+        config: dict = {}
+        if config_path:
+            loaded = yaml_io.load_path(Path(config_path))
+            config = loaded if isinstance(loaded, dict) else {}
+        # As given, like the syncer: a relative path is from the working
+        # directory, which is where `validators sync` wrote it.
+        lock_path = Path((config.get("validators") or {}).get("lock_path") or syncer.DEFAULT_LOCK_PATH)
+        lock = syncer.load_lock(lock_path)
+    except Exception:  # noqa: BLE001 — a missing or broken lock only loses the id match
+        return {}
+    return lock if isinstance(lock, dict) else {}
+
+
+def paramify_status(root: Path, manifest_path: Path, config_path: Optional[Path] = None) -> dict:
+    """What each of the manifest's evidence fetchers has in the Paramify workspace.
+
+    Read-only: it never writes to Paramify. Returns::
+
+        {"workspace": {"base_url", "base_url_source", "token"},
+         "fetchers": [{"name", "kind",
+                       "evidence_set": {"reference_id", "name", "id" | None, "artifact_count"},
+                       "script": "in_sync" | "update" | "create" | "drift" | "error" | None,
+                       "validators": [{"key", "role", "name", "paired"}],
+                       "pairs": [{"pair_id", "validator_key", "capability_id", "function"}],
+                       "ready": bool}],
+         "capabilities": [{"id", "reference_id", "name",
+                           "functions": [{"type", "pairs": [{"pair_id", "validator_id", "evidence_id"}]}]}],
+         "pipelines_count": int, "skipped": [str], "errors": {part: message}}
+
+    Scan-report fetchers are only counted (they go to Pipelines); discovery
+    fetchers are left out; a fetcher named twice is one row; a name discovery
+    does not know is listed in `skipped`. Without a token nothing is read from
+    the workspace. Each workspace part (evidence sets, scripts, capabilities)
+    is read on its own: a failure sets `errors[part]` and leaves the rest.
+    Raises ValueError for setup errors (an unreadable manifest or registry).
+    """
+    from framework import validators as _registry  # local: keeps CLI startup light
+
+    root = Path(root)
+    manifest = read_manifest(Path(manifest_path), must_exist=True)
+    discovered = discover_fetchers(root)
+    registry = list(_registry.discover_validators(root).values())
+    config_path = _upload_config(root, config_path)
+    readiness = upload_readiness(root, config_path=config_path)
+    token = bool(readiness["token_present"])
+
+    rows: List[dict] = []
+    seen: set = set()
+    skipped: List[str] = []
+    pipelines = 0
+    for entry in (manifest.get("run") or {}).get("fetchers") or []:
+        use = entry.get("use") if isinstance(entry, dict) else None
+        if not use or use in seen:
+            continue
+        seen.add(use)
+        fetcher = discovered.get(use)
+        if fetcher is None:
+            skipped.append(use)
+            continue
+        if fetcher.kind == "issue_report":
+            pipelines += 1
+            continue
+        if fetcher.evidence_set is None:
+            continue  # discovery: reports what exists, never uploaded
+        ref = fetcher.evidence_set.reference_id
+        rows.append({
+            "name": use,
+            "kind": fetcher.kind,
+            "evidence_set": {"reference_id": ref, "name": fetcher.evidence_set.name,
+                             "id": None, "artifact_count": 0},
+            "script": None,
+            "validators": [
+                {"key": v.key, "role": v.role or "", "name": v.name, "paired": False}
+                for v in registry if ref in v.evidence_sets
+            ],
+            "pairs": [],
+            "ready": False,
+        })
+
+    status: dict = {
+        "workspace": {"base_url": readiness.get("base_url"),
+                      "base_url_source": readiness.get("base_url_source"), "token": token},
+        "fetchers": rows,
+        "capabilities": [],
+        "pipelines_count": pipelines,
+        "skipped": skipped,
+        "errors": {},
+    }
+    if not token or not rows:
+        return status
+    errors = status["errors"]
+
+    sets: Dict[str, dict] = {}
+    try:
+        sets = {s["reference_id"]: s for s in list_evidence_sets()}
+    except Exception as exc:  # noqa: BLE001 — shown where the data would be
+        errors["evidence_sets"] = str(exc)
+
+    outcomes: Dict[str, str] = {}
+
+    def on_script(ev: dict) -> None:
+        if ev.get("event") == "sync_item" and ev.get("fetcher"):
+            outcomes[ev["fetcher"]] = ev.get("outcome") or ""
+
+    try:
+        scripts_sync(root, config_path, dry_run=True, include={r["name"] for r in rows}, on_event=on_script)
+    except Exception as exc:  # noqa: BLE001
+        errors["scripts"] = str(exc)
+
+    try:
+        capabilities = list_capabilities()
+    except Exception as exc:  # noqa: BLE001
+        errors["capabilities"] = str(exc)
+        capabilities = []
+    status["capabilities"] = [
+        {"id": c["id"], "reference_id": c.get("reference_id") or c.get("template_reference_id") or "",
+         "name": c.get("name") or "",
+         "functions": [{"type": f.get("type") or "", "pairs": list(f.get("pairs") or [])}
+                       for f in c.get("functions") or []]}
+        for c in capabilities
+    ]
+
+    lock = _validator_lock(root, config_path)
+    for row in rows:
+        found = sets.get(row["evidence_set"]["reference_id"])
+        if outcomes.get(row["name"]) is not None:
+            row["script"] = _SCRIPT_STATES.get(outcomes[row["name"]], "error")
+        if found is None:
+            continue
+        row["evidence_set"]["id"] = found["id"]
+        row["evidence_set"]["artifact_count"] = found.get("artifact_count") or 0
+        paired = found.get("validators") or []
+        ids = {v["id"] for v in paired}
+        names = {v["name"]: v["id"] for v in paired}
+        key_by_id: Dict[str, str] = {}
+        for v in row["validators"]:
+            vid = lock.get(v["key"]) if lock.get(v["key"]) in ids else names.get(v["name"])
+            v["paired"] = vid is not None
+            if vid is not None:
+                key_by_id[vid] = v["key"]
+        for cap in status["capabilities"]:
+            for fn in cap["functions"]:
+                for pair in fn["pairs"]:
+                    if pair.get("evidence_id") == found["id"]:
+                        row["pairs"].append({
+                            "pair_id": pair.get("pair_id") or "",
+                            "validator_key": key_by_id.get(pair.get("validator_id") or ""),
+                            "capability_id": cap["id"],
+                            "function": fn["type"],
+                        })
+        row["ready"] = (
+            row["script"] == "in_sync"
+            and all(v["paired"] for v in row["validators"])
+            and row["evidence_set"]["artifact_count"] > 0
+        )
+    return status
+
+
 def effective_config(
     m: dict, uses: List[str], root: Path, fetchers: Optional[dict] = None,
     platforms: Optional[dict] = None,
