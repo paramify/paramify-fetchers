@@ -1548,6 +1548,12 @@ def test_analytics_rules_unknown_confirmed_kind_is_a_config_error(azure, tmp_pat
     assert ws["enabled_rules_quiet"] == [] and "enabled_rules_confirmed_quiet" not in ws  # none used
 
 
+def test_analytics_rules_confirmed_setting_is_documented_as_run_wide():
+    spec = yaml.safe_load((AZURE / "sentinel_analytics_rules" / "fetcher.yaml").read_text())
+    text = " ".join(spec["config_schema"]["confirmed_alert_connections"]["description"].split())
+    assert "every workspace the run reads" in text and "SENTINEL_WORKSPACES" in text
+
+
 def _config_failures(ev):
     return [f for f in ev["metadata"]["api_failures"] if CONFIRMED in f["message"]]
 

@@ -71,7 +71,9 @@ config_schema:
     description: >
       Optional. Comma-separated kinds of alert connection the tenant confirms
       are on, for ones the data connectors API does not list (a tenant-based
-      connector, such as AzureSecurityCenter for Defender for Cloud). An enabled
+      connector, such as AzureSecurityCenter for Defender for Cloud). It
+      applies to every workspace the run reads; narrow the run with
+      SENTINEL_WORKSPACES when only some workspaces have the connection. An enabled
       incident-creation rule whose product sent no alert and has no connection
       read from the API reads as quiet when its product's kind is listed; its
       record says it is confirmed by configuration, not read. Allowed kinds:
