@@ -818,25 +818,40 @@ class ParamifyPage(ParamifyWriter, Vertical):
     @work(thread=True, exclusive=True, group="paramify-action")
     def _scripts_preview_worker(self, root, names: set) -> None:
         counts: dict = {}
+        failures: list = []
 
         def tally(ev: dict) -> None:
             if ev.get("event") == "sync_item":
                 category = _SCRIPT_MARKS.get(ev.get("outcome") or "", ("other",))[0]
                 counts[category] = counts.get(category, 0) + 1
+                if category == "error":
+                    failures.append((ev.get("fetcher") or "?", ev.get("reason") or ev.get("error") or ""))
 
         try:
             api.scripts_sync(root, dry_run=True, include=names, on_event=tally)
         except Exception as exc:  # noqa: BLE001
             self.post_message(ActionEvent("scripts", {"event": "_failed", "error": str(exc)}))
             return
-        self.app.call_from_thread(self._confirm_scripts, names, counts)
+        self.app.call_from_thread(self._confirm_scripts, names, counts, failures)
 
-    def _confirm_scripts(self, names: set, counts: dict) -> None:
+    def _log_failures(self, failures: list) -> None:
+        """The items a preview could not plan, one log line each."""
+        for name, reason in failures:
+            self._log(Text(f"  [error] {name}" + (f"  {reason}" if reason else ""), style=palette.FAIL))
+
+    def _confirm_scripts(self, names: set, counts: dict, failures: list) -> None:
         self._planning = False
         create, update, drift = counts.get("create", 0), counts.get("update", 0), counts.get("drift", 0)
+        self._log_failures(failures)
         kept = (f"\n\n{drift} script(s) changed in Paramify stay as they are. "
                 "`paramify scripts sync --force` overwrites them.") if drift else ""
+        failed = (f"\n\nThe preview failed for {len(failures)} fetcher script(s); "
+                  "the log under the grid says why.") if failures else ""
         if not create and not update:
+            if failures:
+                self._done(Text(f"scripts: the preview failed for {len(failures)} fetcher script(s), "
+                                "nothing synced", style=palette.FAIL))
+                return
             self._done(Text("scripts: nothing to sync" + (f", {drift} changed in Paramify (kept)" if drift else ""),
                             style=palette.OK))
             return
@@ -852,7 +867,7 @@ class ParamifyPage(ParamifyWriter, Vertical):
 
         self.app.push_screen(ConfirmModal(
             f"Sync {create + update} fetcher script(s) to {self._base_url()}: "
-            f"{create} create, {update} update, and pair each one with its evidence set?{kept}"
+            f"{create} create, {update} update, and pair each one with its evidence set?{kept}{failed}"
         ), go)
 
     @work(thread=True, exclusive=True, group="paramify-action")
@@ -899,20 +914,24 @@ class ParamifyPage(ParamifyWriter, Vertical):
     @work(thread=True, exclusive=True, group="paramify-action")
     def _validators_preview_worker(self, root, manifest_path) -> None:
         outcomes: list = []
+        failures: list = []
 
         def tally(ev: dict) -> None:
             if ev.get("event") == "sync_validator":
                 outcomes.append(ev.get("outcome") or "")
+                if ev.get("outcome") == "error":
+                    failures.append((ev.get("key") or "?", ev.get("error") or ""))
 
         try:
             api.sync_validators(root, Path(manifest_path), dry_run=True, on_event=tally)
         except Exception as exc:  # noqa: BLE001
             self.post_message(ActionEvent("validators", {"event": "_failed", "error": str(exc)}))
             return
-        self.app.call_from_thread(self._confirm_validators, manifest_path, outcomes)
+        self.app.call_from_thread(self._confirm_validators, manifest_path, outcomes, failures)
 
-    def _confirm_validators(self, manifest_path, outcomes: list) -> None:
+    def _confirm_validators(self, manifest_path, outcomes: list, failures: list) -> None:
         self._planning = False
+        self._log_failures(failures)
         create = outcomes.count("would_create")
         exist = sum(o.startswith("would_skip") for o in outcomes)
         rows = (self._status or {}).get("fetchers") or []
@@ -921,6 +940,10 @@ class ParamifyPage(ParamifyWriter, Vertical):
         # that exists but is not paired stays that way.
         unpaired = sum(1 for r in rows if r["evidence_set"].get("exists") for v in r["validators"]
                        if v["paired"] is False)
+        if not create and failures:
+            self._done(Text(f"validators: the preview failed for {len(failures)} validator(s), nothing created "
+                            f"({exist} in Paramify already)", style=palette.FAIL))
+            return
         if not create:
             text = f"validators: nothing to create ({exist} in Paramify already)."
             if unpaired:
@@ -943,7 +966,9 @@ class ParamifyPage(ParamifyWriter, Vertical):
                    "yet, and a validator is paired only when it is created: press s first to create the sets.")
         else:
             ask = f"Create {create} validator(s) in {self._base_url()} and pair each one with its evidence sets?"
-        self.app.push_screen(ConfirmModal(f"{ask} {exist} exist already and stay as they are."), go)
+        failed = (f"\n\nThe preview failed for {len(failures)} validator(s); the log under the grid says why."
+                  if failures else "")
+        self.app.push_screen(ConfirmModal(f"{ask} {exist} exist already and stay as they are.{failed}"), go)
 
     @work(thread=True, exclusive=True, group="paramify-action")
     def _validators_worker(self, root, manifest_path) -> None:

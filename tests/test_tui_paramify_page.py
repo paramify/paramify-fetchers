@@ -17,6 +17,7 @@ from rich.console import Console  # noqa: E402
 from textual.widgets import Static, TabbedContent  # noqa: E402
 
 from framework import api  # noqa: E402
+from framework.tui import palette  # noqa: E402
 from framework.tui.components.table import DataTable  # noqa: E402
 from framework.tui.screens.paramify import ParamifyPage  # noqa: E402
 
@@ -625,6 +626,82 @@ def test_the_result_of_an_action_stays_off_the_first_row(tmp_path, monkeypatch, 
     assert (shown, detail) == (True, False), "the action's result vanished after the re-read"
     assert cursor == "charlie"
     assert activity.strip()
+
+
+def test_a_scripts_preview_that_errors_is_a_failure(tmp_path, monkeypatch, run_tui):
+    """A dry run whose every item errors has nothing to create or update; that
+    is a failure with the reasons in the log, not "nothing to sync"."""
+    _stub(monkeypatch, _status())
+    runs = []
+
+    def scripts_sync(root, config_path=None, *, dry_run=False, include=None, on_event=None, **kw):
+        runs.append(dry_run)
+        for name in sorted(include):
+            on_event({"event": "sync_item", "fetcher": name, "outcome": "error", "error": "HTTP 403"})
+        return {"ok": False}
+
+    monkeypatch.setattr(api, "scripts_sync", scripts_sync)
+
+    async def body(app, pilot):
+        page = await _open(app, pilot)
+        await pilot.press("s")
+        await _settle(app, pilot)
+        log = "\n".join(line.text for line in page.query_one("#pf-log").lines)
+        return type(app.screen).__name__, page.query_one("#pf-activity", Static).content, log
+
+    screen, banner, log = run_tui(body, _manifest(tmp_path))
+    assert screen == "WorkspaceScreen", "an all-error preview asked to sync"
+    assert banner.plain == "scripts: the preview failed for 3 fetcher script(s), nothing synced"
+    assert banner.style == palette.FAIL
+    assert "[error] alpha  HTTP 403" in log and "[error] charlie  HTTP 403" in log
+    assert runs == [True]
+
+
+def test_a_scripts_preview_with_some_errors_says_so_in_the_confirm(tmp_path, monkeypatch, run_tui):
+    from framework.tui.modals import ConfirmModal
+
+    _stub(monkeypatch, _status())
+
+    def scripts_sync(root, config_path=None, *, dry_run=False, include=None, on_event=None, **kw):
+        on_event({"event": "sync_item", "fetcher": "alpha", "outcome": "would_create"})
+        on_event({"event": "sync_item", "fetcher": "bravo", "outcome": "error", "error": "bad entry"})
+        return {"ok": False}
+
+    monkeypatch.setattr(api, "scripts_sync", scripts_sync)
+
+    async def body(app, pilot):
+        await _open(app, pilot)
+        await pilot.press("s")
+        await _settle(app, pilot)
+        return str(app.screen._message) if isinstance(app.screen, ConfirmModal) else ""
+
+    confirm = run_tui(body, _manifest(tmp_path))
+    assert "1 create, 0 update" in confirm
+    assert "The preview failed for 1 fetcher script(s)" in confirm
+
+
+def test_a_validators_preview_that_errors_is_a_failure(tmp_path, monkeypatch, run_tui):
+    _stub(monkeypatch, _status())
+
+    def sync_validators(root, manifest_path=None, config_path=None, *, dry_run=False, on_event=None, **kw):
+        on_event({"event": "sync_validator", "key": "k0", "outcome": "error", "error": "set lookup failed"})
+        on_event({"event": "sync_complete", "ok": False})
+        return {"ok": False}
+
+    monkeypatch.setattr(api, "sync_validators", sync_validators)
+
+    async def body(app, pilot):
+        page = await _open(app, pilot)
+        await pilot.press("v")
+        await _settle(app, pilot)
+        log = "\n".join(line.text for line in page.query_one("#pf-log").lines)
+        return type(app.screen).__name__, page.query_one("#pf-activity", Static).content, log
+
+    screen, banner, log = run_tui(body, _manifest(tmp_path))
+    assert screen == "WorkspaceScreen"
+    assert banner.plain.startswith("validators: the preview failed for 1 validator(s), nothing created")
+    assert banner.style == palette.FAIL
+    assert "[error] k0  set lookup failed" in log
 
 
 def test_v_says_when_sets_do_not_exist_yet(tmp_path, monkeypatch, run_tui):
