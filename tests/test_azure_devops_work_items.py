@@ -945,6 +945,10 @@ def test_items_finished_before_the_field_follow_approval_before_field(tmp_path, 
                      108: older, 109: "field"}
     for w in (104, 106, 107):
         assert work_item(evidence, w)["approval"]["source"] == "field"
+    # The approval the older route finds, for a change made before the date: 102's comment, 106's field with both.
+    prior = {w: work_item(evidence, w)["before_field_approval"] for w in (102, 106)}
+    assert (prior[102] or {}).get("source") == (None if before == "exclude" else "comment")
+    assert (prior[106] or {}).get("source") == ("field" if before == "both" else None)
     s = evidence["summary"]
     assert s["approval_field_from"] == since.strftime("%Y-%m-%dT00:00:00Z") and s["approval_before_field"] == older
     assert s["change_items_left_out_of_approval"] == (3 if before == "exclude" else 0)
@@ -967,6 +971,7 @@ def test_without_approval_field_from_every_item_follows_approval_source(tmp_path
     s = evidence["summary"]
     assert s["approval_field_from"] is None and s["approval_before_field"] is None
     assert s["change_items_left_out_of_approval"] == 0 and work_item(evidence, 101)["approval_route"] == "field"
+    assert "before_field_approval" not in work_item(evidence, 101)
 
 
 @pytest.mark.parametrize("emergency", [None, "emergency change", "none"])

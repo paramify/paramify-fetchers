@@ -70,11 +70,12 @@ def inv(path, target=None):
 
 
 def index(tmp_path, changes, items, *, types=("Task", "Hotfix"), window=WINDOW, partial=False,
-          change_files=None, work_files=None, work_items_in_manifest=True) -> Path:
+          change_files=None, work_files=None, work_items_in_manifest=True, selection=None) -> Path:
     change_invs = change_files or [inv(envelope(tmp_path / "changes.json", mod.CHANGES,
                                                 {"lookback_days": 14, "changes": changes}))]
     work = envelope(tmp_path / "work.json", mod.WORK_ITEMS,
-                    {"window": window, "selection": {"work_item_types": list(types)}, "work_items": items},
+                    {"window": window, "selection": {"work_item_types": list(types), **(selection or {})},
+                     "work_items": items},
                     partial=partial, target={"organization_url": "https://dev.azure.com/contoso"})
     path = tmp_path / "index.json"
     path.write_text(json.dumps({"run_id": "r1", "inputs": {
@@ -137,6 +138,7 @@ def test_every_status_and_the_counts_a_validator_reads(tmp_path, monkeypatch):
         "changes_matched": 1, "changes_ambiguous": 1, "changes_unmatched": 1, "changes_without_caller": 1,
         "changes_recorded": 2, "changes_without_record": 2, "changes_recorded_without_approval": 1,
         "changes_recorded_approval_not_required": 0, "changes_recorded_approval_not_judged": 0,
+        "changes_recorded_before_approval_field": 0,
         "changes_without_approved_record": 3, "changes_approved_after_change": 0, "percent_recorded": 50,
         "changes_needing_record_by_origin": {"direct": 4, "manual_deployment": 0},
         "changes_without_record_by_origin": {"direct": 2, "manual_deployment": 0},
@@ -568,6 +570,63 @@ def test_only_the_exclude_route_is_left_out(tmp_path, monkeypatch, route):
     results, summary = compare(tmp_path, monkeypatch, [change("c", "2026-10-02T12:00:00Z")], [item(1, **extra)])
     assert results["c"]["work_items"][0]["approval_judged"] is True and results["c"]["approved"] is False
     assert summary["changes_recorded_approval_not_judged"] == 0 and summary["changes_recorded_without_approval"] == 1
+
+
+FIELD_FROM = "2026-10-02T00:00:00Z"
+
+
+def brought_in(before):
+    """A work items selection whose approval field counts from FIELD_FROM, older items judged by `before`."""
+    return {"approval_source": "field", "approval_field_from": FIELD_FROM, "approval_before_field": before}
+
+
+@pytest.mark.parametrize(("before", "early_approved", "early_judged"), [
+    ("states_and_comments", True, True), ("both", True, True), ("exclude", None, False)])
+def test_a_change_made_before_approval_field_from_is_judged_by_the_older_route(
+        tmp_path, monkeypatch, before, early_approved, early_judged):
+    # An open record the field hasn't approved, approved in a comment before the field came in (the older route).
+    older = approved(at="2026-09-30T10:00:00Z") if before != "exclude" else None
+    record = item(1, created="2026-09-28T09:00:00Z", state="Doing", open_=True, closed=None, approval=None,
+                  approval_route="field", before_field_approval=older)
+    changes = [change("early", "2026-10-01T12:00:00Z"), change("at", FIELD_FROM),
+               change("late", "2026-10-03T12:00:00Z")]
+    results, summary = compare(tmp_path, monkeypatch, changes, [record], selection=brought_in(before))
+    early = results["early"]["work_items"][0]
+    assert (early["approved"], early["approval_judged"], early["change_before_approval_field"]) == (
+        early_approved, early_judged, True)
+    assert results["early"]["approved"] is True and early["approved_at"] == (older or {}).get("at")
+    # On or after the date, the field judges it, and the field is empty.
+    for cid in ("at", "late"):
+        w = results[cid]["work_items"][0]
+        assert (w["approved"], w["approval_judged"], w["change_before_approval_field"]) == (False, True, False)
+        assert results[cid]["approved"] is False
+    assert summary["changes_recorded_before_approval_field"] == 1
+    assert summary["changes_recorded_without_approval"] == 2
+    assert summary["changes_recorded_approval_not_judged"] == (0 if early_judged else 1)
+
+
+def test_an_older_route_approval_after_the_change_counts_as_approved_after(tmp_path, monkeypatch):
+    record = item(1, created="2026-09-28T09:00:00Z", state="Doing", open_=True, closed=None, approval=None,
+                  approval_route="field", before_field_approval=approved(at="2026-10-01T15:00:00Z"))
+    results, summary = compare(tmp_path, monkeypatch, [change("early", "2026-10-01T12:00:00Z")], [record],
+                               selection=brought_in("states_and_comments"))
+    assert results["early"]["approved"] is True and results["early"]["approved_after_change"] is True
+    assert summary["changes_approved_after_change"] == 1
+
+
+@pytest.mark.parametrize(("route", "approval", "expected"), [
+    # Evidence without before_field_approval: a record the older route judged anyway keeps its approval...
+    ("states_and_comments", approved(), True),
+    # ...and one the field judged has no older-route verdict, so it isn't approved.
+    ("field", approved(), None),
+])
+def test_without_before_field_approval_only_a_record_on_the_older_route_has_a_verdict(
+        tmp_path, monkeypatch, route, approval, expected):
+    record = item(1, approval=approval, approval_route=route)
+    results, _ = compare(tmp_path, monkeypatch, [change("early", "2026-10-01T12:00:00Z")], [record],
+                         selection=brought_in("states_and_comments"))
+    assert results["early"]["work_items"][0]["approved"] is expected
+    assert results["early"]["approved"] is bool(expected)
 
 
 def test_nothing_to_check_reads_zero_not_null(tmp_path, monkeypatch):

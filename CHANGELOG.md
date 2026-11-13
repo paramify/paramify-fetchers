@@ -76,7 +76,10 @@ schemas and the `paramify` CLI — not the internal code.
     `change_items_left_out_of_approval` and `approval_field_types_missing` (the
     approval types a project defines without the field, as after a misspelt
     reference name). An approval whose time is unknown leaves the change-order
-    lists `null`, as an unread changeset does.
+    lists `null`, as an unread changeset does. With `approval_field_from` set,
+    each item also records `before_field_approval`, the approval its
+    `approval_before_field` route finds, for `azure_change_work_items` to judge a
+    change made before the date.
 
 - **`azure_change_work_items` 0.3.0: a record left out of approval judging isn't
   read as unapproved.** When `azure_devops_work_items` left a record out
@@ -88,6 +91,12 @@ schemas and the `paramify` CLI — not the internal code.
   `summary.changes_recorded_approval_not_judged` counts recorded changes whose
   every record needing an approval was left out. Work items evidence from before
   0.3.0 has no `approval_route`, so every record is judged as before.
+  A change made before a work items file's `approval_field_from` (read from its
+  `results.selection`, so there is no setting here to keep in step) is judged by
+  that file's `approval_before_field` route, from the record's
+  `before_field_approval`, not by the field. Each record on such a change has
+  `change_before_approval_field` `true`, and the new
+  `summary.changes_recorded_before_approval_field` counts these changes.
 
 - **Optional selected-subscription reads for mixed Entra evidence.**
   `azure_entra_emergency_accounts` 0.2.0 and

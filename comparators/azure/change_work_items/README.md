@@ -52,6 +52,12 @@ left out of approval judging (finished before its `approval_field_from` while it
 says so with `approval_judged` false, it counts as approved, and a change whose
 every record needing an approval was left out is counted in
 `changes_recorded_approval_not_judged`.
+Where that fetcher's selection sets `approval_field_from`, a change made
+before that date is judged by its `approval_before_field` route (the approval
+it records as `before_field_approval`), not by the field; each record on such
+a change says so with `change_before_approval_field`, and
+`changes_recorded_before_approval_field` counts the changes. The date comes
+from the work items evidence, so there is no setting here to keep in step.
 An approval may come after the change: such a change still counts as approved,
 and `changes_approved_after_change` counts it unless the late record is one of
 `emergency_types`, which are approved after the fact.

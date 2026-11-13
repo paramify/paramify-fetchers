@@ -130,7 +130,7 @@ evidence_set:
     - Read azure_change_provenance from the same run — every Azure change with its origin, caller, time and deployment
     - Read azure_devops_work_items from the same run — each work item's type, state, people, dates and approval
 
-    Output: azure_change_work_items.json — each Azure change made outside a pipeline with its status, the work items that record it, and whether they are approved, need no approval, or were left out of approval judging.
+    Output: azure_change_work_items.json — each Azure change made outside a pipeline with its status, the work items that record it, and whether they are approved, need no approval, or were left out of approval judging; a change made before the work items' approval_field_from is judged by their approval_before_field route.
 
     Summary fields:
 
@@ -166,7 +166,8 @@ evidence_set:
     - approval_types_not_record_types — List of names in the approval_types setting that match no record type, such as a misspelt type name; when it isn't empty the run fails with bad_config, since the type meant would need no approval; null when a work items file doesn't say which types it selected, as a failed one doesn't
     - changes_recorded_without_approval — Number of recorded changes whose record needs an approval and isn't approved (has no approval in effect as azure_devops_work_items reads it: an approval state, comment or approval field, as its approval_source counts them, not withdrawn since; and a record whose approval couldn't be read counts as not approved); a change several items could record counts as approved only if every one is approved, is of a type that needs no approval, or was left out of approval judging
     - changes_recorded_approval_not_required — Number of recorded changes whose every record is of a type that needs no approval (not in approval_types); they count as approved
-    - changes_recorded_approval_not_judged — Number of recorded changes whose every record that needs an approval was left out of approval judging by azure_devops_work_items (finished before its approval_field_from while its approval_before_field is exclude); they count as approved, as that fetcher reads no approval for those records
+    - changes_recorded_approval_not_judged — Number of recorded changes whose every record that needs an approval was left out of approval judging by azure_devops_work_items (finished before its approval_field_from, or recording a change made before that date, while its approval_before_field is exclude); they count as approved, as that fetcher reads no approval for those records
+    - changes_recorded_before_approval_field — Number of recorded changes made before a record's approval_field_from (read from the azure_devops_work_items selection), so that record is judged by its approval_before_field route (the approval it records as before_field_approval) rather than by the approval field; each such record says so with change_before_approval_field; 0 when no work items file sets approval_field_from
     - changes_without_approved_record — Number of changes needing a record that have no approved work item, a record of a type that needs no approval, or one left out of approval judging, counting as approved: changes_without_record plus changes_recorded_without_approval
     - changes_without_approved_record_by_origin — Number of changes without an approved record, as changes_without_approved_record counts them, for each checked origin
     - changes_approved_after_change — Number of changes with an approved record where a record that needs an approval and isn't an emergency type (emergency_types) was approved after the change was made; counted, not treated as unapproved

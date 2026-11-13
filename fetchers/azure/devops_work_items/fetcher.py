@@ -582,6 +582,9 @@ def collect_project(client: DevOpsClient, collector: DevOpsCollector, project: D
             updates, selection.approval_field, field_value(raw.get("fields"), selection.approval_field))
         item["approval_route"] = approval_route(item, selection)
         item["approval"] = chosen_approval(item["approval_route"], history, item["field_approval"])
+        if selection.field_from:
+            # What the older route finds, for azure_change_work_items to judge a change made before the date.
+            item["before_field_approval"] = chosen_approval(selection.before_field, history, item["field_approval"])
         item["approval_read"] = updates is not None and comments is not None
         item["approved_by_requester"] = None if not item["approval"] else \
             same_person(item["approval"]["by"], item["created_by"])
