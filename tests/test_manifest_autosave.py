@@ -23,7 +23,7 @@ pytest.importorskip("textual", reason="TUI tests need the 'tui' extra")
 from textual.widgets import Input  # noqa: E402
 
 from framework.tui.modals import ConfirmModal, FormModal, TargetsModal  # noqa: E402
-from framework.tui.screens.manifest import ManifestPage  # noqa: E402
+from framework.tui.screens.manifest import ManifestPanel  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -143,7 +143,7 @@ def test_a_failed_save_keeps_the_edit_in_memory_and_says_so(tmp_path, monkeypatc
         await pilot.pause()
         # the page lives on the workspace screen, under the modals on the stack
         page = next(
-            p for screen in app.screen_stack for p in screen.query(ManifestPage)
+            p for screen in app.screen_stack for p in screen.query(ManifestPanel)
         )
         in_memory = page._manifest["run"]["fetchers"][0].get("targets") or []
         notes = [str(n.message) for n in app._notifications]

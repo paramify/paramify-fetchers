@@ -34,7 +34,7 @@ from framework.issue_reports import (  # noqa: E402
 )
 from framework.tui import kinds  # noqa: E402
 from framework.tui.modals import MultiPickerModal  # noqa: E402
-from framework.tui.screens.manifest import ManifestPage  # noqa: E402
+from framework.tui.screens.manifest import ManifestPanel  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -252,7 +252,7 @@ def test_manifest_table_shows_the_assessment_and_close_policy(tmp_path, run_tui)
     async def body(app, pilot):
         await pilot.press("2")
         await pilot.pause()
-        page = app.screen.query_one(ManifestPage)
+        page = app.screen.query_one(ManifestPanel)
         page._selected = SCAN
         page._refresh_detail()
         detail = _plain(app.screen.query_one("#manifest-detail", Static).content)
@@ -288,7 +288,7 @@ def test_each_row_of_a_fetcher_listed_twice_shows_its_own_entry(tmp_path, run_tu
         dt.focus()
         dt.move_cursor(row=1)
         await pilot.pause()
-        page = app.screen.query_one(ManifestPage)
+        page = app.screen.query_one(ManifestPanel)
         detail = _plain(app.screen.query_one("#manifest-detail", Static).content)
         return _rows(app), page._selected_entry_key(), detail
 

@@ -2875,21 +2875,47 @@ def list_manifests(root) -> List[dict]:
     return [s for s in summaries if s is not None]
 
 
-def new_manifest_path(root, name: str, output_dir: str = "./evidence") -> Path:
-    """Create a fresh manifest file at <root>/manifests/<name>.yaml and return
-    its path. Raises FileExistsError if it already exists, ValueError on a bad
-    name."""
+def new_manifest_target(root, name: str) -> Path:
+    """The path `new_manifest_path` would create for `name`, without writing it.
+
+    Raises ValueError on a bad name and FileExistsError if the manifest is
+    already there. A front-end asks this before it asks anything else, so a
+    taken name is refused while it is still the only thing typed.
+    """
     safe = name.strip()
     if not safe or "/" in safe or safe.startswith("."):
         raise ValueError(f"invalid manifest name: {name!r}")
     if not safe.endswith(".yaml"):
         safe += ".yaml"
-    mdir = Path(root) / "manifests"
-    mdir.mkdir(parents=True, exist_ok=True)
-    path = mdir / safe
+    path = Path(root) / "manifests" / safe
     if path.exists():
         raise FileExistsError(str(path))
-    path.write_text(yaml.safe_dump(init_manifest(output_dir), sort_keys=False))
+    return path
+
+
+def new_manifest_path(
+    root,
+    name: str,
+    output_dir: str = "./evidence",
+    *,
+    stack: Optional[str] = None,
+    stack_name: Optional[str] = None,
+) -> Path:
+    """Create a fresh manifest file at <root>/manifests/<name>.yaml and return
+    its path. Raises FileExistsError if it already exists, ValueError on a bad
+    name.
+
+    With `stack`, the manifest starts with `run.paramify.stack` (and
+    `stack_name`) set, as `set_stack` writes them, in the same single write.
+    """
+    path = new_manifest_target(root, name)
+    m = init_manifest(output_dir)
+    if stack:
+        set_stack(m, stack, stack_name)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    # "x" so a manifest made between the check and here is never overwritten.
+    with path.open("x") as fh:
+        fh.write(yaml.safe_dump(m, sort_keys=False))
     return path
 
 

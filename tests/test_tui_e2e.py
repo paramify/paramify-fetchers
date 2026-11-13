@@ -18,7 +18,7 @@ from framework.paramify_auth import UPLOAD_TOKEN_ENV  # noqa: E402
 from framework.tui.app import FetcherApp  # noqa: E402
 from framework.tui.modals import ConfirmModal, MultiPickerModal, PreviewModal  # noqa: E402
 from framework.tui.screens.evidence import EvidencePage  # noqa: E402
-from framework.tui.screens.manifest import ManifestPage  # noqa: E402
+from framework.tui.screens.manifest import ManifestPanel  # noqa: E402
 from framework.tui.screens.run import RunPage  # noqa: E402
 from framework.tui.screens.upload import UploadPage  # noqa: E402
 from framework.tui.screens.welcome import WelcomeScreen  # noqa: E402
@@ -84,7 +84,7 @@ def test_demo_manifest_end_to_end(demo_workspace, no_network, monkeypatch, tui_s
             assert isinstance(app.screen, WorkspaceScreen)
 
             # Manifest: add demo_hello through the picker; the edit is saved.
-            page = await _tab(pilot, "2", ManifestPage)
+            page = await _tab(pilot, "2", ManifestPanel)
             assert "manifest is empty" in _text(page.query_one("#manifest-empty-hint"))
             await pilot.press("a")
             assert isinstance(app.screen, MultiPickerModal)

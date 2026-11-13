@@ -127,7 +127,7 @@ TabbedContent {
 }
 
 /* ---- Catalog ---- */
-CatalogPage { height: 1fr; padding: 1 1 0 1; }
+CatalogPanel { height: 1fr; padding: 1 1 0 1; }
 
 #catalog-left { width: 42%; min-width: 32; }
 #catalog-search { margin: 1 0; }
@@ -141,7 +141,7 @@ CatalogPage { height: 1fr; padding: 1 1 0 1; }
 #catalog-detail-scroll { width: 1fr; margin-left: 1; }
 
 /* Manifest editor */
-ManifestPage {
+ManifestPanel {
     height: 1fr;
 }
 
@@ -174,6 +174,7 @@ ManifestPage {
 }
 
 #manifest-entries-panel { width: 55%; }
+ManifestPanel.no-detail #manifest-entries-panel { width: 1fr; }
 #manifest-entries { height: 1fr; }
 
 #manifest-detail-scroll {
@@ -344,6 +345,14 @@ ModalScreen {
     padding-bottom: 1;
 }
 
+/* Why a picker's list is short: no token, an API error. */
+#picker-notice {
+    color: $warning;
+    border-left: tall $warning;
+    padding: 0 1;
+    margin-bottom: 1;
+}
+
 #modal-body {
     height: auto;
     max-height: 24;
@@ -414,6 +423,12 @@ ModalScreen {
 #picker-list {
     height: 16;
     margin-top: 1;
+}
+
+/* A notice's single fallback choice: no filter above it, no empty list below it. */
+#picker-list.fallback {
+    height: auto;
+    margin-top: 0;
 }
 
 /* Multi-select add-fetcher modal: checkbox list (left) + live picked list

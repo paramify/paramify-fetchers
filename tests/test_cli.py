@@ -359,6 +359,9 @@ API_TO_CLI = {
     "effective_config": "<implicit: manifest render>",
     "init_manifest": "manifest init",
     "new_manifest_path": "manifest new",
+    # The name check new_manifest_path runs first; the TUI asks it alone so a
+    # taken name is refused before the stack step.
+    "new_manifest_target": "manifest new",
     "add_entry": "manifest add",
     "set_secret": "manifest set-secret",
     "set_fetcher_config": "manifest set-config",
