@@ -1504,6 +1504,19 @@ def test_analytics_rules_confirmed_connection_makes_its_product_quiet_and_is_fla
     assert_summary_documented("azure/sentinel_analytics_rules", ev["summary"])
 
 
+def test_analytics_rules_connection_read_from_the_api_wins_over_a_confirmed_one(azure, tmp_path, monkeypatch):
+    incident_rules_workspace(azure, [incident_rule("ipc", "Azure Active Directory Identity Protection")],
+                             stable=[connection("aad", "AzureActiveDirectory")])
+    monkeypatch.setenv(CONFIRMED, "AzureActiveDirectory")
+    code, ev = run("sentinel_analytics_rules", tmp_path)
+    ws = ws_a(ev)
+    assert code == 0 and ws["enabled_rules_quiet"] == [{
+        "name": "ipc", "display_name": "ipc", "product_filter": "Azure Active Directory Identity Protection",
+        "alerts_enabled_on": ["AzureActiveDirectory"],
+        "reason": "its product sent no alert in the window, and its own connection has alerts enabled"}]
+    assert ws["enabled_rules_confirmed_quiet"] == 0 and ev["summary"]["enabled_rules_confirmed_quiet"] == 0
+
+
 def test_analytics_rules_confirmed_connection_spares_an_unreadable_connector_listing(azure, tmp_path, monkeypatch):
     incident_rules_workspace(azure, [incident_rule("mdc", "Azure Security Center")],
                              stable=Resp(403, {"error": {"code": "AuthorizationFailed", "message": "no"}}),
