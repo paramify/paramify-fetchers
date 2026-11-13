@@ -542,7 +542,8 @@ def _approval_graph(cast_error=None):
         roles=[_role("r-ga", "Global Administrator"), _role("r-sr", "Security Reader"),
                _role("r-dr", "Directory Readers")],
         role_members={"r-ga": [_obj(U_OK, "user"), _obj(U_NEW, "user")],
-                      "r-sr": [_obj(U_NEW, "user"), _obj(G_OK, "group")],
+                      # Graph returns lower-case ids; an upper-case one still matches the list.
+                      "r-sr": [_obj(U_NEW, "user"), _obj(G_OK.upper(), "group")],
                       "r-dr": [_obj(U_READER, "user")]},
         group_members={},
     )
@@ -578,6 +579,7 @@ def _run_roles_main(graph, tmp_path, monkeypatch, approved=None):
 def test_approved_ids_split_on_commas_spaces_and_newlines_ignoring_case():
     assert privileged_roles.parse_approved_ids(None) == (None, 0)
     assert privileged_roles.parse_approved_ids(" \n ") == (None, 0)
+    assert privileged_roles.parse_approved_ids(" , \n,") == (None, 0)
     assert privileged_roles.parse_approved_ids(f"{U_OK.upper()}, {G_OK}\n{U_OK}") == (sorted([U_OK, G_OK]), 0)
     assert privileged_roles.parse_approved_ids(f"{U_OK} alice@contoso.test") == ([U_OK, "alice@contoso.test"], 1)
 

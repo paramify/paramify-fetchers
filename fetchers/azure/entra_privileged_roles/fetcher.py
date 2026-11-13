@@ -246,10 +246,10 @@ def summarize(roles: list[dict], roles_read: bool = True) -> dict:
 
 
 def parse_approved_ids(raw: str | None) -> tuple[list[str] | None, int]:
-    """The approved object ids, lower-cased and sorted (None when unset or blank), and how many aren't object ids."""
-    if raw is None or not raw.strip():
+    """The approved object ids, lower-cased and sorted (None when there is no entry), and how many aren't object ids."""
+    ids = sorted({part.lower() for part in re.split(r"[,\s]+", raw or "") if part})
+    if not ids:
         return None, 0
-    ids = sorted({part.lower() for part in re.split(r"[,\s]+", raw) if part})
     return ids, sum(1 for i in ids if not _OBJECT_ID.fullmatch(i))
 
 
