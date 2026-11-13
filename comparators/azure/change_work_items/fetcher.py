@@ -31,7 +31,7 @@ SUMMARY_KEYS = (
     "changes_checked", "changes_excluded", "changes_by_application", "changes_needing_record",
     "changes_matched", "changes_ambiguous", "changes_unmatched", "changes_without_caller",
     "changes_recorded", "changes_without_record", "changes_recorded_without_approval",
-    "changes_recorded_approval_not_required",
+    "changes_recorded_approval_not_required", "changes_recorded_approval_not_judged",
     "changes_without_approved_record", "changes_approved_after_change", "percent_recorded",
     "changes_needing_record_by_origin", "changes_without_record_by_origin", "changes_without_approved_record_by_origin",
     "changes_without_record_by_caller", "changes_by_application_by_caller", "changes_excluded_by_caller",
@@ -172,6 +172,8 @@ def records(files, cfg):
             # An open item, or one in a state the fetcher couldn't place, covers changes only so long after it last moved.
             last = max(t for t in (created, when(item.get("changed_date"))) if t)
             approval = item.get("approval")
+            # The work items fetcher left it out of approval judging (approval_before_field exclude): not unapproved.
+            judged = item.get("approval_route") != "exclude"
             out.append({
                 "logins": logins(item, cfg["people"]),
                 "from": created - before,
@@ -179,9 +181,10 @@ def records(files, cfg):
                 "ref": {
                     "organization": org, "project": item.get("project"), "id": item.get("id"),
                     "type": item.get("type"), "state": item.get("state"),
-                    "approved": bool(approval) if item.get("approval_read") else None,
+                    "approved": bool(approval) if item.get("approval_read") and judged else None,
                     "approved_at": (approval or {}).get("at"),
                     "approval_required": not cfg["approval_types"] or kind in cfg["approval_types"],
+                    "approval_judged": judged,
                 },
             })
     return out, sorted(types), sorted(unselected), cover_from
@@ -233,8 +236,9 @@ def check_with(cfg):
             else:
                 found = [i["ref"] for i in items if caller.lower() in i["logins"] and at and i["from"] <= at <= i["to"]]
                 status = "unmatched" if not found else "matched" if len(found) == 1 else "ambiguous"
-            # Several candidates count as approved only when every one of them is, or needs no approval.
-            approved = all(w["approved"] or not w["approval_required"] for w in found) if found else None
+            # Several candidates count as approved only when every one of them is, needs no approval, or wasn't judged.
+            approved = all(w["approved"] or not w["approval_required"] or not w["approval_judged"]
+                           for w in found) if found else None
             required = any(w["approval_required"] for w in found) if found else None
             results.append({
                 "change_id": c.get("change_id"), "timestamp": c.get("timestamp"),
@@ -304,6 +308,9 @@ def summarize(results, items, types, unselected, cover_from, origins):
         "changes_recorded_without_approval": recorded - approved,
         "changes_recorded_approval_not_required": sum(
             1 for r in needing if r["status"] in RECORDED and r["approval_required"] is False),
+        "changes_recorded_approval_not_judged": sum(
+            1 for r in needing if r["status"] in RECORDED and r["approval_required"]
+            and not any(w["approval_judged"] for w in r["work_items"] if w["approval_required"])),
         "changes_without_approved_record": len(needing) - approved,
         "changes_approved_after_change": sum(1 for r in needing if r["approved_after_change"]),
         "percent_recorded": recorded * 100 // len(needing) if needing else 0,

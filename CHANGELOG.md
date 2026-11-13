@@ -76,6 +76,17 @@ schemas and the `paramify` CLI — not the internal code.
     reference name). An approval whose time is unknown leaves the change-order
     lists `null`, as an unread changeset does.
 
+- **`azure_change_work_items` 0.3.0: a record left out of approval judging isn't
+  read as unapproved.** When `azure_devops_work_items` left a record out
+  (`approval_route` `exclude`: created before its `approval_field_from` while its
+  `approval_before_field` is `exclude`), the record's `approved` is `null`, its new
+  `approval_judged` is `false`, and it counts as approved, as a record of a type
+  that needs no approval does. It no longer adds to
+  `changes_recorded_without_approval` or `changes_without_approved_record`. The new
+  `summary.changes_recorded_approval_not_judged` counts recorded changes whose
+  every record needing an approval was left out. Work items evidence from before
+  0.3.0 has no `approval_route`, so every record is judged as before.
+
 - **Optional selected-subscription reads for mixed Entra evidence.**
   `azure_entra_emergency_accounts` 0.2.0 and
   `azure_entra_dormant_identities` 0.3.0 accept `target_subscription_only`
