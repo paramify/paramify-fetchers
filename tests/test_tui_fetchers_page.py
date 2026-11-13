@@ -508,3 +508,43 @@ def test_the_scan_report_help_names_the_fetchers_tab():
     text = _text(render.kind_detail(kinds.SCAN_REPORT, 1))
     assert "Manifest tab" not in text
     assert "Fetchers tab" in text
+
+
+def _rgb(color) -> tuple:
+    return (color.r, color.g, color.b)
+
+
+def test_only_the_focused_panel_has_an_accent_border(tmp_path, run_tui):
+    from textual.color import Color
+
+    async def body(app, pilot):
+        await pilot.press("1")
+        await pilot.pause()
+        focused = app.screen.query_one("#catalog-left").styles.border_top[1]
+        at_rest = app.screen.query_one("#manifest-entries-panel").styles.border_top[1]
+        return focused, at_rest, Color.parse(app.current_theme.primary)
+
+    focused, at_rest, primary = run_tui(body, _manifest_with(tmp_path, "demo_hello"))
+    assert _rgb(focused) == _rgb(primary)
+    assert _rgb(at_rest) != _rgb(primary), "a panel without focus still has an accent border"
+
+
+def test_a_list_without_focus_has_a_dim_cursor(tmp_path, run_tui):
+    from textual.color import Color
+
+    async def body(app, pilot):
+        await pilot.press("1")
+        await pilot.pause()
+        table = app.screen.query_one("#manifest-entries", DataTable)
+        tree = app.screen.query_one("#catalog-tree", Tree)
+        table_blurred = table.get_component_styles("datatable--cursor").background
+        table.focus()
+        await pilot.pause()
+        tree_blurred = tree.get_component_styles("tree--cursor").background
+        table_focused = table.get_component_styles("datatable--cursor").background
+        return table_blurred, tree_blurred, table_focused, Color.parse(app.current_theme.primary)
+
+    table_blurred, tree_blurred, table_focused, primary = run_tui(body, _manifest_with(tmp_path, "demo_hello"))
+    assert _rgb(table_blurred) != _rgb(primary), "the manifest cursor stays bright without focus"
+    assert _rgb(tree_blurred) != _rgb(primary), "the catalog cursor stays bright without focus"
+    assert _rgb(table_focused) != _rgb(table_blurred), "focus does not change the cursor"

@@ -53,10 +53,20 @@ Button.-error {
     color: $text-error;
 }
 
+/* Tables sit on the page: the panel border is the only outline. */
+DataTable {
+    background: transparent;
+}
 DataTable > .datatable--header {
     background: transparent;
     color: $text-muted;
     text-style: bold;
+}
+/* Only the list that has focus shows the bright cursor. */
+DataTable:blur > .datatable--cursor {
+    background: $panel;
+    color: $text;
+    text-style: none;
 }
 
 RichLog {
@@ -89,10 +99,10 @@ TabbedContent {
 }
 
 /* A titled box whose border highlights when it (or a child) holds focus.
-   Titles live in the border (border_title, set by each screen) — dim border
-   at rest, full accent + bold title when focused, the Posting .section look. */
+   Titles live in the border (border_title, set by each screen) — a gray
+   border at rest, so only the focused panel has the accent and a bold title. */
 .panel {
-    border: round $primary 40%;
+    border: round $foreground 18%;
     border-title-color: $text-muted;
     border-title-align: right;
     padding: 0 1;
@@ -133,9 +143,10 @@ CatalogPanel { height: 1fr; padding: 1 1 0 1; }
 #catalog-search { margin: 1 0; }
 #catalog-tree {
     height: 1fr;
-    background: $background;
+    background: transparent;
 }
 #catalog-tree > .tree--cursor { background: $primary; color: $background; text-style: bold; }
+#catalog-tree:blur > .tree--cursor { background: $panel; color: $text; text-style: none; }
 #catalog-tree > .tree--guides { color: $panel; }
 
 #catalog-detail-scroll { width: 1fr; margin-left: 1; }

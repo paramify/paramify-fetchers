@@ -1662,6 +1662,9 @@ schemas and the `paramify` CLI — not the internal code.
   catalog keeps half the page, and the blank rows around the filter and the
   settings row are dropped. An empty manifest takes only the rows of its
   hint. The add-fetchers picker is removed.
+- **Only the TUI panel that has focus has a color.** The other panels have a
+  gray border, and the list in them has a gray cursor. Tables and the catalog
+  tree have no fill of their own, so the panel border is the only outline.
 - **Each batch the upload creates is approved on submission by default.** The
   upload now sends the entry's `approval` (default `SUBMISSION`) when it creates
   a batch. Before, a batch took the evidence set's mode, so a set made `MANUAL`
