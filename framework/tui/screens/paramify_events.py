@@ -33,14 +33,6 @@ class PipelineEvent(Message):
         super().__init__()
 
 
-class ScriptsSyncEvent(Message):
-    """Carries one api.scripts_sync() event dict from the worker thread."""
-
-    def __init__(self, ev: dict) -> None:
-        self.ev = ev
-        super().__init__()
-
-
 BUSY_NOTICE = "A Paramify operation is already in progress."
 
 

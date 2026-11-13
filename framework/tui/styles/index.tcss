@@ -277,17 +277,9 @@ EvidencePage {
 
 #evidence-runs, #evidence-files { height: 1fr; }
 
-/* Upload */
-UploadPage {
-    height: 1fr;
-}
-
-/* Paramify tab: evidence and scripts panels over a shared log. */
-#evidence-panel { height: auto; margin: 1 1 0 1; }
-#evidence-summary { height: auto; }
-/* Preflight errors and warnings: prose that wraps, under the summary table. */
+/* Prose that wraps under a summary table (the Pipelines send panel's
+   preflight errors and warnings). */
 .panel-notes { height: auto; padding: 0 1; }
-#evidence-actions { height: auto; align: left middle; padding-top: 1; }
 
 /* Pipelines send panel: sized to content, so a run with no scan reports
    collapses to a single "collected none" line instead of holding open space. */
@@ -295,39 +287,6 @@ UploadPage {
 #issues-summary { height: auto; }
 #issues-actions { height: auto; align: left middle; padding-top: 1; }
 #issues-actions Button { width: 24; }
-
-/* Scripts and log split what the auto-height evidence panel leaves. Each keeps a
-   floor, so neither collapses to its border on a 50-row terminal: the scripts
-   panel needs header, summary, a plan row and the action row (8 with border). */
-#scripts-panel { height: 1fr; min-height: 8; margin: 1 1 0 1; }
-#scripts-header { height: auto; }
-#scripts-plan-summary { height: auto; color: $text-muted; }
-#scripts-plan { height: 1fr; min-height: 2; }
-#scripts-actions { height: auto; align: left middle; padding-top: 1; }
-/* Uniform SIZE across the whole action row. Buttons and checkboxes size to their
-   text by default (mismatched widths), and Checkbox keeps its 3-row bordered box
-   while Button is flattened to 1 row (mismatched heights). Pin both to one width
-   (fits the longest label, "reassociate") and flatten the checkbox to 1 row so
-   the row reads as a single band of equal controls. */
-#scripts-actions Button { margin-right: 1; width: 20; }
-#scripts-actions Checkbox,
-#scripts-actions Checkbox:focus,
-#scripts-actions Checkbox:hover {
-    margin-right: 1;
-    width: 20;
-    height: 1;
-    border: none;
-    padding: 0 1;
-    background: $panel;
-}
-
-#upload-log-panel { height: 1fr; min-height: 6; margin: 1 1 0 1; }
-#upload-log { height: 1fr; }
-
-#upload-banner {
-    height: auto;
-    padding: 0 1;
-}
 
 /* Paramify: a setup grid of what each manifest fetcher has in Paramify. The grid
    takes the free height; the row under it (the detail, or an action's log) is
