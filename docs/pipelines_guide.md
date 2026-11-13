@@ -110,6 +110,7 @@ paramify issues upload -f manifests/pipelines.yaml
 </details>
 
 In the TUI, press `i` on the **Pipelines** tab ([recording](demo/pipeline-send.gif)).
+The tab is marked `beta`: its layout and keys may still change.
 
 ## 5. Watch jobs, and close cycles
 

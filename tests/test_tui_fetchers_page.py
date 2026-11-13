@@ -100,6 +100,21 @@ async def _find(app, pilot, name: str):
     raise AssertionError(f"{name} is not reachable in the filtered catalog")
 
 
+def test_the_pipelines_tab_carries_a_beta_tag(tmp_path, run_tui):
+    """"beta" is a tag after the name, in the theme's warning color, and not part
+    of the tab's id."""
+    async def body(app, pilot):
+        tabs = app.screen.query_one(TabbedContent)
+        tab = tabs.get_tab("tab-pipelines")
+        label = tab.label
+        spans = [(label.plain[s.start:s.end], str(s.style)) for s in label.spans]
+        return label.plain, spans
+
+    plain, spans = run_tui(body, _manifest_with(tmp_path))
+    assert plain == "Pipelines beta"
+    assert spans == [("beta", "$warning")]
+
+
 def test_tabs_are_fetchers_run_evidence_paramify(tmp_path, run_tui):
     async def body(app, pilot):
         tabs = app.screen.query_one(TabbedContent)
@@ -109,7 +124,7 @@ def test_tabs_are_fetchers_run_evidence_paramify(tmp_path, run_tui):
         return labels, tabs.active, _focus_id(app)
 
     labels, active, focus = run_tui(body, _manifest_with(tmp_path))
-    assert labels == ["Fetchers", "Run", "Evidence", "Paramify", "Pipelines"]
+    assert labels == ["Fetchers", "Run", "Evidence", "Paramify", "Pipelines beta"]
     assert active == "tab-fetchers" and focus == "catalog-tree"
 
 

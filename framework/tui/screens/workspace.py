@@ -62,7 +62,8 @@ class WorkspaceScreen(Screen):
                 yield EvidencePage(id="evidence-page")
             with TabPane("Paramify", id="tab-upload"):
                 yield UploadPage(id="upload-page")
-            with TabPane("Pipelines", id="tab-pipelines"):
+            # "beta": a tag after the name, in the theme's warning color.
+            with TabPane("Pipelines [$warning]beta[/]", id="tab-pipelines"):
                 yield PipelinesPage(id="pipelines-page")
         yield HintFooter()
 
