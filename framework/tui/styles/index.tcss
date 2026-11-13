@@ -339,13 +339,14 @@ ParamifyPage { height: 1fr; padding: 0 1; }
 #pf-lens { height: 1fr; }
 #pf-by-fetcher, #pf-by-capability { height: 1fr; }
 #pf-grid-panel { height: 1fr; min-height: 8; }
+#pf-filter { margin-bottom: 1; }
 #pf-grid { height: 1fr; }
 #pf-totals { height: 2; padding: 0 1; border-top: solid $panel; }
 #pf-detail { height: 13; margin-top: 1; }
 #pf-set-panel { width: 46%; }
 #pf-caps-panel { width: 1fr; margin-left: 1; }
 #pf-caps { height: 1fr; }
-.panel.empty > #pf-totals { display: none; }
+.panel.empty > #pf-totals, .panel.empty > #pf-filter { display: none; }
 
 /* Pipelines: the scan-report fetchers, the send panel and its log. */
 PipelinesPage {

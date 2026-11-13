@@ -282,3 +282,70 @@ def test_reading_shows_while_the_worker_runs(tmp_path, monkeypatch, run_tui):
 
     summary, rows = run_tui(body, _manifest(tmp_path))
     assert "reading the workspace…" in summary and rows == 3
+
+
+def _keys(page) -> list:
+    grid = page.query_one("#pf-grid", DataTable)
+    return [grid.coordinate_to_cell_key((i, 0)).row_key.value for i in range(grid.row_count)]
+
+
+def _cursor(page) -> str:
+    grid = page.query_one("#pf-grid", DataTable)
+    return grid.coordinate_to_cell_key(grid.cursor_coordinate).row_key.value
+
+
+def test_filter_matches_name_and_reference_id(tmp_path, monkeypatch, run_tui):
+    _stub(monkeypatch, _status())
+
+    async def body(app, pilot):
+        page = await _open(app, pilot)
+        await pilot.press("slash")
+        await pilot.pause()
+        focused = app.focused.id
+        await pilot.press(*"brav")
+        await pilot.pause()
+        by_name = _keys(page)
+        page.query_one("#pf-filter").value = "evd-charl"
+        await pilot.pause()
+        return focused, by_name, _keys(page)
+
+    focused, by_name, by_ref = run_tui(body, _manifest(tmp_path))
+    assert focused == "pf-filter" and by_name == ["bravo"] and by_ref == ["charlie"]
+
+
+def test_w_hides_ready_rows_and_totals_say_so(tmp_path, monkeypatch, run_tui):
+    _stub(monkeypatch, _status())
+
+    async def body(app, pilot):
+        page = await _open(app, pilot)
+        await pilot.press("w")
+        await pilot.pause()
+        return _keys(page), _text(page.query_one("#pf-totals", Static).content)
+
+    keys, totals = run_tui(body, _manifest(tmp_path))
+    assert keys == ["bravo", "charlie"]
+    assert totals.rstrip().endswith("showing 2 of 3")
+    assert "scripts 1/3" in totals  # the totals still count every fetcher
+
+
+def test_refresh_keeps_the_cursor_on_the_same_fetcher(tmp_path, monkeypatch, run_tui):
+    first = _status()
+    changed = _status()
+    changed["fetchers"][1] = _row("bravo", validators=_validators(True, True), ready=True)
+    _stub(monkeypatch, first, changed)
+
+    async def body(app, pilot):
+        page = await _open(app, pilot)
+        await pilot.press("down")
+        await pilot.pause()
+        before = _cursor(page)
+        await pilot.press("ctrl+r")
+        await _settle(app, pilot)
+        after = _cursor(page)
+        await pilot.press("w")  # bravo is ready now, so it hides
+        await pilot.pause()
+        return before, after, _cursor(page)
+
+    before, after, hidden = run_tui(body, _manifest(tmp_path))
+    assert before == after == "bravo"
+    assert hidden == "charlie"

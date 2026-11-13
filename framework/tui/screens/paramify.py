@@ -25,7 +25,7 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.message import Message
-from textual.widgets import ContentSwitcher, Static, Tab, Tabs
+from textual.widgets import ContentSwitcher, Input, Static, Tab, Tabs
 
 from framework import api
 from framework.tui import palette
@@ -144,6 +144,8 @@ def totals_text(rows: list, shown: int) -> Text:
 class ParamifyPage(Vertical):
     BINDINGS = [
         Binding("ctrl+r", "refresh_status", "Refresh"),
+        Binding("slash", "focus_filter", "Filter"),
+        Binding("w", "needs_work", "Needs work"),
     ]
 
     def compose(self) -> ComposeResult:
@@ -153,6 +155,7 @@ class ParamifyPage(Vertical):
         with ContentSwitcher(initial="pf-by-fetcher", id="pf-lens"):
             with Vertical(id="pf-by-fetcher"):
                 with Vertical(id="pf-grid-panel", classes="panel"):
+                    yield Input(placeholder="/ filter evidence sets…", id="pf-filter")
                     yield DataTable(id="pf-grid", cursor_type="row")
                     yield Static("", id="pf-grid-empty", classes="empty-hint")
                     yield Static("", id="pf-totals")
@@ -174,6 +177,8 @@ class ParamifyPage(Vertical):
         self._stale = True
         self._newest: dict = {}
         self._rows: dict = {}
+        self._filter = ""
+        self._needs_work = False
         self.query_one("#pf-lens-tabs", Tabs).can_focus = False
         grid = self.query_one("#pf-grid", DataTable)
         grid.add_columns("fetcher", "evidence set", "script", "validators", "capabilities", "artifacts", "")
@@ -190,7 +195,7 @@ class ParamifyPage(Vertical):
 
     @property
     def HINTS(self) -> list:  # noqa: N802 — the workspace reads HINTS off every page
-        return [("↑↓", "fetcher"), ("ctrl+r", "refresh")]
+        return [("↑↓", "fetcher"), ("/", "filter"), ("w", "needs work"), ("ctrl+r", "refresh")]
 
     # -- reading ---------------------------------------------------------- #
 
@@ -298,6 +303,14 @@ class ParamifyPage(Vertical):
         else:
             summary.update(line)
 
+    def _shown(self, rows: list) -> list:
+        text = self._filter
+        return [
+            r for r in rows
+            if not (self._needs_work and r["ready"])
+            and (not text or text in r["name"].lower() or text in r["evidence_set"]["reference_id"].lower())
+        ]
+
     def _draw_grid(self) -> None:
         grid = self.query_one("#pf-grid", DataTable)
         panel = self.query_one("#pf-grid-panel", Vertical)
@@ -309,8 +322,9 @@ class ParamifyPage(Vertical):
         online = self._online()
         self._rows = {r["name"]: r for r in rows}
         keep = self._cursor_key()
+        shown = self._shown(rows)
         grid.clear()
-        for row in rows:
+        for row in shown:
             grid.add_row(*grid_cells(row, online), key=row["name"])
         empty = not rows
         panel.set_class(empty, "empty")
@@ -323,10 +337,42 @@ class ParamifyPage(Vertical):
             return
         ready = sum(r["ready"] for r in rows)
         panel.border_title = f"evidence sets ({len(rows)})" + (f"  ·  {ready} ready" if online else "")
-        self.query_one("#pf-totals", Static).update(totals_text(rows, len(rows)))
-        if keep in self._rows:
-            grid.move_cursor(row=grid.get_row_index(keep))
+        self.query_one("#pf-totals", Static).update(totals_text(rows, len(shown)))
+        target = self._landing(keep, rows, shown)
+        if target is not None:
+            grid.move_cursor(row=grid.get_row_index(target))
         self._show(self._cursor_key())
+
+    @staticmethod
+    def _landing(keep: str | None, rows: list, shown: list) -> str | None:
+        """Where the cursor goes after a redraw: the same fetcher when it is still
+        shown, else the next shown one in manifest order, else the last."""
+        names = [r["name"] for r in shown]
+        if not names:
+            return None
+        if keep in names:
+            return keep
+        order = [r["name"] for r in rows]
+        if keep in order:
+            after = order[order.index(keep):]
+            return next((n for n in after if n in names), names[-1])
+        return names[0]
+
+    def action_focus_filter(self) -> None:
+        self.query_one("#pf-filter", Input).focus()
+
+    def action_needs_work(self) -> None:
+        self._needs_work = not self._needs_work
+        self._draw_grid()
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        if event.input.id == "pf-filter":
+            self._filter = event.value.strip().lower()
+            self._draw_grid()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        if event.input.id == "pf-filter":
+            self.query_one("#pf-grid", DataTable).focus()
 
     def _cursor_key(self) -> str | None:
         grid = self.query_one("#pf-grid", DataTable)
