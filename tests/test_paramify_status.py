@@ -2,7 +2,8 @@
 
 The workspace reads (`list_evidence_sets`, `list_capabilities`) and the scripts
 dry run are stubbed at the `api` boundary; the manifest, fetcher discovery and
-the status logic run for real. The validator registry is stubbed, because
+the status logic run for real. The last tests instead serve raw API JSON
+(tests/fixtures/paramify) at the HTTP boundary, so the reads' parsing runs too. The validator registry is stubbed, because
 validator content mostly lives outside the repo.
 """
 
@@ -61,8 +62,8 @@ def workspace(monkeypatch, tmp_path):
                 on_event({"event": "sync_item", "fetcher": name, "outcome": state["outcomes"][name]})
         return {"ok": True}
 
-    monkeypatch.setattr(api, "list_evidence_sets", lambda: state["sets"])
-    monkeypatch.setattr(api, "list_capabilities", lambda: state["caps"])
+    monkeypatch.setattr(api, "list_evidence_sets", lambda base_url=None: state["sets"])
+    monkeypatch.setattr(api, "list_capabilities", lambda base_url=None: state["caps"])
     monkeypatch.setattr(api, "scripts_sync", scripts_sync)
     return state
 
@@ -151,7 +152,7 @@ def test_no_token_reads_nothing(tmp_path, workspace, monkeypatch):
 
 
 def test_one_failed_part_leaves_the_others(tmp_path, workspace, monkeypatch):
-    def denied():
+    def denied(base_url=None):
         raise RuntimeError("HTTP 403")
 
     monkeypatch.setattr(api, "list_capabilities", denied)
@@ -196,3 +197,88 @@ def test_an_uploader_override_names_the_set(tmp_path, workspace):
     # The registry still names the shipped set, so its validators still apply.
     assert [v["key"] for v in row["validators"]] == ["hello_complete", "hello_greets"]
     assert row["ready"] is True
+
+
+# ---- the raw API shape --------------------------------------------------------- #
+#
+# These run the real list_evidence_sets / list_capabilities over raw JSON, so the
+# field names the status depends on (validators[].validatorEvidencePairId on
+# /evidence; functions[].validatorEvidencePairs[].{validatorEvidencePairId,
+# validatorId, evidenceId} on /solution-capabilities) are exercised end to end.
+
+FIXTURES = REPO_ROOT / "tests" / "fixtures" / "paramify"
+
+
+class _Resp:
+    status_code = 200
+    text = "{}"
+
+    def __init__(self, body):
+        self._body = body
+
+    def json(self):
+        return self._body
+
+
+@pytest.fixture
+def raw_api(monkeypatch, tmp_path):
+    """Serve the fixture JSON at the HTTP boundary, recording each GET's URL.
+    The registry and the scripts dry run are stubbed as in `workspace`."""
+    monkeypatch.setenv("PARAMIFY_UPLOAD_API_TOKEN", "tok")
+    monkeypatch.delenv("PARAMIFY_API_TOKEN", raising=False)
+    monkeypatch.delenv("PARAMIFY_API_BASE_URL", raising=False)
+    monkeypatch.setattr("dotenv.load_dotenv", lambda *a, **k: True)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(registry, "discover_validators", lambda root: {
+        "hello_complete": _validator("hello_complete", "Hello complete", "EVD-DEMO-HELLO", "completeness"),
+        "hello_greets": _validator("hello_greets", "Hello greets", "EVD-DEMO-HELLO"),
+    })
+
+    def scripts_sync(root, config_path=None, *, dry_run=False, include=None, on_event=None, **kw):
+        assert dry_run, "the status must never write"
+        for name in sorted(include or ()):
+            on_event({"event": "sync_item", "fetcher": name, "outcome": "would_noop"})
+        return {"ok": True}
+
+    monkeypatch.setattr(api, "scripts_sync", scripts_sync)
+    seen = []
+
+    def fake_get(url, headers=None, params=None, timeout=None):
+        seen.append(url)
+        if url.endswith("/evidence"):
+            return _Resp(json.loads((FIXTURES / "synthetic_evidence_list.json").read_text()))
+        if url.endswith("/solution-capabilities"):
+            return _Resp(json.loads((FIXTURES / "synthetic_solution_capabilities.json").read_text()))
+        raise AssertionError(f"unexpected GET {url}")
+
+    monkeypatch.setattr("requests.get", fake_get)
+    return seen
+
+
+def test_pairs_are_found_in_the_raw_api_shape(tmp_path, raw_api):
+    status = api.paramify_status(REPO_ROOT, _manifest(tmp_path, "demo_hello", "demo_policy_check"))
+    assert status["errors"] == {}
+    hello = _row(status, "demo_hello")
+    assert hello["evidence_set"]["id"] == "0a6f1c2e-5b7d-4e3a-9c81-2f4d6b8a0e11"
+    assert hello["evidence_set"]["artifact_count"] == 3
+    assert {v["key"]: v["paired"] for v in hello["validators"]} == {"hello_complete": True, "hello_greets": True}
+    assert sorted((p["function"], p["validator_key"]) for p in hello["pairs"]) == [
+        ("END_USER", "hello_greets"), ("PROVIDER", "hello_complete")]
+    assert {p["capability_id"] for p in hello["pairs"]} == {"3d9c4f5b-8eaa-4b6d-8fb4-5c7a9ebd3b44"}
+    assert hello["ready"] is True
+    # The capability has no referenceId; the template's stands in.
+    assert status["capabilities"][0]["reference_id"] == "SC-AC-06"
+    policy = _row(status, "demo_policy_check")
+    assert policy["evidence_set"]["id"] is not None and policy["ready"] is False  # no artifact yet
+
+
+def test_every_read_goes_to_the_uploader_configs_host(tmp_path, raw_api):
+    """upload.yaml's paramify.base_url wins over the environment for the header
+    and the scripts dry run; the evidence and capability reads must follow it,
+    or one status mixes two workspaces."""
+    config = tmp_path / "upload.yaml"
+    config.write_text("paramify:\n  base_url: https://stage.example.test/api/v0\n")
+    status = api.paramify_status(REPO_ROOT, _manifest(tmp_path, "demo_hello"), config)
+    assert status["workspace"]["base_url"] == "https://stage.example.test/api/v0"
+    assert sorted(raw_api) == ["https://stage.example.test/api/v0/evidence",
+                               "https://stage.example.test/api/v0/solution-capabilities"]

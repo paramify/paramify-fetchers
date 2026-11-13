@@ -2932,8 +2932,14 @@ _ASSESSMENTS_PATH = "/assessment"
 _WORKSPACE_READ_TIMEOUT = 30
 
 
-def _workspace_get(path: str, params: Optional[Dict[str, Any]] = None) -> Any:
+def _workspace_get(
+    path: str, params: Optional[Dict[str, Any]] = None, *, base_url: Optional[str] = None,
+) -> Any:
     """GET a read-only workspace endpoint and return the decoded body.
+
+    `base_url` is the instance to read; None resolves it from the environment.
+    A caller that has already resolved it with the uploader config (as
+    `upload_readiness` does) passes it, so every call it makes goes to one host.
 
     The one place the read path resolves a token, enforces https, and turns a
     transport or HTTP failure into a single actionable message. Shared by every
@@ -2958,7 +2964,8 @@ def _workspace_get(path: str, params: Optional[Dict[str, Any]] = None) -> Any:
             f"No Paramify API token: set {READ_TOKEN_ENV} (or "
             f"{UPLOAD_TOKEN_ENV}) to a token with read scope on the workspace"
         )
-    base_url, _ = resolve_base_url()
+    if not base_url:
+        base_url, _ = resolve_base_url()
     # Same rule the uploader enforces (uploader._base_url_error): a Bearer token
     # must not go out over plaintext. Localhost is exempt so a local stub works.
     host = urlparse(base_url).hostname or ""
@@ -3324,7 +3331,7 @@ def capability_display_name(capability: dict) -> str:
     )
 
 
-def list_capabilities() -> List[dict]:
+def list_capabilities(base_url: Optional[str] = None) -> List[dict]:
     """Fetch the workspace's solution capabilities via GET /solution-capabilities.
 
     Returns [{"id", "name", "reference_id", "template_reference_id", "family",
@@ -3335,10 +3342,12 @@ def list_capabilities() -> List[dict]:
     [{"pair_id", "validator_id", "evidence_id"}]: the validator-evidence pairs
     the function holds.
 
+    `base_url` is the instance to read; None resolves it from the environment.
+
     Raises RuntimeError with an actionable message on missing credentials, a
     non-https endpoint, or a transport/HTTP failure.
     """
-    payload = _workspace_get(_CAPABILITIES_PATH)
+    payload = _workspace_get(_CAPABILITIES_PATH, base_url=base_url)
     raw = payload.get("solutionCapabilities", []) if isinstance(payload, dict) else payload
 
     capabilities = []
@@ -3425,16 +3434,17 @@ def evidence_set_display_name(evidence_set: dict) -> str:
     )
 
 
-def list_evidence_sets() -> List[dict]:
+def list_evidence_sets(base_url: Optional[str] = None) -> List[dict]:
     """Fetch the workspace's evidence sets via GET /evidence.
 
     Returns [{"id", "reference_id", "name", "description", "instructions",
     "artifact_count", "automated", "frequency", "validators"}] sorted by display
     name, where `validators` is [{"pair_id", "id", "name", "type"}].
     `artifact_count` is what says whether there is anything here to author
-    against at all.
+    against at all. `base_url` is the instance to read; None resolves it from
+    the environment.
     """
-    payload = _workspace_get(_EVIDENCE_SETS_PATH)
+    payload = _workspace_get(_EVIDENCE_SETS_PATH, base_url=base_url)
     raw = payload.get("evidences", []) if isinstance(payload, dict) else payload
 
     sets = []
@@ -3661,6 +3671,8 @@ def paramify_status(root: Path, manifest_path: Path, config_path: Optional[Path]
     does not know is listed in `skipped`. Without a token nothing is read from
     the workspace. Each workspace part (evidence sets, scripts, capabilities)
     is read on its own: a failure sets `errors[part]` and leaves the rest.
+    Every read goes to the base URL `upload_readiness` resolves, with the
+    uploader config, which is the one the scripts dry run uses.
     Raises ValueError for setup errors (an unreadable manifest or registry).
     """
     from framework import validators as _registry  # local: keeps CLI startup light
@@ -3733,7 +3745,7 @@ def paramify_status(root: Path, manifest_path: Path, config_path: Optional[Path]
 
     sets: Dict[str, dict] = {}
     try:
-        sets = {s["reference_id"]: s for s in list_evidence_sets()}
+        sets = {s["reference_id"]: s for s in list_evidence_sets(base_url=readiness["base_url"])}
     except Exception as exc:  # noqa: BLE001 — shown where the data would be
         errors["evidence_sets"] = str(exc)
 
@@ -3749,7 +3761,7 @@ def paramify_status(root: Path, manifest_path: Path, config_path: Optional[Path]
         errors["scripts"] = str(exc)
 
     try:
-        capabilities = list_capabilities()
+        capabilities = list_capabilities(base_url=readiness["base_url"])
     except Exception as exc:  # noqa: BLE001
         errors["capabilities"] = str(exc)
         capabilities = []
