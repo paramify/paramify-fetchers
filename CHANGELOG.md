@@ -47,6 +47,19 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`azure_sentinel_analytics_rules` 0.4.0: alert connections the tenant
+  confirms.** The data connectors API doesn't list a tenant-based connector
+  (Defender for Cloud's, for one), so an incident-creation rule whose product
+  sent no alert read as not connected. The new optional
+  `confirmed_alert_connections` setting
+  (`SENTINEL_CONFIRMED_ALERT_CONNECTIONS`) lists connection kinds the tenant
+  confirms; a rule for such a product, with no connection read from the API,
+  reads as quiet. Its `enabled_rules_quiet` record carries
+  `confirmed_by_configuration: true` and a reason saying the connection is
+  confirmed by configuration, not read from the API, and the new
+  `enabled_rules_quiet_by_confirmation` count (per workspace and in the
+  summary) counts them. A kind that sends no product's alerts fails the run as
+  `bad_config`. Left empty, the evidence is unchanged.
 - **`aws_route53_resolver_dns_security`** (`EVD-R53-RESOLVER-DNS-SECURITY`) —
   one record per VPC in the region with its Route 53 Resolver DNSSEC validation
   status (`NOT_CONFIGURED` when the VPC has no DNSSEC config), its DNS Firewall

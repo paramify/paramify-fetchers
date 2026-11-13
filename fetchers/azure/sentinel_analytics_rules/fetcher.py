@@ -33,6 +33,8 @@ NAME = "azure_sentinel_analytics_rules"
 # Detection queries routinely hold text a web firewall refuses (/etc/passwd, <script, ; rm -rf), which would cost
 # the whole evidence file, so the full text is opt-in; the hash and length identify each query without it.
 QUERY_TEXT_ENV = "SENTINEL_RULE_QUERY_TEXT"
+# Alert connections the tenant confirms, for ones the data connectors API doesn't list (a tenant-based connector).
+CONFIRMED_ENV = "SENTINEL_CONFIRMED_ALERT_CONNECTIONS"
 FUSION_TEMPLATE = "f71aba3d-28fb-450b-b192-4e76a83015c8"
 INCIDENT_CREATION = "MicrosoftSecurityIncidentCreation"
 # Kinds with no query of their own: their template's connectors are optional signals, not tables the rule needs.
@@ -297,9 +299,27 @@ def alert_connections(product: Optional[str], connections: List[Dict[str, Any]])
     return sorted({c["kind"] for c in connections if kind and c.get("kind") in feeds and sends_alerts(c)})
 
 
-def quiet_rules(client, path: str, ws: Dict[str, Any], rules: List[Dict[str, Any]], collector, notes: List[str]) -> Optional[List[Dict[str, Any]]]:
+def confirmed_connections(collector) -> Set[str]:
+    """Connection kinds named in CONFIRMED_ENV. A kind that sends no product's alerts fails the run as bad_config and
+    the whole setting is ignored, so nothing reads as confirmed on a typo."""
+    raw = [k.strip() for k in (os.environ.get(CONFIRMED_ENV) or "").split(",") if k.strip()]
+    known = {k.lower(): k for k in ALERT_PRODUCT_KINDS.values()}
+    unknown = [k for k in raw if k.lower() not in known]
+    if unknown:
+        collector.record(f"config {CONFIRMED_ENV}", ValueError(
+            f"invalid setting {CONFIRMED_ENV}: {', '.join(repr(k) for k in unknown)} not a kind of connection that sends "
+            f"an incident-creation product's alerts; expected any of {', '.join(sorted(known.values()))}; none used"))
+        return set()
+    return {known[k.lower()] for k in raw}
+
+
+def quiet_rules(
+    client, path: str, ws: Dict[str, Any], rules: List[Dict[str, Any]], collector, notes: List[str],
+    confirmed: Optional[Set[str]] = None,
+) -> Optional[List[Dict[str, Any]]]:
     """Enabled incident-creation rules whose product sent no alert while a connection sending its alerts has them
-    enabled: no alert is normal for these. None when a rule isn't quiet by the connections read and a listing failed."""
+    enabled, or the tenant confirms the connection: no alert is normal for these. None when a rule isn't quiet by the
+    connections read or confirmed and a listing failed."""
     missing = [
         r for r in rules
         if r.get("enabled") is True and r.get("kind") == INCIDENT_CREATION and r.get("tables_without_data")
@@ -328,6 +348,13 @@ def quiet_rules(client, path: str, ws: Dict[str, Any], rules: List[Dict[str, Any
                 "reason": "its product sent no alert in the window, and "
                 + ("its own connection" if own else "Defender XDR, which carries that product's alerts,")
                 + " has alerts enabled",
+            })
+        elif (kind := ALERT_PRODUCT_KINDS.get((r.get("product_filter") or "").lower())) in (confirmed or ()):
+            quiet.append({
+                "name": r["name"], "display_name": r["display_name"], "product_filter": r.get("product_filter"),
+                "alerts_enabled_on": [kind], "confirmed_by_configuration": True,
+                "reason": f"its product sent no alert in the window, and the {kind} connection is confirmed by "
+                f"{CONFIRMED_ENV}, not read from the API",
             })
         elif stable is None or preview is None:
             return None
@@ -484,8 +511,9 @@ def collect(client, ws: Dict[str, Any], collector) -> Dict[str, Any]:
             r["tables_without_data"] = tables_without_data(r, ingested, products)
     covered = coverage(rules, ingested, products is not None) if rules is not None and listed_tables is not None else {}
     quiet = None
+    confirmed = confirmed_connections(collector)
     if covered.get("enabled_rules_missing_data") is not None:
-        quiet = quiet_rules(client, path, ws, rules, collector, notes)
+        quiet = quiet_rules(client, path, ws, rules, collector, notes, confirmed)
 
     with_text = include_query_text()
     for r in rules or []:
@@ -501,6 +529,9 @@ def collect(client, ws: Dict[str, Any], collector) -> Dict[str, Any]:
         **(rule_summary(rules) if rules is not None else {}),
         **covered,
         **({"enabled_rules_quiet": quiet} if rules is not None and listed_tables is not None else {}),
+        **({"enabled_rules_quiet_by_confirmation": (
+            None if quiet is None else sum(1 for q in quiet if q.get("confirmed_by_configuration"))
+        )} if confirmed and rules is not None and listed_tables is not None else {}),
         "workspace_tables_listed": len(listed_tables) if listed_tables is not None else None,
         "templates_available": len(template_names) if templates is not None else None,
         "templates_in_use": len(used & template_names) if templates is not None else None,
@@ -525,6 +556,13 @@ def _paired_total(workspaces: List[Dict[str, Any]], field: str, pair: str) -> Op
 def summarize(workspaces: List[Dict[str, Any]]) -> Dict[str, Any]:
     collected = [w for w in workspaces if w.get("rules") is not None]
     enabled = [w.get("enabled_rules") or 0 for w in collected]
+    confirmed = [w for w in collected if "enabled_rules_quiet_by_confirmation" in w]
+    by_confirmation = (
+        {"enabled_rules_quiet_by_confirmation": None
+         if any(w["enabled_rules_quiet_by_confirmation"] is None for w in confirmed)
+         else sum(w["enabled_rules_quiet_by_confirmation"] for w in confirmed)}
+        if confirmed else {}
+    )
     return {
         "enabled_rules_total": sum(enabled),
         "min_enabled_rules": min(enabled) if enabled else None,
@@ -532,6 +570,7 @@ def summarize(workspaces: List[Dict[str, Any]]) -> Dict[str, Any]:
         "workspaces_with_fusion_enabled": sum(1 for w in collected if w.get("fusion_enabled") is True),
         "enabled_rules_missing_data": _total(collected, "enabled_rules_missing_data"),
         "enabled_rules_quiet": _paired_total(collected, "enabled_rules_quiet", "enabled_rules_missing_data"),
+        **by_confirmation,
         "ingesting_tables_not_read": _total(collected, "ingesting_tables_not_read"),
         "ingesting_tables_read_only_by_templates": _total(collected, "ingesting_tables_read_only_by_templates"),
         "enabled_rules_tables_unknown": _total(collected, "enabled_rules_tables_unknown"),

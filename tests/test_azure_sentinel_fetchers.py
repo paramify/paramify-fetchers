@@ -1044,7 +1044,8 @@ def test_data_sources_unknown_ingestion_reads_null(azure, tmp_path, monkeypatch)
         "connectors_configured_without_data": None, "connectors_unhealthy": None}
 
 
-def test_analytics_rules_merge_preview_kinds(azure, tmp_path, assert_summary_documented):
+def test_analytics_rules_merge_preview_kinds(azure, tmp_path, monkeypatch, assert_summary_documented):
+    monkeypatch.setenv("SENTINEL_CONFIRMED_ALERT_CONNECTIONS", "AzureSecurityCenter")  # the confirmation count shows only then
     code, ev = run("sentinel_analytics_rules", tmp_path)
     assert code == 0
     assert_summary_documented("azure/sentinel_analytics_rules", ev["summary"])
@@ -1470,6 +1471,67 @@ def test_analytics_rules_failed_preview_connector_listing_is_a_note(azure, tmp_p
         f.unlink()
     _, ev = run("sentinel_analytics_rules", tmp_path)
     assert [r["name"] for r in ws_a(ev)["enabled_rules_quiet"]] == ["mdi"] and ev["summary"]["enabled_rules_quiet"] == 1
+
+
+CONFIRMED = "SENTINEL_CONFIRMED_ALERT_CONNECTIONS"
+
+
+def test_analytics_rules_confirmed_connection_makes_its_product_quiet_and_is_flagged(
+    azure, tmp_path, monkeypatch, assert_summary_documented
+):
+    # Defender for Cloud's tenant connector isn't listed by the API; the rules for other products stay unchanged.
+    incident_rules_workspace(
+        azure, [incident_rule("mdc", "Azure Security Center"), incident_rule("mdo", "Office 365 Advanced Threat Protection"),
+                incident_rule("ipc", "Azure Active Directory Identity Protection")],
+        stable=[connection("aad", "AzureActiveDirectory")])
+    monkeypatch.setenv(CONFIRMED, " azuresecuritycenter , AzureSecurityCenter ")
+    code, ev = run("sentinel_analytics_rules", tmp_path)
+    ws = ws_a(ev)
+    assert code == 0 and ws["notes"] == []
+    quiet = {q["name"]: q for q in ws["enabled_rules_quiet"]}
+    assert sorted(quiet) == ["ipc", "mdc"]
+    assert quiet["mdc"] == {
+        "name": "mdc", "display_name": "mdc", "product_filter": "Azure Security Center",
+        "alerts_enabled_on": ["AzureSecurityCenter"], "confirmed_by_configuration": True,
+        "reason": "its product sent no alert in the window, and the AzureSecurityCenter connection is confirmed by "
+                  f"{CONFIRMED}, not read from the API"}
+    assert "confirmed_by_configuration" not in quiet["ipc"]  # read from the API: unchanged
+    assert ws["enabled_rules_quiet_by_confirmation"] == 1
+    assert (ev["summary"]["enabled_rules_missing_data"], ev["summary"]["enabled_rules_quiet"],
+            ev["summary"]["enabled_rules_quiet_by_confirmation"]) == (3, 2, 1)
+    assert [r["name"] for r in ws["enabled_rules_missing_data"] if r["name"] == "mdo"] == ["mdo"]  # not confirmed
+    assert_summary_documented("azure/sentinel_analytics_rules", ev["summary"])
+
+
+def test_analytics_rules_confirmed_connection_spares_an_unreadable_connector_listing(azure, tmp_path, monkeypatch):
+    incident_rules_workspace(azure, [incident_rule("mdc", "Azure Security Center")],
+                             stable=Resp(403, {"error": {"code": "AuthorizationFailed", "message": "no"}}),
+                             preview=[connection("o365", "Office365")])
+    monkeypatch.setenv(CONFIRMED, "AzureSecurityCenter")
+    code, ev = run("sentinel_analytics_rules", tmp_path)
+    assert [q["name"] for q in ws_a(ev)["enabled_rules_quiet"]] == ["mdc"]
+    assert ev["summary"]["enabled_rules_quiet_by_confirmation"] == 1 and code == 1  # the listing failure still shows
+
+
+def test_analytics_rules_empty_confirmed_setting_changes_nothing(azure, tmp_path, monkeypatch):
+    incident_rules_workspace(azure, [incident_rule("mdc", "Azure Security Center")])
+    monkeypatch.setenv(CONFIRMED, " , ")
+    code, ev = run("sentinel_analytics_rules", tmp_path)
+    ws = ws_a(ev)
+    assert code == 0 and ws["enabled_rules_quiet"] == []
+    assert "enabled_rules_quiet_by_confirmation" not in ws and "enabled_rules_quiet_by_confirmation" not in ev["summary"]
+    assert [r["name"] for r in ws["enabled_rules_missing_data"]] == ["mdc"]
+
+
+def test_analytics_rules_unknown_confirmed_kind_is_a_config_error(azure, tmp_path, monkeypatch):
+    incident_rules_workspace(azure, [incident_rule("mdc", "Azure Security Center")])
+    monkeypatch.setenv(CONFIRMED, "AzureSecurityCenter,AzureSecurityCentre")
+    code, ev = run("sentinel_analytics_rules", tmp_path)
+    ws = ws_a(ev)
+    assert code == 1 and ev["metadata"]["partial_failure"] is True
+    assert json.loads((tmp_path / "status.json").read_text())["code"] == "bad_config"
+    assert "AzureSecurityCentre" in str(ev["metadata"]["api_failures"])
+    assert ws["enabled_rules_quiet"] == [] and "enabled_rules_quiet_by_confirmation" not in ws  # none used
 
 
 def test_analytics_rules_without_alert_only_rules_missing_data_skip_the_connector_listing(azure, tmp_path):
