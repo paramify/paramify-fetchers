@@ -29,6 +29,7 @@ from azure_common import (  # noqa: E402
     REGISTRATION_UNKNOWN,
     Collector,
     arm_client_kwargs,
+    arm_endpoint,
     arm_id_key,
     build_payload,
     classify_failure_code,
@@ -63,10 +64,16 @@ ROTATE_ACTION = "rotate"
 SOURCE_DATA_PLANE = "data_plane"
 SOURCE_MANAGEMENT_PLANE = "management_plane"
 
-# Fallback host suffix, used only when ARM returned no `vault_uri`. Prowler
-# hardcodes this form; preferring `vault_uri` is what keeps this correct in the
-# sovereign clouds (vault.usgovcloudapi.net / vault.azure.cn).
+# Cloud-specific fallback, used only when ARM returned no `vault_uri`.
+# ARM-provided URI remains preferred; derive the fallback from the same authority
+# as the management client rather than sending sovereign reads to the public cloud.
 DEFAULT_VAULT_URI_SUFFIX = "vault.azure.net"
+_ARM_TO_VAULT_SUFFIX = {
+    "https://management.azure.com": DEFAULT_VAULT_URI_SUFFIX,
+    "https://management.usgovcloudapi.net": "vault.usgovcloudapi.net",
+    "https://management.chinacloudapi.cn": "vault.azure.cn",
+    "https://management.microsoftazure.de": "vault.microsoftazure.de",
+}
 
 # Certificates carry their own data-plane grant (an access policy can allow keys and not certificates).
 CERTIFICATES_ACCESSIBLE = "accessible"
@@ -717,17 +724,13 @@ def is_data_plane_inaccessible(exc: BaseException) -> bool:
 
 
 def vault_data_plane_uri(vault: dict) -> str | None:
-    """The vault's data-plane URL: `vault_uri` from ARM, else Prowler's form.
-
-    Prowler hardcodes f"https://{name}.vault.azure.net/"; preferring ARM's own
-    `vault_uri` is what keeps this correct in Azure Government / China
-    (vault.usgovcloudapi.net / vault.azure.cn).
-    """
+    """Prefer ARM's vault URI; otherwise derive its host in the selected cloud."""
     uri = vault.get("vault_uri")
     if uri:
         return uri
     name = vault.get("name")
-    return f"https://{name}.{DEFAULT_VAULT_URI_SUFFIX}/" if name else None
+    suffix = _ARM_TO_VAULT_SUFFIX[arm_endpoint()]
+    return f"https://{name}.{suffix}/" if name else None
 
 
 def collect_management_plane_keys(client, collector: Collector, group: str, name: str) -> list[dict]:
