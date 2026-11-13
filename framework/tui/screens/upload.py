@@ -24,7 +24,6 @@ from textual import on, work
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
-from textual.message import Message
 from textual.widgets import Button, Checkbox, RichLog, Static, TabbedContent
 
 from framework import api
@@ -33,70 +32,16 @@ from framework.tui import palette
 from framework.tui.components.keys import BUTTON_ROW_BINDINGS, ButtonRowNav
 from framework.tui.components.table import DataTable
 from framework.tui.modals import ConfirmModal, PickerModal
-
-
-class UploadEvent(Message):
-    """Carries one api.upload_run() event dict from the worker thread."""
-
-    def __init__(self, ev: dict) -> None:
-        self.ev = ev
-        super().__init__()
-
-
-class PipelineEvent(Message):
-    """Carries one result of a pipeline action (jobs, retry/cancel, close) from a
-    worker thread."""
-
-    def __init__(self, ev: dict) -> None:
-        self.ev = ev
-        super().__init__()
-
-
-class ScriptsSyncEvent(Message):
-    """Carries one api.scripts_sync() event dict from the worker thread."""
-
-    def __init__(self, ev: dict) -> None:
-        self.ev = ev
-        super().__init__()
-
-
-_COUNT_LABELS = (
-    ("issuesCreated", "created"),
-    ("issuesUpdated", "updated"),
-    ("issuesSeenClosed", "seen-closed"),
-    ("issuesAutoClosed", "auto-closed"),
+from framework.tui.screens.paramify_events import (
+    COUNT_LABELS,
+    PipelineEvent,
+    ScriptsSyncEvent,
+    UploadEvent,
+    job_text,
+    latest_run_scoped,
+    output_dir,
+    upload_event_lines,
 )
-
-
-def _job_text(job: dict) -> Text:
-    """One finished pipeline job as a log line: what it did, or why it stopped."""
-    status = job.get("status") or "?"
-    counts = job.get("counts") or {}
-    shown = [f"{counts[k]} {label}" for k, label in _COUNT_LABELS if counts.get(k) is not None]
-    # Same marks as the CLI: a queued or running job is waiting, not failed —
-    # unless it is queued behind a failed one, which needs a person.
-    if status == "COMPLETED":
-        mark, style = "OK", palette.OK
-    elif status == "FAILED" or job.get("blocked_by"):
-        mark, style = "FAIL", palette.FAIL
-    elif status == "CANCELLED":
-        mark, style = "SKIP", palette.WARN
-    else:
-        mark, style = "WAIT", palette.WARN
-    text = Text(f"  [{mark}] job {job.get('job_id')} {status}", style=style)
-    if shown:
-        text.append("  " + ", ".join(shown))
-    if job.get("blocked_by"):
-        text.append(
-            f"  blocked by failed job {job['blocked_by']} — "
-            f"paramify issues jobs --retry {job['blocked_by']}", style=palette.FAIL,
-        )
-    if job.get("timed_out"):
-        text.append("  still running — check with `paramify issues jobs`", style=palette.WARN)
-    for key in ("error", "poll_error"):
-        if job.get(key):
-            text.append(f"  {job[key]}", style="dim")
-    return text
 
 
 class UploadPage(ButtonRowNav, Vertical):
@@ -238,8 +183,7 @@ class UploadPage(ButtonRowNav, Vertical):
     # -- data ------------------------------------------------------------- #
 
     def _output_dir(self) -> str:
-        run = (getattr(self.app, "manifest", None) or {}).get("run") or {}
-        return run.get("output_dir") or "./evidence"
+        return output_dir(self.app)
 
     def _manifest_fetcher_names(self) -> set:
         """The fetchers the active manifest uses — scripts sync is scoped to these
@@ -262,13 +206,7 @@ class UploadPage(ButtonRowNav, Vertical):
 
     def _latest_scoped(self, kind: str) -> tuple[dict | None, bool]:
         """_latest, and whether the run came from the active manifest's own runs."""
-        out = self._output_dir()
-        path = getattr(self.app, "manifest_path", None)
-        if path is not None:
-            root = self.app.root_path
-            if api.latest_run(out, manifest_path=path, root=root) is not None:
-                return api.latest_run(out, kind=kind, manifest_path=path, root=root), True
-        return api.latest_run(out, kind=kind), False
+        return latest_run_scoped(self.app, kind)
 
     def rebuild(self) -> None:
         """Refresh readiness for both panels (cheap; no network). The scripts
@@ -664,70 +602,21 @@ class UploadPage(ButtonRowNav, Vertical):
     def _handle_upload_event(self, ev: dict) -> None:
         etype = ev.get("event")
         log = self.query_one("#upload-log", RichLog)
-
         noun = self._upload_kind
+        for line in upload_event_lines(ev, noun):
+            log.write(line)
         if etype == "upload_start":
             mode = " (dry-run)" if ev.get("dry_run") else ""
             self._set_banner(Text(f"uploading {ev.get('files', 0)} {noun}(s) to {ev.get('base_url', '')}{mode}", style=palette.WARN))
-            log.write(Text(f"upload {ev.get('files', 0)} {noun}(s) from {ev.get('run_dir', '')}{mode}", style="bold"))
-        elif etype == "delivery_file":
-            n = ev.get("n")
-            progress = f"{n}/{ev.get('of')} " if n is not None else ""
-            outcome = ev.get("outcome")
-            style = palette.OK if outcome == "uploaded" else palette.WARN
-            reason = f"  {ev['reason']}" if ev.get("reason") else ""
-            log.write(Text(f"  {progress}{ev.get('file', '?')} {outcome}{reason}", style=style))
-        elif etype == "upload_file":
-            outcome = ev.get("outcome")
-            if outcome == "uploaded":
-                icon, style = "OK", palette.OK
-            elif outcome in ("skipped_duplicate", "skipped_failed", "would_upload"):
-                icon, style = "SKIP", palette.WARN
-            else:
-                icon, style = "FAIL", palette.FAIL
-            if ev.get("reference_id"):
-                ref = f"  set={ev.get('reference_id')}"
-            elif ev.get("assessment_id"):
-                ref = f"  assessment={ev.get('assessment_id')}"
-            else:
-                ref = ""
-            if ev.get("channel"):
-                ref += f"  channel={ev.get('channel')}"
-            reason = ev.get("reason") or ev.get("error")
-            suffix = f"  {reason}" if reason else ""
-            log.write(Text(f"  [{icon}] {ev.get('file', '?')}  {outcome}{ref}{suffix}", style=style))
-        elif etype == "process_plan" and ev.get("operation"):
-            log.write(Text(
-                f"  [DRY] would {ev['operation']} {ev.get('artifacts', 0)} artifact(s)"
-                f"  assessment={ev.get('assessment_id')}", style=palette.WARN,
-            ))
         elif etype == "job_queued":
-            why = f"  {ev['close_skipped']}" if ev.get("close_skipped") else ""
             self._set_banner(Text(
                 f"processing on {ev.get('assessment_id')} — job {ev.get('job_id')} queued",
                 style=palette.WARN,
             ))
-            log.write(Text(
-                f"  [OK] queued {ev.get('operation')} job {ev.get('job_id')}"
-                f"  assessment={ev.get('assessment_id')}{why}", style=palette.OK,
-            ))
-            if ev.get("newer_cycles"):
-                log.write(Text(
-                    f"  [WARN] landed on cycle {ev.get('cycle_name')!r}, the oldest open "
-                    f"cycle; {ev['newer_cycles']} newer cycle(s) show nothing until it is "
-                    f"closed", style=palette.WARN,
-                ))
         elif etype == "job_status":
             self._set_banner(Text(
                 f"job {ev.get('job_id')} {ev.get('status')} on {ev.get('assessment_id')}",
                 style=palette.WARN,
-            ))
-        elif etype == "job_complete":
-            log.write(_job_text(ev))
-        elif etype == "process_skipped":
-            log.write(Text(
-                f"  [SKIP] nothing new to process  assessment={ev.get('assessment_id')}"
-                f"  {ev.get('reason', '')}", style=palette.WARN,
             ))
         elif etype == "upload_complete":
             self._finalize_upload(ev)
@@ -789,7 +678,7 @@ class UploadPage(ButtonRowNav, Vertical):
         for j in jobs:
             counts = j.get("counts") or {}
             done = ", ".join(
-                f"{counts[k]} {label}" for k, label in _COUNT_LABELS if counts.get(k) is not None
+                f"{counts[k]} {label}" for k, label in COUNT_LABELS if counts.get(k) is not None
             )
             aid = j.get("assessment_id") or ""
             detail = done
@@ -826,7 +715,7 @@ class UploadPage(ButtonRowNav, Vertical):
         if not actions:
             self.app.push_screen(ConfirmModal(
                 f"Job {job['job_id']} is {status}; there is nothing to retry or cancel.\n\n"
-                f"{_job_text(job).plain.strip()}"
+                f"{job_text(job).plain.strip()}"
             ))
             return
 
@@ -924,14 +813,14 @@ class UploadPage(ButtonRowNav, Vertical):
         elif kind == "job_done":
             self.query_one("#upload-log-panel", Vertical).set_class(False, "empty")
             log.write(Text(f"{ev['action']}:", style="bold"))
-            log.write(_job_text(ev["job"]))
+            log.write(job_text(ev["job"]))
             self.notify(f"{ev['action']}: job {ev['job'].get('job_id')} is now "
                         f"{ev['job'].get('status')}")
         elif kind == "closed":
             self._uploading = False
             self._restore_actions()
             job = ev["job"]
-            log.write(_job_text(job))
+            log.write(job_text(job))
             ok = job.get("status") == "COMPLETED"
             self._set_banner(Text(
                 f"cycle close {job.get('status')}", style=palette.OK if ok else palette.FAIL,
