@@ -7,8 +7,8 @@ it, and a Paramify inventory pipeline turns each record into an Inventory item.
 
 **You need:** [the repo installed](../README.md#install) ·
 [an API key](../uploaders/paramify_evidence/README.md#paramify-api-key) ·
-an inventory fetcher (`github_repository_inventory` and `sophos_endpoint_inventory`
-ship; to write another, see the [pipeline fetchers guide](pipeline_fetchers_guide.md)
+an inventory fetcher (`github_repository_inventory`, `sophos_endpoint_inventory` and
+[`wiz_inventory`](../fetchers/wiz/inventory/README.md) ship; to write another, see the [pipeline fetchers guide](pipeline_fetchers_guide.md)
 or ask [your AI agent](../README.md#drive-it-with-an-ai-agent)). The example is
 `acme_asset_inventory`.
 
