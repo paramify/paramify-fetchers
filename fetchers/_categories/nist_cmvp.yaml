@@ -1,0 +1,23 @@
+# NIST Cryptographic Module Validation Program (CMVP) certificates, read from
+# the public certificate pages on csrc.nist.gov.
+#
+# No secrets and no `auth:` block: the certificate pages are public. No
+# `requires:` block either: `requests` is a core dependency (pyproject.toml),
+# and HTML is parsed with the standard library.
+
+name: nist_cmvp
+display_name: NIST CMVP
+description: >-
+  NIST Cryptographic Module Validation Program certificates: whether each
+  cryptographic module you list by certificate number is currently FIPS 140-2
+  or FIPS 140-3 validated.
+
+config_schema:
+  base_url:
+    type: string
+    default: https://csrc.nist.gov
+    env: NIST_CMVP_BASE_URL
+    description: >-
+      Base URL the certificate pages are read from, as
+      <base_url>/projects/cryptographic-module-validation-program/certificate/<number>.
+      Change it only to point at a mirror.

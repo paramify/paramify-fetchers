@@ -59,6 +59,9 @@ If you have a question about this repo, ask DeepWiki. It answers in plain Englis
     <td align="center" width="128"><a href="fetchers/fedramp_marketplace/"><img src="fetchers/logos/fedramp.png" alt="FedRAMP Marketplace" width="48" height="48"></a><br><sub>FedRAMP Marketplace</sub></td>
     <td align="center" width="128"><a href="fetchers/qualys/"><img src="fetchers/logos/qualys.svg" alt="Qualys" width="48" height="48"></a><br><sub>Qualys</sub></td>
   </tr>
+  <tr>
+    <td align="center" width="128"><a href="fetchers/nist_cmvp/"><b>NIST</b></a><br><sub>NIST CMVP</sub></td>
+  </tr>
 </table>
 
 </div>
