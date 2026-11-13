@@ -1,9 +1,4 @@
-# NIST Cryptographic Module Validation Program (CMVP) certificates, read from
-# the public certificate pages on csrc.nist.gov.
-#
-# No secrets and no `auth:` block: the certificate pages are public. No
-# `requires:` block either: `requests` is a core dependency (pyproject.toml),
-# and HTML is parsed with the standard library.
+# Public pages, so no secrets or auth; no `requires:`, since `requests` is core and HTML parsing is stdlib.
 
 name: nist_cmvp
 display_name: NIST CMVP
