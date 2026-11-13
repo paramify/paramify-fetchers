@@ -164,7 +164,8 @@ config_schema:
       states_and_comments (approval states and comments only, as before the
       field), both (those or a filled approval_field, whichever came first),
       or exclude (no approval is read, and the item is left out of every
-      approval figure). Used only when approval_field_from is set.
+      approval figure). Used only when approval_field_from is set: both or
+      exclude without it is bad_config.
   emergency_types:
     type: string
     required: false

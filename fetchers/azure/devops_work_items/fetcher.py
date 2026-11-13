@@ -198,7 +198,10 @@ def approval_field_settings() -> Tuple[Optional[str], str, Optional[datetime], s
         if source == HISTORY:
             raise ValueError(f"{APPROVAL_FIELD_FROM_ENV} is set but {APPROVAL_SOURCE_ENV} is {HISTORY}, so the field "
                              f"never counts")
-    return field, source, since, choice(APPROVAL_BEFORE_FIELD_ENV, BEFORE_FIELD_ROUTES)
+    before = choice(APPROVAL_BEFORE_FIELD_ENV, BEFORE_FIELD_ROUTES)
+    if before != HISTORY and since is None:
+        raise ValueError(f"{APPROVAL_BEFORE_FIELD_ENV} is {before}, which needs {APPROVAL_FIELD_FROM_ENV}")
+    return field, source, since, before
 
 
 def call(collector: DevOpsCollector, operation: str, scope: str, fn: Callable[[], Any], default: Any = None) -> Any:

@@ -874,6 +874,17 @@ def test_with_both_the_earlier_approval_is_in_effect(tmp_path, monkeypatch):
         "display_name": "Frank Approver", "login": "frank@example.com"}, "source": "field", "state": None}
 
 
+def test_with_both_an_approval_of_unknown_time_comes_after_one_of_known_time(tmp_path, monkeypatch):
+    monkeypatch.setenv(mod.APPROVAL_FIELD_ENV, FIELD)
+    monkeypatch.setenv(mod.APPROVAL_SOURCE_ENV, "both")
+    # The field is filled, but no update read shows it filled.
+    fake = with_items(FakeADO(), {104: item(104, "Change Request", "Closed", **{FIELD: FRANK})},
+                      updates={104: [update(1, "Proposed", "Approved", ago(days=5))]})
+    _, evidence, _, _, _ = run(tmp_path, with_field_types(fake))
+    assert work_item(evidence, 104)["field_approval"]["at"] is None
+    assert work_item(evidence, 104)["approval"]["source"] == "state"
+
+
 @pytest.mark.parametrize("before, approved_105, left_out", [
     (None, False, 0), ("states_and_comments", False, 0), ("both", True, 0), ("exclude", None, 4)])
 def test_items_created_before_the_field_follow_approval_before_field(tmp_path, monkeypatch, before, approved_105,
@@ -912,7 +923,6 @@ def test_items_created_before_the_field_follow_approval_before_field(tmp_path, m
 def test_without_approval_field_from_every_item_follows_approval_source(tmp_path, monkeypatch):
     monkeypatch.setenv(mod.APPROVAL_FIELD_ENV, FIELD)
     monkeypatch.setenv(mod.APPROVAL_SOURCE_ENV, "field")
-    monkeypatch.setenv(mod.APPROVAL_BEFORE_FIELD_ENV, "exclude")
     _, evidence, _, _, _ = run(tmp_path, field_fake())
     s = evidence["summary"]
     assert s["approval_field_from"] is None and s["approval_before_field"] is None
@@ -1000,6 +1010,8 @@ def test_unread_updates_leave_the_field_approval_figures_unknown(tmp_path, monke
     {mod.APPROVAL_FIELD_ENV: FIELD, mod.APPROVAL_SOURCE_ENV: "field", mod.APPROVAL_FIELD_FROM_ENV: "last week"},
     {mod.APPROVAL_FIELD_ENV: FIELD, mod.APPROVAL_FIELD_FROM_ENV: "2026-01-31"},
     {mod.APPROVAL_FIELD_ENV: FIELD, mod.APPROVAL_SOURCE_ENV: "field", mod.APPROVAL_BEFORE_FIELD_ENV: "skip"},
+    {mod.APPROVAL_FIELD_ENV: FIELD, mod.APPROVAL_SOURCE_ENV: "field", mod.APPROVAL_BEFORE_FIELD_ENV: "exclude"},
+    {mod.APPROVAL_FIELD_ENV: FIELD, mod.APPROVAL_SOURCE_ENV: "both", mod.APPROVAL_BEFORE_FIELD_ENV: "both"},
     {mod.EMERGENCY_TYPES_ENV: "Emergency Change"},
 ])
 def test_bad_approval_field_settings_fail_with_bad_config(tmp_path, monkeypatch, settings):

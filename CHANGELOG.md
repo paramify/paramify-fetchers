@@ -64,6 +64,7 @@ schemas and the `paramify` CLI — not the internal code.
     `states_and_comments` by default): an item created before the date is judged
     by states and comments, by `both`, or left out of every approval figure
     (`exclude`). Each item records the route that judged it (`approval_route`).
+    `both` or `exclude` without a date is `bad_config`.
   - **`emergency_types`** (`AZURE_DEVOPS_EMERGENCY_TYPES`, none by default):
     types whose approval may come after the change, as the comparator's
     setting of the same name. Their items still need an approval, but a
