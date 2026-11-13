@@ -736,7 +736,7 @@ def test_main_wires_inventory_settings_and_ingestion_into_the_evidence(monkeypat
     monkeypatch.setattr(rds, "credential", lambda: object())
     monkeypatch.setattr(rds, "provider_registration_status", lambda *a: "registered")
     monkeypatch.setattr(rds, "enumerate_resources", lambda *a: {
-        "rows": [{"id": VAULT, "name": "kv1", "type": "Microsoft.KeyVault/vaults"}], "total_records": 1, "pages": 1})
+        "rows": [{"id": VAULT, "name": "kv1", "type": "Microsoft.KeyVault/vaults"}], "total_records": 1, "pages": 1, "read": True})
     monkeypatch.setattr(rds, "monitor_client", lambda *a: monitor)
     monkeypatch.setattr(rds, "AzureRestClient", lambda cred: _Workspaces())
     monkeypatch.setenv("EVIDENCE_DIR", str(tmp_path))

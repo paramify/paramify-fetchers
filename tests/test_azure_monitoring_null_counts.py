@@ -122,7 +122,7 @@ def test_unread_inventory_gives_null_counts_and_scope_counts(monkeypatch, tmp_pa
 
 
 def test_read_empty_inventory_still_counts_zero(monkeypatch, tmp_path):
-    monkeypatch.setattr(rds, "enumerate_resources", lambda *a: {"rows": [], "total_records": 0, "pages": 1})
+    monkeypatch.setattr(rds, "enumerate_resources", lambda *a: {"rows": [], "total_records": 0, "pages": 1, "read": True})
     monkeypatch.setattr(rds, "monitor_client", lambda *a: object())
     monkeypatch.setattr(rds, "AzureRestClient", lambda cred: object())
     code, summary = _run(monkeypatch, tmp_path, rds, "azure_resource_diagnostic_settings_s1.json")
@@ -191,3 +191,38 @@ def test_unread_sub_lists_null_only_the_counts_built_from_them(monkeypatch, tmp_
 def test_read_solutions_keep_sentinel_onboarded_true_or_false(monkeypatch, tmp_path, packs, expected):
     code, summary = _run_law(monkeypatch, tmp_path, _workspace_client(_workspaces, packs=packs))
     assert code == 0 and summary["sentinel_onboarded"] is expected
+
+
+def test_unread_processing_rule_list_leaves_suppression_unknown(monkeypatch, tmp_path):
+    group_id = f"{RG}/providers/microsoft.insights/actionGroups/ag"
+    alert = ala.alert_record({
+        "id": f"{RG}/providers/microsoft.insights/activityLogAlerts/a1", "name": "a1", "location": "global",
+        "enabled": True, "scopes": ["/subscriptions/s1"], "action_groups": [group_id],
+        "condition": {"all_of": [{"field": "operationName", "equals": "Microsoft.Network/networkSecurityGroups/write"}]},
+    })
+    group = {"id": group_id, "enabled": True, "deliverable": True, "notifies_people": True, "receivers": []}
+    monkeypatch.setattr(ala, "collect_activity_log_alerts", lambda sub, cred, collector: [dict(alert)])
+    monkeypatch.setattr(ala, "arm_rest_client", lambda cred: object())
+    monkeypatch.setattr(ala, "collect_action_groups", lambda rest, sub: {"groups": [group]})
+    monkeypatch.setattr(ala, "collect_processing_rules", _refuse)
+    code, summary = _run(monkeypatch, tmp_path, ala, "azure_activity_log_alerts_s1.json")
+    evidence = json.loads((tmp_path / "azure_activity_log_alerts_s1.json").read_text())
+    (record,) = evidence["results"]["activity_log_alerts"]
+    assert code == 1
+    assert record["suppressed"] is None and record["reaches_human"] is None
+    assert _not_null(summary, ala.SUPPRESSION_FIELDS) == {}
+    # what the alert list and the action groups settle is still read
+    assert summary["total_activity_log_alerts"] == 1 and summary["alerts_routing_to_enabled_receiver"] == 1
+    assert summary["monitored_operations_covered"] == 1
+
+
+def test_unread_alert_list_keeps_the_fixed_totals():
+    summary = ala.summarize(None)
+    assert (summary["monitored_operations_total"], summary["change_operations_total"]) == (12, 4)
+
+
+def test_read_empty_workspace_list_counts_zero_and_sentinel_false(monkeypatch, tmp_path):
+    code, summary = _run_law(monkeypatch, tmp_path, _workspace_client(lambda: []))
+    assert code == 0
+    assert summary["total_workspaces"] == 0 and summary["in_scope_workspaces"] == 0
+    assert summary["sentinel_onboarded"] is False and summary["total_tables"] == 0

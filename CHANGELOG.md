@@ -2394,6 +2394,11 @@ schemas and the `paramify` CLI — not the internal code.
     every alert count, both coverage maps and every coverage verdict
     (`all_monitored_operations_covered`, `service_health_alert_configured`,
     `all_change_operations_covered`) are null. Before they read 0 and false.
+    The two operation totals stay 12 and 4. When the processing rule list is
+    not read, `suppressed` and `reaches_human` are null per alert, and
+    `alerts_suppressed`, `alerts_possibly_suppressed`, `alerts_reaching_human`,
+    the change coverage fields and `monitored_operation_coverage_reaching_human`
+    are null. Before they read as if no rule suppressed anything.
   - `azure_diagnostic_settings` 0.2.0: when the settings are not read,
     `activity_log_exported`, the counts, the coverage map and the required
     category verdicts are null. Before, `activity_log_exported` read false.

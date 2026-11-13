@@ -520,12 +520,12 @@ def summarize_ingestion(
 def enumerate_resources(subscription_id, cred, collector: Collector) -> dict:
     client = collector.guard("resourcegraph.ResourceGraphClient (init)", lambda: resource_graph_client(cred))
     if client is None:
-        return {"rows": [], "total_records": None, "pages": 0}
+        return {"rows": [], "total_records": None, "pages": 0, "read": False}
     result = collector.guard(
         "resourcegraph.resources (Resources)",
         lambda: query_all(client, subscription_id, INVENTORY_QUERY),
     )
-    return result or {"rows": [], "total_records": None, "pages": 0}
+    return {**result, "read": True} if result else {"rows": [], "total_records": None, "pages": 0, "read": False}
 
 
 def monitor_client(subscription_id, cred):
@@ -641,7 +641,7 @@ def main() -> int:
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
     records: list[dict] = []
-    inventory = {"rows": [], "total_records": None, "pages": 0}
+    inventory = {"rows": [], "total_records": None, "pages": 0, "read": False}
     registration = REGISTRATION_UNKNOWN
     days = int_config(INGESTION_LOOKBACK_ENV, DEFAULT_INGESTION_LOOKBACK_DAYS)
     hours = basic_lookback_hours()
@@ -680,7 +680,7 @@ def main() -> int:
             ),
         )
 
-    inventory_read = inventory["total_records"] is not None
+    inventory_read = inventory["read"]
     if not inventory_read:
         exclusions.mark_unread()
     exclusions.warn_unmatched(logger)
