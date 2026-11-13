@@ -2381,6 +2381,22 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- **`azure_managed_identity_configuration` 0.3.0: an unread list gives null
+  counts, not 0, and an unread federated-credential list no longer counts an
+  identity as unattached.**
+  - When the user-assigned identity list or the resource list is not read,
+    every count built from it is null (the totals, the federated credential
+    counts, and the counts over both kinds of identity). Before they read 0.
+    The run still exits 1 as `partial_failure`.
+  - `graph_access` is null, not `not_read`, when an identity list was not read.
+    `not_read` now means both lists were read and held no identity to look up.
+  - Before, an identity whose federated credential list could not be read
+    counted in `unattached_identities_with_roles`. That count and
+    `federated_only_identities_with_roles` are now null while any identity's
+    role assignments, attachments or federated credentials are unread, and
+    `user_assigned_identities_no_resource_attached` and the federated credential
+    counts are null when their lists are unread for any identity.
+
 - **`azure_entra_authentication_policy` no longer shows Microsoft's password
   defaults when the tenant's settings could not be read.** Before, a failed
   `/groupSettings` read fell back to the template, so `password_settings_source`

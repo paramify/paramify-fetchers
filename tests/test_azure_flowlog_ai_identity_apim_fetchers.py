@@ -854,6 +854,61 @@ def test_summary_fields_are_documented(assert_summary_documented):
     assert_summary_documented("azure/managed_identity_configuration", summary)
 
 
+def _uai(attached, fics, roles):
+    base = {"kind": "user_assigned", "principal_id": "pu"}
+    record = mi.identity_record(base, None if roles is None else {"pu": roles}, {"pu": []})
+    return {**record, "attached_resources": attached, "federated_credentials": fics}
+
+
+def test_unread_federated_credentials_leave_unattached_with_roles_unknown():
+    role = [{"broad_role": False, "scope_level": "resource_group", "role_resolved": True, **dict.fromkeys(mi.CAPABILITIES, False)}]
+    known = mi.summarize([_uai([], [], role)], [], "read")
+    assert known["unattached_identities_with_roles"] == 1
+    unread = mi.summarize([_uai([], None, role)], [], "read")
+    assert unread["unattached_identities_with_roles"] is None
+    assert unread["federated_only_identities_with_roles"] is None
+    assert unread["total_federated_credentials"] is None
+    assert unread["total_user_assigned_identities"] == 1  # the identity list itself was read
+    attached = mi.summarize([_uai([{"resource_id": "r"}], None, role)], [], "read")
+    assert attached["unattached_identities_with_roles"] == 0  # attached settles it
+
+
+@pytest.mark.parametrize("unread", ["user", "system", "both"])
+def test_unread_identity_lists_give_null_counts_and_graph_access(unread):
+    user = None if unread in ("user", "both") else []
+    system = None if unread in ("system", "both") else []
+    summary = mi.summarize(user, system, None)
+    expected_null = {
+        "user": mi.USER_ASSIGNED_ONLY + ("total_identities", "identities_with_broad_role", "identities_without_role_assignments"),
+        "system": mi.SYSTEM_ASSIGNED_ONLY + ("total_identities", "identities_with_broad_role", "identities_without_role_assignments"),
+    }
+    expected_null["both"] = expected_null["user"] + expected_null["system"]
+    assert all(summary[k] is None for k in expected_null[unread])
+    assert summary["graph_access"] is None
+    assert {k for k, v in summary.items() if v is None} >= set(expected_null[unread])
+    if unread == "user":
+        assert summary["total_system_assigned_identities"] == 0
+
+
+def test_graph_access_is_null_when_an_identity_list_was_not_read_and_collect_reads_nothing(monkeypatch):
+    msi = _Client(user_assigned_identities=_Group(list_by_subscription=lambda: []))
+    authorization = _Client(role_definitions=_Group(list=lambda scope: []), role_assignments=_Group(list_for_subscription=lambda: []))
+    _fake_module(monkeypatch, "azure.mgmt.msi", ManagedServiceIdentityClient=lambda **k: msi)
+    _fake_module(monkeypatch, "azure.mgmt.authorization", AuthorizationManagementClient=lambda **k: authorization)
+    monkeypatch.setattr(mi, "arm_rest_client", lambda cred: "rest")
+    monkeypatch.setattr(mi, "resource_graph_client", lambda cred: "graph")
+
+    def refused(client, sub, query):
+        raise RuntimeError("403")
+
+    monkeypatch.setattr(mi, "query_all", refused)
+    _, system_assigned, graph_access = mi.collect(SUB.split("/")[-1], object(), _collector())
+    assert system_assigned is None and graph_access is None
+    monkeypatch.setattr(mi, "query_all", lambda client, sub, query: {"rows": [], "total_records": 0, "pages": 1})
+    _, system_assigned, graph_access = mi.collect(SUB.split("/")[-1], object(), _collector())
+    assert system_assigned == [] and graph_access == "not_read"  # read, and nothing to look up
+
+
 def test_graph_role_reads_follow_next_link():
     import entra_graph
 
