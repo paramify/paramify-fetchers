@@ -139,3 +139,34 @@ def test_welcome_relative_reads_old_and_suffixed_run_ids():
     old = "2020-01-02T03-04-05Z"
     assert WelcomeScreen._relative(old) != old
     assert WelcomeScreen._relative(old + "-a1f3") == WelcomeScreen._relative(old)
+
+
+def test_new_manifest_path_records_a_picked_stack(tmp_path):
+    path = api.new_manifest_path(tmp_path, "aws-prod", stack="stk-1", stack_name="Alpha")
+    assert path == tmp_path / "manifests" / "aws-prod.yaml"
+    run = yaml.safe_load(path.read_text())["run"]
+    assert run["paramify"] == {"stack": "stk-1", "stack_name": "Alpha"}
+    assert run["fetchers"] == []
+
+
+def test_new_manifest_path_without_a_stack_writes_no_paramify_block(tmp_path):
+    path = api.new_manifest_path(tmp_path, "aws-prod")
+    assert "paramify" not in yaml.safe_load(path.read_text())["run"]
+
+
+def test_new_manifest_target_checks_the_name_without_writing(tmp_path):
+    assert api.new_manifest_target(tmp_path, " aws-prod ") == tmp_path / "manifests" / "aws-prod.yaml"
+    assert not (tmp_path / "manifests").exists()
+    for bad in ("", "  ", "a/b", ".hidden"):
+        try:
+            api.new_manifest_target(tmp_path, bad)
+        except ValueError:
+            continue
+        raise AssertionError(f"{bad!r} was accepted")
+    api.new_manifest_path(tmp_path, "taken")
+    try:
+        api.new_manifest_target(tmp_path, "taken.yaml")
+    except FileExistsError:
+        pass
+    else:
+        raise AssertionError("an existing manifest was accepted")
