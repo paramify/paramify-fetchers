@@ -380,7 +380,7 @@ def test_graph_pages_follow_next_links_on_the_requested_version(monkeypatch):
              f"{base}/beta/things?page=2": {"value": [3]}}
 
     class Session:
-        def get(self, url, headers=None, params=None, timeout=None):
+        def get(self, url, headers=None, params=None, timeout=None, allow_redirects=True):
             return SimpleNamespace(status_code=200, json=lambda: pages[url])
 
     token = SimpleNamespace(token="t", expires_on=9_999_999_999)
@@ -401,10 +401,10 @@ class TimingOutSession:
             raise requests.ReadTimeout("Read timed out. (read timeout=60)")
         return SimpleNamespace(status_code=200, headers={}, json=lambda: {"value": [{"id": "s1"}]})
 
-    def get(self, url, headers=None, params=None, timeout=None):
+    def get(self, url, headers=None, params=None, timeout=None, allow_redirects=True):
         return self._answer()
 
-    def post(self, url, headers=None, json=None, timeout=None):
+    def post(self, url, headers=None, json=None, timeout=None, allow_redirects=True):
         return self._answer()
 
 

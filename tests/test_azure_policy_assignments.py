@@ -628,3 +628,15 @@ def test_unread_exemptions_leave_unmatched_patterns_null(monkeypatch, tmp_path, 
     summary = json.loads((tmp_path / "azure_policy_assignments_s1.json").read_text())["summary"]
     assert summary["resource_exclusion_patterns_unmatched"] is None
     assert "matched nothing" not in caplog.text
+
+
+def test_summary_fields_match_the_instructions(assert_summary_documented):
+    target = initiative_assignment(["deny", "audit"])
+    records = [exemption(wire_exemption("e1", references=["r0"]), [target])]
+    summary = {
+        **fx.summarize([target]),
+        **fx.summarize_exemptions(records, fx.EXEMPTIONS_READ),
+        "provider_registration_status": "registered",
+        **fx.boundary_summary(ResourceExclusions([]), [], records),
+    }
+    assert_summary_documented("azure/policy_assignments", summary)

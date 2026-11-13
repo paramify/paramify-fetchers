@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Dict, List
 
 from azure_common import arm_endpoint
+from read_boundaries import target_subscription_scope, validate_read_url
 
 # A guard, not a cap: reaching it means ARM kept handing back nextLinks.
 MAX_PAGES = 1000
@@ -36,12 +37,18 @@ def get_json(client, url: str) -> Dict[str, Any]:
     if not relative and not url.lower().startswith(endpoint + "/"):
         raise ValueError(f"refusing to send the ARM token outside {endpoint}: {url[:120]}")
 
+    scope = target_subscription_scope()
+    if scope is not None:
+        validate_read_url(client.format_url(url), arm_endpoint(), scope)
+
     from azure.core.exceptions import HttpResponseError  # lazy
     from azure.core.rest import HttpRequest
     from azure.mgmt.core.exceptions import ARMErrorFormat
 
     # send_request does not resolve a relative path against base_url; nextLinks are already absolute.
     response = client.send_request(HttpRequest("GET", client.format_url(url)))
+    if scope is not None and 300 <= response.status_code < 400:
+        raise ValueError("ARM read returned a redirect; not followed")
     if response.status_code >= 400:
         raise HttpResponseError(response=response, error_format=ARMErrorFormat)
     return response.json()

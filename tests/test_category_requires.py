@@ -41,6 +41,7 @@ _DIST_ALIASES = {
     "msgraph_core": "msgraph-sdk",
     "kiota_abstractions": "msgraph-sdk",
     "kiota_authentication_azure": "msgraph-sdk",
+    "kiota_http": "microsoft-kiota-http",
 }
 
 # Binaries a fetcher could plausibly shell out to. A closed vocabulary, because

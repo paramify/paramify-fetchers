@@ -322,9 +322,10 @@ def test_deletion_rights_without_patterns_adds_only_empty_exclusion_fields(monke
     _assert_unchanged_apart_from_new_fields(new, old, 4)
 
 
-def test_deletion_rights_excluded_workspaces_are_not_read(monkeypatch, tmp_path):
+def test_deletion_rights_excluded_workspaces_are_not_read(monkeypatch, tmp_path, assert_summary_documented):
     code, evidence, _, read = run_workspaces(deletion, monkeypatch, tmp_path, WS_PATTERNS, _deletion_detail)
     assert code == 0
+    assert_summary_documented("azure/log_analytics_deletion_rights", evidence["summary"])
     _assert_workspace_exclusions(evidence, read, sentinel_only=False)
     assert evidence["summary"]["max_principals_with_deletion_rights"] == 2
     assert evidence["summary"]["workspaces_with_explicit_grants"] == 1
@@ -393,10 +394,11 @@ def test_query_audit_without_patterns_adds_only_empty_exclusion_fields(monkeypat
     _assert_unchanged_apart_from_new_fields(new, old, 4)
 
 
-def test_query_audit_excluded_workspaces_are_not_read(monkeypatch, tmp_path):
+def test_query_audit_excluded_workspaces_are_not_read(monkeypatch, tmp_path, assert_summary_documented):
     code, evidence, _, read = run_workspaces(query_audit, monkeypatch, tmp_path, WS_PATTERNS, _audit_detail)
     summary = evidence["summary"]
     assert code == 0
+    assert_summary_documented("azure/log_analytics_query_audit", summary)
     _assert_workspace_exclusions(evidence, read, sentinel_only=False)
     assert (summary["workspaces_with_query_auditing"], summary["workspaces_without_query_auditing"],
             summary["sentinel_workspaces"]) == (1, 1, 1)

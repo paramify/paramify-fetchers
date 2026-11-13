@@ -416,8 +416,9 @@ def run_cr(monkeypatch, tmp_path, patterns):
     return _run(cr, monkeypatch, tmp_path, patterns, "azure_rbac_custom_roles")
 
 
-def test_custom_roles_without_patterns_add_only_empty_exclusion_fields(monkeypatch, tmp_path):
+def test_custom_roles_without_patterns_add_only_empty_exclusion_fields(monkeypatch, tmp_path, assert_summary_documented):
     code, evidence = run_cr(monkeypatch, tmp_path, None)
+    assert_summary_documented("azure/rbac_custom_roles", evidence["summary"])
     assert code == 0 and evidence["results"]["excluded"] == []
     assert evidence["summary"] == {
         **cr.summarize(_cr_records(), 9), "provider_registration_status": "registered",
