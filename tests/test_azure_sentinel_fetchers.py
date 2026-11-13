@@ -1494,8 +1494,9 @@ def test_analytics_rules_confirmed_connection_makes_its_product_quiet_and_is_fla
     assert quiet["mdc"] == {
         "name": "mdc", "display_name": "mdc", "product_filter": "Azure Security Center",
         "alerts_enabled_on": ["AzureSecurityCenter"], "confirmed_by_configuration": True,
-        "reason": "its product sent no alert in the window, and the AzureSecurityCenter connection is confirmed by "
-                  f"{CONFIRMED}, not read from the API"}
+        "reason": "its product sent no alert in the window, and the AzureSecurityCenter connection is confirmed by the "
+                  "confirmed_alert_connections setting, not read from the API"}
+    assert ws["confirmed_alert_connections"] == ["AzureSecurityCenter"]  # the normalised list is on the record
     assert "confirmed_by_configuration" not in quiet["ipc"]  # read from the API: unchanged
     assert ws["enabled_rules_confirmed_quiet"] == 1
     assert (ev["summary"]["enabled_rules_missing_data"], ev["summary"]["enabled_rules_quiet"],
@@ -1546,6 +1547,28 @@ def test_analytics_rules_unknown_confirmed_kind_is_a_config_error(azure, tmp_pat
     assert json.loads((tmp_path / "status.json").read_text())["code"] == "bad_config"
     assert "AzureSecurityCentre" in str(ev["metadata"]["api_failures"])
     assert ws["enabled_rules_quiet"] == [] and "enabled_rules_confirmed_quiet" not in ws  # none used
+
+
+def test_analytics_rules_confirmed_summary_counts_over_the_workspaces_quiet_counts():
+    summarize = MODS["sentinel_analytics_rules"].summarize
+    unmeasured = {"rules": [], "enabled_rules": 0, "enabled_rules_missing_data": None, "enabled_rules_quiet": None,
+                  "enabled_rules_confirmed_quiet": None}
+    measured = {"rules": [], "enabled_rules": 1, "enabled_rules_missing_data": [{"name": "r"}],
+                "enabled_rules_quiet": [{"name": "r"}], "enabled_rules_confirmed_quiet": 1}
+    both = summarize([unmeasured, measured])
+    assert (both["enabled_rules_quiet"], both["enabled_rules_confirmed_quiet"]) == (1, 1)
+    none_measured = summarize([unmeasured])
+    assert "enabled_rules_confirmed_quiet" in none_measured and none_measured["enabled_rules_confirmed_quiet"] is None
+    assert "enabled_rules_confirmed_quiet" not in summarize([{"rules": [], "enabled_rules": 0}])
+
+
+def test_analytics_rules_confirmed_text_names_the_setting_and_the_record_lists_kinds():
+    spec = yaml.safe_load((AZURE / "sentinel_analytics_rules" / "fetcher.yaml").read_text())
+    instructions = spec["evidence_set"]["instructions"]
+    quiet = next(line for line in instructions.splitlines() if line.startswith("    - enabled_rules_quiet — ")
+                 or line.startswith("- enabled_rules_quiet — "))
+    assert "confirmed_alert_connections" in quiet and len(quiet) <= 800
+    assert "each workspace also lists the confirmed kinds" in instructions
 
 
 def test_analytics_rules_confirmed_setting_is_documented_as_run_wide():

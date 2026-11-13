@@ -354,8 +354,8 @@ def quiet_rules(
             quiet.append({
                 "name": r["name"], "display_name": r["display_name"], "product_filter": r.get("product_filter"),
                 "alerts_enabled_on": [kind], "confirmed_by_configuration": True,
-                "reason": f"its product sent no alert in the window, and the {kind} connection is confirmed by "
-                f"{CONFIRMED_ENV}, not read from the API",
+                "reason": f"its product sent no alert in the window, and the {kind} connection is confirmed by the "
+                "confirmed_alert_connections setting, not read from the API",
             })
         elif stable is None or preview is None:
             return None
@@ -526,6 +526,7 @@ def collect(client, ws: Dict[str, Any], collector) -> Dict[str, Any]:
         "api_versions": {"stable": SI_API, "preview": SI_PREVIEW_API},
         "ingestion_window_days": days,
         "query_text_included": with_text,
+        **({"confirmed_alert_connections": sorted(confirmed)} if confirmed else {}),
         "rules": rules,
         **(rule_summary(rules) if rules is not None else {}),
         **covered,
@@ -558,10 +559,11 @@ def summarize(workspaces: List[Dict[str, Any]]) -> Dict[str, Any]:
     collected = [w for w in workspaces if w.get("rules") is not None]
     enabled = [w.get("enabled_rules") or 0 for w in collected]
     confirmed = [w for w in collected if "enabled_rules_confirmed_quiet" in w]
+    measured = [w for w in confirmed if w.get("enabled_rules_missing_data") is not None]  # as enabled_rules_quiet counts
     by_confirmation = (
         {"enabled_rules_confirmed_quiet": None
-         if any(w["enabled_rules_confirmed_quiet"] is None for w in confirmed)
-         else sum(w["enabled_rules_confirmed_quiet"] for w in confirmed)}
+         if not measured or any(w["enabled_rules_confirmed_quiet"] is None for w in measured)
+         else sum(w["enabled_rules_confirmed_quiet"] for w in measured)}
         if confirmed else {}
     )
     return {
