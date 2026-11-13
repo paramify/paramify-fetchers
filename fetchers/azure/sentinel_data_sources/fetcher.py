@@ -2,6 +2,7 @@
 """Microsoft Sentinel data sources per workspace: data connectors with their last data received, and which tables received data in the window."""
 
 import logging
+import hashlib
 import re
 import sys
 from datetime import datetime, timedelta, timezone
@@ -29,6 +30,8 @@ from sentinel_ingestion import (  # noqa: E402
     NON_SOURCE_TABLES,
     WINDOW_ENV,
 )
+
+from azure_rest import target_subscription_scope
 
 NAME = "azure_sentinel_data_sources"
 # Cloud Discovery logs are an opt-in extra on the Defender for Cloud Apps connector: table and the connection data type that turns it on.
@@ -394,7 +397,7 @@ def health_rank(status: Optional[str]) -> int:
     return HEALTH_RANK.get((status or "").lower(), 1)
 
 
-def finish_catalog(catalog: List[Dict[str, Any]], answers: Optional[Dict[Tuple[int, int], Any]], health: Dict[str, Dict[str, Any]], conns: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def finish_catalog(catalog: List[Dict[str, Any]], answers: Optional[Dict[Tuple[int, int], Any]], health: Dict[str, Dict[str, Any]], conns: List[Dict[str, Any]], query_observations=None) -> List[Dict[str, Any]]:
     ids = {c["name"]: (c["_raw"].get("id") or "").lower() for c in conns}
     by_name = {c["name"]: c for c in conns}
     out = []
@@ -404,6 +407,7 @@ def finish_catalog(catalog: List[Dict[str, Any]], answers: Optional[Dict[Tuple[i
                 "name": name,
                 "table": query_table(query),
                 "last_data_received": answers.get((ci, di)) if answers is not None else None,
+                **(query_observations.get((ci, di), {}) if query_observations is not None else {}),
             }
             for di, (name, query) in enumerate(c["_data_types"])
         ]
@@ -499,10 +503,24 @@ def collect(client, ws: Dict[str, Any], collector) -> Dict[str, Any]:
             notes.append(f"connector {c['id']} has no data type with a usable last-data query, so it reads as unmeasured")
     complete = connectors is not None and preview is not None and definitions is not None
     answers = None
+    strict = target_subscription_scope() is not None
+    blocked = set()
+    known = {}
+    pending_keys = set()
+    query_observations = None
     found: Optional[Dict[Tuple[int, int], Any]] = {}
     if tables is not None:
         ingested = {t["table"]: t["last_ingested"] for t in tables}
         known, pending = last_data_queries(catalog, ingested, plans, searched_ok)
+        if strict:
+            # Service-provided KQL can call another workspace or a function hiding one.
+            # Keep that query as evidence; a local table observation is still usable,
+            # but only the fetcher's own fixed built-in expressions may be executed.
+            blocked = {key for key, _, _ in pending if catalog[key[0]]['definition'] != 'built_in'}
+            pending = [item for item in pending if item[0] not in blocked]
+            for key in sorted(blocked):
+                notes.append(f"last-data query for {catalog[key[0]]['id']} is not executed: source-supplied query scope is unverified; its value stays unmeasured")
+        pending_keys = {item[0] for item in pending}
         found = collector.guard(
             f"loganalytics.query(connector last data, {ws['name']})",
             lambda: run_last_data(client, ws["customer_id"], pending, days, notes),
@@ -510,7 +528,16 @@ def collect(client, ws: Dict[str, Any], collector) -> Dict[str, Any]:
         # Without the table plans, an empty answer may be a Basic table /query can't read.
         answers = {k: v for k, v in {**known, **(found or {})}.items() if v or plans is not None}
     # A failed last-data query leaves the counts unknown, not partial.
-    measured = answers is not None and found is not None and plans is not None and complete
+    measured = answers is not None and found is not None and plans is not None and complete and not blocked
+    if strict:
+        query_observations = {
+            (ci,di): {'native_last_data_query':query, 'native_last_data_query_sha256':hashlib.sha256(query.encode()).hexdigest(),
+                'native_last_data_query_length':len(query),
+                'query_execution':('not_executed_scope_unverified' if (ci,di) in blocked else
+                    'not_executed_local_table_observation' if (ci,di) in known else
+                    'native_built_in_query_attempted' if (ci,di) in pending_keys else 'not_executed_unmeasured')}
+            for ci,c in enumerate(catalog) for di,(_,query) in enumerate(c['_data_types'])
+        }
     health_on = any(t["table"] == HEALTH_TABLE for t in tables or []) if tables is not None else None
     health_rows = None
     if health_on:
@@ -520,7 +547,7 @@ def collect(client, ws: Dict[str, Any], collector) -> Dict[str, Any]:
         )
     health = project_health(health_rows) if health_rows is not None else None
     by_id = {(h["resource_id"] or "").lower(): h for h in health or []}
-    finished = finish_catalog(catalog, answers, by_id, conns)
+    finished = finish_catalog(catalog, answers, by_id, conns, query_observations=query_observations)
     # Quiet needs a linked connection sending alerts; an alert-only connector without one isn't wired at all.
     alerting = {c["name"] for c in conns if sends_alerts(c)}
     quiet = [c["connected"] is False and c["alert_only"] and bool(alerting.intersection(c["connections"])) for c in finished]
