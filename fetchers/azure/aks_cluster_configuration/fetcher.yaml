@@ -1,5 +1,5 @@
 name: azure_aks_cluster_configuration
-version: 0.3.1
+version: 0.4.0
 description: >-
   Shows whether each AKS cluster's API server is private or IP-restricted, who can sign in, and whether it has network policy, auto-upgrade, Defender and Azure Monitor.
 category: azure
@@ -88,9 +88,9 @@ evidence_set:
     - in_scope_clusters — Number of clusters read and in scope; 0 means there are none or the patterns took out every cluster; null when the cluster list could not be read
 
     Which clusters and node pools were checked?
-    - total_clusters — Number of in-scope AKS clusters, including clusters still provisioning or in a failed state; every count below about clusters is out of this total; reads 0, not null, when the cluster list could not be read, so read it together with in_scope_clusters
-    - total_agent_pools — Number of node pools (agent pools) across the in-scope clusters; 0 when the cluster list could not be read
-    - kubernetes_versions — List of the distinct Kubernetes versions the clusters are set to run (the requested version, which an upgrade in progress may not have reached yet), sorted
+    - total_clusters — Number of in-scope AKS clusters, including clusters still provisioning or in a failed state; every count below about clusters is out of this total; null when the cluster list could not be read, as is every count below
+    - total_agent_pools — Number of node pools (agent pools) across the in-scope clusters; null when the cluster list could not be read
+    - kubernetes_versions — List of the distinct Kubernetes versions the clusters are set to run (the requested version, which an upgrade in progress may not have reached yet), sorted; null when the cluster list could not be read
     - provider_registration_status — Whether the AKS provider (Microsoft.ContainerService) is registered on the subscription: registered, not_registered or unknown
 
     Is the API server kept off the internet?
@@ -121,11 +121,11 @@ evidence_set:
     - fips_enabled_agent_pools — Number of node pools running the FIPS-enabled node image
     - fips_disabled_agent_pools — Number of node pools Azure reports as not running the FIPS-enabled node image
     - fips_unknown_agent_pools — Number of node pools whose FIPS setting Azure did not return; counted apart, never as FIPS-disabled
-    - all_agent_pools_fips — True if every node pool runs the FIPS image; false if any pool is FIPS-disabled and none is unknown; null if any pool's FIPS setting is unknown, or there are no node pools
+    - all_agent_pools_fips — True if every node pool runs the FIPS image; false if any pool is FIPS-disabled and none is unknown; null if any pool's FIPS setting is unknown, there are no node pools, or the cluster list could not be read
     - secure_boot_enabled_agent_pools — Number of node pools with Trusted Launch secure boot turned on
     - vtpm_enabled_agent_pools — Number of node pools with a virtual TPM (vTPM) turned on
     - trusted_launch_unknown_agent_pools — Number of node pools for which Azure returned neither the secure boot nor the vTPM setting
     - ssh_disabled_agent_pools — Number of node pools with SSH access to the nodes disabled
     - ssh_local_user_agent_pools — Number of node pools whose nodes allow SSH as a local user
     - ssh_access_unknown_agent_pools — Number of node pools whose SSH access setting Azure did not return
-    - node_image_versions — List of the distinct node image builds across all node pools, sorted; several builds mean some pools run older images
+    - node_image_versions — List of the distinct node image builds across all node pools, sorted; several builds mean some pools run older images; null when the cluster list could not be read
