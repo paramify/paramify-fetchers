@@ -432,7 +432,7 @@ class ParamifyPage(ParamifyWriter, Vertical):
     def focus_default(self) -> None:
         if self._stale or self._status_at is None or time.monotonic() - self._status_at > STALE_AFTER:
             self.request_status()
-        self._focus_target().focus()
+        self._focus_lens()
 
     def _focus_target(self):
         grid = self.query_one("#pf-grid", DataTable)
@@ -631,11 +631,15 @@ class ParamifyPage(ParamifyWriter, Vertical):
         self.query_one("#pf-lens-tabs", Tabs).active = self._LENS_TABS[target]
         self._refresh_hints()
         if focus:  # only on a key or click on this page, so never from another tab
-            if target == "pf-by-capability":
-                grid = self.query_one("#pf-cap-grid", DataTable)
-                (grid if grid.display else self.query_one("#pf-cap-filter", Input)).focus()
-            else:
-                self._focus_target().focus()
+            self._focus_lens()
+
+    def _focus_lens(self) -> None:
+        """Focus the list of the view that shows, never one in the hidden view."""
+        if self._by_fetcher():
+            self._focus_target().focus()
+            return
+        grid = self.query_one("#pf-cap-grid", DataTable)
+        (grid if grid.display else self.query_one("#pf-cap-filter", Input)).focus()
 
     def _draw_capabilities(self) -> None:
         status = self._status

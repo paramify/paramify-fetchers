@@ -899,3 +899,20 @@ def test_v_says_how_to_pair_validators_that_exist(tmp_path, monkeypatch, run_tui
 
     activity = run_tui(body, _manifest(tmp_path))
     assert "1 validator(s) exist but are not paired" in activity and "in Paramify" in activity
+
+
+def test_coming_back_on_the_capability_view_focuses_it(tmp_path, monkeypatch, run_tui):
+    _stub(monkeypatch, _cap_status())
+
+    async def body(app, pilot):
+        page = await _capability_lens(app, pilot)
+        await pilot.press("3")
+        await pilot.pause()
+        await pilot.press("4")
+        await _settle(app, pilot)
+        on_return = app.focused.id
+        await pilot.press("escape")
+        await pilot.pause()
+        return page.query_one("#pf-lens").current, on_return, app.focused.id
+
+    assert run_tui(body, _manifest(tmp_path)) == ("pf-by-capability", "pf-cap-grid", "pf-cap-grid")
