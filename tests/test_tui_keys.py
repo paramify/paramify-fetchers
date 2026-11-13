@@ -33,7 +33,7 @@ from textual.widgets import Button, DataTable, Input, TabbedContent, Tree  # noq
 from framework import api  # noqa: E402
 from framework.tui.modals import ConfirmModal, FormModal  # noqa: E402
 from framework.tui.screens.manifest import ManifestPanel  # noqa: E402
-from framework.tui.screens.upload import UploadPage  # noqa: E402
+from framework.tui.screens.paramify import ParamifyPage  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -81,7 +81,8 @@ def _focus_id(app) -> str | None:
 # focus: every tab must land inside its own page, or its BINDINGS are dead
 # --------------------------------------------------------------------------- #
 
-def test_each_tab_focuses_a_widget_in_its_own_page(tmp_path, run_tui):
+def test_each_tab_focuses_a_widget_in_its_own_page(tmp_path, run_tui, stub_paramify_status):
+    stub_paramify_status()
     manifest = _write_manifest(tmp_path)
 
     async def body(app, pilot):
@@ -103,7 +104,7 @@ def test_each_tab_focuses_a_widget_in_its_own_page(tmp_path, run_tui):
         "tab-fetchers": "catalog-tree",
         "tab-run": "btn-run",
         "tab-evidence": "evidence-runs",
-        "tab-upload": "scripts-preview",
+        "tab-paramify": "pf-grid",
         "tab-pipelines": "issues-summary",
     }
 
@@ -147,25 +148,27 @@ def test_escape_returns_focus_to_the_pane_default(tmp_path, run_tui):
 # bindings: keys the footer advertises must reach their action
 # --------------------------------------------------------------------------- #
 
-def test_preview_keys_are_ours_not_the_command_palette(tmp_path, monkeypatch, run_tui):
+def test_ctrl_p_opens_no_palette_and_page_keys_reach_the_page(tmp_path, monkeypatch, run_tui, stub_paramify_status):
     """Textual claims ctrl+p for its command palette as a priority binding, which
-    outranks the focused widget — ENABLE_COMMAND_PALETTE=False gives it back."""
+    outranks the focused widget — ENABLE_COMMAND_PALETTE=False keeps it off."""
+    stub_paramify_status()
     manifest = _write_manifest(tmp_path)
     calls = []
-    monkeypatch.setattr(UploadPage, "action_preview_scripts", lambda self: calls.append(1))
+    monkeypatch.setattr(ParamifyPage, "action_sync_scripts", lambda self: calls.append(1))
 
     async def body(app, pilot):
         await pilot.press("4")
+        await app.workers.wait_for_complete()
         await pilot.pause()
         await pilot.press("ctrl+p")
         await pilot.pause()
-        await pilot.press("p")
+        await pilot.press("s")
         await pilot.pause()
         # no palette overlay was pushed over the workspace
         return len(calls), [type(s).__name__ for s in app.screen_stack]
 
     count, stack = run_tui(body, manifest)
-    assert count == 2, "ctrl+p and p should both reach the page's preview action"
+    assert count == 1, "s should reach the page's scripts sync"
     assert stack == ["Screen", "WorkspaceScreen"]
 
 

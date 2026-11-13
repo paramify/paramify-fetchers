@@ -18,9 +18,10 @@ from rich.text import Text  # noqa: E402
 
 from framework import api  # noqa: E402
 from framework.tui.modals import ConfirmModal, PickerModal  # noqa: E402
-from framework.tui.screens.run import RunPage  # noqa: E402
+from framework.tui.screens.paramify import ParamifyPage  # noqa: E402
+from framework.tui.screens.paramify_events import latest_run_scoped  # noqa: E402
 from framework.tui.screens.pipelines import PipelinesPage  # noqa: E402
-from framework.tui.screens.upload import UploadPage  # noqa: E402
+from framework.tui.screens.run import RunPage  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -166,15 +167,14 @@ def test_run_console_points_at_waiting_issue_reports(tmp_path, run_tui):
 
 def test_each_page_picks_the_newest_run_of_its_own_kind(tmp_path, run_tui):
     """An evidence manifest and a pipeline manifest share the output dir; the
-    Pipelines page must not go blank because the evidence run is newer."""
+    Pipelines page must not go blank because the evidence run is newer, and the
+    upload must still pick the evidence run."""
     out = tmp_path / "evidence"
     scans = issue_run(out, "2026-09-01T00-00-00Z")
     evidence = evidence_run(out, "2026-09-02T00-00-00Z")
 
     async def body(app, pilot):
-        await pilot.press("4")
-        await pilot.pause()
-        assert app.screen.query_one(UploadPage)._run_dir == str(evidence)
+        assert latest_run_scoped(app, "evidence")[0]["dir"] == str(evidence)
         await pilot.press("5")
         await pilot.pause()
         assert app.screen.query_one(PipelinesPage)._issues_run_dir == str(scans)
@@ -345,8 +345,10 @@ def test_focus_returns_to_the_pipelines_page_after_a_send(tmp_path, monkeypatch,
     run_tui(body, _write_manifest(tmp_path))
 
 
-@pytest.mark.parametrize("page_cls", [UploadPage, PipelinesPage])
-def test_finishing_a_send_does_not_pull_focus_off_another_tab(tmp_path, run_tui, page_cls):
+@pytest.mark.parametrize("page_cls", [ParamifyPage, PipelinesPage])
+def test_finishing_a_send_does_not_pull_focus_off_another_tab(tmp_path, run_tui, page_cls, stub_paramify_status):
+    stub_paramify_status()
+
     async def body(app, pilot):
         page = app.screen.query_one(page_cls)
         await pilot.press("1")                     # the user is on Fetchers
@@ -442,17 +444,18 @@ def test_a_broken_catalog_does_not_stop_the_tui(tmp_path, monkeypatch, run_tui):
 @pytest.mark.parametrize(
     "busy_page, busy_flag, tab, keys",
     [
-        (UploadPage, "_uploading", "5", ("i",)),         # evidence upload running: no scan send
-        (UploadPage, "_uploading", "5", ("C",)),         # ... and no cycle close
-        (UploadPage, "_syncing", "5", ("i",)),           # scripts sync running: no scan send
-        (PipelinesPage, "_uploading", "4", ("ctrl+u",)),  # scan send running: no evidence upload
-        (PipelinesPage, "_uploading", "4", ("p",)),       # ... and no scripts preview
+        (ParamifyPage, "_running", "5", ("i",)),    # upload or sync running: no scan send
+        (ParamifyPage, "_running", "5", ("C",)),    # ... and no cycle close
+        (ParamifyPage, "_planning", "5", ("i",)),   # a preview being planned: no scan send
+        (PipelinesPage, "_uploading", "4", ("u",)),  # scan send running: no evidence upload
+        (PipelinesPage, "_uploading", "4", ("s",)),  # ... no scripts preview
+        (PipelinesPage, "_uploading", "4", ("v",)),  # ... and no validators preview
     ],
-    ids=["upload-blocks-send", "upload-blocks-close", "sync-blocks-send",
-         "send-blocks-upload", "send-blocks-preview"],
+    ids=["action-blocks-send", "action-blocks-close", "planning-blocks-send",
+         "send-blocks-upload", "send-blocks-scripts", "send-blocks-validators"],
 )
 def test_one_paramify_write_runs_at_a_time_across_pages(
-    tmp_path, monkeypatch, run_tui, busy_page, busy_flag, tab, keys
+    tmp_path, monkeypatch, run_tui, stub_paramify_status, busy_page, busy_flag, tab, keys
 ):
     """The Paramify and Pipelines pages share one busy guard, as they did on one page:
     while either runs a write, the other refuses to start one and says why."""
@@ -460,15 +463,17 @@ def test_one_paramify_write_runs_at_a_time_across_pages(
     issue_run(out, "2026-09-01T00-00-00Z")
     evidence_run(out, "2026-09-02T00-00-00Z")
     monkeypatch.setenv("PARAMIFY_UPLOAD_API_TOKEN", "t")
+    stub_paramify_status()
     started = []
-    for name in ("issues_upload_run", "upload_run", "plan_upload", "scripts_sync", "issues_close"):
+    for name in ("issues_upload_run", "upload_run", "plan_upload", "scripts_sync", "sync_validators",
+                 "issues_close"):
         monkeypatch.setattr(api, name, lambda *a, _n=name, **k: started.append(_n))
 
     async def body(app, pilot):
         app.manifest["run"]["fetchers"][0]["config"] = {"assessment_id": "A-1"}
         setattr(app.screen.query_one(busy_page), busy_flag, True)
         await pilot.press(tab)
-        await pilot.pause()
+        await _settle(app, pilot)  # the Paramify tab reads its status before its keys show
         await pilot.press(*keys)
         await _settle(app, pilot)
         return type(app.screen).__name__, [str(n.message) for n in app._notifications]

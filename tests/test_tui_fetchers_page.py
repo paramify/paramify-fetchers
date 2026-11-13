@@ -118,7 +118,7 @@ def test_the_pipelines_tab_carries_a_beta_tag(tmp_path, run_tui):
 def test_tabs_are_fetchers_run_evidence_paramify(tmp_path, run_tui):
     async def body(app, pilot):
         tabs = app.screen.query_one(TabbedContent)
-        labels = [str(t.label) for t in tabs.query("Tab")]
+        labels = [str(t.label) for t in tabs.query("ContentTab")]  # not the Paramify lens tabs
         await pilot.press("1")
         await pilot.pause()
         return labels, tabs.active, _focus_id(app)

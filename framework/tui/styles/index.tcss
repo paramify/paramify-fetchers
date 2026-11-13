@@ -335,6 +335,8 @@ UploadPage {
 ParamifyPage { height: 1fr; padding: 0 1; }
 #pf-summary { height: auto; padding: 0 1; margin-top: 1; }
 #pf-summary.problem { color: $warning; border-left: tall $warning; }
+#pf-activity-panel { height: 7; margin-top: 1; }
+#pf-log { height: 1fr; }
 #pf-lens-tabs { margin-top: 1; }
 #pf-lens { height: 1fr; }
 #pf-by-fetcher, #pf-by-capability { height: 1fr; }

@@ -35,8 +35,8 @@ def _problems(pane) -> list:
     return problems
 
 
-@pytest.mark.parametrize("keys", [("1",), ("2",), ("3",), ("4",), ("4", "p"), ("5",)],
-                         ids=["fetchers", "run", "evidence", "paramify", "paramify-preview", "pipelines"])
+@pytest.mark.parametrize("keys", [("1",), ("2",), ("3",), ("4",), ("5",)],
+                         ids=["fetchers", "run", "evidence", "paramify", "pipelines"])
 def test_page_fits_160x50(keys, demo_workspace, no_network):
     async def drive() -> list:
         app = FetcherApp(manifest_path="manifests/demo.yaml", root_override=str(demo_workspace.root))
@@ -49,3 +49,50 @@ def test_page_fits_160x50(keys, demo_workspace, no_network):
             return _problems(app.screen.query_one(TabbedContent).active_pane)
 
     assert asyncio.run(asyncio.wait_for(drive(), 60)) == []
+
+
+def _fifty() -> dict:
+    """A 50-fetcher status with long names, linked capabilities and every state."""
+    rows = []
+    for i in range(50):
+        validators = [{"key": f"k{j}", "role": "configuration", "name": f"check {j}", "paired": j <= i % 4}
+                      for j in range(4)]
+        rows.append({
+            "name": f"azure_defender_regulatory_compliance_{i:02d}", "kind": "evidence",
+            "evidence_set": {"reference_id": f"EVD-AZURE-DEFENDER-REGULATORY-{i:02d}", "name": "x",
+                             "id": f"ev-{i}" if i % 5 else None, "artifact_count": i % 7},
+            "script": ("in_sync", "update", "create", "drift")[i % 4], "validators": validators,
+            "pairs": [{"pair_id": "p", "validator_key": "k0", "capability_id": "c1", "function": "PROVIDER"}],
+            "ready": i % 3 == 0,
+        })
+    return {"workspace": {"base_url": "https://app.paramify.com/api/v0", "base_url_source": "default", "token": True},
+            "fetchers": rows,
+            "capabilities": [{"id": "c1", "reference_id": "SC-AC-06", "name": "Least privilege",
+                              "functions": [{"type": "PROVIDER", "pairs": []}]}],
+            "pipelines_count": 2, "skipped": [], "errors": {}}
+
+
+@pytest.mark.parametrize("size", [SMALL, (120, 35)], ids=["160x50", "120x35"])
+def test_paramify_page_holds_fifty_fetchers(size, demo_workspace, no_network, monkeypatch):
+    from framework import api
+
+    monkeypatch.setattr(api, "paramify_status", lambda *a, **k: _fifty())
+    monkeypatch.setattr(api, "list_artifacts", lambda set_id: [])
+
+    async def drive():
+        app = FetcherApp(manifest_path="manifests/demo.yaml", root_override=str(demo_workspace.root))
+        async with app.run_test(size=size) as pilot:
+            await pilot.press("4")
+            await asyncio.wait_for(app.workers.wait_for_complete(), 30)
+            await pilot.pause()
+            await pilot.pause()
+            pane = app.screen.query_one(TabbedContent).active_pane
+            grid = pane.query_one("#pf-grid", DataTable)
+            return grid.size.height - 1, _problems(pane)
+
+    rows, problems = asyncio.run(asyncio.wait_for(drive(), 60))
+    assert rows >= 6, f"the grid shows only {rows} rows"
+    if size == SMALL:
+        assert problems == []
+    else:
+        assert [p for p in problems if "too wide" not in p] == []

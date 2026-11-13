@@ -25,11 +25,19 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.message import Message
-from textual.widgets import ContentSwitcher, Input, Static, Tab, Tabs
+from textual.widgets import ContentSwitcher, Input, RichLog, Static, Tab, Tabs
 
 from framework import api
+from framework.sync.render import render_plan
 from framework.tui import palette
 from framework.tui.components.table import DataTable
+from framework.tui.modals import ConfirmModal
+from framework.tui.screens.paramify_events import (
+    BUSY_NOTICE,
+    ParamifyWriter,
+    latest_run_scoped,
+    upload_event_lines,
+)
 
 NO_TOKEN = (
     "No Paramify API token found. Set PARAMIFY_UPLOAD_API_TOKEN (or PARAMIFY_API_TOKEN) in the "
@@ -71,6 +79,31 @@ class StatusReady(Message):
         self.manifest_path = manifest_path
         self.error = error
         super().__init__()
+
+
+class ActionEvent(Message):
+    """One event of a running sync or upload ("scripts", "validators", "upload")
+    from its worker thread."""
+
+    def __init__(self, kind: str, ev: dict) -> None:
+        self.kind = kind
+        self.ev = ev
+        super().__init__()
+
+
+# A scripts-sync item outcome -> (plan category, log label, style).
+_SCRIPT_MARKS = {
+    "would_create": ("create", "create", palette.OK),
+    "create": ("create", "created", palette.OK),
+    "would_update": ("update", "update", palette.OK),
+    "update": ("update", "updated", palette.OK),
+    "would_noop": ("noop", "noop", "dim"),
+    "noop": ("noop", "noop", "dim"),
+    "would_drift": ("drift", "drift, kept", palette.WARN),
+    "drift": ("drift", "drift, pushed", palette.WARN),
+    "drift_skipped": ("drift", "drift, kept", palette.WARN),
+    "error": ("error", "error", palette.FAIL),
+}
 
 
 class ArtifactsReady(Message):
@@ -141,15 +174,21 @@ def totals_text(rows: list, shown: int) -> Text:
     return text
 
 
-class ParamifyPage(Vertical):
+class ParamifyPage(ParamifyWriter, Vertical):
     BINDINGS = [
         Binding("ctrl+r", "refresh_status", "Refresh"),
         Binding("slash", "focus_filter", "Filter"),
         Binding("w", "needs_work", "Needs work"),
+        Binding("s", "sync_scripts", "Sync scripts"),
+        Binding("v", "sync_validators", "Sync validators"),
+        Binding("u", "upload_run", "Upload run"),
     ]
 
     def compose(self) -> ComposeResult:
         yield Static("", id="pf-summary")
+        with Vertical(id="pf-activity-panel", classes="panel"):
+            yield Static("", id="pf-activity")
+            yield RichLog(id="pf-log", markup=False, wrap=True, highlight=False)
         yield Tabs(Tab("by fetcher", id="lens-fetcher"), Tab("by capability", id="lens-capability"),
                    id="pf-lens-tabs")
         with ContentSwitcher(initial="pf-by-fetcher", id="pf-lens"):
@@ -179,7 +218,14 @@ class ParamifyPage(Vertical):
         self._rows: dict = {}
         self._filter = ""
         self._needs_work = False
+        self._planning = False
+        self._running = False
+        activity = self.query_one("#pf-activity-panel", Vertical)
+        activity.border_title = "activity"
+        activity.display = False
         self.query_one("#pf-lens-tabs", Tabs).can_focus = False
+        # The empty-manifest hint takes focus, so the page keys still work.
+        self.query_one("#pf-grid-empty", Static).can_focus = True
         grid = self.query_one("#pf-grid", DataTable)
         grid.add_columns("fetcher", "evidence set", "script", "validators", "capabilities", "artifacts", "")
         self.query_one("#pf-grid-panel").border_title = "evidence sets"
@@ -189,13 +235,35 @@ class ParamifyPage(Vertical):
 
     def on_resize(self) -> None:
         # Spec §7: on a short terminal the grid keeps its rows; the detail gives way.
-        self.query_one("#pf-detail").styles.height = 10 if self.app.size.height < 40 else 13
+        self.query_one("#pf-detail").styles.height = 8 if self.app.size.height < 40 else 13
 
     # -- hints ------------------------------------------------------------ #
 
     @property
     def HINTS(self) -> list:  # noqa: N802 — the workspace reads HINTS off every page
-        return [("↑↓", "fetcher"), ("/", "filter"), ("w", "needs work"), ("ctrl+r", "refresh")]
+        hints = [("↑↓", "fetcher"), ("/", "filter"), ("w", "needs work")]
+        if self._actions_on():
+            hints += [("s", "sync scripts"), ("v", "sync validators"), ("u", "upload run")]
+        return hints + [("ctrl+r", "refresh")]
+
+    def _actions_on(self) -> bool:
+        # Only this page's own work hides the keys. While the Pipelines tab
+        # sends, they stay and answer with BUSY_NOTICE (see ParamifyWriter).
+        return self._online() and not self._own_busy
+
+    @property
+    def _own_busy(self) -> bool:
+        return self._planning or self._running
+
+    def check_action(self, action: str, parameters) -> bool | None:
+        if action in ("sync_scripts", "sync_validators", "upload_run"):
+            return self._actions_on()
+        return True
+
+    def _refresh_hints(self) -> None:
+        update = getattr(self.screen, "_update_chrome", None)
+        if update is not None:
+            update()
 
     # -- reading ---------------------------------------------------------- #
 
@@ -215,7 +283,11 @@ class ParamifyPage(Vertical):
     def focus_default(self) -> None:
         if self._stale or self._status_at is None or time.monotonic() - self._status_at > STALE_AFTER:
             self.request_status()
-        self.query_one("#pf-grid", DataTable).focus()
+        self._focus_target().focus()
+
+    def _focus_target(self):
+        grid = self.query_one("#pf-grid", DataTable)
+        return self.query_one("#pf-grid-empty", Static) if self.query_one("#pf-grid-panel").has_class("empty") else grid
 
     def action_refresh_status(self) -> None:
         self.request_status()
@@ -255,7 +327,10 @@ class ParamifyPage(Vertical):
             self._status_clock = datetime.now().strftime("%H:%M")
             self._newest = {}
         # Never focus from here: a read can land while the user is on another tab.
+        # When the redraw hides the grid (an empty manifest), Textual moves focus
+        # to the next focusable widget: the hint, which takes focus for that.
         self._draw()
+        self._refresh_hints()
 
     # -- rendering -------------------------------------------------------- #
 
@@ -482,3 +557,288 @@ class ParamifyPage(Vertical):
         row = self._rows.get(self._cursor_key() or "")
         if row is not None and row["evidence_set"]["id"] == message.set_id:
             self.query_one("#pf-set", Static).update(self._set_info(row, self._online()))
+
+    # -- actions: shared -------------------------------------------------- #
+
+    def _begin_log(self, banner) -> None:
+        panel = self.query_one("#pf-activity-panel", Vertical)
+        panel.display = True
+        self.query_one("#pf-log", RichLog).clear()
+        self._set_banner(banner)
+        self._refresh_hints()
+
+    def _set_banner(self, renderable) -> None:
+        self.query_one("#pf-activity-panel", Vertical).display = True
+        self.query_one("#pf-activity", Static).update(renderable)
+
+    def _log(self, line: Text) -> None:
+        self.query_one("#pf-log", RichLog).write(line)
+
+    def _done(self, banner: Text) -> None:
+        """An action ended: say how, re-read the workspace, and re-enable the keys."""
+        self._planning = self._running = False
+        self._set_banner(banner)
+        self.request_status()
+        self._refresh_hints()
+
+    def on_action_event(self, message: ActionEvent) -> None:
+        handler = {"upload": self._handle_upload_event, "scripts": self._handle_scripts_event,
+                   "validators": self._handle_validators_event}[message.kind]
+        handler(message.ev)
+
+    def _evidence_names(self) -> set:
+        return {r["name"] for r in (self._status or {}).get("fetchers") or []}
+
+    def _base_url(self) -> str:
+        return ((self._status or {}).get("workspace") or {}).get("base_url") or "Paramify"
+
+    # -- actions: upload (u) ---------------------------------------------- #
+
+    def action_upload_run(self) -> None:
+        """Upload the newest run with evidence: plan, confirm, then stream."""
+        if self._busy:
+            self.notify(BUSY_NOTICE)
+            return
+        try:
+            latest, scoped = latest_run_scoped(self.app, "evidence")
+        except Exception as exc:  # noqa: BLE001
+            self.notify(f"Cannot list runs: {exc}", severity="error")
+            return
+        if latest is None:
+            self.notify("No run with evidence yet. Collect it on the Run tab (2).")
+            return
+        try:
+            preflight = api.upload_preflight(latest["dir"], self.app.root_path)
+        except Exception as exc:  # noqa: BLE001
+            self.notify(f"Cannot check the upload: {exc}", severity="error")
+            return
+        if not preflight.get("ok"):
+            self.notify(" ".join(preflight.get("errors") or ["The upload is not ready."]), severity="error", timeout=12)
+            return
+        # The manifest the plan compares the run's Paramify settings with: the
+        # open one when the run is its own, or records none.
+        manifest = getattr(self.app, "manifest_path", None) if (scoped or latest.get("manifest") is None) else None
+        self._planning = True
+        self._refresh_hints()
+        self._plan_worker(
+            latest["dir"], self.app.root_path, bool(preflight.get("token_present")),
+            f"Upload {preflight['file_count']} evidence file(s) to {preflight['base_url']}?", manifest,
+        )
+
+    @work(thread=True, exclusive=True, group="paramify-action")
+    def _plan_worker(self, run_dir: str, root, online: bool, question: str, manifest_path=None) -> None:
+        try:
+            lines = render_plan(api.plan_upload(run_dir, root, online=online, manifest_path=manifest_path))
+            error = False
+        except Exception as exc:  # noqa: BLE001 — shown in the confirm, never uploaded
+            lines, error = [f"Cannot plan the upload: {exc}"], True
+        self.app.call_from_thread(self._confirm_upload, run_dir, "\n".join(lines), question, error, manifest_path)
+
+    def _confirm_upload(self, run_dir: str, body: str, question: str, error: bool, manifest_path) -> None:
+        def go(ok: bool) -> None:
+            if ok and not error:
+                self._running = True
+                self._begin_log(Text("uploading to Paramify…", style=palette.WARN))
+                self._upload_worker(run_dir, self.app.root_path, manifest_path)
+            self._refresh_hints()
+
+        try:
+            self.app.push_screen(ConfirmModal(body if error else f"{body}\n\n{question}"), go)
+        finally:
+            self._planning = False
+
+    @work(thread=True, exclusive=True, group="paramify-action")
+    def _upload_worker(self, run_dir: str, root, manifest_path=None) -> None:
+        def post(ev: dict) -> None:
+            self.post_message(ActionEvent("upload", ev))
+
+        try:
+            api.upload_run(run_dir, root, on_event=post, manifest_path=manifest_path)
+        except Exception as exc:  # noqa: BLE001
+            post({"event": "_upload_failed", "error": str(exc)})
+
+    def _handle_upload_event(self, ev: dict) -> None:
+        etype = ev.get("event")
+        noun = "evidence"
+        for line in upload_event_lines(ev, noun):
+            self._log(line)
+        if etype == "upload_start":
+            mode = " (dry-run)" if ev.get("dry_run") else ""
+            self._set_banner(Text(f"uploading {ev.get('files', 0)} {noun}(s) to {ev.get('base_url', '')}{mode}",
+                                  style=palette.WARN))
+        elif etype == "upload_complete":
+            self._finalize_upload(ev)
+        elif etype == "_upload_failed":
+            self._log(Text(f"upload failed: {ev.get('error', '')}", style=f"bold {palette.FAIL}"))
+            self._done(Text(f"upload failed: {ev.get('error', '')}", style=palette.FAIL))
+
+    def _finalize_upload(self, ev: dict) -> None:
+        msg = Text(
+            "evidence upload complete — "
+            f"uploaded={ev.get('uploaded', 0)} "
+            f"duplicates={ev.get('skipped_duplicate', 0)} "
+            f"errors={ev.get('errors', 0)}"
+            + (f" dropped={ev['dropped']}" if ev.get("dropped") else ""),
+            style=palette.OK if ev.get("ok") else palette.FAIL,
+        )
+        if ev.get("halted"):
+            msg.append(f"   stopped early: {ev['halted']}", style=palette.FAIL)
+        if ev.get("log_path"):
+            msg.append(f"   {ev['log_path']}", style="dim")
+        self._done(msg)
+
+    # -- actions: scripts (s) --------------------------------------------- #
+
+    def action_sync_scripts(self) -> None:
+        """Preview the scripts sync, confirm the plan, then sync and re-read."""
+        if self._busy:
+            self.notify(BUSY_NOTICE)
+            return
+        names = self._evidence_names()
+        if not names:
+            self.notify("No evidence fetchers in this manifest.")
+            return
+        self._planning = True
+        self._begin_log(Text("previewing the scripts sync…", style=palette.WARN))
+        self._scripts_preview_worker(self.app.root_path, names)
+
+    @work(thread=True, exclusive=True, group="paramify-action")
+    def _scripts_preview_worker(self, root, names: set) -> None:
+        counts: dict = {}
+
+        def tally(ev: dict) -> None:
+            if ev.get("event") == "sync_item":
+                category = _SCRIPT_MARKS.get(ev.get("outcome") or "", ("other",))[0]
+                counts[category] = counts.get(category, 0) + 1
+
+        try:
+            api.scripts_sync(root, dry_run=True, include=names, on_event=tally)
+        except Exception as exc:  # noqa: BLE001
+            self.post_message(ActionEvent("scripts", {"event": "_failed", "error": str(exc)}))
+            return
+        self.app.call_from_thread(self._confirm_scripts, names, counts)
+
+    def _confirm_scripts(self, names: set, counts: dict) -> None:
+        self._planning = False
+        create, update, drift = counts.get("create", 0), counts.get("update", 0), counts.get("drift", 0)
+        kept = (f"\n\n{drift} script(s) changed in Paramify stay as they are. "
+                "`paramify scripts sync --force` overwrites them.") if drift else ""
+        if not create and not update:
+            self._done(Text("scripts: nothing to sync" + (f", {drift} changed in Paramify (kept)" if drift else ""),
+                            style=palette.OK))
+            return
+
+        def go(ok: bool) -> None:
+            if ok:
+                self._running = True
+                self._begin_log(Text("syncing scripts…", style=palette.WARN))
+                self._scripts_worker(self.app.root_path, names)
+            else:
+                self._set_banner(Text("scripts sync cancelled", style=palette.MUTED))
+            self._refresh_hints()
+
+        self.app.push_screen(ConfirmModal(
+            f"Sync {create + update} fetcher script(s) to {self._base_url()}: "
+            f"{create} create, {update} update, and pair each one with its evidence set?{kept}"
+        ), go)
+
+    @work(thread=True, exclusive=True, group="paramify-action")
+    def _scripts_worker(self, root, names: set) -> None:
+        def post(ev: dict) -> None:
+            self.post_message(ActionEvent("scripts", ev))
+
+        try:
+            api.scripts_sync(root, include=names, on_event=post)
+        except Exception as exc:  # noqa: BLE001
+            post({"event": "_failed", "error": str(exc)})
+
+    def _handle_scripts_event(self, ev: dict) -> None:
+        etype = ev.get("event")
+        if etype == "sync_item":
+            _, label, style = _SCRIPT_MARKS.get(ev.get("outcome") or "", ("other", ev.get("outcome", "?"), "white"))
+            ref = f"  set={ev.get('reference_id')}" if ev.get("reference_id") else ""
+            reason = ev.get("reason") or ev.get("error")
+            self._log(Text(f"  [{label}] {ev.get('fetcher', '?')}{ref}" + (f"  {reason}" if reason else ""), style=style))
+        elif etype == "sync_complete":
+            self._done(Text(
+                f"scripts sync complete — created={ev.get('created', 0)} updated={ev.get('updated', 0)} "
+                f"associated={ev.get('associated', 0)} errors={ev.get('errors', 0)}",
+                style=palette.OK if ev.get("ok") else palette.FAIL,
+            ))
+        elif etype == "_failed":
+            self._log(Text(f"scripts sync failed: {ev.get('error', '')}", style=f"bold {palette.FAIL}"))
+            self._done(Text(f"scripts sync failed: {ev.get('error', '')}", style=palette.FAIL))
+
+    # -- actions: validators (v) ------------------------------------------ #
+
+    def action_sync_validators(self) -> None:
+        """Preview the validators sync, confirm, then create and pair them."""
+        if self._busy:
+            self.notify(BUSY_NOTICE)
+            return
+        path = getattr(self.app, "manifest_path", None)
+        if path is None:
+            return
+        self._planning = True
+        self._begin_log(Text("previewing the validators sync…", style=palette.WARN))
+        self._validators_preview_worker(self.app.root_path, path)
+
+    @work(thread=True, exclusive=True, group="paramify-action")
+    def _validators_preview_worker(self, root, manifest_path) -> None:
+        outcomes: list = []
+
+        def tally(ev: dict) -> None:
+            if ev.get("event") == "sync_validator":
+                outcomes.append(ev.get("outcome") or "")
+
+        try:
+            api.sync_validators(root, Path(manifest_path), dry_run=True, on_event=tally)
+        except Exception as exc:  # noqa: BLE001
+            self.post_message(ActionEvent("validators", {"event": "_failed", "error": str(exc)}))
+            return
+        self.app.call_from_thread(self._confirm_validators, manifest_path, outcomes)
+
+    def _confirm_validators(self, manifest_path, outcomes: list) -> None:
+        self._planning = False
+        create = outcomes.count("would_create")
+        exist = sum(o.startswith("would_skip") for o in outcomes)
+        if not create:
+            self._done(Text(f"validators: nothing to create ({exist} in Paramify already)", style=palette.OK))
+            return
+
+        def go(ok: bool) -> None:
+            if ok:
+                self._running = True
+                self._begin_log(Text("syncing validators…", style=palette.WARN))
+                self._validators_worker(self.app.root_path, manifest_path)
+            else:
+                self._set_banner(Text("validators sync cancelled", style=palette.MUTED))
+            self._refresh_hints()
+
+        self.app.push_screen(ConfirmModal(
+            f"Create {create} validator(s) in {self._base_url()} and pair each one with its evidence sets? "
+            f"{exist} exist already and stay as they are."
+        ), go)
+
+    @work(thread=True, exclusive=True, group="paramify-action")
+    def _validators_worker(self, root, manifest_path) -> None:
+        def post(ev: dict) -> None:
+            self.post_message(ActionEvent("validators", ev))
+
+        try:
+            api.sync_validators(root, Path(manifest_path), on_event=post)
+        except Exception as exc:  # noqa: BLE001
+            post({"event": "_failed", "error": str(exc)})
+
+    def _handle_validators_event(self, ev: dict) -> None:
+        etype = ev.get("event")
+        if etype == "sync_validator":
+            outcome = ev.get("outcome") or "?"
+            style = palette.FAIL if outcome == "error" else (palette.OK if outcome == "created" else "dim")
+            reason = f"  {ev['error']}" if ev.get("error") else ""
+            self._log(Text(f"  [{outcome}] {ev.get('key', '?')}{reason}", style=style))
+        elif etype == "sync_complete":
+            self._done(Text("validators sync complete", style=palette.OK if ev.get("ok", True) else palette.FAIL))
+        elif etype == "_failed":
+            self._log(Text(f"validators sync failed: {ev.get('error', '')}", style=f"bold {palette.FAIL}"))
+            self._done(Text(f"validators sync failed: {ev.get('error', '')}", style=palette.FAIL))

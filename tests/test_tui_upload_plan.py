@@ -23,7 +23,7 @@ from framework import api  # noqa: E402
 from framework.sync.model import Action, Plan  # noqa: E402
 from framework.tui.components.forms import _NULL as BLANK  # noqa: E402
 from framework.tui.modals import ConfirmModal, FormModal, PickerModal  # noqa: E402
-from framework.tui.screens.upload import UploadPage  # noqa: E402
+from framework.tui.screens.paramify import ParamifyPage  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -260,14 +260,16 @@ def _upload_ready(tmp_path, monkeypatch, token: bool):
 
 
 def _open_confirm(tmp_path, run_tui, check, monkeypatch):
-    monkeypatch.setattr(UploadPage, "_rebuild_scripts", lambda page: None)
+    # The page's status read is not under test here; the upload confirm is.
+    monkeypatch.setattr(api, "paramify_status", lambda *a, **k: {
+        "workspace": {"base_url": "https://app.paramify.com/api/v0", "token": True},
+        "fetchers": [], "capabilities": [], "pipelines_count": 0, "skipped": [], "errors": {}})
     path, _ = _manifest(tmp_path)
 
     async def body(app, pilot):
         await pilot.press("4")
         await pilot.pause()
-        page = app.screen.query_one(UploadPage)
-        page.query_one("#upload-submit", Button).disabled = False
+        page = app.screen.query_one(ParamifyPage)
         page.action_upload_run()
         await _settle(app, pilot)
         return check(app)
@@ -368,17 +370,18 @@ def test_confirm_shows_brackets_in_file_names_and_messages(tmp_path, monkeypatch
     assert "[bold]EVD-X[/bold]" in text and "blocked [red]by[/red] the WAF" in text
 
 
-def test_log_shows_brackets_in_file_names_and_reasons(tmp_path, run_tui):
+def test_log_shows_brackets_in_file_names_and_reasons(tmp_path, run_tui, stub_paramify_status):
+    stub_paramify_status()
     path, _ = _manifest(tmp_path)
 
     async def body(app, pilot):
         await pilot.press("4")
         await pilot.pause()
-        page = app.screen.query_one(UploadPage)
+        page = app.screen.query_one(ParamifyPage)
         page._begin_log(Text("uploading"))
         page._handle_upload_event({"event": "upload_file", "action_id": "delivery/x", "file": "report[x].json",
                                    "outcome": "error", "reason": "HTTP 400: [bold]bad[/bold]"})
-        log = page.query_one("#upload-log")
+        log = page.query_one("#pf-log")
         for _ in range(40):
             await pilot.pause(0.05)
             if log.lines:
@@ -389,20 +392,21 @@ def test_log_shows_brackets_in_file_names_and_reasons(tmp_path, run_tui):
     run_tui(body, path)
 
 
-def test_log_panel_renders_delivery_file_progress(tmp_path, run_tui):
+def test_log_panel_renders_delivery_file_progress(tmp_path, run_tui, stub_paramify_status):
+    stub_paramify_status()
     path, _ = _manifest(tmp_path)
 
     async def body(app, pilot):
         await pilot.press("4")
         await pilot.pause()
-        page = app.screen.query_one(UploadPage)
+        page = app.screen.query_one(ParamifyPage)
         page._begin_log(Text("uploading"))
         page._handle_upload_event({"event": "delivery_file", "action_id": "a", "file": "aws_iam.json",
                                    "outcome": "uploaded", "n": 3, "of": 12, "bytes": 10})
         page._handle_upload_event({"event": "delivery_file", "action_id": "a", "file": "b.json",
                                    "outcome": "dropped", "n": None, "of": 12, "bytes": 1, "reason": "WAF"})
         page._handle_upload_event({"event": "something_new"})
-        log = page.query_one("#upload-log")
+        log = page.query_one("#pf-log")
         for _ in range(40):  # the log writes once it has a size
             await pilot.pause(0.05)
             if log.lines:

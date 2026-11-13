@@ -349,3 +349,119 @@ def test_refresh_keeps_the_cursor_on_the_same_fetcher(tmp_path, monkeypatch, run
     before, after, hidden = run_tui(body, _manifest(tmp_path))
     assert before == after == "bravo"
     assert hidden == "charlie"
+
+
+def test_s_previews_then_syncs_then_refreshes(tmp_path, monkeypatch, run_tui):
+    from framework.tui.modals import ConfirmModal
+
+    status_calls = _stub(monkeypatch, _status())
+    runs = []
+
+    def scripts_sync(root, config_path=None, *, dry_run=False, include=None, on_event=None, **kw):
+        runs.append((dry_run, sorted(include)))
+        outcomes = [("alpha", "would_noop"), ("bravo", "would_update"), ("charlie", "would_create")]
+        for name, outcome in outcomes:
+            on_event({"event": "sync_item", "fetcher": name,
+                      "outcome": outcome if dry_run else outcome.removeprefix("would_")})
+        if not dry_run:
+            on_event({"event": "sync_complete", "ok": True, "created": 1, "updated": 1})
+        return {"ok": True}
+
+    monkeypatch.setattr(api, "scripts_sync", scripts_sync)
+
+    async def body(app, pilot):
+        page = await _open(app, pilot)
+        await pilot.press("s")
+        await _settle(app, pilot)
+        confirm = str(app.screen._message) if isinstance(app.screen, ConfirmModal) else ""
+        await pilot.press("y")
+        await _settle(app, pilot)
+        return confirm, _text(page.query_one("#pf-activity", Static).content)
+
+    confirm, activity = run_tui(body, _manifest(tmp_path))
+    assert "1 create, 1 update" in confirm
+    assert runs == [(True, ["alpha", "bravo", "charlie"]), (False, ["alpha", "bravo", "charlie"])]
+    assert activity.startswith("scripts sync complete")
+    assert len(status_calls) == 2, "the sync did not re-read the status"
+
+
+def test_v_previews_validators(tmp_path, monkeypatch, run_tui):
+    from framework.tui.modals import ConfirmModal
+
+    _stub(monkeypatch, _status())
+    runs = []
+
+    def sync_validators(root, manifest_path=None, config_path=None, *, dry_run=False, on_event=None, **kw):
+        runs.append(dry_run)
+        on_event({"event": "sync_validator", "key": "k1", "outcome": "would_create" if dry_run else "created"})
+        on_event({"event": "sync_validator", "key": "k0",
+                  "outcome": "would_skip_exists" if dry_run else "skipped_exists"})
+        on_event({"event": "sync_complete", "ok": True})
+        return {"ok": True}
+
+    monkeypatch.setattr(api, "sync_validators", sync_validators)
+
+    async def body(app, pilot):
+        await _open(app, pilot)
+        await pilot.press("v")
+        await _settle(app, pilot)
+        confirm = str(app.screen._message) if isinstance(app.screen, ConfirmModal) else ""
+        await pilot.press("n")
+        await _settle(app, pilot)
+        return confirm
+
+    confirm = run_tui(body, _manifest(tmp_path))
+    assert "Create 1 validator(s)" in confirm and "1 exist already" in confirm
+    assert runs == [True], "a declined confirm still synced"
+
+
+def test_u_opens_the_upload_confirm(tmp_path, monkeypatch, run_tui):
+    from framework.sync.model import Action, Plan
+    from framework.tui.modals import ConfirmModal
+    from framework.tui.screens import paramify as page_module
+
+    _stub(monkeypatch, _status())
+    monkeypatch.setattr(page_module, "latest_run_scoped",
+                        lambda app, kind: ({"dir": str(tmp_path / "run-1"), "run_id": "1"}, True))
+    monkeypatch.setattr(api, "upload_preflight", lambda run_dir, root: {
+        "ok": True, "token_present": True, "file_count": 3, "base_url": "https://x.test/api/v0", "errors": []})
+    monkeypatch.setattr(api, "plan_upload", lambda *a, **k: Plan(
+        [Action(id="a1", provider="delivery", key="x", verb="deliver", summary="new set")]))
+    monkeypatch.setattr(api, "upload_run", lambda *a, **k: pytest.fail("uploaded without a yes"))
+
+    async def body(app, pilot):
+        await _open(app, pilot)
+        await pilot.press("u")
+        await _settle(app, pilot)
+        return str(app.screen._message) if isinstance(app.screen, ConfirmModal) else ""
+
+    confirm = run_tui(body, _manifest(tmp_path))
+    assert "1 deliver" in confirm
+    assert confirm.endswith("Upload 3 evidence file(s) to https://x.test/api/v0?")
+
+
+def test_actions_are_off_without_a_token(tmp_path, monkeypatch, run_tui):
+    _stub(monkeypatch, _status(token=False, capabilities=[]))
+
+    async def body(app, pilot):
+        page = await _open(app, pilot)
+        footer = _text(app.screen.query_one("#app-footer", Static).content)
+        return [page.check_action(a, ()) for a in ("sync_scripts", "sync_validators", "upload_run")], footer
+
+    allowed, footer = run_tui(body, _manifest(tmp_path))
+    assert allowed == [False, False, False]
+    assert "sync scripts" not in footer and "upload run" not in footer and "ctrl+r" in footer
+
+
+def test_an_empty_manifest_keeps_focus_in_the_page(tmp_path, monkeypatch, run_tui):
+    """The empty state hides the grid; the focus it held must not fall out of the
+    page, or none of the page keys fire."""
+    _stub(monkeypatch, _status([]))
+
+    async def body(app, pilot):
+        page = await _open(app, pilot)
+        await pilot.pause()
+        return app.focused is not None and app.focused in page.walk_children(), getattr(app.focused, "id", None)
+
+    inside, focused = run_tui(body, _manifest(tmp_path))
+    assert inside and focused == "pf-grid-empty"

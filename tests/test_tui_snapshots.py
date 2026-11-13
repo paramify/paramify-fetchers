@@ -134,9 +134,5 @@ def test_paramify(shot):
     assert shot("4")
 
 
-def test_paramify_scripts_preview(shot):
-    assert shot("4", "p")
-
-
 def test_pipelines(shot):
     assert shot("5")
