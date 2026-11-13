@@ -20,6 +20,7 @@ Run: ``pytest tests/test_contracts.py`` (needs an editable install:
 from __future__ import annotations
 
 import ast
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -224,7 +225,8 @@ def test_instructions_open_with_the_entry_path() -> None:
 # --------------------------------------------------------------------------- #
 
 # Every fetcher is checked except these, which still fail _text_format_problems. Shrink-only: a batch deletes
-# its own lines (one per line, so batches don't collide), and a new fetcher is never added here. The frozen
+# only its own lines and keeps every "# <platform>" comment, and a new fetcher is never added here. Parallel
+# batches take runs that don't touch; if a merge conflicts, keep both deletions. The frozen
 # tests/text_format_baseline.txt is the ceiling this list can't outgrow; never edit it.
 TEXT_FORMAT_PENDING = (
     # aws
@@ -506,11 +508,6 @@ BREAKDOWN_LINE = re.compile(r"^  - \S+ \(\S.*\)$")
 COMMAND_LINE = re.compile(r"^- \S.* — \S")
 
 
-def _matches(yaml_path: Path, prefix: str) -> bool:
-    rel = _short(yaml_path)
-    return rel == prefix or rel.startswith(prefix + "/")
-
-
 CHECKED_YAMLS = [y for y in FETCHER_YAMLS if _short(y) not in TEXT_FORMAT_PENDING]
 PENDING_YAMLS = [y for y in FETCHER_YAMLS if _short(y) in TEXT_FORMAT_PENDING]
 
@@ -587,9 +584,14 @@ def _text_format_problems(yaml_path: Path, spec: dict) -> list[str]:
     return problems
 
 
+BASELINE_SHA256 = "92d09c675c741fc09b56bb09fc95c4838103d2e74c3aa46417aebbbea02442b1"
+
+
 def test_text_format_pending_names_real_fetchers_within_the_baseline() -> None:
     """Pending entries are real fetchers and only ever shrink from the frozen baseline."""
-    baseline = set((Path(__file__).parent / "text_format_baseline.txt").read_text().split())
+    baseline_file = Path(__file__).parent / "text_format_baseline.txt"
+    assert hashlib.sha256(baseline_file.read_bytes()).hexdigest() == BASELINE_SHA256, "text_format_baseline.txt is frozen"
+    baseline = set(baseline_file.read_text().split())
     assert len(set(TEXT_FORMAT_PENDING)) == len(TEXT_FORMAT_PENDING), "TEXT_FORMAT_PENDING lists a fetcher twice"
     assert not set(TEXT_FORMAT_PENDING) - baseline, f"not in the baseline, fix the text instead: {sorted(set(TEXT_FORMAT_PENDING) - baseline)}"
     missing = set(TEXT_FORMAT_PENDING) - {_short(y) for y in FETCHER_YAMLS}

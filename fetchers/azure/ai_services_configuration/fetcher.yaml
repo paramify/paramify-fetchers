@@ -77,8 +77,8 @@ evidence_set:
     - providers.get("Microsoft.CognitiveServices") — tells "not registered" from "no accounts"
     - CognitiveServicesManagementClient accounts.list() — every Azure AI services account (Foundry, OpenAI, Language, Speech, Document Intelligence and other kinds) with its network, key, encryption and identity settings
     - deployments.list(), rai_policies.list() and projects.list() (per Foundry or OpenAI account) — model deployments, content filter policies and Foundry projects
-    - GET {account}/connections and {project}/connections (ARM REST, api-version 2025-06-01; per account and per project) — connections agents use to reach other systems, recorded without credentials or query strings
-    - GET /subscriptions/{id}/providers/Microsoft.Search/searchServices (ARM REST, api-version 2025-05-01) — every AI Search service with its network, key and encryption settings
+    - GET {account}/connections and {project}/connections (ARM REST; per account and per project) — connections agents use to reach other systems, recorded without credentials or query strings
+    - GET /subscriptions/{id}/providers/Microsoft.Search/searchServices (ARM REST) — every AI Search service with its network, key and encryption settings
     - diagnostic_settings.list() (per account and search service) — whether audit logs are exported
 
     Output: azure_ai_services_configuration_<subscription>.json — each AI services account, search service, model deployment, content filter policy, project and connection with the verdicts below. Resources the resource_exclusions patterns take out are listed under excluded instead.
@@ -87,76 +87,76 @@ evidence_set:
 
     What was checked?
     - total_accounts — Number of AI services accounts checked; null when the account list could not be read
-    - accounts_by_kind — Number of accounts for each kind of account (AIServices, OpenAI, and so on), with one entry per kind found
+    - accounts_by_kind — Number of accounts for each kind of account (AIServices, OpenAI, and so on), with one entry per kind found; null when the account list could not be read
     - total_search_services — Number of AI Search services checked; null when the search service list could not be read
     - provider_registration_status — Whether the AI services provider (Microsoft.CognitiveServices) is registered on the subscription: registered, not_registered or unknown
 
     Which resources are left out of scope?
     - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
     - resource_exclusion_patterns_unmatched — List of configured patterns that matched no account or search service, such as a mistyped name; null when either list could not be read
-    - excluded_accounts — Number of accounts left out of scope because a pattern matched their resource group, region or id; none of their settings are read and no other count includes them
-    - excluded_search_services — Number of search services left out of scope for the same reason
-    - in_scope_accounts — Number of accounts read and in scope; 0 means the patterns took out every account, which a check can catch by requiring more than 0
-    - in_scope_search_services — Number of search services read and in scope; 0 means the patterns took out every one
+    - excluded_accounts — Number of accounts left out of scope because a pattern matched their resource group, region or id; none of their settings are read and no other count includes them; null when the account list could not be read
+    - excluded_search_services — Number of search services left out of scope because a pattern matched their resource group, region or id; null when the search service list could not be read
+    - in_scope_accounts — Number of accounts read and in scope; 0 means the patterns took out every account, which a check can catch by requiring more than 0; null when the account list could not be read
+    - in_scope_search_services — Number of search services read and in scope; 0 means the patterns took out every one; null when the search service list could not be read
 
     Can the accounts be reached from the internet?
-    - accounts_open_to_all_networks — Number of accounts reachable from any network (public access is on and the network rules allow all)
-    - accounts_network_restricted — Number of accounts with public access on but the network rules denying by default
-    - accounts_private_only — Number of accounts with public network access disabled
-    - accounts_with_private_endpoints — Number of accounts with at least one private endpoint connection
-    - accounts_with_private_endpoint_but_public_access — Number of accounts that have a private endpoint but can still be reached publicly
-    - accounts_with_outbound_restricted — Number of accounts that restrict their own outbound network access
-    - search_services_open_to_all_networks — Number of search services reachable from any network (public access is on and no IP rules are set)
+    - accounts_open_to_all_networks — Number of accounts reachable from any network (public access is on and the network rules allow all); null when the account list could not be read
+    - accounts_network_restricted — Number of accounts with public access on but the network rules denying by default; null when the account list could not be read
+    - accounts_private_only — Number of accounts with public network access disabled; null when the account list could not be read
+    - accounts_with_private_endpoints — Number of accounts with at least one private endpoint connection; null when the account list could not be read
+    - accounts_with_private_endpoint_but_public_access — Number of accounts that have a private endpoint but can still be reached publicly; null when the account list could not be read
+    - accounts_with_outbound_restricted — Number of accounts that restrict their own outbound network access; null when the account list could not be read
+    - search_services_open_to_all_networks — Number of search services reachable from any network (public access is on and no IP rules are set); null when the search service list could not be read
 
     Do keys still work, or only Microsoft Entra ID sign-in?
-    - accounts_with_api_keys_enabled — Number of accounts where API keys still work (local authentication is not disabled)
-    - accounts_entra_only — Number of accounts where API keys are disabled so only Microsoft Entra ID sign-in works
-    - accounts_entra_only_percentage — Percentage of accounts that accept only Entra ID sign-in = accounts_entra_only / total_accounts × 100 (a whole number, 0–100); 0 when total_accounts is 0
-    - accounts_without_managed_identity — Number of accounts with no managed identity
-    - search_services_with_api_keys_enabled — Number of search services where API keys still work
+    - accounts_with_api_keys_enabled — Number of accounts where API keys still work (local authentication is not disabled); null when the account list could not be read
+    - accounts_entra_only — Number of accounts where API keys are disabled so only Microsoft Entra ID sign-in works; null when the account list could not be read
+    - accounts_entra_only_percentage — Percentage of accounts that accept only Entra ID sign-in = accounts_entra_only / total_accounts × 100 (a whole number, 0–100); 0 when total_accounts is 0; null when the account list could not be read
+    - accounts_without_managed_identity — Number of accounts with no managed identity; null when the account list could not be read
+    - search_services_with_api_keys_enabled — Number of search services where API keys still work; null when the search service list could not be read
 
     Is data encrypted with a customer-managed key?
-    - accounts_with_customer_managed_key — Number of accounts encrypted with a key the customer manages instead of the Microsoft-managed key
-    - search_services_cmk_enforced — Number of search services that enforce customer-managed key encryption
+    - accounts_with_customer_managed_key — Number of accounts encrypted with a key the customer manages instead of the Microsoft-managed key; null when the account list could not be read
+    - search_services_cmk_enforced — Number of search services that enforce customer-managed key encryption; null when the search service list could not be read
 
     Are audit logs exported?
-    - accounts_with_diagnostic_settings — Number of accounts with at least one diagnostic setting
-    - accounts_audit_logs_exported — Number of accounts whose diagnostic setting sends audit logs to a destination
-    - accounts_audit_logs_unknown — Number of accounts whose diagnostic settings could not be read
-    - search_services_audit_logs_exported — Number of search services whose diagnostic setting sends operation logs to a destination
+    - accounts_with_diagnostic_settings — Number of accounts with at least one diagnostic setting; null when the account list could not be read
+    - accounts_audit_logs_exported — Number of accounts whose diagnostic setting sends audit logs to a destination; null when the account list could not be read
+    - accounts_audit_logs_unknown — Number of accounts whose diagnostic settings could not be read; null when the account list could not be read
+    - search_services_audit_logs_exported — Number of search services whose diagnostic setting sends operation logs to a destination; null when the search service list could not be read
 
     Where may model deployments process data, and who publishes the models?
-    - total_deployments — Number of model deployments across all accounts
-    - deployments_global_processing — Number of deployments that may process data in any Azure region (Global deployment types)
-    - deployments_data_zone_processing — Number of deployments that process data within one geography (DataZone deployment types)
-    - deployments_regional_processing — Number of deployments that process data in the account's own region (Standard, ProvisionedManaged or Batch types)
-    - deployments_processing_scope_unknown — Number of deployments whose deployment type is not recognised
-    - deployments_third_party_publisher — Number of deployments whose model publisher is neither OpenAI nor Microsoft
-    - deployments_by_model_publisher — Number of deployments for each model publisher (OpenAI, Anthropic and so on; unknown when none is reported), with one entry per publisher found
-    - deployments_with_automatic_version_upgrade — Number of deployments whose model is upgraded automatically when a new default version is available or the current one expires
+    - total_deployments — Number of model deployments across all accounts; null when the account list could not be read
+    - deployments_global_processing — Number of deployments that may process data in any Azure region (Global deployment types); null when the account list could not be read
+    - deployments_data_zone_processing — Number of deployments that process data within one geography (DataZone deployment types); null when the account list could not be read
+    - deployments_regional_processing — Number of deployments that process data in the account's own region (Standard, ProvisionedManaged or Batch types); null when the account list could not be read
+    - deployments_processing_scope_unknown — Number of deployments whose deployment type is not recognised; null when the account list could not be read
+    - deployments_third_party_publisher — Number of deployments whose model publisher is neither OpenAI nor Microsoft; null when the account list could not be read
+    - deployments_by_model_publisher — Number of deployments for each model publisher (OpenAI, Anthropic and so on), with one entry per publisher found; a deployment with no publisher reported is counted under unknown; null when the account list could not be read
+    - deployments_with_automatic_version_upgrade — Number of deployments whose model is upgraded automatically when a new default version is available or the current one expires; null when the account list could not be read
 
     Do deployments run under a content filter?
-    - deployments_content_filter_blocking — Number of deployments whose content filter policy has the hate, sexual, violence and self-harm filters enabled and blocking
-    - deployments_content_filter_non_blocking — Number of deployments whose policy has any of those filters off or annotate-only
-    - deployments_content_filter_none — Number of deployments that name no content filter policy
-    - deployments_content_filter_missing — Number of deployments that name a policy that is not on the account
-    - deployments_content_filter_unknown — Number of deployments whose account's policies could not be listed
-    - deployments_jailbreak_protection — Number of deployments whose policy blocks jailbreak attempts (Prompt Shields)
-    - deployments_indirect_attack_protection — Number of deployments whose policy blocks indirect attacks hidden in documents or tool output (Prompt Shields)
-    - deployments_asynchronous_filtering — Number of deployments whose policy lets output stream before filtering completes
+    - deployments_content_filter_blocking — Number of deployments whose content filter policy has the hate, sexual, violence and self-harm filters enabled and blocking; null when the account list could not be read
+    - deployments_content_filter_non_blocking — Number of deployments whose content filter policy lacks a hate, sexual, violence or self-harm filter, or has one off or annotate-only; null when the account list could not be read
+    - deployments_content_filter_none — Number of deployments that name no content filter policy; null when the account list could not be read
+    - deployments_content_filter_missing — Number of deployments that name a policy that is not on the account; null when the account list could not be read
+    - deployments_content_filter_unknown — Number of deployments whose account's policies could not be listed; null when the account list could not be read
+    - deployments_jailbreak_protection — Number of deployments whose policy blocks jailbreak attempts (Prompt Shields); null when the account list could not be read
+    - deployments_indirect_attack_protection — Number of deployments whose policy blocks indirect attacks hidden in documents or tool output (Prompt Shields); null when the account list could not be read
+    - deployments_asynchronous_filtering — Number of deployments whose policy lets output stream before filtering completes; null when the account list could not be read
 
     Are custom content filter policies weaker than Microsoft's default?
-    - content_filter_policies_custom — Number of content filter policies the customer manages
-    - content_filter_policies_weaker_than_default — Number of custom policies that do not block every harm category and jailbreaks, or set a severity threshold looser than Microsoft's default (a threshold is the lowest severity blocked, so High is looser than Medium)
-    - content_filter_policies_weaker_unknown — Number of policies whose thresholds are missing or unrecognised, so the comparison is unknown
-    - content_filter_policies_custom_unused — Number of custom policies that no deployment uses
+    - content_filter_policies_custom — Number of content filter policies the customer manages; null when the account list could not be read
+    - content_filter_policies_weaker_than_default — Number of custom policies that do not block every harm category and jailbreaks, or set a severity threshold looser than Microsoft's default (a threshold is the lowest severity blocked, so High is looser than Medium); null when the account list could not be read
+    - content_filter_policies_weaker_unknown — Number of custom policies whose thresholds are missing or unrecognised, so the comparison is unknown; null when the account list could not be read
+    - content_filter_policies_custom_unused — Number of custom policies that no deployment uses; null when the account list could not be read
 
     What can agents reach, and with what credentials?
-    - total_projects — Number of Foundry projects across all accounts
-    - total_connections — Number of connections across all accounts and projects (an account list that repeats a project's connection counts it once)
-    - connections_using_stored_secrets — Number of connections that keep a credential (key, token, password, SAS or service principal secret) instead of using Entra ID or a managed identity
-    - connections_unauthenticated — Number of connections that use no authentication
-    - connections_auth_type_unrecognized — Number of connections whose authentication type is not recognised, so whether they hold a secret is unknown
-    - connections_unknown_accounts — Number of Foundry or OpenAI accounts whose connections could not be read
-    - remote_tool_connections — Number of connections that are tools or MCP servers agents can call
-    - grounding_with_bing_connections — Number of Grounding with Bing Search connections, which send queries outside the Azure compliance boundary
+    - total_projects — Number of Foundry projects across all accounts; null when the account list could not be read
+    - total_connections — Number of connections across all accounts and projects (an account list that repeats a project's connection counts it once); null when the account list could not be read
+    - connections_using_stored_secrets — Number of connections that keep a credential (key, token, password, SAS or service principal secret) instead of using Entra ID or a managed identity; null when the account list could not be read
+    - connections_unauthenticated — Number of connections that use no authentication; null when the account list could not be read
+    - connections_auth_type_unrecognized — Number of connections whose authentication type is not recognised, so whether they hold a secret is unknown; null when the account list could not be read
+    - connections_unknown_accounts — Number of Foundry or OpenAI accounts whose connections could not be read; null when the account list could not be read
+    - remote_tool_connections — Number of connections that are tools or MCP servers agents can call; null when the account list could not be read
+    - grounding_with_bing_connections — Number of Grounding with Bing Search connections, which send queries outside the Azure compliance boundary; null when the account list could not be read

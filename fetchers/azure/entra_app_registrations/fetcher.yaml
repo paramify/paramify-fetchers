@@ -95,7 +95,7 @@ evidence_set:
     - credentials_without_expiry — Number of credentials with no end date; null if the applications read failed or stopped part-way
     - healthy_credentials — Number of credentials that have an end date, haven't expired and don't expire within rotation_threshold_days days; null if the applications read failed or stopped part-way
     - rotation_threshold_days — Days before expiry at which a credential counts as expiring soon (30)
-    - credential_rotation_compliance_percentage — Percentage of credentials that are healthy; 0 when there are none; null if the applications read failed or stopped part-way
+    - credential_rotation_compliance_percentage — Percentage of credentials that are healthy = healthy_credentials / total_credentials × 100 (a whole number, 0–100); 0 when total_credentials is 0; null if the applications read failed or stopped part-way
     - apps_with_expired_credentials — Number of app registrations holding an expired credential; null if the applications read failed or stopped part-way
     - apps_with_credentials_expiring_soon — Number of app registrations holding a credential expiring soon; null if the applications read failed or stopped part-way
     - apps_with_credentials_without_expiry — Number of app registrations holding a credential with no end date; null if the applications read failed or stopped part-way
