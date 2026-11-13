@@ -534,3 +534,144 @@ def test_a_credential_failure_writes_null_figures_and_fails_the_run(tmp_path, mo
     evidence = json.loads((tmp_path / "azure_entra_pim_assignments_t-1.json").read_text())
     assert evidence["summary"] == {"pim_available": None, "collection_complete": False}
     assert json.loads((tmp_path / "status.json").read_text())["code"] == "auth_failed"
+
+
+# --- the approved principals setting --------------------------------------------
+
+U_OK, U_NEW = "0000000a-0000-4000-8000-00000000000a", "0000000b-0000-4000-8000-00000000000b"
+G_OK, G_NEW = "0000000c-0000-4000-8000-00000000000c", "0000000f-0000-4000-8000-00000000000f"
+SP_NEW, U_OTHER = "0000000d-0000-4000-8000-00000000000d", "0000000e-0000-4000-8000-00000000000e"
+GROUP, SP = "#microsoft.graph.group", "#microsoft.graph.servicePrincipal"
+
+
+def _approval_eligible():
+    # U_NEW is eligible for two privileged roles; U_OTHER only below the tenant, through a group or for Directory Readers.
+    return [
+        _instance(GA, U_OK, upn="ok@contoso.test", end=LATER),
+        _instance(GA, U_NEW, upn="new@contoso.test", end=LATER),
+        _instance(PRA, U_NEW, upn="new@contoso.test"),
+        # Graph returns lower-case ids; an upper-case one still matches the list.
+        _instance(PRA, G_OK.upper(), odata=GROUP),
+        _instance(PRA, SP_NEW, odata=SP),
+        _instance(PRA, U_OTHER, member_type="Group"),
+        _instance(PRA, U_OTHER, scope="/administrativeUnits/au-1"),
+        _instance(READER, U_OTHER),
+    ]
+
+
+def _approval_build(approved, eligible=None, active=(), invalid=0):
+    eligible = _approval_eligible() if eligible is None else eligible
+    return pim.build(DEFINITIONS, eligible, list(active), [_policy(GA), _policy(PRA)], [], approved, invalid)
+
+
+def test_approved_ids_split_on_commas_spaces_and_newlines_ignoring_case():
+    assert pim.parse_approved_ids(None) == (None, 0)
+    assert pim.parse_approved_ids(" \n ") == (None, 0)
+    assert pim.parse_approved_ids(" , \n,") == (None, 0)
+    assert pim.parse_approved_ids(f"{U_OK.upper()}, {G_OK}\n{U_OK}") == (sorted([U_OK, G_OK]), 0)
+    assert pim.parse_approved_ids(f"{U_OK} alice@contoso.test") == ([U_OK, "alice@contoso.test"], 1)
+
+
+def test_eligible_holders_off_the_approved_list_are_counted_once_and_listed(assert_summary_documented):
+    # An active holder off the list isn't judged here; azure_entra_privileged_roles reads active holders.
+    results, summary = _approval_build([G_OK, U_OK], active=[_instance(GA, U_OTHER)])
+
+    assert summary["approved_principals_configured"] is True
+    assert summary["unapproved_eligible_privileged_principals"] == 2
+    assert results["approved_principal_ids"] == [G_OK, U_OK]
+    assert [(h["principal_id"], h["principal_type"], h["privileged_roles"])
+            for h in results["unapproved_eligible_principals"]] == [
+        # Sorted by sign-in name, else display name (the fixture's display name is the id).
+        (SP_NEW, "ServicePrincipal", ["Privileged Role Administrator"]),
+        (U_NEW, "User", ["Global Administrator", "Privileged Role Administrator"]),
+    ]
+    assert_summary_documented("azure/entra_pim_assignments", summary)
+
+
+def test_an_eligible_group_off_the_list_is_counted_by_its_own_id():
+    eligible = [_instance(GA, U_OK), _instance(PRA, G_NEW, odata=GROUP), _instance(PRA, U_OK, member_type="Group")]
+    results, summary = _approval_build([U_OK], eligible)
+
+    assert summary["unapproved_eligible_privileged_principals"] == 1
+    assert [(h["principal_id"], h["principal_type"]) for h in results["unapproved_eligible_principals"]] == [
+        (G_NEW, "Group"),
+    ]
+
+
+def test_every_eligible_holder_approved_reads_zero():
+    results, summary = _approval_build([U_OK, U_NEW, G_OK, SP_NEW])
+
+    assert summary["unapproved_eligible_privileged_principals"] == 0
+    assert results["unapproved_eligible_principals"] == []
+
+
+def test_without_the_setting_only_the_new_keys_are_added():
+    results, summary = _approval_build(None)
+
+    assert summary.pop("approved_principals_configured") is False
+    assert summary.pop("unapproved_eligible_privileged_principals") is None
+    assert results.pop("approved_principal_ids") is None and results.pop("unapproved_eligible_principals") is None
+    eligible = [pim.assignment_record(i, pim.role_index(DEFINITIONS), False) for i in _approval_eligible()]
+    policies = [pim.policy_record(p, pim.role_index(DEFINITIONS)) for p in (_policy(GA), _policy(PRA))]
+    full = pim.summarize(eligible, [], policies)
+    assert {k: v for k, v in full.items() if k not in ("approved_principals_configured",
+                                                         "unapproved_eligible_privileged_principals")} == {
+        k: v for k, v in summary.items() if k != "collection_complete"}
+    assert set(results) == {"active_assignments", "eligible_assignments", "pim_available",
+                            "privileged_role_names_checked", "role_definitions_read", "role_policies"}
+
+
+def test_an_eligible_grant_with_no_scope_leaves_the_unapproved_count_unknown():
+    results, summary = _approval_build([U_OK], [_instance(GA, U_OK), _instance(PRA, U_NEW, scope=None)])
+
+    assert summary["approved_principals_configured"] is True
+    assert summary["unapproved_eligible_privileged_principals"] is None
+    assert results["unapproved_eligible_principals"] is None
+
+
+def test_a_failed_eligibility_read_leaves_the_approval_out_of_the_summary():
+    results, summary = pim.build(DEFINITIONS, None, [], [_policy(GA)], [], [U_OK])
+
+    assert summary == {"pim_available": None, "collection_complete": False}
+    assert results["approved_principal_ids"] == [U_OK]
+    assert results["unapproved_eligible_principals"] is None
+
+
+def _run_main(tmp_path, monkeypatch, approved, eligible):
+    _client(monkeypatch, _Builder(items=eligible), _Builder(items=[]))
+    monkeypatch.setattr(pim, "credential", lambda: object())
+    monkeypatch.setattr(pim, "load_dotenv", lambda: None)
+    monkeypatch.setenv("EVIDENCE_DIR", str(tmp_path))
+    monkeypatch.setenv("FETCHER_STATUS_FILE", str(tmp_path / "status.json"))
+    monkeypatch.delenv("AZURE_SUBSCRIPTION_ID", raising=False)
+    monkeypatch.setenv(pim.APPROVED_ENV, approved)
+    code = pim.main()
+    return code, json.loads((tmp_path / "azure_entra_pim_assignments_t-1.json").read_text())
+
+
+def _graph_instance(principal_id, odata="#microsoft.graph.user"):
+    return ns(id=f"{GA}-{principal_id}", principal_id=principal_id,
+              principal=ns(odata_type=odata, display_name=principal_id, user_principal_name=None),
+              role_definition_id=GA, directory_scope_id="/", app_scope_id=None, member_type="Direct",
+              assignment_type=None, start_date_time=NOW, end_date_time=LATER)
+
+
+def test_main_reads_the_setting(tmp_path, monkeypatch):
+    code, evidence = _run_main(tmp_path, monkeypatch, f"{U_OK}\n", [_graph_instance(U_OK), _graph_instance(U_NEW)])
+
+    assert code == 0
+    assert evidence["summary"]["approved_principals_configured"] is True
+    assert evidence["summary"]["unapproved_eligible_privileged_principals"] == 1
+    assert evidence["results"]["approved_principal_ids"] == [U_OK]
+
+
+def test_an_entry_that_is_not_an_object_id_fails_the_run_as_bad_config(tmp_path, monkeypatch):
+    code, evidence = _run_main(tmp_path, monkeypatch, f"{U_OK},alice@contoso.test", [_graph_instance(U_NEW)])
+
+    assert code == 1
+    assert json.loads((tmp_path / "status.json").read_text())["code"] == "bad_config"
+    assert evidence["summary"]["approved_principals_configured"] is True
+    assert evidence["summary"]["unapproved_eligible_privileged_principals"] is None
+    assert evidence["results"]["unapproved_eligible_principals"] is None
+    # The rest of the evidence is still collected.
+    assert evidence["summary"]["eligible_privileged_assignments"] == 1

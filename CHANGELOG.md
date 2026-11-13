@@ -62,6 +62,22 @@ schemas and the `paramify` CLI — not the internal code.
   read the legacy query is sent unchanged. The columns are listed in
   [the fetcher's README](fetchers/wiz/vulnerability_findings/README.md#columns).
 
+- **`azure_entra_pim_assignments` 0.2.0: an approved principals setting.** The
+  optional `approved_principal_ids` setting (`AZURE_ENTRA_APPROVED_PRINCIPAL_IDS`)
+  is the same one `azure_entra_privileged_roles` takes: object ids of the users,
+  groups and service principals approved to hold a privileged directory role,
+  separated by commas, spaces or newlines. `summary.approved_principals_configured`
+  says whether a list is set, and `summary.unapproved_eligible_privileged_principals`
+  counts the distinct users, groups and apps eligible for a privileged role
+  tenant-wide whose object id isn't on it. Direct eligible assignments only: a
+  group is matched by its own id, not its members. The count is null with no
+  list, when an entry isn't an object id (the run then fails as `bad_config`), or
+  when a privileged eligible assignment has no scope; like the other figures, it
+  is left out when a read fails. `results.unapproved_eligible_principals` lists
+  those principals with the privileged roles each is eligible for, and
+  `results.approved_principal_ids` the list they were compared with. Without the
+  setting the evidence is unchanged apart from these four keys (false or null).
+
 - **Optional selected-subscription reads for mixed Entra evidence.**
   `azure_entra_emergency_accounts` 0.2.0 and
   `azure_entra_dormant_identities` 0.3.0 accept `target_subscription_only`
