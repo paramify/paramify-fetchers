@@ -117,6 +117,20 @@ def find_repo_root(start: Optional[Path] = None) -> Path:
     )
 
 
+def check_for_update(root: Path) -> Optional[dict]:
+    """Whether a newer release tag than the one this clone runs is available.
+
+    For front-ends to show a quiet notice: the CLI prints one line a day, and
+    the TUI can call this too. Fetches tags at most once a day, in the
+    background; returns None when PARAMIFY_NO_UPDATE_CHECK is set, when there is
+    no git clone (the deploy image), or on any failure. Otherwise
+    {current, latest, latest_tag, update_available, on_release}.
+    """
+    from framework import update
+
+    return update.check_for_update(root)
+
+
 # --------------------------------------------------------------------------- #
 # Catalog — discover + group + describe (powers the UI form and `catalog --json`)
 # --------------------------------------------------------------------------- #

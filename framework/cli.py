@@ -63,6 +63,11 @@ Validate / run / launch:
   paramify issues close <assessment-id> [--yes] [--json]
   paramify tui [--manifest PATH] [--at ROOT]   # interactive terminal UI
 
+Upgrade (release tags only; see docs/versioning_guide.md):
+  paramify update [--to vX.Y.Z-beta | --next] [--yes] [--allow-breaking] [--json]
+  paramify update --check [--json]             # exit 0 up to date, 1 update available, 2 can't tell
+  paramify update --rollback [--yes] [--json]  # back to the version before the last update
+
 Secrets are referenced as ${env:VAR} — set-secret / add-target take the ENV VAR
 NAME, never the secret value. The runner resolves refs from its own environment.
 Outputs land in <output_dir>/run-<timestamp>/ with a _run_metadata.json.
@@ -105,6 +110,8 @@ from framework.secret_resolver import (
 )
 from framework.sync.model import Outcome, Plan
 from framework.sync.render import render_outcomes, render_plan
+from framework.update_cli import maybe_notice as maybe_update_notice
+from framework.update_cli import update_cmd
 
 _DEFAULT_MANIFEST = "manifest.yaml"
 
@@ -195,6 +202,10 @@ def _root(ctx: typer.Context) -> None:
         ctx.color = False
     elif os.environ.get("FORCE_COLOR"):
         ctx.color = True
+    # The once-a-day "a newer release is out" line, printed after the command
+    # finishes. update_cli.maybe_notice decides whether it is due and stays
+    # silent under --json, in pipes, and inside the container.
+    ctx.call_on_close(lambda: maybe_update_notice(ctx.invoked_subcommand))
 
 
 # --------------------------------------------------------------------------- #
@@ -3272,6 +3283,9 @@ def issues_close_cmd(
     else:
         typer.echo(_job_line(job))
     raise typer.Exit(0 if ok else 1)
+
+
+app.command("update")(update_cmd)
 
 
 if __name__ == "__main__":
