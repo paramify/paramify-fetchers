@@ -80,6 +80,15 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **NIST CMVP category: cryptographic module validation status.**
+  `nist_cmvp_module_validation_status` reads the public CMVP certificate page
+  for each certificate number in its `certificates` config and reports whether
+  the module is currently validated: the page is for that number, Status is
+  Active, the standard is FIPS 140-2 or FIPS 140-3, and the sunset date has not
+  passed. Anything else is not validated, with a reason (`historical`,
+  `revoked`, `sunset_passed`, `status_unknown`, `not_found`, `parse_error` or
+  `fetch_error`). Maps to KSI-SVC-SIN and KSI-SVC-VRI. No credential.
+
 - **`pipeline:` block in `fetcher.yaml`.** A fetcher whose output feeds a Paramify
   pipeline declares `pipeline: {type, id_scheme}` (`asset_id_field` for a
   scan-report pipeline). `kind: issue_report` may declare `vulnerability` or

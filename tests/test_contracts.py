@@ -319,6 +319,7 @@ TEXT_FORMAT_FETCHERS = (
     "azure/vpn_gateway_configuration",
     "azure/waf_ddos_activity",
     "azure/zone_redundancy",
+    "nist_cmvp",
     "oci",
     "qualys",
     "sophos",
