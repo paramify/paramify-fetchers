@@ -47,6 +47,12 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- `azure_aks_cluster_configuration` 0.4.0 adds each cluster's
+  `configuration_observations`: SDK-projected RBAC, local-account, private-cluster
+  and authorized API-server IP-range values before normalization. Missing values
+  remain null, distinct from explicit false or empty lists. Existing normalized
+  flags and summary counts keep their meanings.
+
 - Selected-subscription collection now avoids cross-subscription discovery in
   VNet egress, Private DNS, WAF policies and alert action-group references when
   `AZURE_TARGET_SUBSCRIPTION_ONLY=true`. Foreign relationships remain unknown
