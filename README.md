@@ -125,7 +125,7 @@ pip install -e '.[all]'      # '[all]' bundles the TUI; use `pip install -e .` f
 Each platform has its own requirements:
 
 - Most fetchers call a CLI, such as `aws`, `jq`, `curl` or `kubectl`. Install only the CLIs for the platforms that you use.
-- Azure, GCP and Oracle Cloud use the official SDKs, not a CLI. Install them with `pip install -e '.[azure]'`, `pip install -e '.[gcp]'` or `pip install -e '.[oci]'`. These extras are only needed for those platforms, so `[all]` does not include them. Azure signs in with `DefaultAzureCredential` and GCP with Application Default Credentials, so neither one needs a key file. OCI uses an API signing key that the runner injects as a secret, or an instance or resource principal where it is deployed; see [`fetchers/oci/README.md`](fetchers/oci/README.md).
+- Azure, GCP and Oracle Cloud use the official SDKs, not a CLI. Install them with `pip install -e '.[azure]'`, `pip install -e '.[gcp]'` or `pip install -e '.[oci]'`. These extras are only needed for those platforms, so `[all]` does not include them. Azure signs in with `DefaultAzureCredential` and GCP with Application Default Credentials, so neither one needs a key file. For a collector limited to one explicit Azure subscription, see the [Azure read scope guide](docs/azure_read_scope.md). OCI uses an API signing key that the runner injects as a secret, or an instance or resource principal where it is deployed; see [`fetchers/oci/README.md`](fetchers/oci/README.md).
 - Most platforms have a credential setup guide at `fetchers/<category>/README.md`. Select a logo under [Supported services](#supported-services) to open its folder.
 
 ---

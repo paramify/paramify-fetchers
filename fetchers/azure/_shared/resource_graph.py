@@ -81,10 +81,10 @@ def quoted_ids(ids: List[str]) -> str:
 LOOKUP_CHUNK = 200
 
 
-def lookup_by_ids(client, ids, build_query, label: str, collector: Collector):
+def lookup_by_ids(client, ids, build_query, label: str, collector: Collector, *, subscription_id=None):
     """Resource Graph rows keyed by lowercased id, plus the ids whose chunk failed.
 
-    Unscoped so resources in other readable subscriptions resolve. A failed chunk leaves only its own ids unknown.
+    Unscoped by default. An explicit subscription confines all lookup pages; a failed chunk leaves only its own ids unknown.
     """
     unique = sorted({i.lower() for i in ids if i})
     out, failed = {}, set()
@@ -92,7 +92,7 @@ def lookup_by_ids(client, ids, build_query, label: str, collector: Collector):
         chunk = unique[start : start + LOOKUP_CHUNK]
         rows = collector.guard(
             f"resourcegraph.resources ({label} {start + 1}-{start + len(chunk)})",
-            lambda: query_all(client, None, build_query(chunk))["rows"],
+            lambda: query_all(client, subscription_id, build_query(chunk))["rows"],
         )
         if rows is None:
             failed.update(chunk)
