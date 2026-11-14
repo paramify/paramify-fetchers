@@ -2477,6 +2477,15 @@ schemas and the `paramify` CLI — not the internal code.
   ARM-provided URIs and rotation-policy configured/readability semantics are
   unchanged.
 
+- **`azure_defender_plans` 0.3.1 preserves pricing observations.** Each plan
+  retains `observed_configuration` with the selected SDK-projected attributes,
+  including extension `additional_extension_properties` such as exclusions.
+  These are projected observations, not raw HTTP or proof of effective resource
+  coverage. Missing or unrecognized extension, enforcement and inheritance flags
+  stay `null` rather than `false`; extension summary counts include only flags
+  explicitly enabled. Existing security-contact reads and failure handling are
+  unchanged.
+
 - **`azure_entra_authentication_policy` no longer shows Microsoft's password
   defaults when the tenant's settings could not be read.** Before, a failed
   `/groupSettings` read fell back to the template, so `password_settings_source`
