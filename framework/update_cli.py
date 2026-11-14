@@ -431,7 +431,8 @@ def _rollback(run: _Run, root: Path, yes: bool) -> NoReturn:
         run.show(view.note(run.look, "Nothing changed."))
         raise typer.Exit(1)
     run.gap()
-    ref = prev["branch"] or prev["sha"]
+    # The tag reads better than a sha in the step line and lands on the same commit.
+    ref = prev["branch"] or prev.get("tag") or prev["sha"]
     _apply(run, root, pos, ref, manifests, version=label, tries=[], branch=bool(prev["branch"]),
            rolling_back=True)
 

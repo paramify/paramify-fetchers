@@ -308,6 +308,8 @@ def header(look: Look, plan: dict) -> RenderableType:
         facts.append(Text(_plural(len(notes), "release") + " ahead", style=look.muted))
     elif plan["direction"] == "back":
         facts.append(Text("older than what you run", style=look.warn))
+    elif plan["direction"] == "rollback":
+        facts.append(Text("back to the version before your last update", style=look.muted))
     if plan["breaking"]:
         facts.append(Text(_plural(len(plan["breaking"]), "breaking change"), style=Style(color=look.fail, bold=True)))
     sub = Text("  ")
@@ -510,25 +512,26 @@ def dirty(look: Look, status: dict) -> RenderableType:
     t.append_text(look.mark("fail"))
     t.append(" Your checkout has changes to tracked files, so update won't switch.",
              style=Style(color=look.fg, bold=True))
-    parts: List[RenderableType] = [t, Text("    A switch would carry them onto code they weren't written for, "
-                                           "or stop halfway.", style=look.muted), Text("")]
+    parts: List[RenderableType] = [t, indent(Text("A switch would carry them onto code they weren't "
+                                                  "written for, or stop halfway.", style=look.muted), 4),
+                                   Text("")]
     for p in status["tracked"][:12]:
         parts.append(Text(f"      {p}", style=look.warn))
     if len(status["tracked"]) > 12:
         parts.append(Text(f"      … and {len(status['tracked']) - 12} more", style=look.muted))
-    fix = Text("\n    Commit them, or move them to a branch, then run ", style=look.fg)
+    fix = Text("Commit them, or move them to a branch, then run ", style=look.fg)
     fix.append("paramify update", style=look.info)
     fix.append(" again.", style=look.fg)
-    parts.append(fix)
+    parts += [Text(""), indent(fix, 4)]
     if status["untracked"]:
         parts.append(untracked_note(look, status["untracked"]))
     return Group(*parts)
 
 
-def untracked_note(look: Look, untracked: Sequence[str]) -> Text:
-    t = Text(f"    {_plural(len(untracked), 'untracked path')} (custom fetchers, notes) stay where they are.",
-             style=look.muted)
-    return t
+def untracked_note(look: Look, untracked: Sequence[str]) -> RenderableType:
+    n = len(untracked)
+    return indent(Text(f"{_plural(n, 'untracked path')} (custom fetchers, notes) "
+                       f"{'stays where it is' if n == 1 else 'stay where they are'}.", style=look.muted), 4)
 
 
 def done_panel(look: Look, version: str, tries: Sequence[Tuple[str, str]], *, rollback: bool = True,
@@ -537,6 +540,8 @@ def done_panel(look: Look, version: str, tries: Sequence[Tuple[str, str]], *, ro
     rows = [("try" if i == 0 else "", cmd, why) for i, (cmd, why) in enumerate(tries[:3])]
     if rollback:
         rows.append(("undo", "paramify update --rollback", "back to where you were"))
+    elif not rows:
+        rows.append(("next", "paramify update --check", "see what's newer, when you're ready"))
     # Exact widths, with the descriptions cut by hand: when a grid overflows,
     # rich shrinks its first columns to nothing rather than the last one.
     cmd_w = max((len(r[1]) for r in rows), default=0)
