@@ -7,10 +7,43 @@ it, and a Paramify inventory pipeline turns each record into an Inventory item.
 
 **You need:** [the repo installed](../README.md#install) ·
 [an API key](../uploaders/paramify_evidence/README.md#paramify-api-key) ·
-an inventory fetcher (`github_repository_inventory`, `sophos_endpoint_inventory` and
-[`wiz_inventory`](../fetchers/wiz/inventory/README.md) ship; to write another, see the [pipeline fetchers guide](pipeline_fetchers_guide.md)
-or ask [your AI agent](../README.md#drive-it-with-an-ai-agent)). The example is
+an inventory fetcher ([`aws_config_inventory`](../fetchers/aws/config_inventory/fetcher.yaml),
+`github_repository_inventory`, `sophos_endpoint_inventory` and
+[`wiz_inventory`](../fetchers/wiz/inventory/README.md) ship; to write another,
+[copy the template](../fetchers/_template_inventory/), see the
+[pipeline fetchers guide](pipeline_fetchers_guide.md), or ask
+[your AI agent](../README.md#drive-it-with-an-ai-agent)). The example is
 `acme_asset_inventory`.
+
+For AWS Config, run once against an aggregator using the standard AWS CLI
+credential chain. Both commercial AWS and GovCloud work; `region` selects the
+aggregator endpoint, not a filter on the assets' regions:
+
+```yaml
+run:
+  fetchers:
+    - use: aws_config_inventory
+      config:
+        aggregator_name: organization-inventory
+        profile: inventory-reader
+        region: us-east-1 # For GovCloud, e.g. us-gov-west-1
+        require_all_regions: true
+        resource_types: '*' # Or AWS::EC2::Instance,AWS::RDS::DBInstance
+```
+
+The default includes every recorded resource type. Assets retain their source
+ARNs, including the `aws` or `aws-us-gov` partition; resources without an ARN
+use their partition/account/region/type/resource-ID tuple. Network details are
+normalized for EC2 instances and interfaces, RDS instances, load balancers, and
+WorkSpaces. Other types retain their identity, name, tags, and Config timestamp;
+unknown inventory fields stay null. No organization-specific names or exclusions
+apply. Use the AWS profile's `use_fips_endpoint` setting when required.
+
+Config recording must already cover the intended accounts, regions, and resource
+types. An all-regions aggregator cannot discover resources Config does not record.
+Source status checks reject reported failures, but do not prove recording coverage
+or instantaneous freshness: Config aggregation is eventually consistent. This
+fetcher performs no second service scan and does not collect XLSX reports.
 
 ---
 

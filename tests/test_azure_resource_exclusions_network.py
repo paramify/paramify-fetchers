@@ -110,9 +110,10 @@ def run_nsg(monkeypatch, tmp_path, patterns):
     return _run(nsg, monkeypatch, tmp_path, patterns, "azure_network_security_groups")
 
 
-def test_nsg_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_path):
+def test_nsg_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_path, assert_summary_documented):
     code, evidence = run_nsg(monkeypatch, tmp_path, None)
     assert code == 0 and evidence["results"]["excluded"] == []
+    assert_summary_documented("azure/network_security_groups", evidence["summary"])
     assert evidence["summary"] == {
         **nsg.summarize(*_nsg_records()), "provider_registration_status": "registered",
         **_added_fields({"network_security_group": 3, "virtual_network": 2, "network_interface": 3}),
@@ -230,9 +231,10 @@ def run_pe(monkeypatch, tmp_path, patterns, reads=None, fail=()):
     return _run(pe, monkeypatch, tmp_path, patterns, "azure_private_endpoint_configuration")
 
 
-def test_private_endpoints_without_patterns_add_only_empty_exclusion_fields(monkeypatch, tmp_path):
+def test_private_endpoints_without_patterns_add_only_empty_exclusion_fields(monkeypatch, tmp_path, assert_summary_documented):
     code, evidence = run_pe(monkeypatch, tmp_path, None)
     assert code == 0 and evidence["results"]["excluded"] == []
+    assert_summary_documented("azure/private_endpoint_configuration", evidence["summary"])
     assert evidence["results"]["private_endpoints"] == _pe_records()
     assert evidence["summary"] == {
         **pe.summarize(_pe_records()), "provider_registration_status": "registered",
@@ -311,9 +313,10 @@ def run_dns(monkeypatch, tmp_path, patterns):
     return _run(dns, monkeypatch, tmp_path, patterns, "azure_private_dns_zone_configuration")
 
 
-def test_private_dns_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_path):
+def test_private_dns_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_path, assert_summary_documented):
     code, evidence = run_dns(monkeypatch, tmp_path, None)
     assert code == 0 and evidence["results"]["excluded"] == []
+    assert_summary_documented("azure/private_dns_zone_configuration", evidence["summary"])
     assert evidence["summary"] == {
         **dns.summarize(*_dns_records()), "provider_registration_status": "registered",
         **_added_fields({"private_dns_zone": 3}),
@@ -398,9 +401,10 @@ def run_egress(monkeypatch, tmp_path, patterns):
     return _run(egress, monkeypatch, tmp_path, patterns, "azure_vnet_egress_routing")
 
 
-def test_egress_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_path):
+def test_egress_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_path, assert_summary_documented):
     code, evidence = run_egress(monkeypatch, tmp_path, None)
     assert code == 0 and evidence["results"]["excluded"] == []
+    assert_summary_documented("azure/vnet_egress_routing", evidence["summary"])
     assert evidence["summary"] == {
         **egress.summarize(*egress.build_records(*_egress_raw())), "provider_registration_status": "registered",
         **_added_fields({"virtual_network": 3, "subnet": 4, "route_table": 1, "network_interface": 2,
@@ -464,3 +468,51 @@ def test_egress_bare_pattern_fails_the_run(monkeypatch, tmp_path):
     code, evidence = run_egress(monkeypatch, tmp_path, "rg-out")
     assert code == 1
     assert evidence["summary"]["total_virtual_networks"] == 3
+
+
+# --- a list that was not read leaves the unmatched patterns null ---
+
+def _fail_then(m, name, operation, records, caplog):
+    def collect(*args, **kwargs):
+        args[-1 if name != "egress" else 2].record(operation, RuntimeError("403"))
+        return records() if name != "egress" else (_egress_raw(), egress.new_hub_search())
+    return collect
+
+
+def test_nsg_unread_list_leaves_unmatched_null(monkeypatch, tmp_path, caplog):
+    monkeypatch.setattr(nsg, "collect_network", _fail_then(nsg, "nsg", "network.virtual_networks.list_all", _nsg_records, caplog))
+    code, evidence = _run(nsg, monkeypatch, tmp_path, "rg:typo", "azure_network_security_groups")
+    assert code == 1 and evidence["summary"]["resource_exclusion_patterns_unmatched"] is None
+    assert "matched nothing" not in caplog.text
+
+
+def test_private_endpoints_unread_list_leaves_unmatched_null(monkeypatch, tmp_path, caplog):
+    network = ModuleType("azure.mgmt.network")
+
+    def refuse():
+        raise RuntimeError("403")
+
+    network.NetworkManagementClient = lambda **kw: NS(private_endpoints=NS(list_by_subscription=refuse))
+    monkeypatch.setitem(sys.modules, "azure.mgmt.network", network)
+    monkeypatch.setattr(pe, "resource_graph_client", lambda cred: object())
+    monkeypatch.setattr(pe, "readable_scopes", lambda cred, collector: None)
+    code, evidence = _run(pe, monkeypatch, tmp_path, "rg:typo", "azure_private_endpoint_configuration")
+    assert code == 1 and evidence["summary"]["resource_exclusion_patterns_unmatched"] is None
+    assert "matched nothing" not in caplog.text
+
+
+def test_private_dns_unread_list_leaves_unmatched_null(monkeypatch, tmp_path, caplog):
+    monkeypatch.setattr(dns, "collect_zones", _fail_then(dns, "dns", "privatedns.private_zones.list", _dns_records, caplog))
+    code, evidence = _run(dns, monkeypatch, tmp_path, "rg:typo", "azure_private_dns_zone_configuration")
+    assert code == 1 and evidence["summary"]["resource_exclusion_patterns_unmatched"] is None
+    assert "matched nothing" not in caplog.text
+
+
+def test_egress_unread_list_leaves_unmatched_null_but_a_peering_failure_does_not(monkeypatch, tmp_path, caplog):
+    monkeypatch.setattr(egress, "collect", _fail_then(egress, "egress", "network.route_tables.list_all", None, caplog))
+    code, evidence = _run(egress, monkeypatch, tmp_path, "rg:typo", "azure_vnet_egress_routing")
+    assert code == 1 and evidence["summary"]["resource_exclusion_patterns_unmatched"] is None
+    assert "matched nothing" not in caplog.text
+    monkeypatch.setattr(egress, "collect", _fail_then(egress, "egress", "network.virtual_network_peerings.list(v)", None, caplog))
+    _, evidence = _run(egress, monkeypatch, tmp_path, "rg:typo", "azure_vnet_egress_routing")
+    assert evidence["summary"]["resource_exclusion_patterns_unmatched"] == ["rg:typo"]

@@ -1,24 +1,7 @@
 name: azure_log_analytics_deletion_rights
-version: 0.2.0
-description: >
-  Who can remove log data from each Log Analytics workspace in the subscription:
-  through the Purge API, the Delete Data API, deleting the workspace, or
-  shortening workspace or table retention (which deletes everything older).
-  Every role assignment that applies at the workspace (made there or inherited
-  from its resource group, subscription, management group or root), active or
-  PIM-eligible, is checked against its role definition, net of notActions. Each
-  grant lists its principal (name resolved where Microsoft Graph allows), role,
-  scope, whether it is active or eligible, and whether each right comes from an
-  explicit grant (Data Purger) or a wildcard such as Log Analytics Contributor's
-  Microsoft.OperationalInsights/* or Contributor's '*'.
-  Workspaces the resource_exclusions patterns take out are listed under excluded
-  instead, each with the pattern that matched, and every count covers only
-  in-scope workspaces. The summary echoes resource_exclusion_patterns, lists
-  resource_exclusion_patterns_unmatched (patterns that matched no workspace,
-  such as a mistyped name), and counts excluded_workspaces and
-  in_scope_workspaces (0 when none was found or the patterns took out every
-  workspace, which a check can catch by requiring more than 0; both are null
-  when the workspace list couldn't be read).
+version: 0.2.1
+description: >-
+  Shows who can delete log data from each Log Analytics workspace, by purging it, deleting it or shortening its retention, and through which role.
 category: azure
 
 supports_targets: true
@@ -87,12 +70,33 @@ ksis:
 evidence_set:
   reference_id: EVD-AZURE-LOG-ANALYTICS-DELETION-RIGHTS
   name: Azure Log Analytics Deletion Rights
-  instructions: >
-    Script: azure/log_analytics_deletion_rights/fetcher.py. ARM REST at each workspace with $filter=atScope():
-    roleAssignments (2022-04-01), PIM roleEligibilityScheduleInstances
-    (2020-10-01), and each role definition. Checked actions: workspaces purge,
-    tables/deleteData, delete, write (retention) and tables/write. A grant holds
-    one when an action pattern matches (case-insensitive, * wildcard) and no
-    notActions does; explicit means the exact action. Group members are not
-    expanded. Names via Graph directoryObjects/getByIds when permitted. Role:
-    Reader.
+  instructions: |
+    Script: azure/log_analytics_deletion_rights/fetcher.py
+
+    Access: Reader on the subscription. Optional: permission to read directory objects in Microsoft Graph, to show principal names; without it names read as null. Optional: Entra ID P2, which PIM-eligible assignments need; without it they aren't read and a note says so.
+
+    Commands Executed:
+    - GET /subscriptions — picks a subscription when none is set
+    - GET Microsoft.OperationalInsights/workspaces — every workspace
+    - GET Microsoft.SecurityInsights/onboardingStates (per workspace) — whether Sentinel is on
+    - GET Microsoft.Authorization/roleAssignments at the workspace's scope (per workspace) — active assignments made there or inherited from above
+    - GET Microsoft.Authorization/roleEligibilityScheduleInstances at the workspace's scope (per workspace) — PIM-eligible assignments
+    - GET each role definition (per role) — whether the role grants a deletion action
+    - Microsoft Graph POST /directoryObjects/getByIds — principal names
+
+    Output: azure_log_analytics_deletion_rights_<subscription>.json — for each workspace, every principal that can delete its data, with the role, scope and whether the right is explicit or from a wildcard, plus the workspaces left out and why.
+
+    Summary fields:
+
+    How many workspaces were read?
+    - workspaces_collected — Number of in-scope workspaces read, Sentinel or not
+
+    Who can delete log data?
+    - max_principals_with_deletion_rights — Number of distinct principals (users, groups or apps) with a deletion right on the workspace where that number is highest, counting only workspaces whose role assignments were read; null if none was read. A deletion right is purge, Delete Data, deleting the workspace, or changing the workspace's or a table's retention (shortening it deletes everything older), through an active or PIM-eligible assignment net of the role's notActions. Group members are not expanded
+    - workspaces_with_explicit_grants — Number of workspaces where at least one principal holds a deletion right through a role that names the action exactly (such as Data Purger) rather than through a wildcard (such as Log Analytics Contributor's Microsoft.OperationalInsights/*)
+
+    Which workspaces are left out of scope?
+    - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every workspace is in scope
+    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no workspace, such as a mistyped name; null when the workspace list could not be read
+    - excluded_workspaces — Number of workspaces left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, and no other count includes it; null when the workspace list could not be read
+    - in_scope_workspaces — Number of workspaces found and in scope; 0 means none was found or the patterns took out every workspace, which a check can catch by requiring more than 0; null when the workspace list could not be read

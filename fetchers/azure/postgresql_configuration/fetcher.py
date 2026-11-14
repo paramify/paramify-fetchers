@@ -528,8 +528,10 @@ def main() -> int:
             ),
         )
 
-    exclusions.warn_unmatched(logger)
     listed = servers is not None
+    if not listed:
+        exclusions.mark_unread()
+    exclusions.warn_unmatched(logger)
     servers = servers or []
 
     evidence = build_payload(

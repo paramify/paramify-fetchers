@@ -12,8 +12,12 @@ as it did before batches. See
 
 **You need:** [the repo installed](../README.md#install) ·
 [a completed run](cli_guide.md#collect-then-upload) · a Paramify account that
-can create API keys. The TUI's **Paramify** tab does the same upload and script
-sync ([TUI walkthrough](https://support.paramify.com/hc/en-us/articles/55867428958355-Setup-Fetchers)).
+can create API keys. In the TUI, the **Paramify** tab shows what each fetcher in the
+manifest has in Paramify, the same table as
+[`paramify status`](cli_guide.md#check-the-setup-in-paramify). From there, `s`
+syncs the scripts, `v` syncs the validators and `u` uploads the newest run. The
+**Pipelines** tab sends scan reports
+([TUI walkthrough](https://support.paramify.com/hc/en-us/articles/55867428958355-Setup-Fetchers)).
 
 ---
 

@@ -1,0 +1,63 @@
+name: aws_config_inventory
+version: 0.1.0
+description: Lists recorded assets across the accounts and regions of an AWS Config aggregator, with stable identifiers, network details, tags, and source timestamps.
+category: aws
+kind: inventory
+pipeline:
+  type: inventory
+  id_scheme: aws-arn
+supports_targets: false
+runtime:
+  type: python
+  entry: fetcher.py
+  timeout: 900
+output:
+  type: json
+  path: aws_config_inventory.json
+secrets: []
+config_schema:
+  aggregator_name:
+    type: string
+    required: true
+    env: CONFIG_INVENTORY_AGGREGATOR
+    description: Config aggregator in the selected region and account. Run once for its whole scope.
+  region:
+    type: string
+    required: false
+    env: AWS_REGION
+    description: Region hosting the aggregator; does not filter resource regions. Defaults to the AWS credential/configuration chain.
+  profile:
+    type: string
+    required: false
+    env: AWS_PROFILE
+    description: AWS CLI profile with access to the aggregator, including assume-role or SSO profiles.
+  resource_types:
+    type: string
+    required: false
+    default: '*'
+    env: CONFIG_INVENTORY_RESOURCE_TYPES
+    description: Comma-separated AWS Config resource types, or * for all recorded types. No account or region filter is applied.
+  require_all_regions:
+    type: boolean
+    required: false
+    default: false
+    env: CONFIG_INVENTORY_REQUIRE_ALL_REGIONS
+    description: Reject aggregators whose sources do not all enable AllAwsRegions.
+evidence_set:
+  reference_id: EVD-AWS-CONFIG-INVENTORY
+  name: AWS Config Asset Inventory
+  instructions: |
+    Script: aws/config_inventory/fetcher.py
+
+    Access: config:DescribeConfigurationAggregators, config:DescribeConfigurationAggregatorSourcesStatus, config:SelectAggregateResourceConfig on the aggregator account.
+
+    Commands Executed:
+    - aws configservice describe-configuration-aggregators — identify the account or organization scope
+    - aws configservice describe-configuration-aggregator-sources-status — reject missing, failed or outdated sources
+    - aws configservice select-aggregate-resource-config — read every page of recorded assets
+
+    Output: aws_config_inventory.json — one record per asset under payload.data, keyed by its ARN or its partition/account/region/type/resource-ID tuple when Config provides no ARN. Map unique_asset_identifier to Unique ID, component to Component, host_ips to Host IP, hostname to Hostname, subnet to Subnet, and asset_type to Asset Type in an Inventory pipeline. Source timestamps remain distinct from collection time. Unknown fields remain null. Internet facing reflects an explicit load-balancer scheme or RDS publiclyAccessible flag; an EC2 public address alone does not prove reachability. Any failed call, malformed record, duplicate identifier, unhealthy source or empty result withholds every record and fails the run.
+  description: >-
+    Recorded AWS Config resources within the selected aggregator and optional resource-type scope. Supports commercial AWS and GovCloud using the standard AWS CLI region, endpoint and credential configuration. Config must already record the desired resources in every source account and region. Aggregation is eventually consistent; successful source status verifies aggregator source health, not real-time asset freshness. No independent service scan or XLSX collection runs.
+ksis:
+  - KSI-PIY-GIV

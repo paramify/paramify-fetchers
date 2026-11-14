@@ -1,13 +1,7 @@
 name: azure_app_gateway_backend_tls
-version: 0.2.0
-description: >
-  Every Azure Application Gateway in the subscription and each of its backend
-  settings, layer 7 (HTTP/HTTPS) and layer 4 (TCP/TLS): whether traffic from the
-  gateway to the backend is encrypted, whether the backend's certificate chain,
-  expiry and server name are validated, which trusted root certificates are
-  pinned, the health probe's protocol, and which routing rules actually send
-  traffic through the setting. The gateway count is checked against Resource
-  Graph, and the collection fails on a mismatch.
+version: 0.2.1
+description: >-
+  Shows whether each Application Gateway backend setting encrypts traffic to its backend, validates the backend's certificate and server name, and is used by a routing rule.
 category: azure
 
 config_schema:
@@ -71,42 +65,41 @@ ksis:
 evidence_set:
   reference_id: EVD-AZURE-APPGW-BACKEND-TLS
   name: Azure Application Gateway Backend TLS
-  instructions: >
-    Script: azure/app_gateway_backend_tls/fetcher.py. Azure SDK calls: azure-mgmt-network
-    application_gateways.list_all() and a Resource Graph count of
-    microsoft.network/applicationgateways; the run fails if the two differ
-    (results.completeness.match false). Reader at subscription scope is
-    sufficient.
-    Resource Graph can lag behind list_all around a create or delete, so a
-    mismatch is checked once more after 30 seconds (results.completeness.recounted).
+  instructions: |
+    Script: azure/app_gateway_backend_tls/fetcher.py
 
-    One record per backend setting in results.backend_settings, from the
-    gateway's backendHttpSettingsCollection (layer "L7", protocol Http/Https)
-    and backendSettingsCollection (layer "L4", protocol Tcp/Tls). used_by_rules
-    lists the request routing rules, URL path map defaults and path rules, and
-    L4 routing rules that reference the setting; in_use is true when any do.
+    Access: Reader on the subscription.
 
-    certificate_validation, for an encrypted setting: "enabled" when
-    validateCertChainAndExpiry is true, "disabled" when it is false, and
-    "default_enabled" when the API omits it (Microsoft documents the default as
-    true). "not_configurable" for L4 Tls settings, which have no such toggle,
-    and "not_applicable" for Http and Tcp. validate_sni is the raw value; null
-    means not returned. trusted_root_certificates names the roots pinned on the
-    setting; with none, a v2 gateway validates against its built-in store of
-    well-known CAs.
+    Commands Executed:
+    - subscriptions.list() — picks a subscription when none is set
+    - providers.get("Microsoft.Network") — tells "networking not in use" from "no gateways"
+    - application_gateways.list_all() — every gateway with its backend settings, probes, trusted root certificates and routing rules
+    - Resource Graph count of microsoft.network/applicationgateways — confirms the gateway list is complete; a mismatch is counted again after 30 seconds, and the run fails if it persists
 
-    secure_backend is true when the protocol is Https or Tls, certificate
-    validation is not disabled, and validate_sni is not false.
-    summary.insecure_backend_settings_in_use counts in-use settings where it is
-    false; summary.plaintext_in_use counts in-use Http/Tcp settings.
-    Application gateways the patterns take out (their backend settings
-    with them) are listed under results.excluded, each with the pattern
-    that matched; every count covers the rest, while results.completeness
-    still compares the full list with Resource Graph. Summary fields:
-    resource_exclusion_patterns (the configured patterns, empty when none
-    are set), resource_exclusion_patterns_unmatched (patterns that matched
-    nothing, such as a mistyped name), excluded_application_gateways (how
-    many the patterns took out) and in_scope_application_gateways,
-    in_scope_backend_settings (how many stayed); all three are null when
-    the gateway list couldn't be read. results.excluded is always present,
-    empty when nothing is excluded.
+    Output: azure_app_gateway_backend_tls_<subscription>.json — each backend setting (layer 7 HTTP/HTTPS and layer 4 TCP/TLS) with its protocol, certificate validation, pinned roots, probe protocol and the routing rules that use it, plus the gateways left out and why.
+
+    Summary fields:
+
+    Which resources are left out of scope?
+    - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
+    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no application gateway, such as a mistyped name; null when the gateway list could not be read
+    - excluded_application_gateways — Number of application gateways left out of scope because a pattern matched; each is listed under excluded with the pattern, its backend settings leave with it, and no other count includes it; null when the gateway list could not be read
+
+    Which gateways and backend settings were checked?
+    - in_scope_application_gateways — Number of application gateways read and in scope; null when the gateway list could not be read
+    - in_scope_backend_settings — Number of backend settings (how a gateway connects to its backend servers) on in-scope gateways; null when the gateway list could not be read
+    - total_application_gateways — Number of in-scope application gateways assessed
+    - total_backend_settings — Number of backend settings on in-scope gateways, layer 7 (HTTP/HTTPS) and layer 4 (TCP/TLS)
+    - in_use_backend_settings — Number of backend settings that at least one routing rule, URL path map default or path rule references; every count below is out of these in-use settings
+    - completeness_match — True if the gateway count matches Resource Graph's count, which still covers every gateway including excluded ones; false if not; null if either count could not be read
+    - provider_registration_status — Whether the networking provider (Microsoft.Network) is registered on the subscription: registered, not_registered or unknown
+
+    Is traffic to the backends encrypted?
+    - encrypted_in_use — Number of in-use backend settings that connect over HTTPS or TLS
+    - plaintext_in_use — Number of in-use backend settings that connect unencrypted (HTTP or TCP)
+    - plaintext_probes_in_use — Number of in-use backend settings whose health probe uses HTTP or TCP
+
+    Does the gateway verify backend certificates?
+    - certificate_validation_disabled_in_use — Number of in-use encrypted backend settings with the certificate chain and expiry check turned off; layer 4 TLS settings have no such toggle and are never counted
+    - sni_validation_disabled_in_use — Number of in-use backend settings with validate_sni set to false, so the backend's server name is not checked
+    - insecure_backend_settings_in_use — Number of in-use backend settings that are insecure: not HTTPS or TLS, or certificate validation turned off, or the server name check turned off

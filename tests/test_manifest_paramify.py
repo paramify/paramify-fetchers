@@ -176,3 +176,34 @@ def test_run_metadata_keeps_a_run_level_direct_for_an_ordinary_entry(tmp_path, r
     summary = api.run(manifest, repo_root)
     meta = json.loads((tmp_path / "out" / f"run-{summary['run_id']}" / "_run_metadata.json").read_text())
     assert meta["paramify"]["demo_hello"] == {"use": "demo_hello", "no_request": "direct"}
+
+
+def test_new_manifest_path_records_a_picked_stack(tmp_path):
+    path = api.new_manifest_path(tmp_path, "aws-prod", stack="stk-1", stack_name="Alpha")
+    assert path == tmp_path / "manifests" / "aws-prod.yaml"
+    run = yaml.safe_load(path.read_text())["run"]
+    assert run["paramify"] == {"stack": "stk-1", "stack_name": "Alpha"}
+    assert run["fetchers"] == []
+
+
+def test_new_manifest_path_without_a_stack_writes_no_paramify_block(tmp_path):
+    path = api.new_manifest_path(tmp_path, "aws-prod")
+    assert "paramify" not in yaml.safe_load(path.read_text())["run"]
+
+
+def test_new_manifest_target_checks_the_name_without_writing(tmp_path):
+    assert api.new_manifest_target(tmp_path, " aws-prod ") == tmp_path / "manifests" / "aws-prod.yaml"
+    assert not (tmp_path / "manifests").exists()
+    for bad in ("", "  ", "a/b", ".hidden"):
+        try:
+            api.new_manifest_target(tmp_path, bad)
+        except ValueError:
+            continue
+        raise AssertionError(f"{bad!r} was accepted")
+    api.new_manifest_path(tmp_path, "taken")
+    try:
+        api.new_manifest_target(tmp_path, "taken.yaml")
+    except FileExistsError:
+        pass
+    else:
+        raise AssertionError("an existing manifest was accepted")

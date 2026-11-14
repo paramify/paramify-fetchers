@@ -19,6 +19,7 @@ from azure_rest import (  # noqa: E402
     discover_workspaces,
     parse_time,
     run_subscription,
+    target_tenant_matches,
 )
 from entra_graph import PHISHING_RESISTANT_METHODS  # noqa: E402
 
@@ -656,13 +657,18 @@ def collect(client, subscription_id: str, collector) -> tuple:
     subscription = collector.guard("subscriptions.get", lambda: client.get(
         f"/subscriptions/{subscription_id}", SUBSCRIPTION_API), default=None) or {}
     tenant_id = subscription.get("tenantId")
+    tenant_ok = target_tenant_matches(tenant_id, collector, "subscriptions.get tenant check")
     # Graph reads the credential's tenant; in another one (Azure Lighthouse) every account would read missing.
-    orgs = collector.guard("graph.organization.get", lambda: client.graph_list("/organization?$select=id")) or [{}]
+    orgs = (collector.guard("graph.organization.get", lambda: client.graph_list("/organization?$select=id"))
+            if tenant_ok else None) or [{}]
     graph_tenant = (orgs[0].get("id") or "").lower()
-    if tenant_id and graph_tenant and graph_tenant != tenant_id.lower():
+    graph_ok = tenant_ok and target_tenant_matches(graph_tenant, collector, "graph.organization.get tenant check")
+    mismatch = bool(tenant_id and graph_tenant and graph_tenant != tenant_id.lower())
+    if graph_ok and mismatch:
         collector.record("graph.organization.get", RuntimeError(
             f"Microsoft Graph is signed in to tenant {graph_tenant}, but the subscription belongs to tenant "
             f"{tenant_id.lower()}; sign in to the subscription's tenant"))
+    if not graph_ok or mismatch:
         return _results(tenant_id, source, [], [], [], None, now), summarize(
             [], [], [], None, None, None, status, source, len(named))
 

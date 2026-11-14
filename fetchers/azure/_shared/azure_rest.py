@@ -24,6 +24,7 @@ from azure_common import (
     write_evidence,
 )
 from entra_graph import graph_host
+from read_boundaries import target_subscription_scope, validate_read_url
 from resource_exclusions import ResourceExclusions
 
 SI_API = "2025-09-01"
@@ -117,6 +118,8 @@ class AzureRestClient:
         self.logs = logs_endpoint()
         self.graph = graph_host()
         self._tokens: Dict[str, Any] = {}
+        # ARM scope is opt-in; Graph origin checks apply to every Graph read.
+        self.arm_subscription_scope: Optional[str] = target_subscription_scope()
 
     def _token(self, resource: str) -> str:
         cached = self._tokens.get(resource)
@@ -125,10 +128,23 @@ class AzureRestClient:
             self._tokens[resource] = cached
         return cached.token
 
+    def _validate_read_url(self, url: str, resource: str, method: str) -> bool:
+        """Reject untrusted targets before obtaining or sending a bearer token."""
+        scoped_arm = resource == self.arm and self.arm_subscription_scope is not None
+        guarded = self.arm_subscription_scope is not None or resource == self.graph
+        if not guarded:
+            return False
+        validate_read_url(url, resource, self.arm_subscription_scope if scoped_arm else None,
+                          allow_subscription_root=method == "get")
+        return True
+
     def _send(self, method: str, url: str, resource: str, headers: Optional[Dict[str, str]] = None, **kwargs: Any):
         """One request, retried on throttling, transient 5xx and dropped connections, and a GET on a timeout."""
         import requests  # lazy
 
+        guarded = self._validate_read_url(url, resource, method)
+        if guarded:
+            kwargs["allow_redirects"] = False
         timeouts = 0
         for attempt in range(MAX_RETRIES + 1):
             sent = {"Authorization": f"Bearer {self._token(resource)}", **(headers or {})}
@@ -147,6 +163,8 @@ class AzureRestClient:
                 _LOGGER.warning("%s %s timed out; retrying", method.upper(), url.split("?")[0])
                 time.sleep(float(min(2 ** attempt, MAX_RETRY_WAIT)))
                 continue
+            if guarded and 300 <= response.status_code < 400:
+                raise ArmError(response.status_code, "Redirect", "Read returned a redirect; not followed")
             if response.status_code not in RETRY_STATUSES or attempt == MAX_RETRIES:
                 return response
             wait = retry_wait(response, attempt)
@@ -169,8 +187,13 @@ class AzureRestClient:
 
     def _follow(self, body: Dict[str, Any]) -> List[Dict[str, Any]]:
         items = list(body.get("value") or [])
+        seen = set()
         while body.get("nextLink"):
-            body = self._get(body["nextLink"])
+            link = body["nextLink"]
+            if self.arm_subscription_scope is not None and link in seen:
+                raise ValueError("ARM read scope: paging did not terminate")
+            seen.add(link)
+            body = self._get(link)
             items.extend(body.get("value") or [])
         return items
 
@@ -194,8 +217,13 @@ class AzureRestClient:
         """Each page of a Microsoft Graph collection in turn, following @odata.nextLink."""
         body = self._get(f"{self.graph}/{version}{path}", params, self.graph)
         yield list(body.get("value") or [])
+        seen = {f"{self.graph}/{version}{path}"}
         while body.get("@odata.nextLink"):
-            body = self._get(body["@odata.nextLink"], resource=self.graph)
+            link = body["@odata.nextLink"]
+            if link in seen:
+                raise ValueError("Graph paging did not terminate")
+            seen.add(link)
+            body = self._get(link, resource=self.graph)
             yield list(body.get("value") or [])
 
     def graph_list(
@@ -449,6 +477,23 @@ def pinned_credential(subscription_id: Optional[str]):
     return ChainedTokenCredential(AzureCliCredential(subscription=subscription_id), DefaultAzureCredential())
 
 
+def target_tenant_matches(tenant_id: Optional[str], collector: Collector, operation: str) -> bool:
+    """In strict mixed Entra collection, require each tenant read to match the configured tenant."""
+    if target_subscription_scope() is None:
+        return True
+    configured = (os.environ.get("AZURE_TENANT_ID") or "").strip()
+    if not configured:
+        message = "AZURE_TENANT_ID is required for strict subscription and Entra tenant reads"
+    elif not tenant_id:
+        message = "tenant id was not returned; no directory data will be read"
+    elif tenant_id.lower() != configured.lower():
+        message = f"tenant {tenant_id} differs from configured AZURE_TENANT_ID {configured}"
+    else:
+        return True
+    collector.record(operation, RuntimeError(message))
+    return False
+
+
 def _start(logger: logging.Logger) -> Path:
     from dotenv import load_dotenv  # lazy
 
@@ -478,6 +523,7 @@ Collect = Callable[[AzureRestClient, str, Collector], tuple]
 
 def run_subscription(*, fetcher: str, logger: logging.Logger, collect: Collect, session: Any = None) -> int:
     """Resolve the subscription, run `collect(client, subscription_id, collector) -> (results, summary)`, write evidence."""
+    scope = target_subscription_scope()
     output_dir = _start(logger)
     collector = Collector(logger)
     sub = resolve_subscription(collector)
@@ -488,7 +534,11 @@ def run_subscription(*, fetcher: str, logger: logging.Logger, collect: Collect, 
     summary: Dict[str, Any] = {}
     if subscription_id and cred is not None:
         client = AzureRestClient(cred, session)
+        if scope is not None:
+            client.arm_subscription_scope = subscription_id
         results, summary = collect(client, subscription_id, collector)
+        if scope is not None:
+            results["read_scope"] = "target_subscription"
     elif not subscription_id:
         collector.record(
             "resolve_subscription",
@@ -542,6 +592,8 @@ def run_workspaces(
             results["workspaces_without_sentinel"] = without_sentinel
             summary["workspaces_without_sentinel"] = len(without_sentinel)
         if exclusions is not None:
+            if not listed:
+                exclusions.mark_unread()
             exclusions.warn_unmatched(logger)
             results["excluded"] = excluded
             summary.update(exclusions.summary(excluded, ("workspace",), {"workspaces": len(found)}))

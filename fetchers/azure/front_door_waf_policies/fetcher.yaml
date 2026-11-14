@@ -1,15 +1,7 @@
 name: azure_front_door_waf_policies
-version: 0.2.0
-description: >
-  Every Azure Front Door Standard/Premium WAF policy in the subscription: whether it
-  is enabled, its mode (Prevention or Detection), each managed rule set with its
-  version and anomaly-score action, the rules and rule groups its overrides disable,
-  exclusions, custom and rate-limit rules, and the security policies that attach it
-  to Front Door endpoints and domains. Each policy carries a `blocking` verdict
-  (enabled, Prevention, a Default Rule Set that blocks with every rule group that
-  blocks by default still blocking, and no custom rule allowing all traffic) with the reasons when it does
-  not, so a policy left in Detection mode or with its core rules switched off is
-  visible rather than reading as "WAF present".
+version: 0.2.1
+description: >-
+  Shows each Front Door Standard and Premium WAF policy's mode and managed rules, whether it blocks attacks and why not, and whether a Front Door security policy uses it.
 category: azure
 
 config_schema:
@@ -75,53 +67,59 @@ ksis:
 evidence_set:
   reference_id: EVD-AZURE-FRONTDOOR-WAF
   name: Azure Front Door WAF Policies
-  instructions: >
-    Script: azure/front_door_waf_policies/fetcher.py. Azure SDK call (azure-mgmt-frontdoor FrontDoorManagementClient):
-    policies.list_by_subscription(), kept to sku Standard_AzureFrontDoor /
-    Premium_AzureFrontDoor (classic Front Door policies are counted in
-    skipped_policies_by_sku, not evaluated); managed_rule_sets.list() for Microsoft's
-    rule-set definitions. Reader is sufficient — all GETs.
-    Derivations: enabled_state absent reads as Enabled (the API's documented
-    default); mode absent reads as not blocking (no documented default). A managed
-    rule set's effective_action is its ruleSetAction, or Block when absent (the
-    Default Rule Set's documented default); Log means matches are logged, not
-    blocked. A rule-group override with no rules disables the whole group; a rule
-    override with no enabledState is Disabled (both documented API defaults).
-    blocking = enabled AND mode Prevention AND a Default Rule Set
-    (DefaultRuleSet / Microsoft_DefaultRuleSet, matched case-insensitively) whose
-    effective_action is Block or Redirect AND whose definition was found AND in which
-    every rule group that blocks by default still has an enabled blocking rule AND no
-    enabled custom MatchRule with action Allow matches all requests (every condition,
-    not negated, is operator Any or an IPMatch on RemoteAddr / SocketAddr listing
-    0.0.0.0/0 or ::/0; custom rules run before managed rules). not_blocking_reasons names each failed
-    condition: policy_disabled, mode_unset, mode_detection, no_default_rule_set,
-    default_rule_set_log_only, rule_definition_not_found, rule_groups_not_blocking,
-    allow_all_custom_rule. No allowance is made for groups switched off on purpose;
-    default_rule_set_groups_without_blocking_rules names them. Groups Microsoft ships
-    with no rule blocking by default (DRS 2.2 and DefaultRuleSet 1.0 threat-intel
-    groups) do not count against blocking while left off; they are listed in
-    default_rule_set_groups_off_by_default. associated = the
-    policy is referenced by at least one Front Door security policy; which
-    endpoints and domains it actually covers is evidenced by
-    azure_front_door_waf_coverage. Rule counts: each rule in the policy's rule-set
-    definition is Disabled when its whole group is overridden with no rules, else takes
-    its override's enabledState (absent = Disabled), else the definition's
-    defaultState; total_rules / enabled_rules / blocking_rules (enabled, action Block,
-    Redirect or AnomalyScoring; Allow and Log let the request through) follow. Among
-    groups with a rule that blocks by default (enabled, blocking action):
-    fully_disabled_rule_groups (no rule enabled now) and groups_without_blocking_rules
-    (no enabled rule that blocks now). groups_off_by_default: no rule blocks by default
-    and the overrides enable none that does. Beside them, disabled_rules,
-    log_only_rules and allow_rules list the overrides that set each, surfaced per policy
-    as default_rule_set_* for its Default Rule Set, with latest_version_available —
-    no threshold is applied in the fetcher. Maps to KSI-CNA-RVP / KSI-CNA-RNT /
-    KSI-CNA-MAT.
+  instructions: |
+    Script: azure/front_door_waf_policies/fetcher.py
 
-    WAF policies the resource_exclusions patterns take out are listed under
-    results.excluded instead, each with the pattern that matched; the summary gives
-    resource_exclusion_patterns (the configured patterns, empty when none are set),
-    resource_exclusion_patterns_unmatched (patterns that matched no Standard or
-    Premium WAF policy, such as a mistyped name), excluded_waf_policies (how many
-    the patterns took out; no other count includes them) and in_scope_waf_policies
-    (how many stayed; 0 means there are none or the patterns took out every policy).
-    Both are null when the policy list couldn't be read.
+    Access: Reader on the subscription.
+
+    Commands Executed:
+    - subscriptions.list() — picks a subscription when none is set
+    - providers.get("Microsoft.Network") — notes an unregistered provider
+    - policies.list_by_subscription() — every Front Door WAF policy with its settings, managed rule sets, overrides, exclusions, custom rules and security policy links; classic Front Door policies are counted by SKU and not assessed
+    - managed_rule_sets.list() — Microsoft's managed rule set definitions, to work out which rules are on and the newest version of each
+
+    Output: azure_front_door_waf_policies_<subscription>.json — each Standard or Premium WAF policy with its mode, managed rule sets, the rules switched off or set to log or allow, its custom rules, whether it blocks attacks and why not, and whether a Front Door security policy uses it, plus the policies left out and why.
+
+    Summary fields:
+
+    Which resources are left out of scope?
+    - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
+    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no Standard or Premium WAF policy, such as a mistyped name; null when the WAF policy list could not be read
+    - excluded_waf_policies — Number of WAF policies left out of scope because a pattern matched; each is listed under excluded with the pattern, and no other count includes it; a policy linked from an excluded profile's security policy still reads as associated; null when the WAF policy list could not be read
+    - in_scope_waf_policies — Number of WAF policies read and in scope; 0 means there are none or the patterns took out every policy; null when the WAF policy list could not be read
+
+    What was checked?
+    - total_waf_policies — Number of in-scope Front Door Standard and Premium WAF policies
+    - premium_waf_policies — Number of in-scope Front Door Premium WAF policies
+    - standard_waf_policies — Number of in-scope Front Door Standard WAF policies
+    - skipped_policies_by_sku — Number of other WAF policies skipped (classic Front Door), for each SKU Azure reports
+    - provider_registration_status — Whether the networking provider (Microsoft.Network), which holds Front Door WAF policies, is registered on the subscription: registered, not_registered or unknown
+
+    Is each WAF policy used by a Front Door?
+    - associated_waf_policies — Number of WAF policies that at least one Front Door security policy references; which endpoints and domains it covers is evidenced by the Front Door WAF coverage fetcher
+    - unassociated_waf_policies — Number of WAF policies that no Front Door security policy references
+
+    Does each policy block attacks?
+    - blocking_waf_policies — Number of WAF policies that block attacks: enabled (no state set counts as enabled), in Prevention mode, with a Default Rule Set (DefaultRuleSet or Microsoft_DefaultRuleSet) whose action is Block or Redirect (no action set counts as Block) and whose definition was found, where every rule group that blocks by default still has an enabled rule that blocks (action Block, Redirect or AnomalyScoring), and with no enabled custom rule that allows every request. Groups Microsoft ships with no rule blocking by default, such as the threat-intelligence groups, do not count against a policy while left off
+    - waf_policies_not_blocking — Number of WAF policies that do not block attacks
+    - associated_waf_policies_not_blocking — Number of associated WAF policies that do not block attacks
+
+    Why does a policy not block attacks?
+    - policies_disabled — Number of WAF policies that are turned off
+    - policies_in_detection_mode — Number of WAF policies in Detection mode, which logs attacks but does not block them
+    - policies_mode_unset — Number of WAF policies with no mode set, counted as not blocking because Azure documents no default mode
+    - policies_without_default_rule_set — Number of WAF policies with no Default Rule Set
+    - policies_default_rule_set_log_only — Number of WAF policies whose Default Rule Set action is neither Block nor Redirect, such as Log, so matches are logged and not blocked
+    - policies_rule_groups_not_blocking — Number of WAF policies whose Default Rule Set has a rule group that blocks by default but no longer has an enabled blocking rule, because overrides switch the group or its rules off or set them to Log or Allow
+    - policies_rule_definition_not_found — Number of WAF policies whose Default Rule Set type and version has no definition in Microsoft's list, so the rules that are on cannot be counted
+    - policies_with_allow_all_custom_rule — Number of WAF policies with an enabled custom match rule that allows every request (every condition matches any request, or any address through 0.0.0.0/0 or ::/0); custom rules run before managed rules, so it lets every request past them
+
+    How much of the managed rule set is switched off, and is it current?
+    - total_disabled_managed_rules — Number of managed rules switched off one by one through a rule override (an override with no state counts as off), across all policies and rule sets; rules in a group switched off as a whole are not included
+    - total_disabled_managed_rule_groups — Number of managed rule groups switched off as a whole (a group override that lists no rules), across all policies and rule sets
+    - policies_with_fully_disabled_rule_groups — Number of WAF policies whose Default Rule Set has a rule group that blocks by default with no rule enabled now
+    - associated_policies_with_fully_disabled_rule_groups — Number of associated WAF policies whose Default Rule Set has a rule group that blocks by default with no rule enabled now
+    - policies_on_older_default_rule_set — Number of WAF policies whose Default Rule Set version is older than the newest version Microsoft publishes for that rule set type
+
+    Do policies limit request rates?
+    - waf_policies_with_rate_limit_rules — Number of WAF policies with at least one enabled rate-limit custom rule

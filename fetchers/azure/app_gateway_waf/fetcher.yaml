@@ -1,13 +1,7 @@
 name: azure_app_gateway_waf
-version: 0.2.0
-description: >
-  Web application firewall enforcement on every Azure Application Gateway in the
-  subscription: for each HTTP(S) listener, the WAF that actually applies to it
-  (per-path, per-listener or gateway WAF policy, or legacy WAF configuration) and
-  whether it is enabled in Prevention mode; every WAF policy with its managed rule
-  sets, disabled rules, exclusions, custom and rate-limit rules. The gateway
-  count is checked against Resource Graph, and the collection fails on a
-  mismatch.
+version: 0.2.2
+description: >-
+  Shows which web application firewall policy protects each Application Gateway web listener, whether it blocks attacks in Prevention mode, and how each WAF policy is configured.
 category: azure
 
 config_schema:
@@ -75,53 +69,52 @@ ksis:
 evidence_set:
   reference_id: EVD-AZURE-APPGW-WAF
   name: Azure Application Gateway WAF
-  instructions: >
-    Script: azure/app_gateway_waf/fetcher.py. Azure SDK calls: azure-mgmt-network
-    application_gateways.list_all(), web_application_firewall_policies.list_all(),
-    and web_application_firewall_policies.get() for a referenced policy that
-    list_all did not return (another subscription). A Resource Graph count of
-    gateways must match list_all, or the run fails.
-    Resource Graph can lag behind list_all around a create or delete, so a
-    mismatch is checked once more after 30 seconds (results.completeness.recounted).
-    Reader on the gateway's subscription is sufficient. A referenced policy
-    in a subscription the identity cannot read (HTTP 401 or 403), or one that
-    no longer exists (404), does not fail the run. It is recorded with
-    resolved false, read_status "not_authorized" or "not_found" and
-    read_error, and every listener it applies to gets waf_enforcing null.
-    summary.unreadable_waf_policies counts these. Any other error reading the
-    policy fails the run.
+  instructions: |
+    Script: azure/app_gateway_waf/fetcher.py
 
-    One record per HTTP(S) listener in results.listeners; WAF does not apply to
-    layer-4 (Tcp/Tls) listeners, so they are not listed. waf_source is the WAF
-    that applies to the listener: "listener" (the listener's own firewallPolicy),
-    "gateway" (the gateway's firewallPolicy), "legacy_config" (the gateway's
-    webApplicationFirewallConfiguration, used only when no policy is
-    associated), or "none". waf_state and waf_mode come from that policy's
-    policySettings. For the legacy configuration, waf_state is null when the
-    API omits enabled; it is not read as Disabled. path_rule_policies lists WAF policies attached to URL path
-    rules served by the listener; they override the listener policy for those
-    paths. waf_enforcing is true only when the effective WAF and every
-    path-rule WAF are Enabled in Prevention mode, false when any is not or there
-    is no WAF, and null when a referenced policy could not be read.
+    Access: Reader on the subscription. Optional: Reader on another subscription that holds a WAF policy a gateway uses; without it, that policy reads as unreadable and its listeners' enforcement as unknown.
 
-    results.waf_policies: one record per policy, with resolved, read_status
-    ("read" when the policy was read), state, mode, each managed
-    rule set's rule overrides, disabled_rules (overrides with state Disabled),
-    the service's computed_disabled_rules, exclusion_count, custom_rules, and
-    rate_limit_rules (enabled RateLimitRule custom rules).
-    rule_overrides_without_state counts overrides the API returned with no state.
-    Application gateways (with their listeners) and WAF policies the
-    patterns take out are listed under results.excluded, each with the
-    pattern that matched. An in-scope listener whose policy is excluded
-    keeps its WAF verdict; the policy alone leaves results.waf_policies
-    and the policy counts. results.completeness still compares the full
-    gateway list with Resource Graph. Summary fields:
-    resource_exclusion_patterns (the configured patterns, empty when none
-    are set), resource_exclusion_patterns_unmatched (patterns that matched
-    nothing, such as a mistyped name), excluded_application_gateways,
-    excluded_waf_policies (how many the patterns took out) and
-    in_scope_application_gateways, in_scope_listeners,
-    in_scope_waf_policies (how many stayed). The gateway and listener
-    counts are null when the gateway list couldn't be read, and the WAF
-    policy counts when the policy list couldn't. results.excluded is always
-    present, empty when nothing is excluded.
+    Commands Executed:
+    - subscriptions.list() — picks a subscription when none is set
+    - providers.get("Microsoft.Network") — tells "networking not in use" from "no gateways"
+    - application_gateways.list_all() — every gateway with its listeners, path rules, WAF policy associations and legacy WAF configuration
+    - Resource Graph count of microsoft.network/applicationgateways — confirms the gateway list is complete; a mismatch is counted again after 30 seconds, and the run fails if it persists
+    - web_application_firewall_policies.list_all() — every WAF policy in the subscription; when it fails, total_waf_policies is null and the other policy counts cover only the policies gateways reference
+    - web_application_firewall_policies.get() (per referenced policy list_all did not return) — policies held in another subscription; a refusal (401, 403) or a missing policy (404) is recorded as unreadable, and any other error fails the run
+
+    Output: azure_app_gateway_waf_<subscription>.json — each web listener with the WAF that applies, its state, mode and enforcement, plus each WAF policy's mode, rule overrides, exclusions, custom and rate-limit rules, and the resources left out and why.
+
+    Summary fields:
+
+    Which resources are left out of scope?
+    - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
+    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no application gateway or WAF policy, such as a mistyped name; null when the gateway list or the WAF policy list could not be read
+    - excluded_application_gateways — Number of application gateways left out of scope because a pattern matched; each is listed under excluded with the pattern, its listeners leave with it, and no other count includes it; null when the gateway list could not be read
+    - excluded_waf_policies — Number of WAF policies left out of scope because a pattern matched; each is listed under excluded with the pattern. An in-scope listener that uses an excluded policy keeps its WAF verdict, and only the policy list and the policy counts omit it; null when the WAF policy list could not be read
+
+    Which gateways and listeners were checked?
+    - in_scope_application_gateways — Number of application gateways read and in scope; null when the gateway list could not be read
+    - in_scope_listeners — Number of web listeners on in-scope gateways; null when the gateway list could not be read
+    - in_scope_waf_policies — Number of WAF policies in scope, including linked policies read or recorded as unreadable from another subscription; null when the WAF policy list could not be read
+    - total_application_gateways — Number of in-scope application gateways assessed
+    - waf_tier_gateways — Number of in-scope application gateways whose SKU tier is a WAF tier
+    - total_http_listeners — Number of in-scope web listeners (HTTP or HTTPS); WAF does not apply to layer 4 (TCP or TLS) listeners, so they are not listed
+    - completeness_match — True if the gateway count matches Resource Graph's count, which still covers every gateway including excluded ones; false if not; null if either count could not be read
+    - provider_registration_status — Whether the networking provider (Microsoft.Network) is registered on the subscription: registered, not_registered or unknown
+
+    Is every web listener protected by a WAF that blocks attacks?
+    - listeners_waf_enforcing — Number of web listeners whose effective WAF and every path-rule WAF are Enabled in Prevention mode; a listener's WAF is its own policy, else the gateway's policy, else the legacy WAF configuration
+    - listeners_waf_detection_only — Number of web listeners whose effective WAF is Enabled in Detection mode, so it logs attacks but does not block them
+    - listeners_waf_disabled — Number of web listeners whose effective WAF state is Disabled; a legacy WAF configuration whose enabled flag the API omits has no state and is not read as Disabled
+    - listeners_without_waf — Number of web listeners with no WAF policy or legacy WAF configuration at all
+    - public_listeners_not_enforcing — Number of web listeners on a public frontend IP whose WAF is not confirmed enforcing: it is not Enabled in Prevention mode, or it could not be read
+
+    How are the WAF policies configured?
+    - total_waf_policies — Number of WAF policies in the policy list, including policies a gateway references that are held in another subscription; null if the policy list could not be read
+    - unresolved_waf_policies — Number of referenced WAF policies that could not be read, for any reason
+    - unreadable_waf_policies — Number of referenced WAF policies that could not be read because access was refused (401, 403) or the policy no longer exists (404); a listener that uses one has an unknown enforcement
+    - policies_prevention — Number of WAF policies Enabled in Prevention mode
+    - policies_detection — Number of WAF policies Enabled in Detection mode
+    - policies_disabled — Number of WAF policies whose state is Disabled
+    - disabled_managed_rules — Number of managed rules switched off by a rule override with state Disabled, across all readable policies
+    - rate_limit_rules — Number of enabled rate-limit custom rules, across all readable policies

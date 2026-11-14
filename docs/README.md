@@ -33,7 +33,12 @@ permissions:
 [Paramify](../fetchers/paramify/README.md) ·
 [Checkov](../fetchers/checkov/README.md) ·
 [ServiceNow](../fetchers/servicenow/README.md) ·
-[Jira](../fetchers/jira/README.md)
+[Jira](../fetchers/jira/README.md) ·
+[Oracle Cloud](../fetchers/oci/README.md) ·
+[FedRAMP Marketplace](../fetchers/fedramp_marketplace/README.md) ·
+[Qualys](../fetchers/qualys/README.md) ·
+[Sophos](../fetchers/sophos/README.md) ·
+[Cornerstone](../fetchers/cornerstone/README.md)
 
 ## Send results to Paramify
 

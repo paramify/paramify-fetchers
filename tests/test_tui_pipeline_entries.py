@@ -16,7 +16,7 @@ from framework import api  # noqa: E402
 from framework.tui import palette  # noqa: E402
 from framework.tui.modals import FormModal, PreviewModal  # noqa: E402
 from framework.tui.render import destination_cell  # noqa: E402
-from framework.tui.screens.upload import pipeline_wait_lines  # noqa: E402
+from framework.tui.screens.paramify_events import pipeline_wait_lines  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PIPELINE = "sophos_endpoint_inventory"
@@ -51,7 +51,9 @@ def test_destination_cell_marks_a_pipeline_set():
 
 def test_entry_form_hides_direct_settings_for_a_pipeline_entry(tmp_path, run_tui):
     async def body(app, pilot):
-        await pilot.press("2")
+        await pilot.press("1")
+        await pilot.pause()
+        await pilot.press("tab")  # from the catalog to the manifest list
         await pilot.pause()
         await pilot.press("e")
         await pilot.pause()
@@ -75,7 +77,9 @@ def test_saving_the_form_keeps_a_pipeline_entrys_settings(tmp_path, run_tui):
     api.dump_manifest(manifest, path, REPO_ROOT)
 
     async def body(app, pilot):
-        await pilot.press("2")
+        await pilot.press("1")
+        await pilot.pause()
+        await pilot.press("tab")  # from the catalog to the manifest list
         await pilot.pause()
         await pilot.press("e")
         await pilot.pause()
@@ -93,7 +97,9 @@ def test_saving_the_form_keeps_a_pipeline_entrys_settings(tmp_path, run_tui):
 
 def test_entry_form_keeps_direct_settings_for_ordinary_evidence(tmp_path, run_tui):
     async def body(app, pilot):
-        await pilot.press("2")
+        await pilot.press("1")
+        await pilot.pause()
+        await pilot.press("tab")  # from the catalog to the manifest list
         await pilot.pause()
         await pilot.press("e")
         await pilot.pause()
@@ -105,10 +111,12 @@ def test_entry_form_keeps_direct_settings_for_ordinary_evidence(tmp_path, run_tu
 
 def test_detail_pane_names_the_pipeline(tmp_path, run_tui):
     async def body(app, pilot):
-        await pilot.press("2")
+        await pilot.press("1")
+        await pilot.pause()
+        await pilot.press("tab")  # from the catalog to the manifest list
         await pilot.pause()
         console = Console(file=io.StringIO(), width=160, color_system=None)
-        console.print(app.screen.query_one("#manifest-detail").content)
+        console.print(app.screen.query_one("#fetchers-detail").content)
         return console.file.getvalue()
 
     assert "pipeline: inventory · " in run_tui(body, _manifest(tmp_path, PIPELINE))
@@ -116,7 +124,9 @@ def test_detail_pane_names_the_pipeline(tmp_path, run_tui):
 
 def test_P_opens_the_preset_sheet(tmp_path, run_tui):
     async def body(app, pilot):
-        await pilot.press("2")
+        await pilot.press("1")
+        await pilot.pause()
+        await pilot.press("tab")  # from the catalog to the manifest list
         await pilot.pause()
         await pilot.press("P")
         await pilot.pause()
@@ -137,7 +147,9 @@ def test_P_on_an_evidence_row_notifies_instead(tmp_path, run_tui):
     name = _plain_evidence_name()
 
     async def body(app, pilot):
-        await pilot.press("2")
+        await pilot.press("1")
+        await pilot.pause()
+        await pilot.press("tab")  # from the catalog to the manifest list
         await pilot.pause()
         await pilot.press("P")
         await pilot.pause()
@@ -158,3 +170,15 @@ def test_only_an_unapproved_pipeline_entry_gets_a_warning_line():
     [line] = pipeline_wait_lines(entries)
     assert "waiting for approval" in line.plain and "a" in line.plain and "B-1" in line.plain
     assert line.style == palette.WARN
+
+
+def test_P_is_listed_only_on_a_pipeline_row(tmp_path, run_tui):
+    async def body(app, pilot):
+        await pilot.press("1")
+        await pilot.pause()
+        await pilot.press("tab")  # from the catalog to the manifest list
+        await pilot.pause()
+        return dict(app.screen.query_one("#manifest-panel").HINTS)
+
+    assert run_tui(body, _manifest(tmp_path, PIPELINE)).get("P") == "preset"
+    assert "P" not in run_tui(body, _manifest(tmp_path, _plain_evidence_name()))

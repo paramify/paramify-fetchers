@@ -44,6 +44,23 @@ def test_match_returns_the_first_configured_pattern_and_marks_every_match_used()
     assert exclusions.unmatched() == ["rg:typo"]
 
 
+def test_unread_list_makes_unmatched_null_and_skips_the_warning(caplog):
+    exclusions = ResourceExclusions(["rg:typo"])
+    exclusions.mark_unread()
+    assert exclusions.unmatched() is None
+    assert exclusions.summary([], ("vault",), {"vaults": 1})["resource_exclusion_patterns_unmatched"] is None
+    with caplog.at_level(logging.WARNING):
+        exclusions.warn_unmatched(logging.getLogger("t"))
+    assert not caplog.records
+
+
+def test_summary_with_an_unread_count_makes_unmatched_null():
+    exclusions = ResourceExclusions(["rg:typo"])
+    assert exclusions.summary([], ("vault",), {"vaults": 1})["resource_exclusion_patterns_unmatched"] == ["rg:typo"]
+    assert ResourceExclusions(["rg:typo"]).summary([], ("vault",), {"vaults": None})[
+        "resource_exclusion_patterns_unmatched"] is None
+
+
 def test_match_own_id_skips_a_trailing_star_pattern_that_names_the_parent():
     log = f"{SUB}/resourceGroups/NetworkWatcherRG/providers/Microsoft.Network/networkWatchers/NetworkWatcher_xeast/flowLogs/fl1"
     assert ResourceExclusions(["id:*/networkWatchers/NetworkWatcher_x*"]).match_own_id(log) is None
@@ -102,7 +119,7 @@ def test_a_list_that_wasnt_read_leaves_both_its_counts_null():
     excluded = [{"kind": "key", "name": "k"}]
     assert exclusions.summary(excluded, ("vault", "key"), {"vaults": None, "keys": 3}) == {
         "resource_exclusion_patterns": ["rg:rg-out"],
-        "resource_exclusion_patterns_unmatched": ["rg:rg-out"],
+        "resource_exclusion_patterns_unmatched": None,
         "excluded_vaults": None, "excluded_keys": 1,
         "in_scope_vaults": None, "in_scope_keys": 3,
     }

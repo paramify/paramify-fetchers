@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR.parent / "_shared"))
-from azure_rest import ArmError, int_config, parse_time, run_subscription  # noqa: E402
+from azure_rest import ArmError, int_config, parse_time, run_subscription, target_tenant_matches  # noqa: E402
 from entra_graph import is_privileged_role  # noqa: E402
 
 NAME = "azure_entra_dormant_identities"
@@ -395,14 +395,19 @@ def collect(client, subscription_id: str, collector) -> tuple:
     subscription = collector.guard("subscriptions.get", lambda: client.get(
         f"/subscriptions/{subscription_id}", SUBSCRIPTION_API), default=None) or {}
     tenant_id = subscription.get("tenantId")
+    tenant_ok = target_tenant_matches(tenant_id, collector, "subscriptions.get tenant check")
     # Graph reads the credential's tenant; in another one (Azure Lighthouse) every principal would read deleted.
-    orgs = _graph_list(client, collector, "graph.organization.get", "/organization?$select=id") or [{}]
+    orgs = (_graph_list(client, collector, "graph.organization.get", "/organization?$select=id")
+            if tenant_ok else None) or [{}]
     graph_tenant = (orgs[0].get("id") or "").lower()
-    if tenant_id and graph_tenant and graph_tenant != tenant_id.lower():
+    graph_ok = tenant_ok and target_tenant_matches(graph_tenant, collector, "graph.organization.get tenant check")
+    mismatch = bool(tenant_id and graph_tenant and graph_tenant != tenant_id.lower())
+    if graph_ok and mismatch:
         collector.record("graph.organization.get", RuntimeError(
             f"Microsoft Graph is signed in to tenant {graph_tenant}, but the subscription belongs to tenant "
             f"{tenant_id.lower()}; sign in to the subscription's tenant"
         ))
+    if not graph_ok or mismatch:
         unread = dict.fromkeys(("tenant", "users", "applications", "user_sign_in_activity",
                                 "service_principal_sign_in_activity", "directory_roles", "azure_roles",
                                 "principal_lookup"), NOT_READ)

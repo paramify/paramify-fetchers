@@ -126,7 +126,7 @@ in the same change.
 |---|---|---|
 | `github-repository-url` | The repository's REST URL, built from its numeric id | `github_repository_inventory` |
 | `sophos-endpoint-id` | The Sophos Central endpoint id | `sophos_endpoint_inventory` |
-| `aws-arn` | The resource's ARN | no fetcher yet |
+| `aws-arn` | The resource's ARN. A Config resource type with no ARN gets `aws-config:<partition>:<account>:<region>:<type>:<resource id>` instead, which matches no other fetcher | `aws_config_inventory` |
 | `azure-resource-id` | The Azure resource id | no fetcher yet |
 | `wiz-resource-id` | The Wiz resource id (`cloudResourcesV2` `id`), one format on every cloud. A Wiz vulnerability finding carries the same id as `vulnerableAsset.id`, the `Asset ID` column of `wiz_vulnerability_findings` | `wiz_inventory` |
 | `hostname` | The host's name | no fetcher yet |

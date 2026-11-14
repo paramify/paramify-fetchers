@@ -309,9 +309,10 @@ def test_failed_nic_list_leaves_every_path_unknown_and_fails() -> None:
     assert summary["virtual_machines_read"] is False and summary["virtual_machines_without_bastion_path"] is None
 
 
-def test_failed_host_list_leaves_every_unreached_vm_unknown_and_fails() -> None:
-    results, summary, collector = _collect(_Arm(hosts_fail=True))
+def test_failed_host_list_leaves_every_unreached_vm_unknown_and_fails(caplog) -> None:
+    results, summary, collector = _collect(_Arm(hosts_fail=True), ResourceExclusions(["rg:nope"]))
     assert not collector.ok and summary["bastion_hosts_read"] is False
+    assert summary["resource_exclusion_patterns_unmatched"] is None and "matched nothing" not in caplog.text
     # An unread host list is not an empty one: no host count reads as a known 0.
     for key in ("bastion_hosts", "bastion_hosts_by_sku", "bastion_hosts_with_subnet_nsg",
                 "bastion_hosts_without_subnet_nsg", "bastion_hosts_without_audit_log_export",

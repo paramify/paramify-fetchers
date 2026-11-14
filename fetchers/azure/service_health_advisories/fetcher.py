@@ -16,6 +16,7 @@ sys.path.insert(0, str(SCRIPT_DIR.parent / "_shared"))
 from azure_common import (  # noqa: E402
     Collector,
     arm_id_key,
+    arm_endpoint,
     basename,
     provider_registration_status,
     resource_group_from_id,
@@ -30,6 +31,13 @@ NAME = "azure_service_health_advisories"
 logger = logging.getLogger(NAME)
 
 API = "2025-05-01"
+GOVERNMENT_API = "2025-04-01"
+
+
+def service_health_api() -> str:
+    """Use the stable version advertised by Azure Government's Resource Health provider."""
+    return GOVERNMENT_API if arm_endpoint() == "https://management.usgovcloudapi.net" else API
+
 NAMESPACE = "Microsoft.ResourceHealth"
 LOOKBACK_ENV = "AZURE_SERVICE_HEALTH_LOOKBACK_DAYS"
 # Measured: 180 days answers, 270 days gets 502 BadGateway at once, every time.
@@ -336,7 +344,7 @@ def read_details(client, base: str, event: dict, raw: dict, collector: Collector
     if not event["is_sensitive"]:
         return NOT_NEEDED, raw
     try:
-        return READ, client.post(f"{base}/{event['tracking_id']}/fetchEventDetails", API)
+        return READ, client.post(f"{base}/{event['tracking_id']}/fetchEventDetails", service_health_api())
     except Exception as exc:  # noqa: BLE001 — classify, then record only real failures
         status = read_status(exc)
         if status == ERROR:
@@ -353,7 +361,7 @@ def read_impacted(client, base: str, event: dict, graph_impacted, collector: Col
             return ERROR, None
         return READ, graph_impacted.get(_lower(event["tracking_id"]), [])
     try:
-        raw = client.post_list(f"{base}/{event['tracking_id']}/listSecurityAdvisoryImpactedResources", API)
+        raw = client.post_list(f"{base}/{event['tracking_id']}/listSecurityAdvisoryImpactedResources", service_health_api())
     except Exception as exc:  # noqa: BLE001 — classify, then record only real failures
         status = read_status(exc)
         if status == ERROR:
@@ -380,7 +388,7 @@ def read_by_id(client, base: str, tracking_id: str, since: datetime, collector: 
     try:
         # The GET filters on lastUpdateTime like the list (3 days by default), so start before the event's last update.
         params = {"queryStartTime": query_start(since - timedelta(days=BY_ID_MARGIN_DAYS))}
-        return READ, {"name": tracking_id, **client.get(f"{base}/{tracking_id}", API, params)}
+        return READ, {"name": tracking_id, **client.get(f"{base}/{tracking_id}", service_health_api(), params)}
     except Exception as exc:  # noqa: BLE001 — classify, then record only real failures
         status = read_status(exc)
         if status == NOT_FOUND:
@@ -401,7 +409,7 @@ def collect(client, subscription_id: str, now: datetime, lookback_days: int, col
     base = f"/subscriptions/{subscription_id}/providers/{NAMESPACE}/events"
     window_start = now - timedelta(days=lookback_days)
     start = query_start(window_start)
-    raw = collector.guard("resourceHealth.events.list", lambda: client.list(base, API, {"queryStartTime": start}))
+    raw = collector.guard("resourceHealth.events.list", lambda: client.list(base, service_health_api(), {"queryStartTime": start}))
     if raw is None:
         return [], False, None, False, None
     graph = collector.guard(
@@ -454,8 +462,9 @@ def collect_subscription(client, subscription_id: str, collector: Collector) -> 
     events, excluded = apply_scope(scope, events)
     # A pattern may match a resource that wasn't read, so "matched nothing" is known only once every list was read.
     resources_known = events_read and older_read and all(e["impacted_resources"] is not None for e in events)
-    if resources_known:
-        scope.warn_unmatched(logger)
+    if not resources_known:
+        scope.mark_unread()
+    scope.warn_unmatched(logger)
     events.sort(key=lambda e: (e["tracking_id"] or ""))
     if events_read:
         logger.info("%d Service Health events in the last %d days or still in Resource Graph", len(events),
@@ -475,7 +484,7 @@ def collect_subscription(client, subscription_id: str, collector: Collector) -> 
     boundary["excluded_impacted_resources"] = len({arm_id_key(x["id"]) or _lower(x["name"])
                                                    for x in excluded if x["kind"] == RESOURCE_KIND})
     if not resources_known:
-        boundary.update({"resource_exclusion_patterns_unmatched": None, "excluded_impacted_resources": None})
+        boundary["excluded_impacted_resources"] = None
     if not (events_read and older_read):
         boundary["excluded_events"] = None
     summary = {

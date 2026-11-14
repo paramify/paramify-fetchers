@@ -23,7 +23,7 @@ from framework import api  # noqa: E402
 from framework.sync.model import Action, Plan  # noqa: E402
 from framework.tui.components.forms import _NULL as BLANK  # noqa: E402
 from framework.tui.modals import ConfirmModal, FormModal, PickerModal  # noqa: E402
-from framework.tui.screens.upload import UploadPage  # noqa: E402
+from framework.tui.screens.paramify import ParamifyPage  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -72,7 +72,9 @@ def test_stack_row_shows_the_stack_name(tmp_path, run_tui):
     api.dump_manifest(m, path, REPO_ROOT)
 
     async def body(app, pilot):
-        await pilot.press("2")
+        await pilot.press("1")
+        await pilot.pause()
+        await pilot.press("tab")  # from the catalog to the manifest list
         await pilot.pause()
         assert "Alpha" in str(app.screen.query_one("#manifest-stack", Button).label)
 
@@ -86,7 +88,9 @@ def test_stack_picker_stores_id_and_name(tmp_path, monkeypatch, run_tui):
     monkeypatch.setattr(api, "list_stacks", lambda *a, **k: STACKS)
 
     async def body(app, pilot):
-        await pilot.press("2")
+        await pilot.press("1")
+        await pilot.pause()
+        await pilot.press("tab")  # from the catalog to the manifest list
         await pilot.pause()
         app.screen.query_one("#manifest-stack", Button).press()
         await _settle(app, pilot)
@@ -117,7 +121,9 @@ def test_stack_picker_finds_a_token_that_is_only_in_dotenv(tmp_path, no_token, m
     monkeypatch.setattr(api, "list_stacks", lambda *a, **k: STACKS)
 
     async def body(app, pilot):
-        await pilot.press("2")
+        await pilot.press("1")
+        await pilot.pause()
+        await pilot.press("tab")  # from the catalog to the manifest list
         await pilot.pause()
         app.screen.query_one("#manifest-stack", Button).press()
         await _settle(app, pilot)
@@ -134,7 +140,9 @@ def test_stack_without_a_token_takes_typed_text(tmp_path, no_token, run_tui):
     path, _ = _manifest(tmp_path)
 
     async def body(app, pilot):
-        await pilot.press("2")
+        await pilot.press("1")
+        await pilot.pause()
+        await pilot.press("tab")  # from the catalog to the manifest list
         await pilot.pause()
         app.screen.query_one("#manifest-stack", Button).press()
         await _settle(app, pilot)
@@ -159,7 +167,9 @@ def test_owner_picker_stores_the_owner_and_can_remove_it(tmp_path, monkeypatch, 
     monkeypatch.setattr(api, "list_channel_owners", lambda *a, **k: OWNERS)
 
     async def pick(app, pilot, choice):
-        await pilot.press("2")
+        await pilot.press("1")
+        await pilot.pause()
+        await pilot.press("tab")  # from the catalog to the manifest list
         await pilot.pause()
         app.screen.query_one("#manifest-owner", Button).press()
         await _settle(app, pilot)
@@ -189,7 +199,9 @@ def test_owner_without_a_token_takes_typed_text(tmp_path, no_token, run_tui):
     path, _ = _manifest(tmp_path)
 
     async def body(app, pilot):
-        await pilot.press("2")
+        await pilot.press("1")
+        await pilot.pause()
+        await pilot.press("tab")  # from the catalog to the manifest list
         await pilot.pause()
         app.screen.query_one("#manifest-owner", Button).press()
         await _settle(app, pilot)
@@ -207,7 +219,9 @@ def test_entry_editor_writes_and_clears_paramify_overrides(tmp_path, run_tui):
     path, name = _manifest(tmp_path)
 
     async def edit(app, pilot, approval, no_request, stack, delivery=BLANK, owner=""):
-        await pilot.press("2")
+        await pilot.press("1")
+        await pilot.pause()
+        await pilot.press("tab")  # from the catalog to the manifest list
         await pilot.pause()
         await pilot.press("e")
         await pilot.pause()
@@ -246,14 +260,16 @@ def _upload_ready(tmp_path, monkeypatch, token: bool):
 
 
 def _open_confirm(tmp_path, run_tui, check, monkeypatch):
-    monkeypatch.setattr(UploadPage, "_rebuild_scripts", lambda page: None)
+    # The page's status read is not under test here; the upload confirm is.
+    monkeypatch.setattr(api, "paramify_status", lambda *a, **k: {
+        "workspace": {"base_url": "https://app.paramify.com/api/v0", "token": True},
+        "fetchers": [], "capabilities": [], "pipelines_count": 0, "skipped": [], "errors": {}})
     path, _ = _manifest(tmp_path)
 
     async def body(app, pilot):
-        await pilot.press("5")
+        await pilot.press("4")
         await pilot.pause()
-        page = app.screen.query_one(UploadPage)
-        page.query_one("#upload-submit", Button).disabled = False
+        page = app.screen.query_one(ParamifyPage)
         page.action_upload_run()
         await _settle(app, pilot)
         return check(app)
@@ -354,17 +370,18 @@ def test_confirm_shows_brackets_in_file_names_and_messages(tmp_path, monkeypatch
     assert "[bold]EVD-X[/bold]" in text and "blocked [red]by[/red] the WAF" in text
 
 
-def test_log_shows_brackets_in_file_names_and_reasons(tmp_path, run_tui):
+def test_log_shows_brackets_in_file_names_and_reasons(tmp_path, run_tui, stub_paramify_status):
+    stub_paramify_status()
     path, _ = _manifest(tmp_path)
 
     async def body(app, pilot):
-        await pilot.press("5")
+        await pilot.press("4")
         await pilot.pause()
-        page = app.screen.query_one(UploadPage)
+        page = app.screen.query_one(ParamifyPage)
         page._begin_log(Text("uploading"))
         page._handle_upload_event({"event": "upload_file", "action_id": "delivery/x", "file": "report[x].json",
                                    "outcome": "error", "reason": "HTTP 400: [bold]bad[/bold]"})
-        log = page.query_one("#upload-log")
+        log = page.query_one("#pf-log")
         for _ in range(40):
             await pilot.pause(0.05)
             if log.lines:
@@ -375,20 +392,21 @@ def test_log_shows_brackets_in_file_names_and_reasons(tmp_path, run_tui):
     run_tui(body, path)
 
 
-def test_log_panel_renders_delivery_file_progress(tmp_path, run_tui):
+def test_log_panel_renders_delivery_file_progress(tmp_path, run_tui, stub_paramify_status):
+    stub_paramify_status()
     path, _ = _manifest(tmp_path)
 
     async def body(app, pilot):
-        await pilot.press("5")
+        await pilot.press("4")
         await pilot.pause()
-        page = app.screen.query_one(UploadPage)
+        page = app.screen.query_one(ParamifyPage)
         page._begin_log(Text("uploading"))
         page._handle_upload_event({"event": "delivery_file", "action_id": "a", "file": "aws_iam.json",
                                    "outcome": "uploaded", "n": 3, "of": 12, "bytes": 10})
         page._handle_upload_event({"event": "delivery_file", "action_id": "a", "file": "b.json",
                                    "outcome": "dropped", "n": None, "of": 12, "bytes": 1, "reason": "WAF"})
         page._handle_upload_event({"event": "something_new"})
-        log = page.query_one("#upload-log")
+        log = page.query_one("#pf-log")
         for _ in range(40):  # the log writes once it has a size
             await pilot.pause(0.05)
             if log.lines:
@@ -417,7 +435,9 @@ def test_entry_editor_edits_the_selected_duplicate_entry(tmp_path, run_tui):
     path, name, cfg_key = _two_entry_manifest(tmp_path)
 
     async def body(app, pilot):
-        await pilot.press("2")
+        await pilot.press("1")
+        await pilot.pause()
+        await pilot.press("tab")  # from the catalog to the manifest list
         await pilot.pause()
         await pilot.press("down")
         await pilot.pause()
@@ -447,7 +467,9 @@ def test_entry_editor_opens_on_unknown_hand_edited_values(tmp_path, run_tui):
     path.write_text(yaml.safe_dump(m))
 
     async def body(app, pilot):
-        await pilot.press("2")
+        await pilot.press("1")
+        await pilot.pause()
+        await pilot.press("tab")  # from the catalog to the manifest list
         await pilot.pause()
         await pilot.press("e")
         await pilot.pause()

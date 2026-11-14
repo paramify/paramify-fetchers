@@ -965,6 +965,8 @@ def collect_web_apps(subscription_id, cred, collector: Collector, scan_secrets: 
     """
     client = web_client(subscription_id, cred, collector)
     if client is None:
+        if exclusions is not None:
+            exclusions.mark_unread()
         return []
 
     def _list():
@@ -975,7 +977,11 @@ def collect_web_apps(subscription_id, cred, collector: Collector, scan_secrets: 
             if is_web_app(model_attr(site, "kind"))
         ]
 
-    apps = collector.guard("web.web_apps.list", _list, default=[])
+    apps = collector.guard("web.web_apps.list", _list, default=None)
+    if apps is None:
+        apps = []
+        if exclusions is not None:
+            exclusions.mark_unread()
     if exclusions:
         apps, out = exclusions.split(apps, "web_app")
         if excluded is not None:
@@ -1182,6 +1188,8 @@ def main() -> int:
                 "ambient Azure credential that can list subscriptions)"
             ),
         )
+    if not (subscription_id and cred is not None):
+        exclusions.mark_unread()
     exclusions.warn_unmatched(logger)
 
     evidence = build_payload(

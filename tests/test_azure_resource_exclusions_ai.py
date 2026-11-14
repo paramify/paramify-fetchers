@@ -114,6 +114,13 @@ def test_hub_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_
     }
 
 
+def test_hub_summary_matches_the_instructions(monkeypatch, tmp_path, assert_summary_documented):
+    workspaces = [_ws("rg-in", "hub-in", "Hub"), _ws("rg-in", "proj-in", "Project", hub=_hub_id("rg-in", "hub-in")),
+                  _ws("rg-in", "classic", "Default"), _ws("rg-in", "store", "FeatureStore")]
+    _, evidence, *_ = run_hub(monkeypatch, tmp_path, "rg:rg-out", workspaces=workspaces)
+    assert_summary_documented("azure/ai_hub_configuration", evidence["summary"])
+
+
 def test_hub_excludes_by_group_and_region_and_skips_their_reads(monkeypatch, tmp_path):
     code, evidence, paths, diag = run_hub(monkeypatch, tmp_path, "rg:rg-out, location:regioneast, rg:typo")
     summary = evidence["summary"]
@@ -175,6 +182,7 @@ def test_hub_unread_workspace_list_makes_every_count_null(monkeypatch, tmp_path)
     assert {"total_workspaces", "excluded_hubs", "in_scope_hubs", "in_scope_other_workspaces"} <= set(counts)
     assert all(summary[k] is None for k in counts)
     assert summary["resource_exclusion_patterns"] == ["rg:rg-out"]
+    assert summary["resource_exclusion_patterns_unmatched"] is None
 
 
 def test_hub_bare_pattern_fails_the_run(monkeypatch, tmp_path):
@@ -295,6 +303,7 @@ def test_services_unread_lists_make_their_counts_null(monkeypatch, tmp_path):
     counts = [k for k, v in summary.items() if k.startswith(("total_", "excluded_", "in_scope_"))]
     assert {"total_accounts", "total_search_services", "excluded_accounts", "in_scope_search_services"} <= set(counts)
     assert all(summary[k] is None for k in counts)
+    assert summary["resource_exclusion_patterns_unmatched"] is None
 
 
 def test_services_unread_account_list_leaves_search_counts(monkeypatch, tmp_path):
@@ -304,6 +313,7 @@ def test_services_unread_account_list_leaves_search_counts(monkeypatch, tmp_path
     assert (summary["total_accounts"], summary["excluded_accounts"], summary["in_scope_accounts"]) == (None, None, None)
     assert (summary["total_search_services"], summary["excluded_search_services"],
             summary["in_scope_search_services"]) == (2, 1, 2)
+    assert summary["resource_exclusion_patterns_unmatched"] is None
 
 
 def test_services_every_summary_key_is_in_exactly_one_group():
@@ -324,6 +334,7 @@ def test_hub_no_credential_makes_every_count_null(monkeypatch, tmp_path):
     assert code == 1 and evidence["results"]["workspaces"] == []
     counts = [k for k, v in summary.items() if k.startswith(("total_", "excluded_", "in_scope_"))]
     assert "total_workspaces" in counts and all(summary[k] is None for k in counts)
+    assert summary["resource_exclusion_patterns_unmatched"] is None
 
 
 def test_services_no_credential_makes_every_count_null(monkeypatch, tmp_path):

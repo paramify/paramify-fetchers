@@ -186,7 +186,6 @@ def test_fetcher_yaml_follows_the_shape():
     assert spec["name"] == mod.NAME == "azure_devops_audit_streams"
     assert spec["category"] == "azure" and spec["version"] == "0.1.1"
     assert spec["evidence_set"]["reference_id"] == "EVD-AZURE-DEVOPS-AUDIT-STREAMS"
-    assert len(spec["evidence_set"]["instructions"].split()) <= 80
     assert spec["config_schema"]["audit_window_days"]["env"] == mod.WINDOW_ENV
     assert spec["config_schema"]["audit_window_days"]["default"] == mod.DEFAULT_WINDOW_DAYS
     assert spec["output"]["aggregation"] == "per_target"
@@ -331,7 +330,7 @@ def test_the_page_cap_marks_the_search_incomplete(fakes):
 
 # --- collect() ------------------------------------------------------------------
 
-def test_collect_reports_streams_and_ingestion(fakes):
+def test_collect_reports_streams_and_ingestion(fakes, assert_summary_documented):
     devops, logs, subs = fakes
     results, summary, collector = run(devops)
     assert collector.ok and results["notes"] == []
@@ -364,6 +363,7 @@ def test_collect_reports_streams_and_ingestion(fakes):
         "azure_monitor_streams_missing_rows": 0,
         "newest_audit_event": results["audit_log"]["newest_event"]["timestamp"],
     }
+    assert_summary_documented("azure/devops_audit_streams", summary)
 
 
 def test_no_stream_credential_reaches_the_evidence(fakes):

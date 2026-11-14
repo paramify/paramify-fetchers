@@ -1,20 +1,7 @@
 name: azure_aks_cluster_configuration
-version: 0.3.0
-description: >
-  For every AKS managed cluster in the subscription, reports the control-plane
-  configuration: the public and private API server FQDNs, whether it is a private
-  cluster and whether the API server has authorized IP ranges, Kubernetes RBAC and
-  Entra-integrated Azure RBAC, whether local (certificate) admin accounts are
-  disabled, workload identity and the OIDC issuer, the network policy and plugin, the
-  requested and running Kubernetes versions with the cluster and node-OS auto-upgrade
-  channels, Microsoft Defender for Containers and Azure Monitor metrics, and each
-  agent pool's size, OS, version and whether its nodes get public IPs, plus each
-  pool's node security: whether it runs the FIPS-enabled node image
-  (enable_fips), its node image version, Trusted Launch (secure boot and vTPM)
-  and whether SSH to the nodes is disabled. Each node-security field is null,
-  not false, when Azure did not return it, and the summary counts unknown pools
-  apart from FIPS-disabled ones; all_agent_pools_fips is null until every pool
-  has answered, and null when there are no pools to judge.
+version: 0.3.1
+description: >-
+  Shows whether each AKS cluster's API server is private or IP-restricted, who can sign in, and whether it has network policy, auto-upgrade, Defender and Azure Monitor.
 category: azure
 
 config_schema:
@@ -80,15 +67,65 @@ ksis:
 evidence_set:
   reference_id: EVD-AZURE-AKS-CONFIG
   name: Azure Kubernetes Service Cluster Configuration
-  instructions: >
-    Script: azure/aks_cluster_configuration/fetcher.py. Azure SDK calls: azure-mgmt-containerservice
-    ContainerServiceClient.managed_clusters.list(), preceded by azure-mgmt-resource
-    ResourceManagementClient.providers.get("Microsoft.ContainerService"). One evidence
-    file per subscription.
-    Clusters the resource_exclusions patterns take out are listed under results.excluded
-    instead, each with the pattern that matched; the summary gives resource_exclusion_patterns
-    (the configured patterns, empty when none are set), resource_exclusion_patterns_unmatched
-    (patterns that matched no cluster, such as a mistyped name), excluded_clusters (how many the
-    patterns took out, null if the list couldn't be read; no other count includes them, and the agent pool counts leave with their
-    cluster) and in_scope_clusters (how many stayed; null if the list couldn't be read, and 0 means there are none or the patterns took
-    out every cluster).
+  instructions: |
+    Script: azure/aks_cluster_configuration/fetcher.py
+
+    Access: Reader on the subscription.
+
+    Commands Executed:
+    - subscriptions.list() — picks a subscription when none is set
+    - providers.get("Microsoft.ContainerService") — tells "AKS not in use" from "no clusters"
+    - managed_clusters.list() — every AKS cluster with its API server, sign-in, network, upgrade, monitoring and node pool settings
+
+    Output: azure_aks_cluster_configuration_<subscription>.json — each AKS cluster's public and private API server names, access settings, authorization, network policy and plugin, requested and running Kubernetes versions, upgrade channels, Defender and Azure Monitor settings and node pools (size, OS, node image, public IPs, FIPS, Trusted Launch, SSH), plus the clusters left out and why.
+
+    Summary fields:
+
+    Which clusters are left out of scope?
+    - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every cluster is in scope
+    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no cluster, such as a mistyped name; null when the cluster list could not be read
+    - excluded_clusters — Number of clusters left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, no other count includes it and its node pools leave with it; null when the cluster list could not be read
+    - in_scope_clusters — Number of clusters read and in scope; 0 means there are none or the patterns took out every cluster; null when the cluster list could not be read
+
+    Which clusters and node pools were checked?
+    - total_clusters — Number of in-scope AKS clusters, including clusters still provisioning or in a failed state; every count below about clusters is out of this total; reads 0, not null, when the cluster list could not be read, so read it together with in_scope_clusters
+    - total_agent_pools — Number of node pools (agent pools) across the in-scope clusters; 0 when the cluster list could not be read
+    - kubernetes_versions — List of the distinct Kubernetes versions the clusters are set to run (the requested version, which an upgrade in progress may not have reached yet), sorted
+    - provider_registration_status — Whether the AKS provider (Microsoft.ContainerService) is registered on the subscription: registered, not_registered or unknown
+
+    Is the API server kept off the internet?
+    - private_clusters — Number of private clusters, whose API server has only a private address inside the virtual network
+    - private_cluster_percentage — Percentage of clusters that are private = private_clusters / total_clusters × 100 (a whole number, rounded down; reads 0 when total_clusters is 0)
+    - clusters_with_authorized_ip_ranges — Number of clusters whose API server accepts connections only from a list of authorized IP ranges
+    - api_server_access_restricted_clusters — Number of clusters with restricted API server access: a private cluster, or a public one with authorized IP ranges set
+    - api_server_access_restricted_percentage — Percentage of clusters with restricted API server access = api_server_access_restricted_clusters / total_clusters × 100 (a whole number, rounded down; reads 0 when total_clusters is 0)
+    - clusters_with_public_node_ips — Number of clusters with at least one node pool that gives its nodes public IP addresses
+
+    Who can sign in, and what can they do?
+    - rbac_enabled_clusters — Number of clusters with Kubernetes role-based access control (RBAC) turned on
+    - azure_rbac_enabled_clusters — Number of clusters that authorize Kubernetes actions with Azure RBAC (Entra ID role assignments) instead of in-cluster role bindings alone
+    - local_accounts_disabled_clusters — Number of clusters with local accounts turned off, so the shared certificate-based admin credential can't be downloaded and every sign-in goes through Entra ID
+    - workload_identity_clusters — Number of clusters with workload identity turned on, so pods sign in to Azure as an Entra ID app or managed identity instead of with stored secrets
+
+    Is traffic between pods restricted?
+    - network_policy_clusters — Number of clusters with a network policy engine set (azure, calico or cilium); any non-empty value counts
+
+    Are clusters kept up to date?
+    - auto_upgrade_clusters — Number of clusters with an automatic upgrade channel set (patch, stable, rapid or node-image); none or no channel doesn't count
+
+    Are clusters monitored?
+    - defender_enabled_clusters — Number of clusters with Microsoft Defender for Containers security monitoring turned on in the cluster's security profile
+    - azure_monitor_enabled_clusters — Number of clusters sending metrics to Azure Monitor managed Prometheus; Container Insights logging isn't checked
+
+    Are node pools hardened?
+    - fips_enabled_agent_pools — Number of node pools running the FIPS-enabled node image
+    - fips_disabled_agent_pools — Number of node pools Azure reports as not running the FIPS-enabled node image
+    - fips_unknown_agent_pools — Number of node pools whose FIPS setting Azure did not return; counted apart, never as FIPS-disabled
+    - all_agent_pools_fips — True if every node pool runs the FIPS image; false if any pool is FIPS-disabled and none is unknown; null if any pool's FIPS setting is unknown, or there are no node pools
+    - secure_boot_enabled_agent_pools — Number of node pools with Trusted Launch secure boot turned on
+    - vtpm_enabled_agent_pools — Number of node pools with a virtual TPM (vTPM) turned on
+    - trusted_launch_unknown_agent_pools — Number of node pools for which Azure returned neither the secure boot nor the vTPM setting
+    - ssh_disabled_agent_pools — Number of node pools with SSH access to the nodes disabled
+    - ssh_local_user_agent_pools — Number of node pools whose nodes allow SSH as a local user
+    - ssh_access_unknown_agent_pools — Number of node pools whose SSH access setting Azure did not return
+    - node_image_versions — List of the distinct node image builds across all node pools, sorted; several builds mean some pools run older images

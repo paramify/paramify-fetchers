@@ -33,8 +33,7 @@ from framework.issue_reports import (  # noqa: E402
     CLOSE_CYCLE_FIELD,
 )
 from framework.tui import kinds  # noqa: E402
-from framework.tui.modals import MultiPickerModal  # noqa: E402
-from framework.tui.screens.manifest import ManifestPage  # noqa: E402
+from framework.tui.screens.manifest import ManifestPanel  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -151,8 +150,9 @@ def test_catalog_tree_is_kind_then_platform(tmp_path, run_tui):
         ]
 
     assert run_tui(body, _manifest(root, [EVIDENCE]), root) == [
-        ("Evidence  (2)", [("acme  (1)", [EVIDENCE]), ("zeta  (1)", [OTHER])]),
-        ("Scan reports  (1)", [("acme  (1)", [SCAN])]),
+        # The manifest's fetcher is checked: it is already in the manifest.
+        ("Evidence  (2)", [("acme  (1)", [f"[x] {EVIDENCE}"]), ("zeta  (1)", [f"[ ] {OTHER}"])]),
+        ("Scan reports  (1)", [("acme  (1)", [f"[ ] {SCAN}"])]),
     ]
 
 
@@ -162,15 +162,14 @@ def test_catalog_detail_says_kind_and_destination(tmp_path, run_tui):
     async def body(app, pilot):
         page = app.screen.query_one("#catalog-left").parent
         tree = page.query_one("#catalog-tree", Tree)
-        detail = page.query_one("#catalog-detail", Static)
         shown = {}
         for kind_node in tree.root.children:
             page._show(kind_node.data)
-            shown[_label(kind_node)] = _plain(detail.content)
+            shown[_label(kind_node)] = _plain(page.current_detail())
             for cat in kind_node.children:
                 for leaf in cat.children:
                     page._show(leaf.data)
-                    shown[_label(leaf)] = _plain(detail.content)
+                    shown[leaf.data["name"]] = _plain(page.current_detail())
         return shown
 
     shown = run_tui(body, _manifest(root, [EVIDENCE]), root)
@@ -184,32 +183,29 @@ def test_catalog_detail_says_kind_and_destination(tmp_path, run_tui):
 
 
 # --------------------------------------------------------------------------- #
-# add picker
+# the catalog on the Fetchers page
 # --------------------------------------------------------------------------- #
 
-def test_add_picker_groups_by_kind_and_lists_picks_under_their_kind(tmp_path, run_tui):
+def test_catalog_groups_by_kind_and_marks_what_the_manifest_has(tmp_path, run_tui):
     root = _stage_root(tmp_path)
 
     async def body(app, pilot):
-        await pilot.press("2")
+        await pilot.press("1")
         await pilot.pause()
-        await pilot.press("a")
+        await pilot.press("tab")  # from the catalog to the manifest list
         await pilot.pause()
-        assert isinstance(app.screen, MultiPickerModal)
-        tree = app.screen.query_one("#multi-pick-tree", Tree)
+        tree = app.screen.query_one("#catalog-tree", Tree)
         headings = [_label(n) for n in tree.root.children]
-        # EVIDENCE is already in the manifest, so acme's evidence is "all added".
-        under_scan = [_label(c) for c in tree.root.children[1].children]
-        await pilot.press(*"findings", "enter")
-        await pilot.pause()
-        chosen = _plain(app.screen.query_one("#multi-pick-chosen", Static).content)
-        return headings, under_scan, sorted(app.screen._chosen), chosen
+        leaves = {
+            leaf.data["name"]: str(leaf.label)
+            for kind in tree.root.children for cat in kind.children for leaf in cat.children
+        }
+        return headings, leaves
 
-    headings, under_scan, picked, chosen = run_tui(body, _manifest(root, [EVIDENCE]), root)
-    assert headings == ["Evidence  (1)", "Scan reports  (1)"]
-    assert under_scan == ["acme  (1)"]
-    assert picked == [SCAN], "enter in the filter did not pick the lone match"
-    assert chosen.splitlines()[0] == "Scan reports"
+    headings, leaves = run_tui(body, _manifest(root, [EVIDENCE]), root)
+    assert headings == ["Evidence  (2)", "Scan reports  (1)"]
+    assert leaves[EVIDENCE] == f"[x] {EVIDENCE}", "the manifest's fetcher is not marked"
+    assert leaves[SCAN] == f"[ ] {SCAN}"
 
 
 # --------------------------------------------------------------------------- #
@@ -229,7 +225,9 @@ def test_manifest_table_says_kind_and_flags_a_scan_report_with_no_assessment(tmp
     root = _stage_root(tmp_path)
 
     async def body(app, pilot):
-        await pilot.press("2")
+        await pilot.press("1")
+        await pilot.pause()
+        await pilot.press("tab")  # from the catalog to the manifest list
         await pilot.pause()
         return _rows(app)
 
@@ -250,12 +248,13 @@ def test_manifest_table_shows_the_assessment_and_close_policy(tmp_path, run_tui)
     }
 
     async def body(app, pilot):
-        await pilot.press("2")
+        await pilot.press("1")
         await pilot.pause()
-        page = app.screen.query_one(ManifestPage)
+        await pilot.press("tab")  # from the catalog to the manifest list
+        await pilot.pause()
+        page = app.screen.query_one(ManifestPanel)
         page._selected = SCAN
-        page._refresh_detail()
-        detail = _plain(app.screen.query_one("#manifest-detail", Static).content)
+        detail = _plain(page.current_detail())
         return _rows(app), detail
 
     rows, detail = run_tui(body, _manifest(root, [SCAN], config), root)
@@ -282,14 +281,17 @@ def test_each_row_of_a_fetcher_listed_twice_shows_its_own_entry(tmp_path, run_tu
     api.dump_manifest(manifest, path, root)
 
     async def body(app, pilot):
-        await pilot.press("2")
+        await pilot.press("1")
+        await pilot.pause()
+        await pilot.press("tab")  # from the catalog to the manifest list
         await pilot.pause()
         dt = app.screen.query_one("#manifest-entries", DataTable)
         dt.focus()
         dt.move_cursor(row=1)
         await pilot.pause()
-        page = app.screen.query_one(ManifestPage)
-        detail = _plain(app.screen.query_one("#manifest-detail", Static).content)
+        page = app.screen.query_one(ManifestPanel)
+        # The manifest table has focus, so the shared pane shows this entry.
+        detail = _plain(app.screen.query_one("#fetchers-detail", Static).content)
         return _rows(app), page._selected_entry_key(), detail
 
     rows, selected, detail = run_tui(body, path, root)
@@ -306,7 +308,9 @@ def test_a_on_evidence_explains_where_evidence_goes(tmp_path, run_tui):
     root = _stage_root(tmp_path)
 
     async def body(app, pilot):
-        await pilot.press("2")
+        await pilot.press("1")
+        await pilot.pause()
+        await pilot.press("tab")  # from the catalog to the manifest list
         await pilot.pause()
         await pilot.press("A")
         await pilot.pause()

@@ -86,7 +86,8 @@ schemas and the `paramify` CLI — not the internal code.
   `configuration`; evidence and discovery fetchers refuse it (for `kind:
   inventory`, see **Breaking**). The envelope records it as `metadata.pipeline` and
   `paramify describe` shows it. `github_repository_inventory` and
-  `sophos_endpoint_inventory` 0.2.0 declare it.
+  `sophos_endpoint_inventory` 0.2.0 declare it, and so does `aws_config_inventory`
+  (`id_scheme: aws-arn`).
 
 - **Pipeline files upload as the full envelope, and the result says whether the
   pipeline ran.** `paramify upload` sends an inventory (or any pipeline) file as
@@ -104,6 +105,49 @@ schemas and the `paramify` CLI — not the internal code.
   workspace has no batches. A batch approved on submission that has not flipped
   to APPROVED yet when read back counts as `approved: true`.
 
+- Selected-subscription collection now avoids cross-subscription discovery in
+  VNet egress, Private DNS, WAF policies and alert action-group references when
+  `AZURE_TARGET_SUBSCRIPTION_ONLY=true`. Foreign relationships remain unknown
+  rather than deleted. Resource diagnostic settings report the selected scope.
+  Sentinel data sources retain service-supplied last-data KQL without executing
+  it in this mode when its workspace/function scope cannot be established.
+  Default broad discovery remains unchanged.
+
+- **`wiz_vulnerability_findings` 0.4.0: SLA columns.** After the 43 legacy
+  columns (unchanged, so existing intake presets keep mapping), the CSV adds the
+  Wiz fields Paramify's remediation SLAs depend on: `Is Internet Reachable` and
+  `Internet Reachable Reason` (Wiz's finding-level classification, closer to
+  FedRAMP's Internet-Reachable Vulnerability than the asset-level `Asset Has Wide
+  Internet Exposure`), `Asset Has Limited Internet Exposure`, the BOD 26-04 KEV
+  inputs `CISA SSVC Automatable` and `CISA SSVC Technical Impact` plus `CISA KEV
+  Due Date`, and four signals toward Likely Exploitable (`Exploitability
+  Validation Status`, `Has Initial Access Potential`, `Code Reachability`,
+  `Attack Vector`). None of the four is a Likely Exploitable verdict. Each field
+  is selected only when the tenant's schema has it (read-only introspection); a
+  missing one leaves its column blank and is logged, and if the schema cannot be
+  read the legacy query is sent unchanged. The columns are listed in
+  [the fetcher's README](fetchers/wiz/vulnerability_findings/README.md#columns).
+
+- **Optional selected-subscription reads for mixed Entra evidence.**
+  `azure_entra_emergency_accounts` 0.2.0 and
+  `azure_entra_dormant_identities` 0.3.0 accept `target_subscription_only`
+  (default false). With an explicit subscription and `AZURE_TENANT_ID`, ARM
+  requests stay in that subscription and both source tenant reads must agree
+  before further directory reads. Shared Graph clients check continuation origins
+  and refuse redirects; scoped ARM REST/SDK requests validate before token/send.
+  Graph remains tenant-wide. Missing reads, licensing limits and unsupported APIs
+  remain recorded failures or unknown values. No source access is changed.
+
+- **`paramify status <manifest>` shows what each fetcher has in Paramify.** For
+  each evidence fetcher in the manifest, it shows the evidence set, the script
+  state, the paired validators, the solution capabilities, the artifacts, and
+  whether the fetcher is ready. It changes nothing in the workspace. It exits 1
+  until every fetcher is ready, so a deployment can use it as a check, and 2
+  when it cannot tell: no token, a failed read such as an expired token, an
+  unreadable manifest or uploader config, an unknown fetcher, or no evidence
+  fetchers. A value it could not read shows as `?` (`null` in `--json`). Every
+  read goes to the uploader config's `paramify.base_url` when it sets one. The
+  evidence-set and capability reads now keep each validator pair.
 - **`aws_route53_resolver_dns_security`** (`EVD-R53-RESOLVER-DNS-SECURITY`) —
   one record per VPC in the region with its Route 53 Resolver DNSSEC validation
   status (`NOT_CONFIGURED` when the VPC has no DNSSEC config), its DNS Firewall
@@ -116,7 +160,14 @@ schemas and the `paramify` CLI — not the internal code.
   `KSI-SVC-VCM`, `KSI-CNA-RNT` and `KSI-MLA-LET`. `aws_discovery_beta` now
   lists DNS Firewall rule group associations (`dns_firewall_association`) per
   region, so discovery covers the `route53resolver` service this fetcher reads.
-
+- **The TUI asks for the stack when it makes a new manifest.** After the name,
+  `n` on the welcome screen shows the stacks of the workspace. Pick one, or
+  skip and set it later on the manifest screen. The TUI writes the manifest
+  only after this step, with `run.paramify.stack` and `stack_name` when you
+  pick a stack. Without an API token, or when the stack list fails, the step
+  still shows. It tells why there is no list and offers to make the manifest
+  without a stack. The form refuses a name that is already in use before the
+  stack step, and keeps the typed name.
 - **Evidence uploads go out as batches.** `paramify upload` now sends the files
   of each fetcher entry as one batch. Paramify submits and approves a batch as
   one unit. The batch goes through the channel of the evidence set, on the
@@ -1668,6 +1719,69 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **The TUI shows the catalog and the manifest on one Fetchers page.** The
+  Catalog and Manifest tabs are now one tab, so the TUI has four tabs:
+  Fetchers, Run, Evidence and Paramify (keys `1` to `4`). The catalog and a
+  detail pane are at the top, and the manifest is across the full width below
+  them. The detail pane shows the item in the list that has focus. Press `a`, or enter, on a catalog
+  fetcher to add it to the manifest, and focus stays in the catalog. The
+  catalog shows `[x]` before each fetcher that is in the manifest and `[ ]`
+  before the rest, as the add-fetchers picker did. `a` on a fetcher that is
+  already in the manifest moves the manifest cursor to it, and `a` on the
+  manifest list moves to the catalog filter (its footer hint reads "find to
+  add"). Enter in the filter moves to the first fetcher it shows. Tab moves
+  from the catalog to the manifest list, the output dir, the stack, owner and
+  Save row, and the detail pane. Escape stays in the list you were in. The
+  footer shows the keys of the list that has focus. The manifest list shows
+  at least twelve rows on a tall terminal and at most 65% of the page. On a
+  short terminal, such as 80×24, the twelve-row floor gives way so the
+  catalog keeps half the page, and the blank rows around the filter and the
+  settings row are dropped. An empty manifest takes only the rows of its
+  hint. The add-fetchers picker is removed.
+- **The Paramify tab in the TUI can show the solution capabilities.** `[` and `]`
+  switch between the view by fetcher and the view by capability. The view by
+  capability lists each capability in the workspace with its validator
+  pairs and the fetchers they come from. The count includes pairs whose
+  evidence sets are not in the manifest, and the row says how many come from
+  other evidence sets. On a short terminal the view bar is hidden (`[` and
+  `]` still switch views) and the pairs pane gives way, as the fetcher
+  detail does, so the capability list keeps its rows. Under it, the highlighted capability shows each
+  pair: the fetcher, the function, and the validators in the pair. `/`
+  filters by capability id or name. If the token cannot read the
+  capabilities, the view tells you. The view by fetcher still works.
+- **The TUI's Paramify tab is a setup grid.** It has one row for each evidence
+  fetcher in the manifest: the evidence set, the script, the validators, the
+  linked solution capabilities, the artifacts, and whether the fetcher is
+  ready. Under the grid, a line counts each column. The highlighted fetcher
+  shows its validators and the capabilities that its validator pairs prove.
+  `/` filters the grid. `w` hides the fetchers that are ready, so the grid
+  lists only what needs work, and shows them again; the footer reads
+  `w hide ready` or `w show all`. The validators count is out of the
+  fetchers that have validators in the registry. `s` syncs the scripts, `v` syncs the validators and `u` uploads the newest run,
+  each after a preview and a confirm, and the grid then reads the workspace
+  again. Without an API token, a bar says how to set one, and the three keys
+  are off. A cell or count whose read failed shows `?`, as in `paramify
+  status`, and an uploader config that cannot be read shows in the bar. On a
+  short terminal, such as 80×24, the detail under the grid gives way so the
+  grid keeps its rows. The tab reads the workspace only when it shows. The scripts force
+  and reassociate options are no longer in the TUI; `paramify scripts sync`
+  keeps them.
+- **Scan reports are on their own Pipelines tab in the TUI.** The tabs are
+  Fetchers, Run, Evidence, Paramify and Pipelines (keys `1` to `5`). The
+  Pipelines tab lists the scan-report fetchers in the manifest, with the assessment
+  each one sends to and its close-cycle setting, read as the manifest list
+  reads them: an assessment set for the whole platform counts, and a close
+  policy that is not set reads "close unset". `i` sends the reports, `j`
+  lists the pipeline jobs and `C` closes a cycle, as before. The Paramify tab
+  keeps the evidence upload and the scripts sync. One Paramify operation
+  still runs at a time across both tabs: while an upload, sync, send or cycle
+  close runs, the other tab refuses to start another and says so. The tab's
+  label carries a `beta` tag.
+- **Only the TUI panel that has focus has a color.** The other panels have a
+  gray border, and the list in them has a gray cursor. The catalog's cursor
+  stays bright while its filter has focus, because up, down and enter in the
+  filter move and pick that cursor. Tables and the catalog tree have no fill
+  of their own, so the panel border is the only outline.
 - **Each batch the upload creates is approved on submission by default.** The
   upload now sends the entry's `approval` (default `SUBMISSION`) when it creates
   a batch. Before, a batch took the evidence set's mode, so a set made `MANUAL`
@@ -2453,6 +2567,26 @@ schemas and the `paramify` CLI — not the internal code.
   or `refuse`) on a pipeline entry, still hides `delivery`, and a save touches
   only the keys the form shows.
 
+- Azure Service Health uses API `2025-04-01` for Azure Government event
+  lists, individual events and both detail actions. Other clouds retain
+  `2025-05-01`; evidence fields and collection scope are unchanged.
+- Key Vault key rotation derives a missing ARM `vault_uri` from the selected
+  Azure cloud instead of defaulting sovereign-cloud reads to the public host.
+  ARM-provided URIs and rotation-policy configured/readability semantics are
+  unchanged.
+
+- **`azure_entra_authentication_policy` no longer shows Microsoft's password
+  defaults when the tenant's settings could not be read.** Before, a failed
+  `/groupSettings` read fell back to the template, so `password_settings_source`
+  read `template_defaults` and the banned-password and lockout fields showed
+  the defaults, though the tenant may have saved other values. The source and
+  those fields are now null, and the failed read still fails the run. Version
+  0.3.1.
+- **`azure_app_gateway_waf` `total_waf_policies` is null when the WAF policy
+  list could not be read.** Before, a failed
+  `web_application_firewall_policies.list_all` left only the policies a gateway
+  references, read one by one, so the total looked like a small number of
+  policies. The failed list still fails the run. Version 0.2.2.
 - **`paramify doctor` and the note before `paramify run` find an upload token
   in `.env`.** So do `manifest set-stack` and the stack picker in the TUI.
   Before, only `paramify stacks` and `paramify upload` read `.env`, and the
@@ -2519,6 +2653,26 @@ schemas and the `paramify` CLI — not the internal code.
   ones in an explicit `SEARCH_KEYS` set, not those whose key happens to contain
   `search_service`, and a test checks every summary key falls in exactly one
   group. Output is unchanged.
+- **Azure resource exclusions: `resource_exclusion_patterns_unmatched` is null
+  when a resource list was not read.** Before, a list that failed (or had no
+  credential or subscription) left every configured pattern in the field and
+  logged "matched nothing" for each, as if the patterns were mistyped, though
+  none was compared to a resource. The field is now null, with no warning,
+  whenever a list the fetcher needs was not read. The shared
+  `ResourceExclusions` gains `mark_unread()`, and `summary()` does the same when
+  any in-scope count is null. Each fetcher's description says so. Output
+  changes only on an unread list; with every list read it is the same. Versions:
+  `azure_activity_log_alerts` 0.3.1, `azure_ai_hub_configuration` 0.2.1, `azure_ai_services_configuration` 0.2.2, `azure_aks_cluster_configuration` 0.3.1, `azure_alert_rules` 0.3.1, `azure_api_management_configuration` 0.2.1, `azure_app_gateway_backend_tls` 0.2.1, `azure_app_gateway_tls_listeners` 0.2.1, `azure_app_gateway_waf` 0.2.1, `azure_app_service_backups` 0.3.2, `azure_app_service_configuration` 0.5.1, `azure_app_service_deployments` 0.3.1, `azure_app_service_plans` 0.3.1, `azure_backup_recovery_status` 0.4.1, `azure_backup_vault_protection` 0.1.1, `azure_bastion_configuration` 0.1.1, `azure_change_provenance` 0.3.1, `azure_container_registry_configuration` 0.2.1, `azure_container_workloads_configuration` 0.2.1, `azure_cosmosdb_configuration` 0.2.1, `azure_data_services_configuration` 0.2.1, `azure_databricks_workspace_configuration` 0.2.1, `azure_ddos_protection` 0.2.1, `azure_defender_assessments` 0.4.1, `azure_defender_vulnerability_findings` 0.1.1, `azure_disk_encryption_status` 0.2.1, `azure_dns_configuration` 0.6.1, `azure_firewall_configuration` 0.1.1, `azure_front_door_origins` 0.8.1, `azure_front_door_tls` 0.6.1, `azure_front_door_waf_coverage` 0.6.1, `azure_front_door_waf_policies` 0.2.1, `azure_function_app_configuration` 0.2.1, `azure_key_vault_configuration` 0.4.1, `azure_key_vault_key_rotation` 0.6.1, `azure_log_analytics_deletion_rights` 0.2.1, `azure_log_analytics_query_audit` 0.2.1, `azure_log_analytics_workspaces` 0.3.1, `azure_log_storage_immutability` 0.2.1, `azure_managed_identity_configuration` 0.2.1, `azure_managed_redis_configuration` 0.2.1, `azure_monitor_fired_alerts` 0.2.2, `azure_mysql_configuration` 0.2.1, `azure_network_flow_logs` 0.2.1, `azure_network_security_groups` 0.5.1, `azure_policy_assignments` 0.4.1, `azure_policy_compliance` 0.5.1, `azure_postgresql_configuration` 0.2.1, `azure_private_dns_zone_configuration` 0.4.1, `azure_private_endpoint_configuration` 0.3.1, `azure_rbac_custom_roles` 0.2.2, `azure_rbac_role_assignments` 0.4.3, `azure_redis_cache_configuration` 0.2.1, `azure_residual_resources` 0.3.1, `azure_resource_diagnostic_settings` 0.4.1, `azure_resource_inventory` 0.4.1, `azure_resource_locks` 0.1.1, `azure_sentinel_analytics_rules` 0.3.2, `azure_sentinel_automation_rules` 0.2.1, `azure_sentinel_data_sources` 0.4.1, `azure_sentinel_incidents` 0.3.1, `azure_service_availability` 0.1.1, `azure_service_health_advisories` 0.1.1, `azure_service_log_records` 0.2.1, `azure_sql_encryption_status` 0.2.1, `azure_sql_managed_instance_backups` 0.4.1, `azure_sql_managed_instance_configuration` 0.4.1, `azure_sql_managed_instance_encryption` 0.3.1, `azure_sql_server_configuration` 0.2.1, `azure_storage_encryption_status` 0.4.1, `azure_virtual_wan_configuration` 0.2.1, `azure_vm_hardening_status` 0.3.1, `azure_vnet_egress_routing` 0.3.1, `azure_vpn_gateway_configuration` 0.2.1, `azure_zone_redundancy` 0.1.1.
+  Two fetchers also null counts that read 0 on an unread list:
+  `azure_key_vault_configuration` `in_scope_key_vaults` and `excluded_key_vaults`,
+  and `azure_storage_encryption_status` `in_scope_storage_accounts` and
+  `excluded_storage_accounts`.
+  `azure_policy_compliance` now marks a task whose deployment list failed as
+  unread even after an earlier task returned rows; before, a local list took
+  over the name of the caller's list, so `deployments_complete` stayed true.
+  `azure_resource_inventory` also nulls the field when the Defender assessments
+  or Policy states query fails, since patterns are matched against those rows
+  too.
 - **The TUI's Paramify tab fits a 160x50 terminal.** Below 242 columns the
   scripts-sync panel was squeezed to its border, its buttons drawn over the log,
   and a missing-token preflight error ran off the evidence panel behind a

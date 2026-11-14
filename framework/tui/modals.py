@@ -6,7 +6,6 @@ caller's push_screen callback maps onto framework.api mutators.
 
   FormModal        -> dict of {group: {key: value}}   (edit entry / add target / platform)
   PickerModal      -> str (the chosen option id) or None
-  MultiPickerModal -> list[str] (the chosen option ids) or None
   ConfirmModal     -> bool
   PreviewModal     -> None (read-only YAML view)
 """
@@ -54,11 +53,14 @@ class FormModal(ButtonRowNav, ModalScreen[dict]):
         *BUTTON_ROW_BINDINGS,
     ]
 
-    def __init__(self, title: str, groups: Dict[str, List[dict]], subtitle: str = "") -> None:
+    def __init__(self, title: str, groups: Dict[str, List[dict]], subtitle: str = "",
+                 save_label: str = "Save") -> None:
         super().__init__()
         self._title = title
         self._subtitle = subtitle
         self._groups = groups
+        # "Next" where another step follows, so the form does not promise a save it does not make.
+        self._save_label = save_label
 
     def compose(self) -> ComposeResult:
         with Vertical(id="modal-card"):
@@ -77,7 +79,7 @@ class FormModal(ButtonRowNav, ModalScreen[dict]):
                 if not any_fields:
                     yield Static("Nothing to configure for this fetcher.", classes="dim")
             with Horizontal(id="modal-buttons"):
-                yield Button("Save", variant="primary", id="save")
+                yield Button(self._save_label, variant="primary", id="save")
                 yield Button("Cancel", id="cancel")
 
     def on_mount(self) -> None:
@@ -115,24 +117,39 @@ class PickerModal(FilterListNav, ModalScreen[str]):
     BINDINGS = [Binding("escape", "cancel", "Cancel"), *FILTER_NAV_BINDINGS]
     FILTER_NAV = ("#picker-filter", "#picker-list")
 
-    def __init__(self, title: str, options: List[Tuple[str, str]], subtitle: str = "") -> None:
-        # options: list of (id, label)
+    def __init__(self, title: str, options: List[Tuple[str, str]], subtitle: str = "",
+                 notice: str = "") -> None:
+        # options: list of (id, label). notice: why the list is short or empty
+        # (no token, an API error), shown as a warning above it.
         super().__init__()
         self._title = title
         self._subtitle = subtitle
         self._options = options
+        self._notice = notice
 
     def compose(self) -> ComposeResult:
         with Vertical(id="modal-card"):
             yield Label(self._title, id="modal-title")
             if self._subtitle:
                 yield Label(self._subtitle, id="modal-subtitle")
+            if self._notice:
+                # Plain text: it can carry an API error body, and a "[" there is not markup.
+                yield Static(Text(self._notice), id="picker-notice")
             yield Input(placeholder="filter…", id="picker-filter")
             yield OptionList(id="picker-list")
 
     def on_mount(self) -> None:
         self._populate("")
-        self.query_one("#picker-filter", Input).focus()
+        if not (self._notice and len(self._options) <= 1):
+            self.query_one("#picker-filter", Input).focus()
+            return
+        # A notice with one fallback choice: nothing to filter, so hide the box
+        # and put enter on the choice.
+        self.query_one("#picker-filter", Input).display = False
+        ol = self.query_one("#picker-list", OptionList)
+        ol.add_class("fallback")
+        ol.highlighted = 0
+        ol.focus()
 
     def _populate(self, flt: str) -> None:
         ol = self.query_one("#picker-list", OptionList)
@@ -277,185 +294,6 @@ class _PickTree(Tree):
     the only thing that opens a platform is an explicit select/click."""
 
     BINDINGS = [Binding("space", "select_cursor", "Toggle", show=False)]
-
-
-class MultiPickerModal(ButtonRowNav, FilterListNav, ModalScreen[list]):
-    """A filterable multi-select catalog: sections (always open) of collapsible
-    per-platform dropdowns of checkbox leaves on the left, a live list of
-    everything checked on the right, under the same section headings. Returns the
-    chosen ids (section- then platform-grouped order), or None.
-
-    The checked set is the source of truth; leaf labels and the right pane are
-    rendered from it, so filtering (which rebuilds the tree) never drops a pick.
-    """
-
-    BINDINGS = [
-        Binding("escape", "cancel", "Cancel"),
-        Binding("ctrl+s", "confirm", "Add"),
-        *BUTTON_ROW_BINDINGS,
-        *FILTER_NAV_BINDINGS,
-    ]
-    FILTER_NAV = ("#multi-pick-filter", "#multi-pick-tree")
-
-    def __init__(
-        self, title: str, sections: List[Tuple[str, List[Tuple[str, List[str]]]]],
-        subtitle: str = "", disabled: set[str] | None = None,
-    ) -> None:
-        # sections: ordered [(heading, [(platform, [fetcher_name, ...]), ...]), ...]
-        # — every discovered fetcher, in the catalog's order. A platform may sit
-        # under more than one heading. `disabled` names are already in the
-        # manifest: shown for context (so a fully-added category still appears)
-        # but not selectable.
-        super().__init__()
-        self._title = title
-        self._subtitle = subtitle
-        self._sections = sections
-        self._disabled = set(disabled or ())
-        self._cat_of = {
-            name: cat for _, groups in sections for cat, names in groups for name in names
-        }
-        self._all_ids = [
-            name for _, groups in sections for _, names in groups for name in names
-        ]
-        self._chosen: set = set()
-
-    def compose(self) -> ComposeResult:
-        with Vertical(id="modal-card", classes="multi-pick"):
-            yield Label(self._title, id="modal-title")
-            if self._subtitle:
-                yield Label(self._subtitle, id="modal-subtitle")
-            with Horizontal(id="multi-pick-split"):
-                with Vertical(id="multi-pick-left"):
-                    yield Input(placeholder="filter…", id="multi-pick-filter")
-                    yield _PickTree("fetchers", id="multi-pick-tree")
-                with VerticalScroll(id="multi-pick-right"):
-                    yield Static("selected", classes="panel-title")
-                    yield Static(id="multi-pick-chosen")
-            with Horizontal(id="modal-buttons"):
-                yield Button("Add 0 selected", variant="primary", id="confirm")
-                yield Button("Cancel", id="cancel")
-
-    def on_mount(self) -> None:
-        tree = self.query_one("#multi-pick-tree", _PickTree)
-        tree.show_root = False
-        tree.auto_expand = False
-        self._populate("")
-        self._refresh_chosen()
-        self.query_one("#multi-pick-filter", Input).focus()
-
-    def _leaf_label(self, name: str) -> Text:
-        # A Rich Text (not a markup string) — "[x]" would otherwise be parsed as
-        # a console-markup tag and vanish. Lets us tint the checked marker too.
-        if name in self._disabled:
-            # Already in the manifest: shown for context, not selectable.
-            label = Text()
-            label.append("✓ ", style="green")
-            label.append(name, style="dim")
-            label.append("  in manifest", style="dim italic")
-            return label
-        checked = name in self._chosen
-        label = Text()
-        label.append("[x] " if checked else "[ ] ", style="green" if checked else "dim")
-        label.append(name)
-        return label
-
-    def _count(self, names: List[str]) -> str:
-        # Count what's actually addable; a fully-added platform still shows
-        # (labelled "all added") so the category never silently disappears.
-        addable = sum(1 for n in names if n not in self._disabled)
-        return f"({addable})" if addable else "(all added)"
-
-    def _populate(self, flt: str) -> None:
-        tree = self.query_one("#multi-pick-tree", _PickTree)
-        tree.clear()
-        flt = flt.strip().lower()
-        for heading, groups in self._sections:
-            hits = [
-                (cat, matches) for cat, names in groups
-                if (matches := [n for n in names if not flt or flt in n.lower()])
-            ]
-            if not hits:
-                continue
-            every = [n for _, matches in hits for n in matches]
-            section = tree.root.add(f"{heading}  {self._count(every)}", expand=True)
-            for cat, matches in hits:
-                # Filtering opens the platforms with hits; otherwise stay collapsed
-                # so a long catalog reads as a tidy list of platforms to open.
-                node = section.add(f"{cat}  {self._count(matches)}", expand=bool(flt))
-                for name in matches:
-                    node.add_leaf(self._leaf_label(name), data=name)
-
-    @on(Input.Changed, "#multi-pick-filter")
-    def _filter(self, event: Input.Changed) -> None:
-        self._populate(event.value)
-
-    @on(Tree.NodeSelected, "#multi-pick-tree")
-    def _on_select(self, event: Tree.NodeSelected) -> None:
-        self._activate(event.node)
-
-    @on(Input.Submitted, "#multi-pick-filter")
-    def _submit(self, event: Input.Submitted) -> None:
-        # Focus opens in the filter box, so Enter there must do what the subtitle
-        # promises: act on the highlighted row, or on the only fetcher left.
-        # The cursor rests on the platform row after filtering, so a lone match
-        # wins over it; otherwise Enter acts where the arrows put the cursor.
-        tree = self.query_one("#multi-pick-tree", _PickTree)
-        leaves = [n for s in tree.root.children for c in s.children for n in c.children
-                  if n.data not in self._disabled]
-        node = leaves[0] if len(leaves) == 1 else tree.cursor_node
-        if node is None or node is tree.root:
-            return
-        self._activate(node)
-
-    def _activate(self, node) -> None:
-        name = node.data
-        if name is None:  # a section or platform row → open/close it
-            node.toggle()
-            return
-        if name in self._disabled:
-            return  # already in the manifest — shown for context, not selectable
-        if name in self._chosen:
-            self._chosen.discard(name)
-        else:
-            self._chosen.add(name)
-        node.set_label(self._leaf_label(name))
-        self._refresh_chosen()
-
-    def _refresh_chosen(self) -> None:
-        chosen = self.query_one("#multi-pick-chosen", Static)
-        btn = self.query_one("#confirm", Button)
-        n = len(self._chosen)
-        btn.label = f"Add {n} selected"
-        btn.disabled = n == 0
-        if not self._chosen:
-            chosen.update(Text("(nothing selected yet)", style="dim"))
-            return
-        body = Text()
-        # Walk the original (section- then platform-grouped) order so the picked
-        # list mirrors the catalog's grouping, not a/z by name.
-        for heading, groups in self._sections:
-            picked = [n for _, names in groups for n in names if n in self._chosen]
-            if not picked:
-                continue
-            if body:
-                body.append("\n")
-            body.append(f"{heading}\n", style="bold")
-            for name in picked:
-                body.append("• ", style="green")
-                body.append(name)
-                body.append(f"   [{self._cat_of.get(name, '?')}]\n", style="dim")
-        chosen.update(body)
-
-    @on(Button.Pressed, "#confirm")
-    def action_confirm(self) -> None:
-        if not self._chosen:
-            return
-        # Return in grouped order so manifest entries keep the grouping.
-        self.dismiss([name for name in self._all_ids if name in self._chosen])
-
-    @on(Button.Pressed, "#cancel")
-    def action_cancel(self) -> None:
-        self.dismiss(None)
 
 
 class ConfirmModal(ButtonRowNav, ModalScreen[bool]):

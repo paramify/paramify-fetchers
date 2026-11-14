@@ -1,5 +1,5 @@
 name: azure_backup_vault_protection
-version: 0.1.0
+version: 0.1.1
 description: >-
   Shows whether each Backup vault's backup instances have a recent recovery point, how long each policy keeps backups, and whether the vault has soft delete, immutability and geo-redundant storage.
 category: azure
@@ -170,7 +170,7 @@ evidence_set:
 
     What was left out of scope?
     - resource_exclusion_patterns — List of the resource_exclusions patterns as given
-    - resource_exclusion_patterns_unmatched — List of the patterns that matched nothing, such as a mistyped name
+    - resource_exclusion_patterns_unmatched — List of the patterns that matched nothing, such as a mistyped name; null when the vault list or a vault's instance list could not be read
     - excluded_backup_vaults — Number of vaults a pattern took out of scope
     - excluded_backup_instances — Number of backup instances a pattern took out of scope, by their own id or the resource they protect
     - in_scope_backup_vaults — Number of vaults assessed

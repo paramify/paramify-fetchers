@@ -596,6 +596,8 @@ def main() -> int:
         )
 
     exclusions.record_invalid(collector)
+    if accounts is None or search_services is None:
+        exclusions.mark_unread()
     exclusions.warn_unmatched(logger)
 
     accounts_read, search_read = accounts is not None, search_services is not None
