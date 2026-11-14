@@ -77,12 +77,12 @@ _KIND_ABOUT = {
         "Asserts a configuration state — MFA is enforced, buckets are encrypted — "
         "as a JSON payload the fetcher builds.",
         "Wrapped in the standard envelope and uploaded to the evidence set the "
-        "fetcher names. Upload with ctrl+u on the Paramify tab.",
+        "fetcher names. Upload with u on the Paramify tab.",
     ),
     kinds.INVENTORY: (
         "Lists every asset of a kind — cloud resources, hosts, devices — one "
         "record each, for Paramify's Inventory.",
-        "Uploaded to its evidence set with ctrl+u like evidence; an inventory "
+        "Uploaded to its evidence set with u like evidence; an inventory "
         "pipeline attached to that set builds the Inventory items. Only a run "
         "that collected every asset is sent.",
     ),
@@ -90,8 +90,8 @@ _KIND_ABOUT = {
         "Hands over findings a scanner already computed — a Nessus export, a Wiz "
         "CSV, a STIG report — as the tool's own file, never rewritten.",
         "Sent to an assessment's pipeline, which turns it into issues. Each one "
-        "needs an assessment, chosen per manifest with A on the Manifest tab; "
-        "send with i on the Paramify tab. Usually kept in a manifest of its own.",
+        "needs an assessment, chosen per manifest with A on its entry on the Fetchers tab; "
+        "send with i on the Pipelines tab. Usually kept in a manifest of its own.",
     ),
 }
 
@@ -127,7 +127,7 @@ def _close_label(policy: Optional[str]) -> Text:
     if policy == CLOSE_AFTER_RUN:
         return Text("after each complete run (after_run)", style=palette.FG)
     if policy == CLOSE_NEVER:
-        return Text("by hand — C on the Paramify tab (never)", style=palette.FG)
+        return Text("by hand — C on the Pipelines tab (never)", style=palette.FG)
     return Text("unset — press A", style=palette.WARN)
 
 
@@ -175,7 +175,7 @@ def _destination(f: dict, config_view: Optional[List[dict]] = None, in_manifest:
             rows.append(("assessment", Text(f"a {atype} assessment, chosen per manifest", style=palette.FG)))
         fmt = ir.get("format")
         rows.append(("format", Text(f"{fmt + ' — ' if fmt else ''}the tool's own file, never enveloped", style="dim")))
-        rows.append(("send", Text("i on the Paramify tab, to the assessment's pipeline", style="dim")))
+        rows.append(("send", Text("i on the Pipelines tab, to the assessment's pipeline", style="dim")))
     else:
         es = f.get("evidence_set")
         if es:
@@ -188,12 +188,16 @@ def _destination(f: dict, config_view: Optional[List[dict]] = None, in_manifest:
                 "none declared — the upload skips it unless the uploader config names one",
                 style=palette.WARN,
             )))
-        rows.append(("send", Text("ctrl+u on the Paramify tab, enveloped JSON", style="dim")))
+        rows.append(("send", Text("u on the Paramify tab, enveloped JSON", style="dim")))
     return Group(Text("sends to", style="bold"), _kv_table(rows))
 
 
-def fetcher_detail(f: dict) -> RenderableType:
-    """Full detail view for one fetcher descriptor."""
+def fetcher_detail(f: dict, in_manifest: Optional[bool] = None) -> RenderableType:
+    """Full detail view for one fetcher descriptor.
+
+    in_manifest adds a line under the title saying whether the fetcher is in the
+    manifest, or how to add it. None leaves the line out.
+    """
     title = Text()
     title.append(f.get("name", ""), style=f"bold {palette.FG}")
     if f.get("version"):
@@ -209,9 +213,16 @@ def fetcher_detail(f: dict) -> RenderableType:
 
     description = Text(f.get("description") or "(no description)", style="italic")
 
+    status = []
+    if in_manifest is True:
+        status = [Text("✓ in manifest", style=palette.OK)]
+    elif in_manifest is False:
+        status = [Text.assemble(("a", f"bold {palette.ACCENT}"), (" add to the manifest", "dim"))]
+
     return Group(
         title,
         meta,
+        *status,
         Text(),
         description,
         Text(),

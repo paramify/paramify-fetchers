@@ -24,14 +24,13 @@ from framework.contract import ManifestEntry
 from framework.issue_reports import CLOSE_AFTER_RUN, CLOSE_NEVER
 from framework.runner.manifest_loader import entry_keys
 from framework.tui import kinds, palette, render
-from framework.tui.components.detail import ShowDetail
+from framework.tui.components.detail import FocusCatalog, ManifestChanged, ShowDetail
 from framework.tui.components.forms import env_name_from_ref
 from framework.tui.components.keys import BUTTON_ROW_BINDINGS, ButtonRowNav
 from framework.tui.components.table import DataTable
 from framework.tui.modals import (
     ConfirmModal,
     FormModal,
-    MultiPickerModal,
     PickerModal,
     PreviewModal,
     TargetsModal,
@@ -69,13 +68,14 @@ class ManifestPanel(ButtonRowNav, Vertical):
     page that hosts the panel, which shows it in a shared pane.
     """
 
+    # `a` moves to the catalog filter: fetchers are added from the catalog.
     HINTS = [
-        ("a", "add"), ("e", "entry"), ("x", "remove"), ("t", "targets"),
+        ("a", "find to add"), ("e", "entry"), ("x", "remove"), ("t", "targets"),
         ("A", "assessment"), ("s", "save"), ("v", "validate"), ("p", "preview"),
     ]
 
     BINDINGS = [
-        Binding("a", "add_fetcher", "Add"),
+        Binding("a", "add_fetcher", "Find to add"),
         Binding("e", "edit_entry", "Entry"),
         Binding("x", "remove_entry", "Remove"),
         Binding("t", "edit_targets", "Targets"),
@@ -98,12 +98,7 @@ class ManifestPanel(ButtonRowNav, Vertical):
             # select_on_focus off: Textual selects the whole value on focus, so
             # the first keystroke replaced the existing path wholesale.
             yield Input(placeholder="./evidence", id="manifest-output-dir", select_on_focus=False)
-            yield Static("stack:", classes="inline-label")
-            yield Button("—", id="manifest-stack")
-            yield Static("owner:", classes="inline-label after-button")
-            yield Button("—", id="manifest-owner")
-            yield Button("Add fetcher", variant="primary", id="btn-add")
-            yield Button("Save", id="btn-save")
+            yield from self._settings_buttons()
         with Horizontal(id="manifest-body"):
             with Vertical(id="manifest-entries-panel", classes="panel"):
                 yield DataTable(id="manifest-entries")
@@ -112,6 +107,13 @@ class ManifestPanel(ButtonRowNav, Vertical):
                 with VerticalScroll(id="manifest-detail-scroll", classes="panel"):
                     yield Static(render.empty_detail("No fetcher selected."), id="manifest-detail")
         yield Static(id="manifest-issues")
+
+    def _settings_buttons(self) -> ComposeResult:
+        yield Static("stack:", classes="inline-label")
+        yield Button("—", id="manifest-stack")
+        yield Static("owner:", classes="inline-label after-button")
+        yield Button("—", id="manifest-owner")
+        yield Button("Save", id="btn-save")
 
     def on_mount(self) -> None:
         self._selected: Optional[str] = None  # the fetcher (use) of the selected row
@@ -123,6 +125,10 @@ class ManifestPanel(ButtonRowNav, Vertical):
         self.query_one("#manifest-entries-panel", Vertical).border_title = "fetchers"
         if self._has_detail:
             self.query_one("#manifest-detail-scroll", VerticalScroll).border_title = "detail"
+        else:
+            # On the Fetchers page an empty manifest hides its table; the hint takes
+            # its place as the focus stop, so the manifest's keys stay in reach.
+            self.query_one("#manifest-empty-hint", Static).can_focus = True
         dt = self.query_one("#manifest-entries", DataTable)
         dt.cursor_type = "row"
         dt.zebra_stripes = True
@@ -176,6 +182,7 @@ class ManifestPanel(ButtonRowNav, Vertical):
             dt.clear()
             self._set_empty(f"no manifest loaded — press [bold {palette.ACCENT}]m[/] to pick one")
             self._set_issues(["(no manifest loaded)"])
+            self.post_message(ManifestChanged(set()))
             return
 
         out = self._run().get("output_dir", "") or ""
@@ -234,11 +241,12 @@ class ManifestPanel(ButtonRowNav, Vertical):
             )
             row_keys.append(ekey)
 
-        self._set_empty(
-            None
-            if entries
-            else f"manifest is empty — press [bold {palette.ACCENT}]a[/] to add fetchers"
+        empty = (
+            f"manifest is empty — press [bold {palette.ACCENT}]a[/] to add fetchers"
+            if self._has_detail
+            else f"press [bold {palette.ACCENT}]a[/] on a fetcher to add it"
         )
+        self._set_empty(None if entries else empty)
 
         # preserve selection across rebuilds
         if row_keys:
@@ -257,6 +265,10 @@ class ManifestPanel(ButtonRowNav, Vertical):
 
         self._refresh_detail()
         self._set_issues(self._errors)
+        if not self._has_detail:
+            # Under the catalog, whose list is titled "fetchers", this one is the manifest.
+            self.query_one("#manifest-entries-panel", Vertical).border_title = f"manifest ({len(entries)})"
+        self.post_message(ManifestChanged(self.in_manifest()))
 
     def _set_empty(self, hint: Optional[str]) -> None:
         """Show the hatched placeholder (with the given message) instead of the
@@ -270,7 +282,7 @@ class ManifestPanel(ButtonRowNav, Vertical):
         if self._has_detail:
             self.query_one("#manifest-detail", Static).update(self.current_detail())
         else:
-            self.post_message(ShowDetail(self.current_detail()))
+            self.post_message(ShowDetail(self.current_detail(), self))
 
     def current_detail(self) -> RenderableType:
         """What the detail pane shows for the selected entry."""
@@ -564,10 +576,6 @@ class ManifestPanel(ButtonRowNav, Vertical):
             done,
         )
 
-    @on(Button.Pressed, "#btn-add")
-    def _on_btn_add(self) -> None:
-        self.action_add_fetcher()
-
     @on(Button.Pressed, "#btn-save")
     def _on_btn_save(self) -> None:
         self.action_save()
@@ -575,65 +583,65 @@ class ManifestPanel(ButtonRowNav, Vertical):
     # -- actions ---------------------------------------------------------- #
 
     def action_add_fetcher(self) -> None:
+        # Fetchers are added from the catalog above, on the same page.
+        self.post_message(FocusCatalog())
+
+    def add_fetchers(self, names: List[str]) -> List[str]:
+        """Add fetchers to the manifest and return the names added.
+
+        A comparator brings its inputs with it. Each added fetcher's entry-level
+        secrets are wired to their suggested env var names: the default is almost
+        always correct, so the edit form is only needed where a name differs.
+        (Per-target secrets are not wired: each target usually needs its own
+        credential.) The table cursor moves to the last fetcher asked for.
+        """
         m = self._manifest
-        if m is None:
-            return
-        existing = {e.get("use") for e in self._entries()}
-        cat = getattr(self.app, "catalog_data", None)
-        # Grouped like the catalog, kind first: a platform that ships both kinds
-        # (wiz) would otherwise list its evidence and its scan reports as one.
-        # Every fetcher is passed (not just addable ones): the picker shows the
-        # already-added ones greyed out so a fully-added category — e.g. datadog
-        # once all 13 are in — still appears instead of vanishing.
-        sections = [
-            (kinds.heading(kind), [(c, [f["name"] for f in fs]) for c, fs in groups])
-            for kind, groups in kinds.sections(cat)
-        ]
-        if not sections:
-            self.notify("No fetchers discovered.")
-            return
-
-        def done(names: Optional[List[str]]) -> None:
-            if not names:
-                return
-            # Auto-wire each added fetcher's entry-level secrets to their suggested
-            # env var names: the default is almost always correct, so the edit form
-            # is only needed for the edge case where a name differs. (Per-target
-            # secrets are not wired here — each target usually needs its own cred.)
-            descriptors = self._descriptors()
-            try:
-                fetchers = api.discover(self.app.root_path)["fetchers"]
-            except Exception:  # never let a discovery failure kill the UI
-                fetchers = {}
-            # A comparator brings its inputs with it.
-            added = [a for name in names for a in api.add_entry(m, name, fetchers)]
-            wired = False
-            for name in added:
-                d = descriptors.get(name)
-                if d:
-                    for s in d.get("secrets", []):
-                        if not s.get("per_target") and s.get("env"):
-                            api.set_secret(m, name, s["name"], s["env"])
-                            wired = True
-            self._selected = names[-1]
-            self._autosave()
-            self.rebuild()
-            n = len(added)
-            noun = "fetcher" if n == 1 else "fetchers"
+        if m is None or not names:
+            return []
+        descriptors = self._descriptors()
+        try:
+            fetchers = api.discover(self.app.root_path)["fetchers"]
+        except Exception:  # never let a discovery failure kill the UI
+            fetchers = {}
+        added = [a for name in names for a in api.add_entry(m, name, fetchers)]
+        wired = False
+        for name in added:
+            d = descriptors.get(name)
+            for s in (d or {}).get("secrets", []):
+                if not s.get("per_target") and s.get("env"):
+                    api.set_secret(m, name, s["name"], s["env"])
+                    wired = True
+        # Both: rebuild keeps the old row while _selected_key still names one.
+        self._selected = self._selected_key = names[-1]
+        self._autosave()
+        self.rebuild()
+        if added:
+            asked = [n for n in names if n in added]
+            inputs = len(added) - len(asked)
+            message = f"Added {', '.join(asked) or ', '.join(added)}"
+            if asked and inputs:
+                message += f" + {inputs} input{'s' if inputs != 1 else ''}"
             if wired:
-                self.notify(f"Added {n} {noun} — secrets wired to default env vars (e to change).")
-            else:
-                self.notify(f"Added {n} {noun}.")
+                # On the Fetchers page focus stays in the catalog, where e does nothing.
+                how = "e to change" if self._has_detail else "tab, then e to change"
+                message += f" — secrets wired to default env vars ({how})."
+            self.notify(message)
+        return added
 
-        self.app.push_screen(
-            MultiPickerModal(
-                "Add fetchers",
-                sections,
-                subtitle="enter/space opens a platform or toggles a fetcher · ✓ = already in manifest · type to filter",
-                disabled=existing,
-            ),
-            done,
-        )
+    def in_manifest(self) -> set:
+        """The fetchers the manifest uses."""
+        return {str(e.get("use")) for e in self._entries() if e.get("use")}
+
+    def select(self, use: str) -> None:
+        """Move the table cursor to the entry for `use`."""
+        dt = self.query_one("#manifest-entries", DataTable)
+        try:
+            row = dt.get_row_index(use)
+        except Exception:
+            return
+        self._selected = self._selected_key = use
+        dt.move_cursor(row=row)
+        self._refresh_detail()
 
     def action_edit_entry(self) -> None:
         use, m = self._selected, self._manifest
@@ -1055,4 +1063,7 @@ class ManifestPanel(ButtonRowNav, Vertical):
     # -- focus ------------------------------------------------------------ #
 
     def focus_default(self) -> None:
-        self.query_one("#manifest-entries", DataTable).focus()
+        table = self.query_one("#manifest-entries", DataTable)
+        hint = self.query_one("#manifest-empty-hint", Static)
+        # An empty manifest hides its table; on the Fetchers page its hint takes focus instead.
+        (hint if not table.display and hint.can_focus else table).focus()

@@ -35,7 +35,7 @@ Wire the scanner settings it lists ([Wiz manifest settings](wiz_pipeline_guide.m
 or [let your AI agent](../README.md#drive-it-with-an-ai-agent) do it with
 `wire-manifest`. Step 2 covers the assessment lines.
 [In the TUI](https://support.paramify.com/hc/en-us/articles/55867428958355-Setup-Fetchers),
-that's `n`, then `a` on the **Manifest** tab.
+that's `n`, then `a` on each fetcher in the catalog of the **Fetchers** tab.
 
 ## 2. Point it at an assessment
 
@@ -55,7 +55,8 @@ paramify assessments select wiz_vulnerability_findings -f manifests/pipelines.ya
 </details>
 
 It adds the last three keys below. **Set them before you run**: a run records
-its assessment when it collects. In the TUI, press `A` on the **Manifest** tab
+its assessment when it collects. In the TUI, press `A` on the entry in the
+manifest list of the **Fetchers** tab
 ([recording](demo/pipeline-setup.gif)).
 
 ```yaml
@@ -108,7 +109,8 @@ paramify issues upload -f manifests/pipelines.yaml
 ```
 </details>
 
-In the TUI, press `i` on the **Paramify** tab ([recording](demo/pipeline-send.gif)).
+In the TUI, press `i` on the **Pipelines** tab ([recording](demo/pipeline-send.gif)).
+The tab is marked `beta`: its layout and keys may still change.
 
 ## 5. Watch jobs, and close cycles
 
@@ -124,7 +126,7 @@ paramify issues close <assessment-id>
 ```
 </details>
 
-The TUI's keys are `j` and `C` on the **Paramify** tab ([recording](demo/pipeline-jobs.gif)).
+The TUI's keys are `j` and `C` on the **Pipelines** tab ([recording](demo/pipeline-jobs.gif)).
 
 ## 6. Verify in Paramify
 

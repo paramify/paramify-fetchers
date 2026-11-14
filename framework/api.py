@@ -2932,8 +2932,14 @@ _ASSESSMENTS_PATH = "/assessment"
 _WORKSPACE_READ_TIMEOUT = 30
 
 
-def _workspace_get(path: str, params: Optional[Dict[str, Any]] = None) -> Any:
+def _workspace_get(
+    path: str, params: Optional[Dict[str, Any]] = None, *, base_url: Optional[str] = None,
+) -> Any:
     """GET a read-only workspace endpoint and return the decoded body.
+
+    `base_url` is the instance to read; None resolves it from the environment.
+    A caller that has already resolved it with the uploader config (as
+    `upload_readiness` does) passes it, so every call it makes goes to one host.
 
     The one place the read path resolves a token, enforces https, and turns a
     transport or HTTP failure into a single actionable message. Shared by every
@@ -2958,7 +2964,8 @@ def _workspace_get(path: str, params: Optional[Dict[str, Any]] = None) -> Any:
             f"No Paramify API token: set {READ_TOKEN_ENV} (or "
             f"{UPLOAD_TOKEN_ENV}) to a token with read scope on the workspace"
         )
-    base_url, _ = resolve_base_url()
+    if not base_url:
+        base_url, _ = resolve_base_url()
     # Same rule the uploader enforces (uploader._base_url_error): a Bearer token
     # must not go out over plaintext. Localhost is exempt so a local stub works.
     host = urlparse(base_url).hostname or ""
@@ -3324,19 +3331,23 @@ def capability_display_name(capability: dict) -> str:
     )
 
 
-def list_capabilities() -> List[dict]:
+def list_capabilities(base_url: Optional[str] = None) -> List[dict]:
     """Fetch the workspace's solution capabilities via GET /solution-capabilities.
 
     Returns [{"id", "name", "reference_id", "template_reference_id", "family",
     "subfamily", "risk", "risk_family", "implementation_status",
     "main_component", "functions"}] sorted by display name, where `functions` is
-    [{"type", "name", "narrative", "implementation_status"}] — the narratives
-    being the point of the call.
+    [{"type", "name", "narrative", "implementation_status", "pairs"}] — the
+    narratives being the point of the call. `pairs` is
+    [{"pair_id", "validator_id", "evidence_id"}]: the validator-evidence pairs
+    the function holds.
+
+    `base_url` is the instance to read; None resolves it from the environment.
 
     Raises RuntimeError with an actionable message on missing credentials, a
     non-https endpoint, or a transport/HTTP failure.
     """
-    payload = _workspace_get(_CAPABILITIES_PATH)
+    payload = _workspace_get(_CAPABILITIES_PATH, base_url=base_url)
     raw = payload.get("solutionCapabilities", []) if isinstance(payload, dict) else payload
 
     capabilities = []
@@ -3356,6 +3367,16 @@ def list_capabilities() -> List[dict]:
                 # verbatim: deciding whether it says anything is the reader's job.
                 "narrative": fn.get("narrative") or "",
                 "implementation_status": fn.get("implementationStatus") or "",
+                # Each pair is one validator on one evidence set; the function
+                # holds the pairs that prove it.
+                "pairs": [
+                    {
+                        "pair_id": p.get("validatorEvidencePairId") or "",
+                        "validator_id": p.get("validatorId") or "",
+                        "evidence_id": p.get("evidenceId") or "",
+                    }
+                    for p in fn.get("validatorEvidencePairs") or [] if isinstance(p, dict)
+                ],
             })
         capabilities.append({
             "id": c["id"],
@@ -3413,15 +3434,17 @@ def evidence_set_display_name(evidence_set: dict) -> str:
     )
 
 
-def list_evidence_sets() -> List[dict]:
+def list_evidence_sets(base_url: Optional[str] = None) -> List[dict]:
     """Fetch the workspace's evidence sets via GET /evidence.
 
     Returns [{"id", "reference_id", "name", "description", "instructions",
-    "artifact_count", "automated", "frequency"}] sorted by display name.
+    "artifact_count", "automated", "frequency", "validators"}] sorted by display
+    name, where `validators` is [{"pair_id", "id", "name", "type"}].
     `artifact_count` is what says whether there is anything here to author
-    against at all.
+    against at all. `base_url` is the instance to read; None resolves it from
+    the environment.
     """
-    payload = _workspace_get(_EVIDENCE_SETS_PATH)
+    payload = _workspace_get(_EVIDENCE_SETS_PATH, base_url=base_url)
     raw = payload.get("evidences", []) if isinstance(payload, dict) else payload
 
     sets = []
@@ -3438,6 +3461,16 @@ def list_evidence_sets() -> List[dict]:
             # Derived server-side from whether a validator is attached; read-only.
             "automated": bool(e.get("automated")),
             "frequency": e.get("frequency") or "",
+            # The validators paired with this set, each with its pair id.
+            "validators": [
+                {
+                    "pair_id": v.get("validatorEvidencePairId") or "",
+                    "id": v.get("id") or "",
+                    "name": v.get("name") or "",
+                    "type": v.get("type") or "",
+                }
+                for v in e.get("validators") or [] if isinstance(v, dict)
+            ],
         })
     sets.sort(key=lambda e: evidence_set_display_name(e).lower())
     return sets
@@ -3578,6 +3611,221 @@ def pull_artifact(evidence_set: dict, artifact: dict, dest_dir) -> dict:
         "artifact_id": artifact["id"],
         "evidence_set": evidence_set_display_name(evidence_set),
     }
+
+
+# --------------------------------------------------------------------------- #
+# Paramify workspace — setup status
+#
+# One read-only answer to "what does each of this manifest's fetchers have in
+# Paramify?": its evidence set, its script, its validators, the capabilities its
+# pairs prove, and its artifacts. Built from the same reads and the same scripts
+# dry run the syncs use, so the status and a sync never disagree.
+# --------------------------------------------------------------------------- #
+
+# The scripts dry run's item outcomes, as script states.
+_SCRIPT_STATES = {
+    "would_noop": "in_sync",
+    "would_update": "update",
+    "would_create": "create",
+    "would_drift": "drift",
+    "error": "error",
+}
+
+
+def _validator_lock(root: Path, config_path: Optional[Path]) -> Dict[str, str]:
+    """The customer-side {registry key: Paramify validator id} lock that
+    `validators sync` writes, or {} when it is absent or unreadable."""
+    try:
+        syncer = _load_paramify_validator_syncer(root)
+        config: dict = {}
+        if config_path:
+            loaded = yaml_io.load_path(Path(config_path))
+            config = loaded if isinstance(loaded, dict) else {}
+        # As given, like the syncer: a relative path is from the working
+        # directory, which is where `validators sync` wrote it.
+        lock_path = Path((config.get("validators") or {}).get("lock_path") or syncer.DEFAULT_LOCK_PATH)
+        lock = syncer.load_lock(lock_path)
+    except Exception:  # noqa: BLE001 — a missing or broken lock only loses the id match
+        return {}
+    return lock if isinstance(lock, dict) else {}
+
+
+def paramify_status(root: Path, manifest_path: Path, config_path: Optional[Path] = None) -> dict:
+    """What each of the manifest's evidence fetchers has in the Paramify workspace.
+
+    Read-only: it never writes to Paramify. Returns::
+
+        {"workspace": {"base_url", "base_url_source", "token"},
+         "fetchers": [{"name", "kind",
+                       "evidence_set": {"reference_id", "name", "id" | None,
+                                        "exists": bool | None, "artifact_count": int | None},
+                       "script": "in_sync" | "update" | "create" | "drift" | "error" | None,
+                       "validators": [{"key", "role", "name", "paired": bool | None}],
+                       "pairs": [{"pair_id", "validator_key", "capability_id", "function"}],
+                       "ready": bool}],
+         "capabilities": [{"id", "reference_id", "name",
+                           "functions": [{"type", "pairs": [{"pair_id", "validator_id", "evidence_id"}]}]}],
+         "pipelines_count": int, "skipped": [str], "errors": {part: message}}
+
+    None means unknown: the evidence sets were not read (no token) or the read
+    failed. Then `exists`, `artifact_count` and each validator's `paired` are
+    None, never a value that looks read; `exists` False with `artifact_count` 0
+    means the read found no such set. `script` is None when the dry run did not
+    report the fetcher. A row is `ready` only on known values.
+
+    Scan-report fetchers are only counted (they go to Pipelines); discovery
+    fetchers are left out; a fetcher named twice is one row; a name discovery
+    does not know is listed in `skipped`. Without a token nothing is read from
+    the workspace. Each workspace part (evidence sets, scripts, capabilities)
+    is read on its own: a failure sets `errors[part]` and leaves the rest.
+    Every read goes to the base URL `upload_readiness` resolves, with the
+    uploader config, which is the one the scripts dry run uses.
+    Raises ValueError for setup errors (an unreadable manifest, registry or
+    uploader config).
+    """
+    from framework import validators as _registry  # local: keeps CLI startup light
+
+    root = Path(root)
+    manifest = read_manifest(Path(manifest_path), must_exist=True)
+    discovered = discover_fetchers(root)
+    registry = list(_registry.discover_validators(root).values())
+    config_path = _upload_config(root, config_path)
+    readiness = upload_readiness(root, config_path=config_path)
+    if readiness.get("base_url") is None:
+        # Only an unreadable uploader config leaves it unresolved. Its base URL
+        # and overrides are unknown then, so nothing below would be right.
+        raise ValueError("; ".join(readiness.get("errors") or ["could not read the uploader config"]))
+    base_url = readiness["base_url"]
+    token = bool(readiness["token_present"])
+    # The uploader config can send a fetcher to another set (overrides.<name>);
+    # the scripts sync and the upload both follow it, so the status does too.
+    overrides: dict = {}
+    if config_path:
+        try:
+            loaded = yaml_io.load_path(Path(config_path))
+            overrides = (loaded.get("overrides") or {}) if isinstance(loaded, dict) else {}
+        except (OSError, yaml.YAMLError):
+            overrides = {}  # upload_readiness read it just now; a race at most
+
+    rows: List[dict] = []
+    seen: set = set()
+    skipped: List[str] = []
+    pipelines = 0
+    for entry in (manifest.get("run") or {}).get("fetchers") or []:
+        use = entry.get("use") if isinstance(entry, dict) else None
+        if not use or use in seen:
+            continue
+        seen.add(use)
+        fetcher = discovered.get(use)
+        if fetcher is None:
+            skipped.append(use)
+            continue
+        if fetcher.kind == "issue_report":
+            pipelines += 1
+            continue
+        if fetcher.evidence_set is None:
+            continue  # discovery: reports what exists, never uploaded
+        ref = fetcher.evidence_set.reference_id
+        found_override = overrides.get(use)
+        override: dict = found_override if isinstance(found_override, dict) else {}
+        rows.append({
+            "name": use,
+            "kind": fetcher.kind,
+            "evidence_set": {"reference_id": override.get("reference_id") or ref,
+                             "name": override.get("name") or fetcher.evidence_set.name,
+                             "id": None, "exists": None, "artifact_count": None},
+            "script": None,
+            "validators": [
+                {"key": v.key, "role": v.role or "", "name": v.name, "paired": None}
+                for v in registry if ref in v.evidence_sets
+            ],
+            "pairs": [],
+            "ready": False,
+        })
+
+    status: dict = {
+        "workspace": {"base_url": readiness.get("base_url"),
+                      "base_url_source": readiness.get("base_url_source"), "token": token},
+        "fetchers": rows,
+        "capabilities": [],
+        "pipelines_count": pipelines,
+        "skipped": skipped,
+        "errors": {},
+    }
+    if not token or not rows:
+        return status
+    errors = status["errors"]
+
+    sets: Optional[Dict[str, dict]] = None  # None: not read
+    try:
+        sets = {s["reference_id"]: s for s in list_evidence_sets(base_url=base_url)}
+    except Exception as exc:  # noqa: BLE001 — shown where the data would be
+        errors["evidence_sets"] = str(exc)
+
+    outcomes: Dict[str, str] = {}
+
+    def on_script(ev: dict) -> None:
+        if ev.get("event") == "sync_item" and ev.get("fetcher"):
+            outcomes[ev["fetcher"]] = ev.get("outcome") or ""
+
+    try:
+        scripts_sync(root, config_path, dry_run=True, include={r["name"] for r in rows}, on_event=on_script)
+    except Exception as exc:  # noqa: BLE001
+        errors["scripts"] = str(exc)
+
+    try:
+        capabilities = list_capabilities(base_url=base_url)
+    except Exception as exc:  # noqa: BLE001
+        errors["capabilities"] = str(exc)
+        capabilities = []
+    status["capabilities"] = [
+        {"id": c["id"], "reference_id": c.get("reference_id") or c.get("template_reference_id") or "",
+         "name": c.get("name") or "",
+         "functions": [{"type": f.get("type") or "", "pairs": list(f.get("pairs") or [])}
+                       for f in c.get("functions") or []]}
+        for c in capabilities
+    ]
+
+    lock = _validator_lock(root, config_path)
+    for row in rows:
+        if outcomes.get(row["name"]) is not None:
+            row["script"] = _SCRIPT_STATES.get(outcomes[row["name"]], "error")
+        if sets is None:
+            continue  # unknown: leave exists, artifact_count and paired None
+        found = sets.get(row["evidence_set"]["reference_id"])
+        row["evidence_set"]["exists"] = found is not None
+        if found is None:
+            row["evidence_set"]["artifact_count"] = 0
+            for v in row["validators"]:
+                v["paired"] = False
+            continue
+        row["evidence_set"]["id"] = found["id"]
+        row["evidence_set"]["artifact_count"] = found.get("artifact_count") or 0
+        paired = found.get("validators") or []
+        ids = {v["id"] for v in paired}
+        names = {v["name"]: v["id"] for v in paired}
+        key_by_id: Dict[str, str] = {}
+        for v in row["validators"]:
+            vid = lock.get(v["key"]) if lock.get(v["key"]) in ids else names.get(v["name"])
+            v["paired"] = vid is not None
+            if vid is not None:
+                key_by_id[vid] = v["key"]
+        for cap in status["capabilities"]:
+            for fn in cap["functions"]:
+                for pair in fn["pairs"]:
+                    if pair.get("evidence_id") == found["id"]:
+                        row["pairs"].append({
+                            "pair_id": pair.get("pair_id") or "",
+                            "validator_key": key_by_id.get(pair.get("validator_id") or ""),
+                            "capability_id": cap["id"],
+                            "function": fn["type"],
+                        })
+        row["ready"] = (
+            row["script"] == "in_sync"
+            and all(v["paired"] for v in row["validators"])
+            and row["evidence_set"]["artifact_count"] > 0
+        )
+    return status
 
 
 def effective_config(

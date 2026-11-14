@@ -1,0 +1,1067 @@
+"""TUI: the Paramify page, a setup grid of what each manifest fetcher has in Paramify.
+
+`api.paramify_status` is stubbed; the app, the page and its workers run for real.
+"""
+
+from __future__ import annotations
+
+import io
+import threading
+from pathlib import Path
+
+import pytest
+
+pytest.importorskip("textual", reason="TUI tests need the 'tui' extra")
+
+from rich.console import Console  # noqa: E402
+from textual.widgets import Static, TabbedContent  # noqa: E402
+
+from framework import api  # noqa: E402
+from framework.tui import palette  # noqa: E402
+from framework.tui.components.table import DataTable  # noqa: E402
+from framework.tui.screens.paramify import ParamifyPage  # noqa: E402
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _manifest(tmp_path: Path) -> Path:
+    m = api.init_manifest()
+    api.set_output_dir(m, str(tmp_path / "evidence"))
+    api.add_entry(m, "demo_hello")
+    path = tmp_path / "page.yaml"
+    api.dump_manifest(m, path, REPO_ROOT)
+    return path
+
+
+def _validators(*paired: bool) -> list:
+    return [{"key": f"k{i}", "role": "completeness" if i == 0 else "configuration",
+             "name": f"check {i}", "paired": p} for i, p in enumerate(paired)]
+
+
+def _row(name, *, set_id="ev", arts=1, script="in_sync", validators=None, pairs=None, ready=False,
+         unread=False):
+    """One status row. unread=True is a set whose read failed: its id, existence
+    and artifact count are unknown (None)."""
+    es = {"reference_id": f"EVD-{name.upper()}", "name": name, "id": set_id,
+          "exists": set_id is not None, "artifact_count": arts}
+    if unread:
+        es.update(id=None, exists=None, artifact_count=None)
+    return {"name": name, "kind": "evidence", "evidence_set": es,
+            "script": script, "validators": _validators() if validators is None else validators,
+            "pairs": pairs or [], "ready": ready}
+
+
+def _status(rows=None, *, token=True, capabilities=None, pipelines=0, errors=None) -> dict:
+    if rows is None:
+        rows = [
+            _row("alpha", validators=_validators(True, True), ready=True,
+                 pairs=[{"pair_id": "p1", "validator_key": "k0", "capability_id": "c1", "function": "PROVIDER"},
+                        {"pair_id": "p2", "validator_key": "k1", "capability_id": "c1", "function": "PROVIDER"}]),
+            _row("bravo", script="update", validators=_validators(True, False), arts=0),
+            _row("charlie", set_id=None, script="create", validators=[], arts=0),
+        ]
+    return {"workspace": {"base_url": "https://app.paramify.com/api/v0", "base_url_source": "default",
+                          "token": token},
+            "fetchers": rows,
+            "capabilities": capabilities if capabilities is not None else [
+                {"id": "c1", "reference_id": "SC-AC-06", "name": "Least privilege",
+                 "functions": [{"type": "PROVIDER", "pairs": []}]}],
+            "pipelines_count": pipelines, "skipped": [], "errors": errors or {}}
+
+
+def _stub(monkeypatch, *results):
+    """paramify_status returns (or raises) each result in turn; the last repeats."""
+    calls = []
+
+    def fake(root, manifest_path, config_path=None):
+        calls.append(manifest_path)
+        result = results[min(len(calls), len(results)) - 1]
+        if callable(result):
+            result = result()
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    monkeypatch.setattr(api, "paramify_status", fake)
+    monkeypatch.setattr(api, "list_artifacts", lambda set_id: [])
+    return calls
+
+
+def _text(renderable) -> str:
+    console = Console(file=io.StringIO(), width=220, record=True, color_system=None)
+    console.print(renderable)
+    return console.export_text()
+
+
+async def _settle(app, pilot):
+    await app.workers.wait_for_complete()
+    await pilot.pause()
+    await pilot.pause()
+
+
+async def _open(app, pilot) -> ParamifyPage:
+    await pilot.press("4")
+    await _settle(app, pilot)
+    return app.screen.query_one(ParamifyPage)
+
+
+def _cells(page, key) -> list:
+    grid = page.query_one("#pf-grid", DataTable)
+    return [_text(c).strip() for c in grid.get_row(key)]
+
+
+def _summary(page) -> str:
+    return _text(page.query_one("#pf-summary", Static).content)
+
+
+def test_grid_cells_follow_the_status(tmp_path, monkeypatch, run_tui):
+    _stub(monkeypatch, _status())
+
+    async def body(app, pilot):
+        page = await _open(app, pilot)
+        return _cells(page, "alpha"), _cells(page, "bravo"), _cells(page, "charlie")
+
+    alpha, bravo, charlie = run_tui(body, _manifest(tmp_path))
+    assert alpha == ["alpha", "✓", "✓", "2/2", "1", "1", "READY"]
+    assert bravo[2:4] == ["update", "1/2"] and bravo[6] == "·"
+    assert charlie[1:4] == ["+ create", "+ create", "none"]
+
+
+def test_title_and_totals(tmp_path, monkeypatch, run_tui):
+    _stub(monkeypatch, _status())
+
+    async def body(app, pilot):
+        page = await _open(app, pilot)
+        return (str(page.query_one("#pf-grid-panel").border_title),
+                _text(page.query_one("#pf-totals", Static).content), _summary(page))
+
+    title, totals, summary = run_tui(body, _manifest(tmp_path))
+    assert title == "evidence sets (3)  ·  1 ready"
+    assert "evidence sets 2/3" in totals and "scripts 1/3" in totals
+    # charlie has no validators in the registry: out of the two that do, alpha's are paired
+    assert "validators 1/2" in totals and "uploaded 1/3" in totals
+    assert "https://app.paramify.com/api/v0" in summary and "1/3 ready" in summary
+
+
+def test_detail_follows_the_cursor(tmp_path, monkeypatch, run_tui):
+    _stub(monkeypatch, _status())
+
+    async def body(app, pilot):
+        page = await _open(app, pilot)
+        first = _text(page.query_one("#pf-set", Static).content)
+        caps = page.query_one("#pf-caps", DataTable)
+        matrix = [_text(c).strip() for c in caps.get_row_at(0)]
+        await pilot.press("down")
+        await _settle(app, pilot)
+        second = _text(page.query_one("#pf-set", Static).content)
+        return first, matrix, second
+
+    first, matrix, second = run_tui(body, _manifest(tmp_path))
+    assert "alpha" in first and "EVD-ALPHA" in first
+    assert matrix[0].startswith("SC-AC-06") and matrix[1] == "provider" and matrix[2:] == ["●", "●"]
+    assert "bravo" in second and "update" in second
+
+
+def test_no_token_shows_the_problem_bar(tmp_path, monkeypatch, run_tui):
+    _stub(monkeypatch, _status([_row("alpha", set_id=None, script=None, validators=_validators(False))],
+                               token=False, capabilities=[]))
+
+    async def body(app, pilot):
+        page = await _open(app, pilot)
+        summary = page.query_one("#pf-summary", Static)
+        return (summary.has_class("problem"), _summary(page), _cells(page, "alpha"),
+                _text(page.query_one("#pf-caps-empty", Static).content))
+
+    problem, summary, cells, caps = run_tui(body, _manifest(tmp_path))
+    assert problem
+    assert "No Paramify API token found. Set PARAMIFY_UPLOAD_API_TOKEN" in summary
+    assert cells[1:4] == ["—", "—", "1 in registry"]
+    assert "Capabilities are read from Paramify." in caps
+
+
+def test_a_read_error_keeps_the_last_grid(tmp_path, monkeypatch, run_tui):
+    _stub(monkeypatch, _status(), RuntimeError("HTTP 503"))
+
+    async def body(app, pilot):
+        page = await _open(app, pilot)
+        await pilot.press("ctrl+r")
+        await _settle(app, pilot)
+        return page.query_one("#pf-grid", DataTable).row_count, _summary(page)
+
+    rows, summary = run_tui(body, _manifest(tmp_path))
+    assert rows == 3
+    assert summary.startswith("Could not read the workspace: HTTP 503. This is the status from")
+    assert "ctrl+r to try again." in summary
+
+
+def test_an_unreadable_config_shows_as_an_error(tmp_path, monkeypatch, run_tui):
+    """paramify_status raises ValueError for a setup it cannot read (here the
+    uploader config); the page says so in the problem bar and keeps running."""
+    _stub(monkeypatch, ValueError("Could not read uploader config upload.yaml: bad indent"))
+
+    async def body(app, pilot):
+        page = await _open(app, pilot)
+        return (page.query_one("#pf-summary", Static).has_class("problem"), _summary(page),
+                page.query_one("#pf-grid", DataTable).row_count, app.is_running)
+
+    problem, summary, rows, running = run_tui(body, _manifest(tmp_path))
+    assert problem and running and rows == 0
+    assert summary.startswith("Could not read uploader config upload.yaml: bad indent.")
+    assert "Fix it, then press ctrl+r." in summary
+    assert "Could not read the workspace" not in summary
+
+
+def test_a_failed_evidence_set_read_shows_unknowns(tmp_path, monkeypatch, run_tui):
+    """When /evidence fails, exists, artifact_count and paired are None: the grid,
+    totals and detail show "?" for them, as `paramify status` does, never a value
+    that looks read (create, 0, +)."""
+    rows = [_row("alpha", unread=True, validators=[
+        {"key": "k0", "role": "completeness", "name": "check 0", "paired": None}])]
+    _stub(monkeypatch, _status(rows, errors={"evidence_sets": "HTTP 500"}))
+
+    async def body(app, pilot):
+        page = await _open(app, pilot)
+        return (_cells(page, "alpha"), _text(page.query_one("#pf-totals", Static).content),
+                _text(page.query_one("#pf-set", Static).content),
+                _text(page.query_one("#pf-caps-empty", Static).content), _summary(page))
+
+    cells, totals, detail, caps, summary = run_tui(body, _manifest(tmp_path))
+    assert cells == ["alpha", "?", "✓", "?/1", "?", "?", "·"]
+    assert "evidence sets ?/1" in totals and "validators ?/1" in totals and "uploaded ?/1" in totals
+    assert "? links" in totals and "scripts 1/1" in totals
+    assert "EVD-ALPHA  ? not read" in detail and "created by the scripts sync" not in detail
+    assert "V1 ? check 0" in " ".join(detail.split())
+    assert "Could not read the evidence sets: HTTP 500" in caps
+    assert "Could not read evidence sets: HTTP 500." in summary
+
+
+def test_a_failed_scripts_read_shows_an_unknown_script(tmp_path, monkeypatch, run_tui):
+    _stub(monkeypatch, _status([_row("alpha", script=None)], errors={"scripts": "dry run failed"}))
+
+    async def body(app, pilot):
+        page = await _open(app, pilot)
+        return _cells(page, "alpha")[2], _text(page.query_one("#pf-totals", Static).content)
+
+    script, totals = run_tui(body, _manifest(tmp_path))
+    assert script == "?"
+    assert "scripts ?/1" in totals
+
+
+def test_empty_manifest_shows_the_hint(tmp_path, monkeypatch, run_tui):
+    _stub(monkeypatch, _status([]))
+
+    async def body(app, pilot):
+        page = await _open(app, pilot)
+        return (page.query_one("#pf-grid-panel").has_class("empty"),
+                _text(page.query_one("#pf-grid-empty", Static).content),
+                page.query_one("#pf-detail").display)
+
+    empty, hint, detail = run_tui(body, _manifest(tmp_path))
+    assert empty and "No fetchers in this manifest yet." in hint and "Fetchers tab (1)" in hint
+    assert detail is False
+
+
+def test_only_scan_reports_points_at_pipelines(tmp_path, monkeypatch, run_tui):
+    _stub(monkeypatch, _status([], pipelines=2))
+
+    async def body(app, pilot):
+        page = await _open(app, pilot)
+        return _text(page.query_one("#pf-grid-empty", Static).content)
+
+    assert "They are on the Pipelines tab (5)." in run_tui(body, _manifest(tmp_path))
+
+
+def test_a_refresh_does_not_pull_the_view_off_pipelines(tmp_path, monkeypatch, run_tui):
+    _stub(monkeypatch, _status())
+
+    async def body(app, pilot):
+        page = await _open(app, pilot)
+        await pilot.press("5")
+        await pilot.pause()
+        page.request_status()
+        await _settle(app, pilot)
+        return app.screen.query_one(TabbedContent).active
+
+    assert run_tui(body, _manifest(tmp_path)) == "tab-pipelines"
+
+
+def test_a_status_for_another_manifest_is_dropped(tmp_path, monkeypatch, run_tui):
+    gate = threading.Event()
+
+    def slow():
+        gate.wait(5)
+        return _status()
+
+    _stub(monkeypatch, slow)
+
+    async def body(app, pilot):
+        await pilot.press("4")
+        await pilot.pause()
+        app.manifest_path = tmp_path / "other.yaml"
+        gate.set()
+        await _settle(app, pilot)
+        return app.screen.query_one(ParamifyPage).query_one("#pf-grid", DataTable).row_count
+
+    assert run_tui(body, _manifest(tmp_path)) == 0
+
+
+def test_many_validators_list_names_not_columns(tmp_path, monkeypatch, run_tui):
+    validators = _validators(*([True] * 7))
+    pairs = [{"pair_id": f"p{i}", "validator_key": f"k{i}", "capability_id": "c1", "function": "PROVIDER"}
+             for i in (0, 6)]
+    _stub(monkeypatch, _status([_row("alpha", validators=validators, pairs=pairs)]))
+
+    async def body(app, pilot):
+        page = await _open(app, pilot)
+        caps = page.query_one("#pf-caps", DataTable)
+        labels = [str(col.label) for col in caps.columns.values()]
+        return labels, [_text(c).strip() for c in caps.get_row_at(0)]
+
+    labels, row = run_tui(body, _manifest(tmp_path))
+    assert "V7" not in labels and "validators in the pair" in labels
+    assert row[-1] == "check 0 + check 6"
+
+
+def test_reading_shows_while_the_worker_runs(tmp_path, monkeypatch, run_tui):
+    gate = threading.Event()
+
+    def slow():
+        gate.wait(5)
+        return _status()
+
+    _stub(monkeypatch, _status(), slow)
+
+    async def body(app, pilot):
+        page = await _open(app, pilot)
+        page.request_status()
+        await pilot.pause()
+        during = _summary(page), page.query_one("#pf-grid", DataTable).row_count
+        gate.set()
+        await _settle(app, pilot)
+        return during
+
+    summary, rows = run_tui(body, _manifest(tmp_path))
+    assert "reading the workspace…" in summary and rows == 3
+
+
+def _keys(page) -> list:
+    grid = page.query_one("#pf-grid", DataTable)
+    return [grid.coordinate_to_cell_key((i, 0)).row_key.value for i in range(grid.row_count)]
+
+
+def _cursor(page) -> str:
+    grid = page.query_one("#pf-grid", DataTable)
+    return grid.coordinate_to_cell_key(grid.cursor_coordinate).row_key.value
+
+
+def test_filter_matches_name_and_reference_id(tmp_path, monkeypatch, run_tui):
+    _stub(monkeypatch, _status())
+
+    async def body(app, pilot):
+        page = await _open(app, pilot)
+        await pilot.press("slash")
+        await pilot.pause()
+        focused = app.focused.id
+        await pilot.press(*"brav")
+        await pilot.pause()
+        by_name = _keys(page)
+        page.query_one("#pf-filter").value = "evd-charl"
+        await pilot.pause()
+        return focused, by_name, _keys(page)
+
+    focused, by_name, by_ref = run_tui(body, _manifest(tmp_path))
+    assert focused == "pf-filter" and by_name == ["bravo"] and by_ref == ["charlie"]
+
+
+def _w_hint(page) -> str:
+    return dict(page.HINTS)["w"]
+
+
+def test_w_hides_ready_rows_and_totals_say_so(tmp_path, monkeypatch, run_tui):
+    _stub(monkeypatch, _status())
+
+    async def body(app, pilot):
+        page = await _open(app, pilot)
+        before = _w_hint(page)
+        await pilot.press("w")
+        await pilot.pause()
+        hidden = _keys(page), _text(page.query_one("#pf-totals", Static).content), _w_hint(page)
+        await pilot.press("w")
+        await pilot.pause()
+        return before, hidden, _keys(page), _w_hint(page)
+
+    before, (keys, totals, hint), again, after = run_tui(body, _manifest(tmp_path))
+    assert before == "hide ready", "the footer must say what w does"
+    assert keys == ["bravo", "charlie"]
+    assert totals.rstrip().endswith("showing 2 of 3")
+    assert "scripts 1/3" in totals  # the totals still count every fetcher
+    assert hint == "show all"
+    assert again == ["alpha", "bravo", "charlie"] and after == "hide ready"
+
+
+def test_a_filter_that_matches_nothing_clears_the_detail(tmp_path, monkeypatch, run_tui):
+    _stub(monkeypatch, _status())
+
+    async def body(app, pilot):
+        page = await _open(app, pilot)
+        before = _text(page.query_one("#pf-set", Static).content)
+        await pilot.press("slash", *"zzz")
+        await pilot.pause()
+        return (before, _keys(page), _text(page.query_one("#pf-set", Static).content),
+                page.query_one("#pf-caps", DataTable).row_count)
+
+    before, keys, detail, caps = run_tui(body, _manifest(tmp_path))
+    assert "alpha" in before
+    assert keys == []
+    assert "No fetcher matches “zzz”." in detail and "alpha" not in detail
+    assert caps == 0
+
+
+def test_hiding_every_ready_fetcher_says_so(tmp_path, monkeypatch, run_tui):
+    _stub(monkeypatch, _status([_row("alpha", validators=_validators(True), ready=True)]))
+
+    async def body(app, pilot):
+        page = await _open(app, pilot)
+        await pilot.press("w")
+        await pilot.pause()
+        return _keys(page), _text(page.query_one("#pf-set", Static).content)
+
+    keys, detail = run_tui(body, _manifest(tmp_path))
+    assert keys == []
+    assert "Every fetcher is ready. w shows them all." in detail
+
+
+def test_refresh_keeps_the_cursor_on_the_same_fetcher(tmp_path, monkeypatch, run_tui):
+    first = _status()
+    changed = _status()
+    changed["fetchers"][1] = _row("bravo", validators=_validators(True, True), ready=True)
+    _stub(monkeypatch, first, changed)
+
+    async def body(app, pilot):
+        page = await _open(app, pilot)
+        await pilot.press("down")
+        await pilot.pause()
+        before = _cursor(page)
+        await pilot.press("ctrl+r")
+        await _settle(app, pilot)
+        after = _cursor(page)
+        await pilot.press("w")  # bravo is ready now, so it hides
+        await pilot.pause()
+        return before, after, _cursor(page)
+
+    before, after, hidden = run_tui(body, _manifest(tmp_path))
+    assert before == after == "bravo"
+    assert hidden == "charlie"
+
+
+def test_s_previews_then_syncs_then_refreshes(tmp_path, monkeypatch, run_tui):
+    from framework.tui.modals import ConfirmModal
+
+    status_calls = _stub(monkeypatch, _status())
+    runs = []
+
+    def scripts_sync(root, config_path=None, *, dry_run=False, include=None, on_event=None, **kw):
+        runs.append((dry_run, sorted(include)))
+        outcomes = [("alpha", "would_noop"), ("bravo", "would_update"), ("charlie", "would_create")]
+        for name, outcome in outcomes:
+            on_event({"event": "sync_item", "fetcher": name,
+                      "outcome": outcome if dry_run else outcome.removeprefix("would_")})
+        if not dry_run:
+            on_event({"event": "sync_complete", "ok": True, "created": 1, "updated": 1})
+        return {"ok": True}
+
+    monkeypatch.setattr(api, "scripts_sync", scripts_sync)
+
+    async def body(app, pilot):
+        page = await _open(app, pilot)
+        await pilot.press("s")
+        await _settle(app, pilot)
+        confirm = str(app.screen._message) if isinstance(app.screen, ConfirmModal) else ""
+        await pilot.press("y")
+        await _settle(app, pilot)
+        return confirm, _text(page.query_one("#pf-activity", Static).content)
+
+    confirm, activity = run_tui(body, _manifest(tmp_path))
+    assert "1 create, 1 update" in confirm
+    assert runs == [(True, ["alpha", "bravo", "charlie"]), (False, ["alpha", "bravo", "charlie"])]
+    assert activity.startswith("scripts sync complete")
+    assert len(status_calls) == 2, "the sync did not re-read the status"
+
+
+def test_v_previews_validators(tmp_path, monkeypatch, run_tui):
+    from framework.tui.modals import ConfirmModal
+
+    _stub(monkeypatch, _status())
+    runs = []
+
+    def sync_validators(root, manifest_path=None, config_path=None, *, dry_run=False, on_event=None, **kw):
+        runs.append(dry_run)
+        on_event({"event": "sync_validator", "key": "k1", "outcome": "would_create" if dry_run else "created"})
+        on_event({"event": "sync_validator", "key": "k0",
+                  "outcome": "would_skip_exists" if dry_run else "skipped_exists"})
+        on_event({"event": "sync_complete", "ok": True})
+        return {"ok": True}
+
+    monkeypatch.setattr(api, "sync_validators", sync_validators)
+
+    async def body(app, pilot):
+        await _open(app, pilot)
+        await pilot.press("v")
+        await _settle(app, pilot)
+        confirm = str(app.screen._message) if isinstance(app.screen, ConfirmModal) else ""
+        await pilot.press("n")
+        await _settle(app, pilot)
+        return confirm
+
+    confirm = run_tui(body, _manifest(tmp_path))
+    assert "Create 1 validator(s)" in confirm and "1 exist already" in confirm
+    assert runs == [True], "a declined confirm still synced"
+
+
+def test_u_opens_the_upload_confirm(tmp_path, monkeypatch, run_tui):
+    from framework.sync.model import Action, Plan
+    from framework.tui.modals import ConfirmModal
+    from framework.tui.screens import paramify as page_module
+
+    _stub(monkeypatch, _status())
+    monkeypatch.setattr(page_module, "latest_run_scoped",
+                        lambda app, kind: ({"dir": str(tmp_path / "run-1"), "run_id": "1"}, True))
+    monkeypatch.setattr(api, "upload_preflight", lambda run_dir, root: {
+        "ok": True, "token_present": True, "file_count": 3, "base_url": "https://x.test/api/v0", "errors": []})
+    monkeypatch.setattr(api, "plan_upload", lambda *a, **k: Plan(
+        [Action(id="a1", provider="delivery", key="x", verb="deliver", summary="new set")]))
+    monkeypatch.setattr(api, "upload_run", lambda *a, **k: pytest.fail("uploaded without a yes"))
+
+    async def body(app, pilot):
+        await _open(app, pilot)
+        await pilot.press("u")
+        await _settle(app, pilot)
+        return str(app.screen._message) if isinstance(app.screen, ConfirmModal) else ""
+
+    confirm = run_tui(body, _manifest(tmp_path))
+    assert "1 deliver" in confirm
+    assert confirm.endswith("Upload 3 evidence file(s) to https://x.test/api/v0?")
+
+
+def test_actions_are_off_without_a_token(tmp_path, monkeypatch, run_tui):
+    _stub(monkeypatch, _status(token=False, capabilities=[]))
+
+    async def body(app, pilot):
+        page = await _open(app, pilot)
+        footer = _text(app.screen.query_one("#app-footer", Static).content)
+        return [page.check_action(a, ()) for a in ("sync_scripts", "sync_validators", "upload_run")], footer
+
+    allowed, footer = run_tui(body, _manifest(tmp_path))
+    assert allowed == [False, False, False]
+    assert "sync scripts" not in footer and "upload run" not in footer and "ctrl+r" in footer
+
+
+def test_an_empty_manifest_keeps_focus_in_the_page(tmp_path, monkeypatch, run_tui):
+    """The empty state hides the grid; the focus it held must not fall out of the
+    page, or none of the page keys fire."""
+    _stub(monkeypatch, _status([]))
+
+    async def body(app, pilot):
+        page = await _open(app, pilot)
+        await pilot.pause()
+        return app.focused is not None and app.focused in page.walk_children(), getattr(app.focused, "id", None)
+
+    inside, focused = run_tui(body, _manifest(tmp_path))
+    assert inside and focused == "pf-grid-empty"
+
+
+def _linked(name: str, *keys: str, cap: str = "c1", function: str = "PROVIDER") -> dict:
+    return _row(name, validators=_validators(True, True, True),
+                pairs=[{"pair_id": f"{name}-{k}", "validator_key": k, "capability_id": cap, "function": function}
+                       for k in keys])
+
+
+def _cap_status(**kw) -> dict:
+    return _status(
+        [_linked("alpha", "k0", "k1"), _linked("bravo", "k0", function="INTEGRATOR"), _linked("charlie", "k2"),
+         _row("delta")],
+        capabilities=[{"id": "c1", "reference_id": "SC-AC-06", "name": "Least privilege", "functions": []},
+                      {"id": "c2", "reference_id": "SC-AU-02", "name": "Audit logging", "functions": []}],
+        **kw)
+
+
+async def _capability_lens(app, pilot) -> ParamifyPage:
+    page = await _open(app, pilot)
+    await pilot.press("right_square_bracket")
+    await pilot.pause()
+    return page
+
+
+def _cap_rows(page) -> dict:
+    grid = page.query_one("#pf-cap-grid", DataTable)
+    rows = {}
+    for i in range(grid.row_count):
+        cells = [_text(c).strip() for c in grid.get_row_at(i)]
+        rows[cells[0]] = cells
+    return rows
+
+
+def test_capability_rows_and_title(tmp_path, monkeypatch, run_tui):
+    _stub(monkeypatch, _cap_status())
+
+    async def body(app, pilot):
+        page = await _capability_lens(app, pilot)
+        return str(page.query_one("#pf-cap-panel").border_title), _cap_rows(page)
+
+    title, rows = run_tui(body, _manifest(tmp_path))
+    assert title == "capabilities (2)  ·  1 with pairs"
+    # pairs, not fetcher-and-function groups: alpha has two, bravo and charlie one each
+    assert rows["SC-AC-06"][1:] == ["Least privilege", "4", "alpha, bravo  +1 more"]
+    assert rows["SC-AU-02"][2:] == ["—", "no pairs yet"]
+
+
+def test_pairs_pane_lists_fetcher_function_and_validator_names(tmp_path, monkeypatch, run_tui):
+    _stub(monkeypatch, _cap_status())
+
+    async def body(app, pilot):
+        page = await _capability_lens(app, pilot)
+        pairs = page.query_one("#pf-pairs", DataTable)
+        return [[_text(c).strip() for c in pairs.get_row_at(i)] for i in range(pairs.row_count)]
+
+    rows = run_tui(body, _manifest(tmp_path))
+    assert rows == [["alpha", "provider", "check 0 + check 1"],
+                    ["bravo", "integrator", "check 0"],
+                    ["charlie", "provider", "check 2"]]
+
+
+def test_brackets_switch_lenses(tmp_path, monkeypatch, run_tui):
+    _stub(monkeypatch, _cap_status())
+
+    async def body(app, pilot):
+        page = await _open(app, pilot)
+        switcher = page.query_one("#pf-lens")
+        seen = [switcher.current]
+        await pilot.press("right_square_bracket")
+        await pilot.pause()
+        seen += [switcher.current, app.focused.id]
+        await pilot.press("left_square_bracket")
+        await pilot.pause()
+        return seen + [switcher.current, app.focused.id]
+
+    assert run_tui(body, _manifest(tmp_path)) == [
+        "pf-by-fetcher", "pf-by-capability", "pf-cap-grid", "pf-by-fetcher", "pf-grid"]
+
+
+def test_capability_filter(tmp_path, monkeypatch, run_tui):
+    _stub(monkeypatch, _cap_status())
+
+    async def body(app, pilot):
+        page = await _capability_lens(app, pilot)
+        await pilot.press("slash")
+        await pilot.pause()
+        focused = app.focused.id
+        await pilot.press(*"audit")
+        await pilot.pause()
+        return focused, list(_cap_rows(page))
+
+    focused, rows = run_tui(body, _manifest(tmp_path))
+    assert focused == "pf-cap-filter" and rows == ["SC-AU-02"]
+
+
+def test_a_capabilities_error_shows_in_its_lens(tmp_path, monkeypatch, run_tui):
+    _stub(monkeypatch, _cap_status(errors={"capabilities": "HTTP 403"}))
+
+    async def body(app, pilot):
+        page = await _capability_lens(app, pilot)
+        return (page.query_one("#pf-cap-grid").display,
+                _text(page.query_one("#pf-cap-error", Static).content),
+                page.query_one("#pf-pairs-panel").display)
+
+    grid_shown, error, pairs_shown = run_tui(body, _manifest(tmp_path))
+    assert not grid_shown and not pairs_shown
+    assert "Could not list the workspace's solution capabilities: HTTP 403." in error
+    assert "The by-fetcher view still works." in error
+
+
+def test_w_belongs_to_the_fetcher_view(tmp_path, monkeypatch, run_tui):
+    _stub(monkeypatch, _cap_status())
+
+    async def body(app, pilot):
+        page = await _capability_lens(app, pilot)
+        footer = _text(app.screen.query_one("#app-footer", Static).content)
+        return page.check_action("hide_ready", ()), "hide ready" in footer
+
+    assert run_tui(body, _manifest(tmp_path)) == (False, False)
+
+
+# ---- review fixes ------------------------------------------------------------ #
+
+def _second_manifest(tmp_path: Path) -> Path:
+    m = api.init_manifest()
+    api.add_entry(m, "demo_hello")
+    path = tmp_path / "second.yaml"
+    api.dump_manifest(m, path, REPO_ROOT)
+    return path
+
+
+def test_switching_the_manifest_on_the_tab_reads_the_new_one(tmp_path, monkeypatch, run_tui):
+    other = _second_manifest(tmp_path)
+    second = _status([_row("zulu")])
+    calls = _stub(monkeypatch, _status(), second)
+
+    async def body(app, pilot):
+        page = await _open(app, pilot)
+        app.load_manifest(other)
+        app.screen.reload()
+        await _settle(app, pilot)
+        return _keys(page)
+
+    assert run_tui(body, _manifest(tmp_path)) == ["zulu"]
+    assert Path(calls[-1]) == other
+
+
+def test_a_request_during_a_read_is_not_lost(tmp_path, monkeypatch, run_tui):
+    gate = threading.Event()
+
+    def slow():
+        gate.wait(5)
+        return _status()
+
+    calls = _stub(monkeypatch, _status(), slow, _status([_row("zulu")]))
+
+    async def body(app, pilot):
+        page = await _open(app, pilot)
+        page.request_status()          # a read that blocks
+        await pilot.pause()
+        page.request_status()          # e.g. an action ends during it
+        gate.set()
+        await _settle(app, pilot)
+        await _settle(app, pilot)
+        return _keys(page)
+
+    assert run_tui(body, _manifest(tmp_path)) == ["zulu"]
+    assert len(calls) == 3
+
+
+def test_the_page_stays_a_running_message_pump(tmp_path, monkeypatch, run_tui):
+    """Textual keeps its own _running on every widget; the page must not shadow it."""
+    _stub(monkeypatch, _status())
+
+    async def body(app, pilot):
+        return (await _open(app, pilot)).is_running
+
+    assert run_tui(body, _manifest(tmp_path)) is True
+
+
+def test_the_activity_log_takes_the_detail_row_until_the_cursor_moves(tmp_path, monkeypatch, run_tui):
+    _stub(monkeypatch, _status())
+    monkeypatch.setattr(api, "scripts_sync", lambda root, config_path=None, **kw: {"ok": True})
+
+    async def body(app, pilot):
+        page = await _open(app, pilot)
+        await pilot.press("s")           # nothing to sync: the log shows the result
+        await _settle(app, pilot)
+        during = page.query_one("#pf-activity-panel").display, page.query_one("#pf-detail").display
+        await pilot.press("down")
+        await pilot.pause()
+        after = page.query_one("#pf-activity-panel").display, page.query_one("#pf-detail").display
+        return during, after
+
+    during, after = run_tui(body, _manifest(tmp_path))
+    assert during == (True, False), "the log must replace the detail row, not push the grid down"
+    assert after == (False, True)
+
+
+@pytest.mark.parametrize("key", ["s", "v"])
+def test_the_result_of_an_action_stays_off_the_first_row(tmp_path, monkeypatch, run_tui, key):
+    """The re-read after an action redraws the grid; that redraw must not count
+    as the user moving off the row, or the result vanishes unless the cursor
+    was on the first row."""
+    _stub(monkeypatch, _status())
+    monkeypatch.setattr(api, "scripts_sync", lambda root, config_path=None, **kw: {"ok": True})
+    monkeypatch.setattr(api, "sync_validators", lambda root, manifest_path=None, **kw: {"ok": True})
+
+    async def body(app, pilot):
+        page = await _open(app, pilot)
+        await pilot.press("down", "down")   # the third row: charlie
+        await _settle(app, pilot)
+        await pilot.press(key)              # nothing to do: the log shows the result
+        await _settle(app, pilot)
+        return (page.query_one("#pf-activity-panel").display, page.query_one("#pf-detail").display,
+                _cursor(page), _text(page.query_one("#pf-activity", Static).content))
+
+    shown, detail, cursor, activity = run_tui(body, _manifest(tmp_path))
+    assert (shown, detail) == (True, False), "the action's result vanished after the re-read"
+    assert cursor == "charlie"
+    assert activity.strip()
+
+
+def test_a_scripts_preview_that_errors_is_a_failure(tmp_path, monkeypatch, run_tui):
+    """A dry run whose every item errors has nothing to create or update; that
+    is a failure with the reasons in the log, not "nothing to sync"."""
+    _stub(monkeypatch, _status())
+    runs = []
+
+    def scripts_sync(root, config_path=None, *, dry_run=False, include=None, on_event=None, **kw):
+        runs.append(dry_run)
+        for name in sorted(include):
+            on_event({"event": "sync_item", "fetcher": name, "outcome": "error", "error": "HTTP 403"})
+        return {"ok": False}
+
+    monkeypatch.setattr(api, "scripts_sync", scripts_sync)
+
+    async def body(app, pilot):
+        page = await _open(app, pilot)
+        await pilot.press("s")
+        await _settle(app, pilot)
+        log = "\n".join(line.text for line in page.query_one("#pf-log").lines)
+        return type(app.screen).__name__, page.query_one("#pf-activity", Static).content, log
+
+    screen, banner, log = run_tui(body, _manifest(tmp_path))
+    assert screen == "WorkspaceScreen", "an all-error preview asked to sync"
+    assert banner.plain == "scripts: the preview failed for 3 fetcher script(s), nothing synced"
+    assert banner.style == palette.FAIL
+    assert "[error] alpha  HTTP 403" in log and "[error] charlie  HTTP 403" in log
+    assert runs == [True]
+
+
+def test_a_scripts_preview_with_some_errors_says_so_in_the_confirm(tmp_path, monkeypatch, run_tui):
+    from framework.tui.modals import ConfirmModal
+
+    _stub(monkeypatch, _status())
+
+    def scripts_sync(root, config_path=None, *, dry_run=False, include=None, on_event=None, **kw):
+        on_event({"event": "sync_item", "fetcher": "alpha", "outcome": "would_create"})
+        on_event({"event": "sync_item", "fetcher": "bravo", "outcome": "error", "error": "bad entry"})
+        return {"ok": False}
+
+    monkeypatch.setattr(api, "scripts_sync", scripts_sync)
+
+    async def body(app, pilot):
+        await _open(app, pilot)
+        await pilot.press("s")
+        await _settle(app, pilot)
+        return str(app.screen._message) if isinstance(app.screen, ConfirmModal) else ""
+
+    confirm = run_tui(body, _manifest(tmp_path))
+    assert "1 create, 0 update" in confirm
+    assert "The preview failed for 1 fetcher script(s)" in confirm
+
+
+def test_a_validators_preview_that_errors_is_a_failure(tmp_path, monkeypatch, run_tui):
+    _stub(monkeypatch, _status())
+
+    def sync_validators(root, manifest_path=None, config_path=None, *, dry_run=False, on_event=None, **kw):
+        on_event({"event": "sync_validator", "key": "k0", "outcome": "error", "error": "set lookup failed"})
+        on_event({"event": "sync_complete", "ok": False})
+        return {"ok": False}
+
+    monkeypatch.setattr(api, "sync_validators", sync_validators)
+
+    async def body(app, pilot):
+        page = await _open(app, pilot)
+        await pilot.press("v")
+        await _settle(app, pilot)
+        log = "\n".join(line.text for line in page.query_one("#pf-log").lines)
+        return type(app.screen).__name__, page.query_one("#pf-activity", Static).content, log
+
+    screen, banner, log = run_tui(body, _manifest(tmp_path))
+    assert screen == "WorkspaceScreen"
+    assert banner.plain.startswith("validators: the preview failed for 1 validator(s), nothing created")
+    assert banner.style == palette.FAIL
+    assert "[error] k0  set lookup failed" in log
+
+
+def test_v_says_when_sets_do_not_exist_yet(tmp_path, monkeypatch, run_tui):
+    from framework.tui.modals import ConfirmModal
+
+    _stub(monkeypatch, _status())   # charlie's set does not exist yet
+    monkeypatch.setattr(api, "sync_validators", lambda root, manifest_path=None, config_path=None, *, dry_run=False,
+                        on_event=None, **kw: on_event({"event": "sync_validator", "key": "k9",
+                                                       "outcome": "would_create"}) or {"ok": True})
+
+    async def body(app, pilot):
+        await _open(app, pilot)
+        await pilot.press("v")
+        await _settle(app, pilot)
+        return str(app.screen._message) if isinstance(app.screen, ConfirmModal) else ""
+
+    confirm = run_tui(body, _manifest(tmp_path))
+    assert "1 evidence set(s) do not exist yet" in confirm and "press s first" in confirm
+    assert "and pair each one with its evidence sets" not in confirm
+
+
+def test_v_says_how_to_pair_validators_that_exist(tmp_path, monkeypatch, run_tui):
+    _stub(monkeypatch, _status())   # bravo has an unpaired validator that already exists
+    monkeypatch.setattr(api, "sync_validators", lambda root, manifest_path=None, config_path=None, *, dry_run=False,
+                        on_event=None, **kw: on_event({"event": "sync_validator", "key": "k1",
+                                                       "outcome": "would_skip_exists"}) or {"ok": True})
+
+    async def body(app, pilot):
+        page = await _open(app, pilot)
+        await pilot.press("v")
+        await _settle(app, pilot)
+        return _text(page.query_one("#pf-activity", Static).content)
+
+    activity = run_tui(body, _manifest(tmp_path))
+    assert "1 validator(s) exist but are not paired" in activity and "in Paramify" in activity
+
+
+def test_coming_back_on_the_capability_view_focuses_it(tmp_path, monkeypatch, run_tui):
+    _stub(monkeypatch, _cap_status())
+
+    async def body(app, pilot):
+        page = await _capability_lens(app, pilot)
+        await pilot.press("3")
+        await pilot.pause()
+        await pilot.press("4")
+        await _settle(app, pilot)
+        on_return = app.focused.id
+        await pilot.press("escape")
+        await pilot.pause()
+        return page.query_one("#pf-lens").current, on_return, app.focused.id
+
+    assert run_tui(body, _manifest(tmp_path)) == ("pf-by-capability", "pf-cap-grid", "pf-cap-grid")
+
+
+# ---- #345 review fixes ------------------------------------------------------- #
+
+@pytest.mark.parametrize("errors, token", [({}, False), ({"capabilities": "HTTP 403"}, True)],
+                         ids=["no-token", "read-failed"])
+def test_the_capability_view_without_a_grid_keeps_the_keys(tmp_path, monkeypatch, run_tui, errors, token):
+    """With no grid to focus, the view must not focus its filter: [ would type a
+    bracket and 1 a digit there, and escape would come back to it."""
+    _stub(monkeypatch, _cap_status(token=token, errors=errors))
+
+    async def body(app, pilot):
+        page = await _capability_lens(app, pilot)
+        on_view = app.focused.id, page.query_one("#pf-cap-filter").display
+        await pilot.press("escape")
+        await pilot.pause()
+        after_escape = app.focused.id
+        await pilot.press("left_square_bracket")
+        await pilot.pause()
+        back = page.query_one("#pf-lens").current
+        await pilot.press("right_square_bracket", "1")
+        await pilot.pause()
+        return on_view, after_escape, back, app.screen.query_one(TabbedContent).active
+
+    (focused, filter_shown), after_escape, back, tab = run_tui(body, _manifest(tmp_path))
+    assert focused == "pf-cap-error" and not filter_shown
+    assert after_escape == "pf-cap-error"
+    assert back == "pf-by-fetcher", "[ did not switch the view back"
+    assert tab == "tab-fetchers", "1 did not switch the tab"
+
+
+def _other_set_status(**kw) -> dict:
+    """c1 has alpha's pair and one from an evidence set outside the manifest; c2
+    has only two from outside it."""
+    def fn(*ids):
+        return [{"type": "PROVIDER", "pairs": [{"pair_id": i, "validator_id": "v", "evidence_id": "e"} for i in ids]}]
+
+    return _status(
+        [_linked("alpha", "k0"), _row("delta")],
+        capabilities=[{"id": "c1", "reference_id": "SC-AC-06", "name": "Least privilege",
+                       "functions": fn("alpha-k0", "elsewhere-1")},
+                      {"id": "c2", "reference_id": "SC-AU-02", "name": "Audit logging",
+                       "functions": fn("elsewhere-2", "elsewhere-3")},
+                      {"id": "c3", "reference_id": "SC-CM-02", "name": "Baseline", "functions": []}],
+        **kw)
+
+
+def test_pairs_from_outside_the_manifest_count(tmp_path, monkeypatch, run_tui):
+    """A capability proven by evidence outside this manifest has pairs: the rows
+    and the title count them, and say where they come from."""
+    _stub(monkeypatch, _other_set_status())
+
+    async def body(app, pilot):
+        page = await _capability_lens(app, pilot)
+        await pilot.press("down")
+        await pilot.pause()
+        pairs = page.query_one("#pf-pairs", DataTable)
+        return (str(page.query_one("#pf-cap-panel").border_title), _cap_rows(page),
+                [[_text(c).strip() for c in pairs.get_row_at(i)] for i in range(pairs.row_count)])
+
+    title, rows, pairs = run_tui(body, _manifest(tmp_path))
+    assert title == "capabilities (3)  ·  2 with pairs"
+    assert rows["SC-AC-06"][2:] == ["2", "alpha  +1 from other evidence sets"]
+    assert rows["SC-AU-02"][2:] == ["2", "+2 from other evidence sets"]
+    assert rows["SC-CM-02"][2:] == ["—", "no pairs yet"]
+    assert pairs == [["other evidence sets", "—", "2 pair(s), not in this manifest"]]
+
+
+def test_unread_evidence_sets_leave_the_pair_sources_unknown(tmp_path, monkeypatch, run_tui):
+    """The manifest's pairs come from the evidence-set read. Without it the count
+    still comes from the capability read, but where the pairs come from is unknown."""
+    status = _other_set_status(errors={"evidence_sets": "HTTP 500"})
+    for row in status["fetchers"]:
+        row["pairs"] = []
+    _stub(monkeypatch, status)
+
+    async def body(app, pilot):
+        page = await _capability_lens(app, pilot)
+        pairs = page.query_one("#pf-pairs", DataTable)
+        return _cap_rows(page), [_text(c).strip() for c in pairs.get_row_at(0)]
+
+    rows, pair_row = run_tui(body, _manifest(tmp_path))
+    assert rows["SC-AC-06"][2:] == ["2", "? the evidence sets were not read"]
+    assert rows["SC-AU-02"][2] == "2"
+    assert pair_row == ["?", "—", "2 pair(s); the evidence sets were not read"]
+
+
+def test_a_manifest_switch_clears_the_old_capabilities(tmp_path, monkeypatch, run_tui):
+    """The old manifest's pairs must not stay on the capability view after a
+    switch, while the new read runs or when it fails."""
+    other = _second_manifest(tmp_path)
+    _stub(monkeypatch, _cap_status(), RuntimeError("HTTP 503"))
+
+    async def body(app, pilot):
+        page = await _capability_lens(app, pilot)
+        before = page.query_one("#pf-cap-grid", DataTable).row_count, page.query_one("#pf-pairs", DataTable).row_count
+        app.load_manifest(other)
+        app.screen.reload()
+        await _settle(app, pilot)
+        return (before, page.query_one("#pf-cap-grid", DataTable).row_count,
+                page.query_one("#pf-pairs", DataTable).row_count, page._cap_pairs)
+
+    before, caps, pairs, kept = run_tui(body, _manifest(tmp_path))
+    assert before == (2, 3)
+    assert (caps, pairs, kept) == (0, 0, {})
+
+
+def test_the_capability_view_says_it_is_reading(tmp_path, monkeypatch, run_tui):
+    """Opened on the capability view before the first read lands, the grid is
+    empty: a line says the workspace is being read, and goes when it lands."""
+    gate = threading.Event()
+
+    def slow():
+        gate.wait(5)
+        return _cap_status()
+
+    _stub(monkeypatch, slow)
+
+    async def body(app, pilot):
+        await pilot.press("4")
+        await pilot.pause()
+        page = app.screen.query_one(ParamifyPage)
+        await pilot.press("right_square_bracket")
+        await pilot.pause()
+        hint = page.query_one("#pf-cap-hint", Static)
+        during = hint.display, _text(hint.content)
+        gate.set()
+        await _settle(app, pilot)
+        return during, hint.display
+
+    (shown, text), after = run_tui(body, _manifest(tmp_path))
+    assert shown and "reading the workspace…" in text
+    assert not after
+
+
+def test_a_capability_filter_that_matches_nothing_says_so(tmp_path, monkeypatch, run_tui):
+    _stub(monkeypatch, _cap_status())
+
+    async def body(app, pilot):
+        page = await _capability_lens(app, pilot)
+        await pilot.press("slash", *"zzz")
+        await pilot.pause()
+        hint = page.query_one("#pf-cap-hint", Static)
+        return _cap_rows(page), hint.display, _text(hint.content)
+
+    rows, shown, text = run_tui(body, _manifest(tmp_path))
+    assert rows == {} and shown
+    assert "No capability matches “zzz”." in text
