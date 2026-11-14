@@ -184,3 +184,43 @@ def test_capability_view_holds_fifty_fetchers(size, demo_workspace, no_network, 
     rows, problems = asyncio.run(asyncio.wait_for(drive(), 60))
     assert rows >= 4, f"the capability grid shows only {rows} rows"
     assert [p for p in problems if "too wide" not in p] == []
+
+
+def _many_capabilities() -> dict:
+    status = _fifty()
+    # The fifty fetchers' pairs prove c1; the rest have none.
+    status["capabilities"] = [{"id": "c1" if i == 0 else f"cap-{i}", "reference_id": f"SC-AC-{i:02d}",
+                               "name": f"Capability {i}", "functions": []} for i in range(30)]
+    return status
+
+
+@pytest.mark.parametrize("size", [SHORT, (100, 30)], ids=["80x24", "100x30"])
+def test_capability_view_keeps_its_rows_on_a_short_terminal(size, demo_workspace, no_network, monkeypatch):
+    """The capability view's pairs pane gives way as the fetcher detail does: the
+    capability grid keeps its rows and nothing runs off the page."""
+    from framework import api
+
+    monkeypatch.setattr(api, "paramify_status", lambda *a, **k: _many_capabilities())
+    monkeypatch.setattr(api, "list_artifacts", lambda set_id: [])
+
+    async def drive():
+        app = FetcherApp(manifest_path="manifests/demo.yaml", root_override=str(demo_workspace.root))
+        async with app.run_test(size=size) as pilot:
+            await pilot.press("4")
+            await asyncio.wait_for(app.workers.wait_for_complete(), 30)
+            await pilot.pause()
+            await pilot.press("right_square_bracket")
+            for _ in range(4):
+                await pilot.pause()
+            pane = app.screen.query_one(TabbedContent).active_pane
+            pairs = pane.query_one("#pf-pairs-panel")
+            return (pane.query_one("#pf-cap-grid", DataTable).size.height - 1,
+                    pairs.region.height if _shown(pairs) else 0, _problems(pane))
+
+    rows, pairs, problems = asyncio.run(asyncio.wait_for(drive(), 60))
+    assert rows >= 7, f"the capability grid shows only {rows} rows"
+    if size == SHORT:
+        assert pairs == 0, "a pairs pane with no room to show a pair"
+    else:
+        assert pairs >= 5
+    assert [p for p in problems if "too wide" not in p] == []

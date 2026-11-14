@@ -307,6 +307,7 @@ class ParamifyPage(ParamifyWriter, Vertical):
         self.query_one("#pf-set-panel").border_title = "evidence set"
         self.query_one("#pf-caps-panel").border_title = "linked capabilities"
         self._detail_rows = self.DETAIL_ROWS
+        self._caps_shown = False
         self._cap_filter = ""
         self._cap_pairs: dict = {}
         self._cap_others: dict = {}
@@ -336,6 +337,7 @@ class ParamifyPage(ParamifyWriter, Vertical):
     # under it.
     _VIEW_LAYOUT: dict = {
         "pf-by-fetcher": ("#pf-grid-panel", "#pf-grid", ("#pf-detail", "#pf-activity-panel")),
+        "pf-by-capability": ("#pf-cap-panel", "#pf-cap-grid", ("#pf-pairs-panel",)),
     }
 
     def on_resize(self) -> None:
@@ -358,8 +360,6 @@ class ParamifyPage(ParamifyWriter, Vertical):
             self.call_after_refresh(self.call_after_refresh, self._fit)
             return
         view = self.query_one("#pf-lens", ContentSwitcher).current or "pf-by-fetcher"
-        if view not in self._VIEW_LAYOUT:
-            return
         panel_id, list_id, slots = self._VIEW_LAYOUT[view]
         panel, table = self.query_one(panel_id), self.query_one(list_id)
         rows = self.DETAIL_ROWS_TALL if self.app.size.height >= self.TALL_TERMINAL else self.DETAIL_ROWS
@@ -374,10 +374,13 @@ class ParamifyPage(ParamifyWriter, Vertical):
         self._place_detail()
 
     def _place_detail(self) -> None:
-        """The detail shows when there are fetchers, no log in its place, and room."""
+        """The detail shows when there are fetchers, no log in its place, and room;
+        the pairs pane when the capability grid shows, and room."""
         has_rows = bool((self._status or {}).get("fetchers"))
         activity = self.query_one("#pf-activity-panel").display
-        self.query_one("#pf-detail").display = has_rows and not activity and self._detail_rows > 0
+        room = self._detail_rows > 0
+        self.query_one("#pf-detail").display = has_rows and not activity and room
+        self.query_one("#pf-pairs-panel").display = self._caps_shown and room
 
     # -- hints ------------------------------------------------------------ #
 
@@ -649,6 +652,7 @@ class ParamifyPage(ParamifyWriter, Vertical):
         self.query_one("#pf-lens", ContentSwitcher).current = target
         self.query_one("#pf-lens-tabs", Tabs).active = self._LENS_TABS[target]
         self._refresh_hints()
+        self.call_after_refresh(self._fit)  # each view fits its own list and the row under it
         if focus:  # only on a key or click on this page, so never from another tab
             self._focus_lens()
 
@@ -727,9 +731,11 @@ class ParamifyPage(ParamifyWriter, Vertical):
 
     def _cap_view_parts(self, shown: bool) -> None:
         """The capability grid, its filter and the pairs pane, or the text in their place."""
-        for part in ("#pf-cap-grid", "#pf-cap-filter", "#pf-pairs-panel"):
+        for part in ("#pf-cap-grid", "#pf-cap-filter"):
             self.query_one(part).display = shown
         self.query_one("#pf-cap-error", Static).display = not shown
+        self._caps_shown = shown
+        self._place_detail()
         self._draw_cap_hint()
 
     def _draw_cap_hint(self) -> None:

@@ -1677,7 +1677,9 @@ schemas and the `paramify` CLI — not the internal code.
   capability lists each capability in the workspace with its validator
   pairs and the fetchers they come from. The count includes pairs whose
   evidence sets are not in the manifest, and the row says how many come from
-  other evidence sets. Under it, the highlighted capability shows each
+  other evidence sets. On a short terminal the view bar is hidden (`[` and
+  `]` still switch views) and the pairs pane gives way, as the fetcher
+  detail does, so the capability list keeps its rows. Under it, the highlighted capability shows each
   pair: the fetcher, the function, and the validators in the pair. `/`
   filters by capability id or name. If the token cannot read the
   capabilities, the view tells you. The view by fetcher still works.
