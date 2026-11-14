@@ -10,7 +10,40 @@ schemas and the `paramify` CLI — not the internal code.
 
 ## [Unreleased]
 
+### Added
+
+- **`wiz_inventory`**, the Wiz cloud resource inventory, as a pipeline fetcher (`kind: inventory`, `id_scheme:
+  wiz-resource-id`). One record per resource from `cloudResourcesV2` under `payload.data`, keyed by the Wiz resource
+  id, with its cloud ID (`external_id`), account, region, type, IPs, OS, image, environment and owner, and internet
+  exposure; `asset_type` is the Wiz resource type. The Wiz id is the `Asset ID` column of
+  `wiz_vulnerability_findings`, so a scan report can link to it. Other tags only with `include_tags`; a run with any
+  collection failure writes no records. Scoped by resource type, account and project; needs only `read:resources`. See
+  `fetchers/wiz/inventory/README.md`.
+- TUI: a pipeline fetcher's "sends to" cell ends in `· pipeline`, its detail pane names the pipeline type and ID
+  scheme, and its entry form hides `delivery` and offers `no_request` as `evidence` or `refuse` only. `P` on the
+  Manifest tab opens the preset sheet. The upload log flags a pipeline batch that is submitted but not yet approved.
+- `paramify preset <fetcher>` prints the settings to enter when building a pipeline's Paramify preset: sample file, data
+  path, unique ID and scheme, the `asset_type` values of the newest run, and the other fetchers that share the ID
+  scheme. `--json`, `-f` and `--output-dir` pick the output.
+- `paramify validate` refuses `delivery: direct` and `no_request: direct` on a pipeline fetcher entry, and notes
+  `approval: MANUAL` on one (the pipeline waits for someone to approve each batch). It also refuses a registry
+  validator that targets a pipeline evidence set, since a failing validator means the batch never approves.
+  Validator sync leaves pipeline sets out of an explicit `reference_ids` list.
+
 ### Breaking
+
+- **`kind: inventory` requires a `pipeline:` block.** A `fetcher.yaml` with
+  `kind: inventory` and no `pipeline: {type: inventory, id_scheme: …}` fails the
+  schema, and a schema failure drops the fetcher from discovery. Migration: add
+  `pipeline: {type: inventory, id_scheme: <scheme>}` (the scheme list is in the
+  [pipeline fetchers guide](docs/pipeline_fetchers_guide.md)).
+
+- **Inventory records must carry `asset_type`.** Advanced config derives each
+  Inventory item's parent component from it, so a `kind: inventory` record
+  without a non-empty string `asset_type` now breaks the inventory contract
+  and the run is not sent. `metadata.inventory.by_asset_type` counts the
+  records per type (largest first). Migration: set a non-empty `asset_type`
+  (such as `endpoint`) on every record; `_template_inventory` already writes it.
 
 - **Datadog evidence: some fields are removed, renamed, or now mean something
   else.** Re-check any validator or query that reads these fields:
@@ -56,6 +89,30 @@ schemas and the `paramify` CLI — not the internal code.
   `revoked`, `sunset_passed`, `status_unknown`, `not_found`, `parse_error` or
   `fetch_error`). Maps to KSI-SVC-SIN and KSI-SVC-VRI. No credential.
 
+- **`pipeline:` block in `fetcher.yaml`.** A fetcher whose output feeds a Paramify
+  pipeline declares `pipeline: {type, id_scheme}` (`asset_id_field` for a
+  scan-report pipeline). `kind: issue_report` may declare `vulnerability` or
+  `configuration`; evidence and discovery fetchers refuse it (for `kind:
+  inventory`, see **Breaking**). The envelope records it as `metadata.pipeline` and
+  `paramify describe` shows it. `github_repository_inventory` and
+  `sophos_endpoint_inventory` 0.2.0 declare it, and so does `aws_config_inventory`
+  (`id_scheme: aws-arn`).
+
+- **Pipeline files upload as the full envelope, and the result says whether the
+  pipeline ran.** `paramify upload` sends an inventory (or any pipeline) file as
+  the whole envelope even when `artifact_payload: payload` is set, because
+  Paramify's inventory pipeline reads `payload.data`; the WAF scan reads the same
+  bytes. When the batch is approved on submit, the entry says `APPROVED: pipeline
+  runs now` and where to look (Monitoring → Inventory); when it waits for a
+  person it says `SUBMITTED: waiting for approval; the pipeline has not run`. The
+  entry result in `--json` gains `pipeline: {type, approved}`. A file sent direct
+  (the workspace has no batches) reports `approved: null`; `false` means a batch
+  is submitted and waiting for a person. `--plan` warns when
+  the batch will approve MANUAL: the entry's `approval: MANUAL` for a new batch
+  (each new batch takes the entry's approval, so a MANUAL set alone does not
+  hold it), or a resumed batch created MANUAL. There is no warning when the
+  workspace has no batches. A batch approved on submission that has not flipped
+  to APPROVED yet when read back counts as `approved: true`.
 - `azure_aks_cluster_configuration` 0.4.0 adds each cluster's
   `configuration_observations`: SDK-projected RBAC, local-account, private-cluster
   and authorized API-server IP-range values before normalization. Missing values
@@ -2484,6 +2541,45 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- **`paramify upload` no longer sends an inventory direct when its channel has
+  no artifact request.** A Paramify inventory pipeline runs only on a file in an
+  approved batch, so a direct upload was stored and built nothing. The file now
+  goes in an evidence-level batch. `delivery: direct` or `no_request: direct` on
+  an inventory entry is refused, and so is an evidence set with validators
+  attached (its batches never approve). `--plan` warns when the set approves
+  MANUAL or the workspace has no batches.
+
+- **Re-uploading an inventory that went direct before now runs the pipeline.**
+  When the workspace has batches, files of the run that an earlier upload sent
+  direct (with no batch) are sent again in a batch, with a plan warning, instead
+  of being reported as already delivered while Paramify built nothing. With
+  batches off nothing changes. A pipeline run already in a submitted or approved
+  batch is a no-op even if the set has since gained a validator, and a no-op
+  result carries `pipeline: {type, approved}` too.
+
+- **A run-level `delivery: direct` or `no_request: direct` no longer refuses
+  every inventory.** A pipeline entry ignores a `direct` it inherits from
+  `run.paramify` and uses `delivery: auto` and `no_request: evidence`;
+  `paramify validate` notes it, `paramify run` records those settings, and the
+  upload plan compares against them. `direct` on the entry itself is still a
+  validate error. A run recorded before this fix still refuses at upload; the
+  refusal now says to set `no_request: evidence` on the entry or remove
+  `direct` from `run.paramify`, then run again.
+
+- **`paramify preset` (and `P` in the TUI) finds the sample of a per-target
+  inventory.** It looked for `sophos_endpoint_inventory.json`, but the shipped
+  inventory fetchers write one file per tenant or org
+  (`sophos_endpoint_inventory_<tenant>.json`), so it never found one. It now takes
+  the fetcher's files from the run's invocations (else `<stem>*.json` files whose
+  envelope names the fetcher), skips ghost runs as `paramify runs` does, uses the
+  first file as the sample and sums `asset_type` counts across the files. An
+  unreadable file says `could not read <path>`; `--json` gains `problem`.
+
+- **Saving a pipeline entry's form in the TUI keeps its settings.** The form hid
+  `no_request` and `delivery`, and the save removed every key it did not show,
+  so `no_request: refuse` was lost. The form now offers `no_request` (`evidence`
+  or `refuse`) on a pipeline entry, still hides `delivery`, and a save touches
+  only the keys the form shows.
 - `azure_private_endpoint_configuration` 0.3.2 uses the existing native strict
   subscription setting for related Resource Graph lookups and skips wider
   visibility discovery in that mode. Foreign references remain unknown; an

@@ -152,7 +152,10 @@ def destination_cell(descriptor: Optional[dict], config_view: Optional[List[dict
         return cell
     es = (descriptor or {}).get("evidence_set")
     if es:
-        return Text(es["reference_id"], style="dim")
+        cell = Text(es["reference_id"], style="dim")
+        if (descriptor or {}).get("pipeline"):
+            cell.append(" · pipeline", style="dim")
+        return cell
     return Text("no evidence set", style=palette.WARN)
 
 
@@ -183,6 +186,10 @@ def _destination(f: dict, config_view: Optional[List[dict]] = None, in_manifest:
             if es.get("name"):
                 value.append(f" — {es['name']}", style="dim")
             rows.append(("evidence set", value))
+            pipe = f.get("pipeline")
+            if pipe:
+                rows.append(("pipeline", Text(
+                    f"pipeline: {pipe.get('type')} · {pipe.get('id_scheme') or '—'}", style=palette.FG)))
         else:
             rows.append(("evidence set", Text(
                 "none declared — the upload skips it unless the uploader config names one",

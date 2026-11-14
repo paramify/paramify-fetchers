@@ -56,6 +56,7 @@ paramify validate <manifest>   # validate a manifest without running
 paramify run      <manifest>   # run it
 paramify runs                  # past runs under an output dir (newest first)
 paramify evidence <file>       # read one evidence file, or an issue-report sidecar
+paramify preset   <fetcher>    # settings for a pipeline fetcher's Paramify preset
 paramify upload   [run-dir]    # push a run's evidence to Paramify (default: latest run)
 paramify stacks                # list the workspace's stacks (name, id)
 paramify status   <manifest>   # what each fetcher has in Paramify; exit 1 until all are ready, 2 on errors
@@ -371,6 +372,17 @@ uploads to an evidence set like any other evidence. Then an inventory pipeline o
 that set turns each record into an Inventory item. The pipeline reads the file as
 the full estate, so `paramify upload` sends an inventory only when the run
 collected all of it. See [`inventory_fetchers_guide.md`](inventory_fetchers_guide.md).
+
+### `paramify preset <fetcher>`
+
+Building the inventory pipeline's preset in Paramify takes a sample file, a data
+path, a unique ID field and a rule for the parent component. `paramify preset
+sophos_endpoint_inventory` prints them from the fetcher's `pipeline:` block and
+its newest run, and lists the other fetchers that share the same ID scheme. With
+no run yet, the sample and the `asset_type` values are missing, so run the
+fetcher first. It reads runs from `<repo>/evidence`; `-f MANIFEST` uses that
+manifest's `output_dir`, and `--output-dir` overrides both. `--json` prints the
+same facts as data.
 
 ## See what a platform has (discovery)
 

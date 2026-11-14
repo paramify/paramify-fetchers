@@ -37,6 +37,9 @@ OUTPUT_FILE = "<category>_<short_name>.json"
 _TIMEOUT = 60
 
 
+_DEFAULT_ASSET_TYPE = "asset"  # replace with your asset kind, such as "endpoint"
+
+
 class _Incomplete(Exception):
     """Collection cannot vouch for the whole estate. Carries the failure code."""
 
@@ -65,13 +68,15 @@ def fetch_assets(session: requests.Session) -> list:
 
 
 def record(asset: dict) -> dict:
-    """One inventory record. The fields are yours to choose, except one.
+    """One inventory record. The fields are yours to choose, except two.
 
     `unique_asset_identifier` is required, must be non-empty, and must be unique
     in the file: it is what the pipeline matches Inventory items on, so use the
-    asset's own stable ID (an ARN, a resource ID), never a display name. Keep
-    every record's keys the same, with None for a missing value, so a pipeline
-    mapping built from one sample holds for every run.
+    asset's own stable ID (an ARN, a resource ID), never a display name.
+    `asset_type` is required and must be a non-empty string, such as
+    `endpoint` or `s3_bucket`: Paramify derives the parent component from it.
+    Keep every other record's keys the same, with None for a missing value, so a
+    pipeline mapping built from one sample holds for every run.
     """
     asset_id = asset.get("id")
     if not asset_id:
@@ -79,7 +84,9 @@ def record(asset: dict) -> dict:
     return {
         "unique_asset_identifier": asset_id,
         "name": asset.get("name"),
-        "asset_type": asset.get("type"),
+        # Required and never None. Set this per asset kind: a fixed string when the
+        # fetcher lists one kind of asset, else the tool's own type with this fallback.
+        "asset_type": asset.get("type") or _DEFAULT_ASSET_TYPE,
         # ... the fields an inventory pipeline should map
     }
 

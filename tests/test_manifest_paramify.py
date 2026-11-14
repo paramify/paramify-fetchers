@@ -141,6 +141,43 @@ def test_welcome_relative_reads_old_and_suffixed_run_ids():
     assert WelcomeScreen._relative(old + "-a1f3") == WelcomeScreen._relative(old)
 
 
+def test_a_pipeline_entry_ignores_an_inherited_direct():
+    m = parse_manifest({"run": {"paramify": {"delivery": "direct", "no_request": "direct", "approval": "MANUAL"},
+                                "fetchers": [{"use": "x"}, {"use": "y", "paramify": {"no_request": "direct"}}]}})
+    x, y = m.entries
+    assert resolved_paramify(m, x, pipeline=True) == {"delivery": "auto", "no_request": "evidence", "approval": "MANUAL"}
+    assert resolved_paramify(m, x) == {"delivery": "direct", "no_request": "direct", "approval": "MANUAL"}
+    # The entry's own setting stays (validate refuses it).
+    assert resolved_paramify(m, y, pipeline=True) == {"delivery": "auto", "no_request": "direct", "approval": "MANUAL"}
+
+
+def test_run_metadata_records_the_pipeline_defaults_under_a_run_level_direct(tmp_path, repo_root, monkeypatch):
+    import dataclasses
+
+    from framework.contract import Pipeline
+    real = api.discover_fetchers
+
+    def with_pipeline(root):
+        found = dict(real(root))
+        found["demo_hello"] = dataclasses.replace(found["demo_hello"], pipeline=Pipeline("inventory", "x-id"))
+        return found
+
+    monkeypatch.setattr(api, "discover_fetchers", with_pipeline)
+    manifest = {"run": {"output_dir": str(tmp_path / "out"), "paramify": {"no_request": "direct"},
+                        "fetchers": [{"use": "demo_hello"}]}}
+    summary = api.run(manifest, repo_root)
+    meta = json.loads((tmp_path / "out" / f"run-{summary['run_id']}" / "_run_metadata.json").read_text())
+    assert meta["paramify"]["demo_hello"]["no_request"] == "evidence"
+
+
+def test_run_metadata_keeps_a_run_level_direct_for_an_ordinary_entry(tmp_path, repo_root):
+    manifest = {"run": {"output_dir": str(tmp_path / "out"), "paramify": {"no_request": "direct"},
+                        "fetchers": [{"use": "demo_hello"}]}}
+    summary = api.run(manifest, repo_root)
+    meta = json.loads((tmp_path / "out" / f"run-{summary['run_id']}" / "_run_metadata.json").read_text())
+    assert meta["paramify"]["demo_hello"] == {"use": "demo_hello", "no_request": "direct"}
+
+
 def test_new_manifest_path_records_a_picked_stack(tmp_path):
     path = api.new_manifest_path(tmp_path, "aws-prod", stack="stk-1", stack_name="Alpha")
     assert path == tmp_path / "manifests" / "aws-prod.yaml"

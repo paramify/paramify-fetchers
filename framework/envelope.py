@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, Dict, NoReturn
 
 from framework import inventory
-from framework.contract import Fetcher, InvocationResult
+from framework.contract import Fetcher, InvocationResult, pipeline_dict
 
 logger = logging.getLogger("framework.envelope")
 
@@ -65,6 +65,8 @@ def build_metadata(result: InvocationResult, fetcher: Fetcher, run_id: str) -> d
         if es.description is not None:
             es_meta["description"] = es.description
         meta["evidence_set"] = es_meta
+    if fetcher.pipeline:
+        meta["pipeline"] = pipeline_dict(fetcher.pipeline)
     if result.inputs is not None:
         meta["inputs"] = result.inputs
     # Only when the fetcher received a pattern: a run without patterns writes the envelope it always has.

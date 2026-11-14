@@ -82,13 +82,16 @@ def discover_validators(repo_root: Path) -> Dict[str, Validator]:
     return out
 
 
-def manifest_reference_ids(manifest: dict, fetchers: Dict[str, Fetcher]) -> Set[str]:
-    """The evidence-set reference_ids the manifest's fetchers produce."""
+def manifest_reference_ids(
+    manifest: dict, fetchers: Dict[str, Fetcher], *, include_pipeline: bool = False
+) -> Set[str]:
+    """The evidence-set reference_ids the manifest's fetchers produce. Pipeline sets are left out
+    unless `include_pipeline`: validators never ship against them."""
     refs: Set[str] = set()
     for entry in (manifest.get("run") or {}).get("fetchers") or []:
         name = entry.get("use") if isinstance(entry, dict) else None
         fetcher = fetchers.get(name) if name else None
-        if fetcher and fetcher.evidence_set:
+        if fetcher and fetcher.evidence_set and (include_pipeline or not fetcher.is_pipeline):
             refs.add(fetcher.evidence_set.reference_id)
     return refs
 
@@ -98,3 +101,18 @@ def select_validators(
 ) -> List[Validator]:
     """Validators whose evidence_sets intersect the given reference_ids."""
     return [v for v in validators if set(v.evidence_sets) & reference_ids]
+
+
+def pipeline_reference_ids(fetchers: Dict[str, Fetcher]) -> Set[str]:
+    """The reference_ids of evidence sets that feed a pipeline."""
+    return {f.evidence_set.reference_id for f in fetchers.values() if f.is_pipeline and f.evidence_set}
+
+
+def pipeline_conflicts(validators: Iterable[Validator], fetchers: Dict[str, Fetcher]) -> List[str]:
+    """One message per (validator, pipeline set): a validator on a pipeline set means the batch never approves."""
+    pipeline = pipeline_reference_ids(fetchers)
+    return [
+        f"validator {v.key} targets pipeline evidence set {ref}: a failing validator means the batch will "
+        f"never approve, so the pipeline never runs (remove {ref} from its evidence_sets)"
+        for v in validators for ref in v.evidence_sets if ref in pipeline
+    ]
