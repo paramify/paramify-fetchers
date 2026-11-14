@@ -100,6 +100,18 @@ def test_plan_json_carries_the_plan(fake, tmp_path):  # noqa: F811
     assert out["ok"] is True and [a["id"] for a in out["plan"]["actions"]][-1] == "delivery/x"
 
 
+def test_plan_json_on_an_inventory_run_says_the_pipeline_runs(fake, tmp_path):  # noqa: F811
+    from tests.test_sync_desired import build, env, inv
+    run = tmp_path / "run-inv"
+    run.mkdir()
+    body = env(fetcher="x", pipeline={"type": "inventory", "id_scheme": "x-id"}, inventory={"complete": True})
+    build(run, {"inv.json": body}, [inv("x", ["inv.json"])], {"x": {"use": "x"}})
+    res = cli("upload", str(run), "--plan", "--json")
+    assert res.exit_code == 0, res.output
+    action = next(a for a in json.loads(res.output)["plan"]["actions"] if a["id"] == "delivery/x")
+    assert action["summary"].endswith("new batch (approved on submit) → pipeline runs")
+
+
 def test_plan_that_cannot_be_made_exits_1(no_env, tmp_path):  # noqa: F811
     res = cli("upload", str(two_files(tmp_path)), "--plan", "--json")
     assert res.exit_code == 1
@@ -561,3 +573,23 @@ def test_an_entry_key_in_only_one_side_or_for_another_fetcher_is_not_compared(no
     run = two_files(tmp_path)
     other = paramify_manifest(tmp_path / "other.yaml", {"stack": "E2E-A"}, use="y")
     assert api.plan_upload(run, root, online=False, manifest_path=other).notes == []
+
+
+def test_a_pipeline_entry_recorded_with_its_defaults_gets_no_note_under_a_run_level_direct(
+        no_env, repo_root, tmp_path):  # noqa: F811
+    # The run recorded the pipeline defaults for the inventory entry; the manifest still holds run-level direct.
+    # The repo root, so the manifest's fetcher is known to be a pipeline fetcher.
+    settings = {"use": "github_repository_inventory", "delivery": "auto", "no_request": "evidence"}
+    m = paramify_manifest(tmp_path / "m.yaml", {"delivery": "direct", "no_request": "direct"},
+                          use="github_repository_inventory")
+    run = two_files(tmp_path, {"github_repository_inventory": settings})
+    assert api.plan_upload(run, repo_root, online=False, manifest_path=m).notes == []
+
+
+def test_an_ordinary_entry_still_takes_a_run_level_direct_in_the_notes(no_env, repo_root, tmp_path):  # noqa: F811
+    use = "cornerstone_incident_response_training"
+    m = paramify_manifest(tmp_path / "m.yaml", {"no_request": "direct"}, use=use)
+    run = two_files(tmp_path, {use: {"use": use, "no_request": "evidence"}})
+    assert api.plan_upload(run, repo_root, online=False, manifest_path=m).notes == [
+        f"the manifest now sets no_request: direct for {use}; this run was made with evidence. "
+        "Run the manifest again to use it."]

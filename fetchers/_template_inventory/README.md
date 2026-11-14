@@ -6,6 +6,8 @@ This is an **inventory** fetcher (`kind: inventory`): one record per asset,
 uploaded to an evidence set where a Paramify inventory pipeline turns each
 record into an Inventory item. See
 [docs/inventory_fetchers_guide.md](../../docs/inventory_fetchers_guide.md).
+To write one, see
+[docs/pipeline_fetchers_guide.md](../../docs/pipeline_fetchers_guide.md).
 
 ## Records
 
@@ -13,9 +15,9 @@ Each record under `payload.data`:
 
 | Field | Inventory field | Source |
 |---|---|---|
-| `unique_asset_identifier` | Unique ID | \<the asset's own stable ID> |
+| `unique_asset_identifier` | Unique ID (required) | \<the asset's own stable ID, in the format of `id_scheme`> |
 | `name` | | \<…> |
-| `asset_type` | Asset Type | \<…> |
+| `asset_type` | Parent component (required) | \<a non-empty string, such as `endpoint`> |
 
 ## Required env vars
 

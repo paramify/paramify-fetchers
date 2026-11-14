@@ -1,9 +1,10 @@
 # Wiz
 
 Read-only fetchers for the Wiz cloud security platform (commercial and Wiz for
-Government): eleven evidence fetchers, below, and three issue reports that send
-findings to a Paramify assessment (see [Issue reports](#issue-reports)). All
-fourteen share one GraphQL client (`_shared/wiz_client.py`) and one pair of
+Government): eleven evidence fetchers, below, one inventory for a Paramify
+inventory pipeline (see [Inventory](#inventory)), and three issue reports that
+send findings to a Paramify assessment (see [Issue reports](#issue-reports)).
+All fifteen share one GraphQL client (`_shared/wiz_client.py`) and one pair of
 secrets. None of them writes to Wiz: the client refuses to send a GraphQL
 mutation.
 
@@ -39,6 +40,16 @@ tooling (FedRAMP SCG-ENH); that has to come from the organization's product.
 Read the vulnerability and issue evidence together with `wiz_scan_coverage`:
 zero findings only means something if every account in the boundary is being
 scanned.
+
+## Inventory
+
+This one writes an inventory for a Paramify inventory pipeline, which builds
+Inventory items from it. Setup, the record fields and the pipeline settings are
+in its [README](inventory/README.md).
+
+| Fetcher | What it sends | ID scheme | Wiz scopes |
+|---|---|---|---|
+| [`wiz_inventory`](inventory/README.md) | One record per cloud resource (account, region, type, IPs, OS, owner, internet exposure) under `payload.data`, keyed by the Wiz resource id | `wiz-resource-id` | `read:resources` |
 
 ## Issue reports
 

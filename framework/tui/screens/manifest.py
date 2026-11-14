@@ -8,7 +8,8 @@ modal -> api.* mutator -> rebuild, mirroring the Bagels write path.
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional
+from pathlib import Path
+from typing import Dict, List, Optional, Sequence
 
 import yaml
 from rich.console import RenderableType
@@ -38,6 +39,7 @@ from framework.tui.modals import (
 
 APPROVALS = ("MANUAL", "SUBMISSION_WITH_PASSING_VALIDATORS", "SUBMISSION")
 NO_REQUESTS = ("direct", "evidence", "refuse")
+PIPELINE_NO_REQUESTS = ("evidence", "refuse")  # a pipeline file never goes direct
 DELIVERIES = ("auto", "direct")
 
 
@@ -69,10 +71,18 @@ class ManifestPanel(ButtonRowNav, Vertical):
     """
 
     # `a` moves to the catalog filter: fetchers are added from the catalog.
-    HINTS = [
+    _HINTS = [
         ("a", "find to add"), ("e", "entry"), ("x", "remove"), ("t", "targets"),
         ("A", "assessment"), ("s", "save"), ("v", "validate"), ("p", "preview"),
     ]
+
+    @property
+    def HINTS(self) -> list:  # noqa: N802 — the workspace reads HINTS off every page
+        # `P` only does something on a pipeline entry, so it is listed only there
+        # (the key stays bound and explains itself on any other row).
+        if self._selected and (self._descriptors().get(self._selected) or {}).get("pipeline"):
+            return self._HINTS[:5] + [("P", "preset")] + self._HINTS[5:]
+        return list(self._HINTS)
 
     BINDINGS = [
         Binding("a", "add_fetcher", "Find to add"),
@@ -80,6 +90,7 @@ class ManifestPanel(ButtonRowNav, Vertical):
         Binding("x", "remove_entry", "Remove"),
         Binding("t", "edit_targets", "Targets"),
         Binding("A", "pick_assessment", "Assessment"),
+        Binding("P", "preset_sheet", "Preset"),
         Binding("s", "save", "Save"),
         Binding("v", "validate", "Validate"),
         Binding("p", "preview", "Preview"),
@@ -283,6 +294,10 @@ class ManifestPanel(ButtonRowNav, Vertical):
             self.query_one("#manifest-detail", Static).update(self.current_detail())
         else:
             self.post_message(ShowDetail(self.current_detail(), self))
+        # The hints follow the selected row (`P` is listed on a pipeline entry).
+        update = getattr(self.screen, "_update_chrome", None)
+        if update is not None:
+            update()
 
     def current_detail(self) -> RenderableType:
         """What the detail pane shows for the selected entry."""
@@ -671,6 +686,8 @@ class ManifestPanel(ButtonRowNav, Vertical):
             for s in d.get("secrets", []) if not s.get("per_target")
         ]
         pf = entry.get("paramify") or {}
+        pipeline = bool(d.get("pipeline"))
+        no_requests = PIPELINE_NO_REQUESTS if pipeline else NO_REQUESTS
         paramify_specs = [
             {"key": "stack", "label": "stack", "kind": "text", "value": pf.get("stack"),
              "placeholder": "inherit", "required": False, "help": "stack id or name; blank inherits"},
@@ -678,12 +695,22 @@ class ManifestPanel(ButtonRowNav, Vertical):
              "placeholder": "inherit", "required": False,
              "help": "Paramify username; picks the channel when a stack has one per owner; blank inherits"},
             {"key": "approval", "label": "approval", "kind": "select", "value": pf.get("approval") if pf.get("approval") in APPROVALS else None,
-             "options": [(v, v) for v in APPROVALS], "required": False, "help": "blank inherits"},
-            {"key": "no_request", "label": "no_request", "kind": "select", "value": pf.get("no_request") if pf.get("no_request") in NO_REQUESTS else None,
-             "options": [(v, v) for v in NO_REQUESTS], "required": False, "help": "blank inherits"},
+             "options": [(v, v) for v in APPROVALS], "required": False,
+             "help": ("pipeline files always go in a batch; MANUAL waits for a person"
+                      if pipeline else "blank inherits")},
+            {"key": "no_request", "label": "no_request", "kind": "select",
+             "value": pf.get("no_request") if pf.get("no_request") in no_requests else None,
+             "options": [(v, v) for v in no_requests], "required": False,
+             "help": ("no artifact request: blank or evidence sends a batch to the set; refuse stops"
+                      if pipeline else "blank inherits")},
             {"key": "delivery", "label": "delivery", "kind": "select", "value": pf.get("delivery") if pf.get("delivery") in DELIVERIES else None,
              "options": [(v, v) for v in DELIVERIES], "required": False, "help": "blank inherits"},
         ]
+        if pipeline:
+            # A pipeline file always goes in a batch, so `delivery` does not apply (and
+            # no_request offers no `direct`). The save leaves a key the form hides alone.
+            paramify_specs = [s for s in paramify_specs if s["key"] != "delivery"]
+        shown = [s["key"] for s in paramify_specs]
         groups = {"config": config_specs, "secrets": secret_specs, "paramify": paramify_specs}
 
         def done(result: Optional[dict]) -> None:
@@ -696,7 +723,7 @@ class ManifestPanel(ButtonRowNav, Vertical):
                     api.set_fetcher_config(m, use, k, v, entry_key=ekey)
             for name, env in (result.get("secrets") or {}).items():
                 api.set_secret(m, use, name, env, entry_key=ekey)
-            self._set_entry_paramify(entry, result.get("paramify") or {})
+            self._set_entry_paramify(entry, result.get("paramify") or {}, shown)
             self._autosave()
             self.rebuild()
             self.notify(f"Updated {use}.")
@@ -722,10 +749,13 @@ class ManifestPanel(ButtonRowNav, Vertical):
         entries = self._entries()
         return list(zip(entry_keys([ManifestEntry(use=str(e.get("use", "?"))) for e in entries]), entries))
 
-    def _set_entry_paramify(self, entry: dict, values: dict) -> None:
-        """Write the entry's `paramify` block from the form; a blank field removes its key."""
+    def _set_entry_paramify(self, entry: dict, values: dict, shown: Sequence[str]) -> None:
+        """Write the entry's `paramify` block from the form; a blank field removes its key.
+
+        Only the keys the form `shown` are touched: one it hid keeps its value.
+        """
         block = dict(entry.get("paramify") or {})
-        for key in ("stack", "owner", "approval", "no_request", "delivery"):
+        for key in shown:
             if values.get(key):
                 block[key] = values[key]
             else:
@@ -1059,6 +1089,23 @@ class ManifestPanel(ButtonRowNav, Vertical):
             return
         text = yaml.safe_dump(self._manifest, sort_keys=False, default_flow_style=False)
         self.app.push_screen(PreviewModal(text, title=str(self.app.manifest_path)))
+
+    def action_preset_sheet(self) -> None:
+        use = self._selected
+        if not use or self._manifest is None:
+            return
+        if not (self._descriptors().get(use) or {}).get("pipeline"):
+            self.notify(f"{use} is not a pipeline fetcher")
+            return
+        run = self._manifest.get("run") or {}
+        out = run.get("output_dir")
+        try:
+            sheet = api.preset_sheet(self.app.root_path, use, Path(out) if out else None)
+        except (KeyError, ValueError) as exc:
+            self.notify(str(exc), severity="warning")
+            return
+        self.app.push_screen(PreviewModal(api.render_preset_sheet(sheet), title=f"preset: {use}",
+                                          close_keys="escape,q,P"))
 
     # -- focus ------------------------------------------------------------ #
 

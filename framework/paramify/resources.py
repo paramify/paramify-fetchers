@@ -62,6 +62,8 @@ class EvidenceSet:
     name: str
     approval: str
     channels: Tuple[Channel, ...]
+    # Names (else ids) of the validators paired with the set; empty when the API sends none.
+    validators: Tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -111,6 +113,7 @@ def _evidence(d: Dict[str, Any]) -> EvidenceSet:
         name=d.get("name") or "",
         approval=d.get("whenToApproveArtifactRequest") or "",
         channels=tuple(_channel(c) for c in d.get("channels") or ()),
+        validators=tuple(v.get("name") or v.get("id") or "" for v in d.get("validators") or ()),
     )
 
 

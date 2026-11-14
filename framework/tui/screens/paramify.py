@@ -44,6 +44,7 @@ from framework.tui.screens.paramify_events import (
     BUSY_NOTICE,
     ParamifyWriter,
     latest_run_scoped,
+    pipeline_wait_lines,
     upload_event_lines,
 )
 
@@ -1086,6 +1087,8 @@ class ParamifyPage(ParamifyWriter, Vertical):
             self._set_banner(Text(f"uploading {ev.get('files', 0)} {noun}(s) to {ev.get('base_url', '')}{mode}",
                                   style=palette.WARN))
         elif etype == "upload_complete":
+            for line in pipeline_wait_lines(ev.get("entries") or {}):
+                self._log(line)
             self._finalize_upload(ev)
         elif etype == "_upload_failed":
             self._log(Text(f"upload failed: {ev.get('error', '')}", style=f"bold {palette.FAIL}"))

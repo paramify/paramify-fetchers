@@ -44,12 +44,14 @@ from framework import samples as _samples
 from framework.config_loader import discover_fetchers, discover_platforms
 from framework.contract import (
     ConfigField,
+    Fetcher,
     ManifestEntry,
     PlatformConfig,
     Secret,
     TargetField,
     config_hint,
     effective_secrets,
+    pipeline_dict,
     platform_category,
     platform_for,
 )
@@ -85,6 +87,7 @@ from framework.secret_resolver import (
 )
 from framework.sync import upload as _sync_upload
 from framework.sync.model import Plan
+from framework.sync.providers.delivery_routing import PIPELINE_DIRECT
 
 _missing_token_error = missing_token_error
 
@@ -182,6 +185,8 @@ def _fetcher_descriptor(f, platform_spec=None) -> dict:
             "title": f.issue_report.title,
             "format": f.output_type,
         }
+    if f.pipeline is not None:
+        d["pipeline"] = pipeline_dict(f.pipeline)
     if f.is_comparator:
         d["depends_on"] = list(f.depends_on)
     return d
@@ -1189,6 +1194,15 @@ def validate_notes(manifest: dict, root: Path, fetchers=None, platforms=None) ->
     if not UNKNOWN_CONFIG_KEYS_ARE_ERRORS:
         notes += unknown_config_keys(parsed, fetchers, platforms)
     notes += _duplicate_entry_notes(parsed, fetchers)
+    for entry, key in zip(parsed.entries, manifest_loader.entry_keys(parsed.entries)):
+        f = fetchers.get(entry.use)
+        if f is None or not f.is_pipeline:
+            continue
+        if manifest_loader.resolved_paramify(parsed, entry, pipeline=True).get("approval") == "MANUAL":
+            notes.append(f"{key}: approval MANUAL on a pipeline fetcher; "
+                         f"the pipeline waits for someone to approve each batch")
+        notes += [f"{key}: ignores run.paramify {setting}: direct; pipeline files always go in a batch"
+                  for setting in manifest_loader.ignored_run_direct(parsed, entry)]
     return notes
 
 
@@ -1238,6 +1252,13 @@ def validate(manifest: dict, root: Path, fetchers=None, platforms=None) -> List[
         errors += unknown_config_keys(parsed, fetchers, platforms)
     # A bad category-wide pattern list is one mistake, reported once with the entries it reaches.
     shared: Dict[Tuple[Optional[str], str], List[str]] = {}
+
+    from framework.validators import (
+        discover_validators,
+        manifest_reference_ids,
+        pipeline_conflicts,
+        select_validators,
+    )
 
     # Each message names its entry by key (`x`, `x#1`), so a front-end can tell
     # which of two entries of one fetcher it is about.
@@ -1347,7 +1368,23 @@ def validate(manifest: dict, root: Path, fetchers=None, platforms=None) -> List[
                 if secret.name not in entry.secrets:
                     errors.append(f"{key}: missing secret '{secret.name}'")
 
+        # A pipeline file never goes direct (the upload engine refuses it too; this catches it before a run).
+        # A `direct` inherited from run.paramify is ignored (validate_notes says so); the entry's own is an error.
+        if fetcher.is_pipeline:
+            paramify = manifest_loader.resolved_paramify(parsed, entry, pipeline=True)
+            errors += [f"{key}: {setting}: direct is not allowed on a pipeline fetcher; {PIPELINE_DIRECT}"
+                       for setting in ("delivery", "no_request") if paramify.get(setting) == "direct"]
+
     errors += [f"platforms.{cat}.config: {problem} (for {', '.join(uses)})" for (cat, problem), uses in shared.items()]
+    # Validators on a pipeline set mean the batch never approves, so the pipeline never runs.
+    # Only manifests with a pipeline entry pay for loading the registry.
+    if any(e.use in fetchers and fetchers[e.use].is_pipeline for e in parsed.entries):
+        try:
+            scoped = select_validators(discover_validators(root).values(),
+                                       manifest_reference_ids(manifest, fetchers, include_pipeline=True))
+            errors += pipeline_conflicts(scoped, fetchers)
+        except ValueError as e:
+            errors.append(f"validator registry: {e}")
     return errors
 
 
@@ -1655,7 +1692,8 @@ def run(
         "completed_at": completed_at,
         "invocations": [_invocation_record(r) for r in all_results],
         "paramify": {
-            keys[id(e)]: {"use": e.use, **manifest_loader.resolved_paramify(parsed, e)}
+            keys[id(e)]: {"use": e.use, **manifest_loader.resolved_paramify(
+                parsed, e, pipeline=e.use in fetchers and fetchers[e.use].is_pipeline)}
             for e in entries
         },
     }
@@ -2619,6 +2657,123 @@ def latest_run(
     if kind is not None:
         runs = [r for r in runs if run_has(r, kind)]
     return runs[0] if runs else None
+
+
+def _read_envelope(path: Path) -> Optional[dict]:
+    """The JSON object in `path`, or None when it cannot be read as one."""
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def newest_pipeline_files(output_dir, fetcher: Fetcher) -> List[Tuple[Path, Optional[dict]]]:
+    """The fetcher's files in the newest run under output_dir that has any, with each one's
+    JSON (None: unreadable), sorted by name. [] when no run has one.
+
+    Runs come from list_runs: newest first, ghost runs skipped. A run's invocations
+    name the fetcher's outputs (`<stem>_<target>.json` for a per-target fetcher). A
+    run without them is searched for `<output_path stem>*.json` files whose envelope
+    names the fetcher; an unreadable one is kept, so the sheet can say so.
+    """
+    stem = Path(fetcher.output_path).stem
+    for run in list_runs(output_dir):
+        files = run.get("files") or []
+        recorded = sorted(Path(f["path"]) for f in files if f.get("fetcher") == fetcher.name)
+        found = [(p, _read_envelope(p)) for p in recorded if p.is_file()]
+        if not recorded:
+            for f in sorted(files, key=lambda f: f["name"]):
+                p = Path(f["path"])
+                if f.get("fetcher") is not None or p.suffix != ".json" or not p.name.startswith(stem):
+                    continue
+                env = _read_envelope(p)
+                if env is None or (env.get("metadata") or {}).get("fetcher_name") == fetcher.name:
+                    found.append((p, env))
+        if found:
+            return found
+    return []
+
+
+def _merged_asset_types(envelopes: List[dict]) -> Dict[str, int]:
+    """Each envelope's metadata.inventory.by_asset_type, summed: largest count first, then by name."""
+    total: Dict[str, int] = {}
+    for env in envelopes:
+        counts = ((env.get("metadata") or {}).get("inventory") or {}).get("by_asset_type")
+        if isinstance(counts, dict):
+            for k, v in counts.items():
+                if isinstance(v, int):
+                    total[k] = total.get(k, 0) + v
+    return dict(sorted(total.items(), key=lambda kv: (-kv[1], kv[0])))
+
+
+def preset_sheet(root: Path, name: str, output_dir: Optional[Path] = None) -> Dict[str, Any]:
+    """The settings to enter when building the Paramify preset for a pipeline fetcher.
+
+    Reads the fetcher's `pipeline:` block and its files in the newest run that
+    has any under output_dir (default <root>/evidence). With several target files
+    the sample is the first by name and `asset_types` sums them. `problem` names
+    a file that could not be read. Raises KeyError for an unknown fetcher and
+    ValueError for one with no `pipeline:` block.
+    """
+    fetchers = discover_fetchers(root)
+    if name not in fetchers:
+        raise KeyError(name)
+    f = fetchers[name]
+    pipe = f.pipeline
+    if pipe is None:
+        raise ValueError(f"{name} is not a pipeline fetcher")
+    inventory = pipe.type == "inventory"
+    out = Path(output_dir) if output_dir is not None else Path(root) / "evidence"
+    found = newest_pipeline_files(out, f)
+    sample = str(found[0][0]) if found else None
+    unreadable = [p for p, env in found if env is None]
+    problem = f"could not read {unreadable[0]}" if unreadable else None
+    asset_types = None
+    if inventory and found and not unreadable:
+        asset_types = _merged_asset_types([env for _p, env in found if env is not None])
+    return {
+        "fetcher": name,
+        "type": pipe.type,
+        "evidence_set": f.evidence_set.reference_id if f.evidence_set else None,
+        "sample": sample,
+        "problem": problem,
+        "data_path": "payload.data" if inventory else None,
+        "unique_id": "unique_asset_identifier" if inventory else None,
+        "id_scheme": pipe.id_scheme,
+        "asset_id_field": pipe.asset_id_field,
+        "asset_types": asset_types,
+        "linked": sorted(
+            n for n, o in fetchers.items()
+            if n != name and o.pipeline is not None and o.pipeline.id_scheme == pipe.id_scheme
+        ),
+    }
+
+
+def render_preset_sheet(sheet: Dict[str, Any]) -> str:
+    """The text of the preset sheet (spec section 5); the CLI and the TUI both show it."""
+    ref = sheet["evidence_set"] or sheet["fetcher"]
+    inventory = sheet["data_path"] is not None
+    rows = [("Sample file", sheet["sample"] or "none yet: run the fetcher first")]
+    if inventory:
+        rows.append(("Data path", sheet["data_path"]))
+        rows.append(("Unique ID", f"{sheet['unique_id']}   (scheme: {sheet['id_scheme']})"))
+        if sheet.get("problem"):
+            rows.append(("Parent component", f"derive from asset_type. {sheet['problem']}"))
+        elif sheet["asset_types"] is None:
+            rows.append(("Parent component", "derive from asset_type. The asset_type values need a run (run the fetcher first)"))
+        elif not sheet["asset_types"]:
+            rows.append(("Parent component", "derive from asset_type. The last run had no assets"))
+        else:
+            counts = " · ".join(f"{k} {v}" for k, v in sheet["asset_types"].items())
+            rows.append(("Parent component", f"derive from asset_type. Values in the last run:\n{' ' * 22}{counts}"))
+    else:
+        rows.append(("Asset ID field", f"{sheet['asset_id_field']}   (scheme: {sheet['id_scheme']})"))
+    rows.append(("Evidence set", "approval must be automatic; attach no validators"))
+    linked = ", ".join(sheet["linked"]) if sheet["linked"] else f"none in the catalog use {sheet['id_scheme']}"
+    rows.append(("Linked fetchers", linked))
+    head = f"{sheet['type'].capitalize()} pipeline for {ref}  (attach it to this set, not a new one)"
+    return "\n".join([head] + [f"  {k:<17} {v}" for k, v in rows])
 
 
 def read_evidence(path) -> dict:

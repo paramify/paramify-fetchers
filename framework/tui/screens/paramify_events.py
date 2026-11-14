@@ -157,6 +157,25 @@ def upload_event_lines(ev: dict, noun: str) -> list[Text]:
     return []
 
 
+def pipeline_wait_lines(entries: dict) -> list[Text]:
+    """One amber line per pipeline entry whose batch is submitted but not approved.
+
+    Only `approved is False` counts: None means the file went direct (a workspace
+    without batches), which is not a warning.
+    """
+    lines = []
+    for key, entry in entries.items():
+        pipe = (entry or {}).get("pipeline") or {}
+        if pipe.get("approved") is False:
+            batch = entry.get("batch_reference") or entry.get("batch_id")
+            where = f" ({batch})" if batch else ""
+            lines.append(Text(
+                f"  [WAIT] {key}: waiting for approval{where}; the {pipe.get('type')} pipeline runs once someone approves the batch",
+                style=palette.WARN,
+            ))
+    return lines
+
+
 def output_dir(app) -> str:
     """The active manifest's output dir, as the run tab and the uploaders read it."""
     run = (getattr(app, "manifest", None) or {}).get("run") or {}

@@ -292,3 +292,14 @@ def test_batches_flag_off_answers_403_and_can_be_undone(fake, res):
         assert "Artifact requests are not enabled for this workspace." in ei.value.message
     fake.batches_flag_off(False)
     assert list(res.batches()) == []
+
+
+def test_evidence_without_validators_key_parses_empty():
+    from framework.paramify.resources import _evidence
+    assert _evidence({"id": "e", "referenceId": "R", "channels": []}).validators == ()
+
+
+def test_evidence_validators_are_named():
+    from framework.paramify.resources import _evidence
+    ev = _evidence({"id": "e", "referenceId": "R", "validators": [{"id": "v1", "name": "VAL-1"}, {"id": "v2"}]})
+    assert ev.validators == ("VAL-1", "v2")

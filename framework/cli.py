@@ -16,6 +16,7 @@ Read / discover:
   paramify manifests [--json]                  # discovered run manifests
   paramify runs [--output-dir DIR] [--json]    # past runs under an output dir
     paramify evidence <path> [--json]            # read one evidence file (or issue-report sidecar)
+    paramify preset <fetcher> [-f MANIFEST] [--output-dir DIR] [--json]  # settings for a pipeline's Paramify preset
     paramify samples status [--json]             # which fetchers have a committed evidence sample
     paramify samples show <fetcher> [--json]     # one fetcher's sample: one record + field coverage
     paramify samples backfill [--evidence DIR] [--fetcher NAME ...] [--scrub WORD ...]
@@ -1100,6 +1101,42 @@ def runs_cmd(
             f"{r['ok']}/{total} ok  {style.dim(str(len(r['files'])) + ' files')}"
             f"{style.warn(reports)}  [{tone(status)}]"
         )
+
+
+@app.command("preset")
+def preset_cmd(
+    fetcher: str = typer.Argument(..., help="A pipeline fetcher's name"),
+    file: Optional[str] = typer.Option(None, "-f", "--file", help="Manifest whose run.output_dir holds the runs"),
+    output_dir: Optional[str] = typer.Option(None, "-o", "--output-dir", help="Base dir to find the newest run in (default: the -f manifest's output_dir, else <repo>/evidence)"),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON"),
+):
+    """Print the settings to enter when building the Paramify preset for a pipeline fetcher."""
+    root = api.find_repo_root()
+    out = Path(output_dir) if output_dir else None
+    if out is None and file:
+        try:
+            manifest = api.read_manifest(api.resolve_manifest_path(root, file), must_exist=True)
+        except (api.ManifestNotFound, OSError, ValueError) as e:
+            _err(str(e))
+            raise typer.Exit(1)
+        configured = (manifest.get("run") or {}).get("output_dir")
+        out = Path(configured) if configured else None
+    try:
+        sheet = api.preset_sheet(root, fetcher, output_dir=out)
+    except KeyError:
+        names = list(api.discover_fetchers(root))
+        _err(f"Unknown fetcher: {fetcher}{api._did_you_mean(fetcher, names)}")
+        raise typer.Exit(2)
+    except ValueError as e:
+        if json_out:
+            typer.echo(json.dumps({"error": str(e)}, indent=2))
+        else:
+            _err(str(e))
+        raise typer.Exit(1)
+    if json_out:
+        typer.echo(json.dumps(sheet, indent=2))
+        return
+    typer.echo(api.render_preset_sheet(sheet))
 
 
 @app.command("evidence")

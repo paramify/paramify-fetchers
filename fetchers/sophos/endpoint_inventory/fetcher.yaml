@@ -1,10 +1,13 @@
 name: sophos_endpoint_inventory
-version: 0.1.0
+version: 0.2.0
 description: >-
   Lists every computer and server that Sophos Central manages, one record each, with the attributes Sophos records for it.
 category: sophos
 
 kind: inventory
+pipeline:
+  type: inventory
+  id_scheme: sophos-endpoint-id
 supports_targets: true
 
 target_schema:
