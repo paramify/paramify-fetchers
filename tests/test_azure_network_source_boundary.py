@@ -123,6 +123,44 @@ def test_private_dns_queries_explicit_target_and_keeps_foreign_link_unknown(
     assert link["virtual_network_status"] == "unknown"
 
 
+def test_private_dns_strict_reverse_peer_lookup_keeps_foreign_hub_predicate(monkeypatch):
+    pytest.importorskip("azure.mgmt.privatedns")
+    import test_azure_private_network_fetchers as existing
+
+    strict(monkeypatch, existing.SUB)
+    scopes = []
+
+    class RecordingPatch:
+        def setitem(self, *args, **kwargs):
+            return monkeypatch.setitem(*args, **kwargs)
+
+        def setattr(self, obj, name, value, *args, **kwargs):
+            if name == "query_all":
+                original = value
+
+                def value(graph, scope, query):
+                    scopes.append(scope)
+                    return original(graph, scope, query)
+
+            if name == "readable_scopes":
+                value = Mock(side_effect=AssertionError("unscoped readable scopes"))
+            return monkeypatch.setattr(obj, name, value, *args, **kwargs)
+
+    # A foreign hub is a relationship predicate, while the queried spoke and
+    # every Resource Graph request stay inside the selected subscription.
+    hub = existing.UNREADABLE_HUB
+    zones, queries, collector = existing._collect(
+        RecordingPatch(), {existing.BLOB: [hub]},
+        [existing._vnet_row(existing.VNET, "10.0.0.0/16", [existing.NIC_CONFIG], peers=[hub])],
+    )
+    record = zones[existing.BLOB]["record_sets"][0]
+    assert record["ip_address_networks"] == {"10.0.0.4": [existing.VNET.lower()]}
+    assert any("remoteVirtualNetwork" in query and f"@'{hub.lower()}'" in query for query in queries)
+    assert collector.ok and scopes and all(scope == existing.SUB for scope in scopes)
+    link = zones[existing.BLOB]["virtual_network_links"][0]
+    assert link["virtual_network_id"] == hub and link["virtual_network_status"] == "unknown"
+
+
 def test_private_dns_does_not_create_foreign_zone_group_client(monkeypatch):
     pytest.importorskip("azure.mgmt.network")
     strict(monkeypatch)

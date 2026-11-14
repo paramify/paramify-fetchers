@@ -2,9 +2,12 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace as NS
+
+import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "fetchers" / "azure" / "_shared"))
@@ -90,3 +93,44 @@ def test_cluster_summary_carries_node_security_keys():
 def test_tri_state_reads_strings_by_text_not_truthiness():
     assert aks._tri_state("false") is False and aks._tri_state("True") is True
     assert aks._tri_state("") is None and aks._tri_state("maybe") is None and aks._tri_state(None) is None
+
+
+@pytest.mark.parametrize("value", [None, False, True, "false"])
+def test_cluster_observations_preserve_sdk_flags_before_normalization(value):
+    cluster = NS(enable_rbac=value, disable_local_accounts=value,
+                 api_server_access_profile=NS(enable_private_cluster=value))
+    row = json.loads(json.dumps(aks.cluster_record(aks.project_managed_cluster(cluster))))
+    observed = row["configuration_observations"]
+    assert observed["rbac_enabled"] == value
+    assert observed["local_accounts_disabled"] == value
+    assert observed["enable_private_cluster"] == value
+    assert type(observed["rbac_enabled"]) is type(value)
+    # Existing normalized flags keep their meaning, including string truthiness.
+    assert row["rbac_enabled"] is bool(value)
+    assert row["local_accounts_disabled"] is bool(value)
+    assert row["private_cluster"] is bool(value)
+
+
+@pytest.mark.parametrize("ranges", [None, [], ["0.0.0.0/0"], ["0.0.0.0/32"], ["192.0.2.0/24"]])
+def test_cluster_observations_preserve_nullable_authorized_ip_ranges(ranges):
+    cluster = NS(api_server_access_profile=NS(enable_private_cluster=False, authorized_ip_ranges=ranges))
+    row = json.loads(json.dumps(aks.cluster_record(aks.project_managed_cluster(cluster))))
+    assert row["configuration_observations"]["authorized_ip_ranges"] == ranges
+    assert row["authorized_ip_ranges"] == (ranges or [])
+    # The native flag still treats any non-empty list as restricted; the
+    # observation alone does not establish whether these ranges are approved.
+    assert row["api_server_access_restricted"] is bool(ranges)
+
+
+def test_omitted_cluster_fields_stay_unknown_in_observations():
+    row = aks.cluster_record(aks.project_managed_cluster(NS()))
+    assert row["configuration_observations"] == {
+        "rbac_enabled": None,
+        "local_accounts_disabled": None,
+        "enable_private_cluster": None,
+        "authorized_ip_ranges": None,
+    }
+    assert row["rbac_enabled"] is False
+    assert row["local_accounts_disabled"] is False
+    assert row["private_cluster"] is False
+    assert row["authorized_ip_ranges"] == []
