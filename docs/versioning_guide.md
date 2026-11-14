@@ -1,15 +1,89 @@
 # Pinning a release and upgrading safely
 
-Run a release tag, not `main`. Before moving to a newer one, read what changed
-and check your manifests still validate.
-
-![Flow: fetch tags and name your version, read every changelog entry you cross and pick a target, then switch, reinstall, and validate each manifest](img/versioning/flow.svg)
+Run a release tag, not `main`. `paramify update` moves you to a newer one: it
+shows what changed, checks your manifests against the new version before it
+touches your checkout, then switches, reinstalls and validates.
 
 **You need:** [a clone installed from source](../README.md#install). Private
 copy? [Merge each release](private_mirror_guide.md#3-merge-each-paramify-release)
-instead. Container? [Build from the tag](../deploy/README.md#running-this-in-production).
+instead. Container? [Update the clone, then rebuild](#in-a-container).
 
 ---
+
+## Upgrade with `paramify update`
+
+```bash
+paramify update
+```
+
+![paramify update moving from 0.5.1-beta to 0.6.0-beta: the version jump, five highlights, the breaking changes with their fixes and the manifests they affect, a pre-switch check that finds one manifest would break, the fetchers you use that changed, then switch, reinstall and validate, and a closing card with commands to try](img/update/update.svg)
+
+In order, it:
+
+1. Fetches the tags and picks the newest release. Releases are `vX.Y.Z-beta`
+   tags; it never offers `main` or an `archive/*` tag.
+2. Shows that release's highlights (`releases/<version>.yaml`), or a link to
+   its CHANGELOG section if it has none. Every breaking change you cross is
+   listed with its fix and the manifests it affects. Changes that only touch
+   fetchers your manifests don't use fold into one line.
+3. Checks the new version out in a temporary `git worktree`, runs that
+   version's own `paramify validate` on each of your manifests, and removes
+   the worktree. A manifest that fails there and passes today **would break**.
+4. Lists which fetchers you use changed, and counts the rest.
+5. Asks before it changes anything (`[y/N]`).
+6. Runs `git switch --detach <tag>`, reinstalls with the same Python and the
+   extras you have installed (`.[all]` if it can't tell), and validates each
+   manifest again.
+
+| Command | Does |
+|---|---|
+| `paramify update` | Move to the newest release. |
+| `paramify update --next` | Move one release forward, to read each release's breaking changes in turn. |
+| `paramify update --to v0.6.0-beta` | Move to that release, older or newer. |
+| `paramify update --check` | Only report. Exit 0 up to date, 1 an update is available, 2 can't tell. |
+| `paramify update --rollback` | Go back to the version you ran before the last update, and reinstall. |
+| `--yes` | Don't ask. With breaking changes or a manifest that would break, it still stops unless you add `--allow-breaking`. |
+| `--json` | The whole plan and result as JSON. Without `--yes` it plans and exits 1 without switching. |
+
+![paramify update --check printing 0.5.1-beta, an arrow, 0.6.0-beta, and "run paramify update"](img/update/check.svg)
+
+**It won't switch over local changes.** If git tracks a file you changed,
+update lists it and stops: commit it, or move it to a branch. Untracked files,
+such as your own fetcher directories and `manifests/`, stay where they are.
+
+![paramify update refusing to switch because framework/cli.py has changes, and noting that one untracked path stays where it is](img/update/dirty.svg)
+
+**Changed your mind?** `paramify update --rollback` returns to the version
+recorded in `.paramify/state.json` (which git ignores), and reinstalls.
+
+![paramify update --rollback going from 0.6.0-beta back to 0.5.1-beta: switch, reinstall, validate](img/update/rollback.svg)
+
+**A newer release shows up on its own.** After a command, `paramify` prints
+one dim line when a newer release tag exists: at most once a day, never with
+`--json`, never into a pipe. It fetches tags in the background, so it never
+waits on the network. Set `PARAMIFY_NO_UPDATE_CHECK=1` to turn it off.
+
+### In a container
+
+The image is built from your clone, with no git history in it. Inside it,
+`paramify update` explains this and prints the two commands to run on the host:
+
+```bash
+paramify update                                     # in your clone, on the host
+docker compose -f deploy/docker-compose.yml build   # rebuild the image
+```
+
+![paramify update inside the container: no git history here; update the clone on the host, then rebuild the image](img/update/container.svg)
+
+---
+
+## Upgrade by hand
+
+`paramify update` first ships after 0.6.0-beta, so moving off 0.6.0-beta or
+older is done by hand once. These steps are also the fallback if update can't
+run.
+
+![Flow: fetch tags and name your version, read every changelog entry you cross and pick a target, then switch, reinstall, and validate each manifest](img/versioning/flow.svg)
 
 ## 1. See where you are
 
@@ -74,8 +148,10 @@ Set what it names as the entry says
 
 | Symptom | Fix |
 |---|---|
-| `git describe` prints `v0.5.1-beta-291-g59a2387` | You're on `main`, 291 commits past it. Switch to a tag. |
-| A run breaks after upgrading | Switch back to your old tag, then reinstall. |
+| `git describe` prints `v0.5.1-beta-291-g59a2387` | You're on `main`, 291 commits past it. `paramify update` offers the newest tag. |
+| A run breaks after upgrading | `paramify update --rollback`, or switch back to your old tag and reinstall. |
+| update says it stopped at breaking changes | You ran it with `--yes` or `--json`. Read them, then add `--allow-breaking`. |
+| update says a manifest would break | It names the error. Fix the manifest first, or switch and fix it after. |
 
 **More detail:** [how releases are cut](releasing_guide.md) ·
-[CHANGELOG](../CHANGELOG.md)
+[release highlights](../releases/README.md) · [CHANGELOG](../CHANGELOG.md)

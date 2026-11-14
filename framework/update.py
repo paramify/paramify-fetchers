@@ -399,7 +399,7 @@ def user_manifests(root: Path) -> List[dict]:
     try:
         fetchers = api.discover_fetchers(root)
         platforms = api.discover_platforms(root)
-    except Exception:  # noqa: BLE001 — a broken tree still gets an update
+    except Exception:  # noqa: BLE001 (a broken tree still gets an update)
         pass
     for summary in api.list_manifests(root):
         path = Path(summary["path"])
@@ -841,7 +841,7 @@ def check_for_update(root: Path, *, now: Optional[float] = None, fetch: bool = T
             "update_available": available,
             "on_release": bool(pos["exact"]),
         }
-    except Exception:  # noqa: BLE001 — a notice must never break a command
+    except Exception:  # noqa: BLE001 (a notice must never break a command)
         return None
 
 
