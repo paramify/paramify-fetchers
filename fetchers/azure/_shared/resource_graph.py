@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Union
 
-from azure_common import Collector, arm_client_kwargs, model_attr
+from azure_common import Collector, arm_client_kwargs, model_attr, subscription_of
 
 # The largest page Resource Graph serves; `$top` above it is rejected.
 PAGE_SIZE = 1000
@@ -84,15 +84,26 @@ LOOKUP_CHUNK = 200
 def lookup_by_ids(client, ids, build_query, label: str, collector: Collector, *, subscription_id=None):
     """Resource Graph rows keyed by lowercased id, plus the ids whose chunk failed.
 
-    Unscoped by default. An explicit subscription confines all lookup pages; a failed chunk leaves only its own ids unknown.
+    Unscoped by default. An explicit subscription confines lookup pages and
+    response rows; a failed chunk leaves only its own ids unknown. Predicate ids
+    may be foreign references when querying local reverse relationships.
     """
     unique = sorted({i.lower() for i in ids if i})
     out, failed = {}, set()
+
+    def read_chunk(chunk):
+        rows = query_all(client, subscription_id, build_query(chunk))["rows"]
+        if subscription_id is not None and any(
+            subscription_of(row.get("id")) != subscription_id.lower() for row in rows
+        ):
+            raise ValueError("Resource Graph returned a row outside the target subscription")
+        return rows
+
     for start in range(0, len(unique), LOOKUP_CHUNK):
         chunk = unique[start : start + LOOKUP_CHUNK]
         rows = collector.guard(
             f"resourcegraph.resources ({label} {start + 1}-{start + len(chunk)})",
-            lambda: query_all(client, subscription_id, build_query(chunk))["rows"],
+            lambda: read_chunk(chunk),
         )
         if rows is None:
             failed.update(chunk)

@@ -2469,6 +2469,13 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- `azure_private_endpoint_configuration` 0.3.2 uses the existing native strict
+  subscription setting for related Resource Graph lookups and skips wider
+  visibility discovery in that mode. Foreign references remain unknown; an
+  invalid strict flag or missing explicit target stops before authentication. Scoped lookups
+  reject out-of-scope response rows. `results.lookup_scope` records the mode;
+  default broad discovery and exclusion behavior remain unchanged.
+
 - Azure Service Health uses API `2025-04-01` for Azure Government event
   lists, individual events and both detail actions. Other clouds retain
   `2025-05-01`; evidence fields and collection scope are unchanged.
