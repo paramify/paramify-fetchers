@@ -1,0 +1,46 @@
+name: tenable_vuln_scan
+version: 0.1.0
+description: >-
+  Exports a Tenable.io scan as a .nessus file by scan ID. Requests an async
+  export, polls until ready, then streams the file to disk unmodified for
+  Paramify assessment intake.
+category: tenable
+
+kind: issue_report
+
+supports_targets: true
+
+target_schema:
+  scan_id:
+    type: string
+    env: TENABLE_SCAN_ID
+    description: Tenable.io scan ID to export (numeric, e.g. "12345").
+
+runtime:
+  type: python
+  entry: fetcher.py
+  timeout: 900
+
+output:
+  type: nessus
+  path: tenable_vuln_scan.nessus
+
+secrets:
+  - name: access_key
+    env: TENABLE_ACCESS_KEY
+    description: Tenable.io API access key with scan-export permission.
+  - name: secret_key
+    env: TENABLE_SECRET_KEY
+    description: Tenable.io API secret key.
+
+config_schema:
+  api_base_url:
+    type: string
+    required: false
+    env: TENABLE_API_BASE_URL
+    default: "https://cloud.tenable.com"
+    description: Tenable.io API base URL. Override for Tenable.sc or on-prem deployments.
+
+issue_report:
+  assessment_type: VULNERABILITY
+  title: Tenable Vulnerability Scan
