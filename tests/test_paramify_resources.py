@@ -124,6 +124,40 @@ def test_artifacts_by_name_go_out_50_names_per_request(fake, res):
     assert [n for r in reads for n in r] == names
 
 
+def test_artifacts_by_name_split_when_the_query_would_pass_1500_bytes(fake, res):
+    ev, req = _request_for(fake)
+    batch = res.create_batch(artifact_request_id=req.id)
+    names = [f"{'f' * 95}{i:03}.json" for i in range(24)]  # 121 query bytes each
+    for name in names[::6]:
+        res.upload_to_batch(batch.id, name, b"{}", {})
+    fake.calls.clear()
+    got = res.artifacts(ev.id, original_file_names=names)
+    assert [a.original_file_name for a in got] == names[::6]
+    reads = [c[2]["originalFileName"] for c in fake.calls if c[1] == f"/evidence/{ev.id}/artifacts"]
+    assert [len(r) for r in reads] == [12, 12]
+    assert [n for r in reads for n in r] == names
+
+
+def test_artifacts_query_budget_counts_the_createdAt_parameters(fake, res):
+    ev, _ = _request_for(fake)
+    names = [f"{'f' * 95}{i:03}.json" for i in range(24)]
+    days = [date(2026, 10, 31), date(2026, 11, 1), date(2026, 11, 2)]  # 62 query bytes
+    fake.calls.clear()
+    res.artifacts(ev.id, original_file_names=names, created_on=days)
+    reads = [c[2] for c in fake.calls if c[1] == f"/evidence/{ev.id}/artifacts"]
+    assert [len(r["originalFileName"]) for r in reads] == [11, 11, 2]
+    assert all(r["createdAt"] == ["2026-10-31", "2026-11-01", "2026-11-02"] for r in reads)
+
+
+def test_artifacts_name_longer_than_the_query_budget_goes_alone(fake, res):
+    ev, _ = _request_for(fake)
+    long_name = "x" * 1600 + ".json"
+    fake.calls.clear()
+    res.artifacts(ev.id, original_file_names=["a.json", long_name, "b.json"])
+    reads = [c[2]["originalFileName"] for c in fake.calls if c[1] == f"/evidence/{ev.id}/artifacts"]
+    assert reads == [["a.json"], [long_name], ["b.json"]]
+
+
 def test_artifacts_created_on_is_the_repeated_createdAt_parameter(fake, res):
     ev, req = _request_for(fake)
     batch = res.create_batch(artifact_request_id=req.id)

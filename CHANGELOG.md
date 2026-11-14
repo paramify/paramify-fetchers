@@ -56,6 +56,12 @@ schemas and the `paramify` CLI — not the internal code.
   `revoked`, `sunset_passed`, `status_unknown`, `not_found`, `parse_error` or
   `fetch_error`). Maps to KSI-SVC-SIN and KSI-SVC-VRI. No credential.
 
+- `azure_aks_cluster_configuration` 0.4.0 adds each cluster's
+  `configuration_observations`: SDK-projected RBAC, local-account, private-cluster
+  and authorized API-server IP-range values before normalization. Missing values
+  remain null, distinct from explicit false or empty lists. Existing normalized
+  flags and summary counts keep their meanings.
+
 - Selected-subscription collection now avoids cross-subscription discovery in
   VNet egress, Private DNS, WAF policies and alert action-group references when
   `AZURE_TARGET_SUBSCRIPTION_ONLY=true`. Foreign relationships remain unknown
@@ -2478,12 +2484,28 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- `azure_private_endpoint_configuration` 0.3.2 uses the existing native strict
+  subscription setting for related Resource Graph lookups and skips wider
+  visibility discovery in that mode. Foreign references remain unknown; an
+  invalid strict flag or missing explicit target stops before authentication. Scoped lookups
+  reject out-of-scope response rows. `results.lookup_scope` records the mode;
+  default broad discovery and exclusion behavior remain unchanged.
+
 - Azure Service Health uses API `2025-04-01` for Azure Government event
   lists, individual events and both detail actions. Other clouds retain
   `2025-05-01`; evidence fields and collection scope are unchanged.
 - Key Vault key rotation derives a missing ARM `vault_uri` from the selected
   Azure cloud instead of defaulting sovereign-cloud reads to the public host.
   ARM-provided URIs and rotation-policy configured/readability semantics are
+  unchanged.
+
+- **`azure_defender_plans` 0.3.1 preserves pricing observations.** Each plan
+  retains `observed_configuration` with the selected SDK-projected attributes,
+  including extension `additional_extension_properties` such as exclusions.
+  These are projected observations, not raw HTTP or proof of effective resource
+  coverage. Missing or unrecognized extension, enforcement and inheritance flags
+  stay `null` rather than `false`; extension summary counts include only flags
+  explicitly enabled. Existing security-contact reads and failure handling are
   unchanged.
 
 - **`azure_entra_authentication_policy` no longer shows Microsoft's password
