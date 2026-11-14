@@ -29,9 +29,11 @@ from azure_common import (  # noqa: E402
     resolve_subscription,
     resource_group_from_id,
     sanitize_for_filename,
+    subscription_of,
     write_evidence,
 )
 from private_dns import project_zone_group  # noqa: E402
+from read_boundaries import target_subscription_scope  # noqa: E402
 from resource_exclusions import ResourceExclusions  # noqa: E402
 from resource_graph import (  # noqa: E402
     lookup_by_ids,
@@ -338,6 +340,7 @@ def truncated_vnets(subnet_rows: dict) -> set:
 def collect_endpoints(subscription_id, cred, collector: Collector, exclusions: ResourceExclusions | None = None,
                       excluded: list | None = None) -> list[dict]:
     """Endpoints the exclusions take out are appended to `excluded` and get none of the per-endpoint reads."""
+    scope = subscription_id if target_subscription_scope() is not None else None
 
     def _client():
         from azure.mgmt.network import NetworkManagementClient  # lazy
@@ -369,14 +372,18 @@ def collect_endpoints(subscription_id, cred, collector: Collector, exclusions: R
     ids = [c["checked_resource_id"] for pe in endpoints for c in pe["connections"]]
     ids += [n for pe in endpoints for n in pe["network_interface_ids"]]
     vnet_ids = [virtual_network_id(pe["subnet_id"]) for pe in endpoints]
+    if scope is not None:
+        ids = [i for i in ids if subscription_of(i) == scope.lower()]
+        vnet_ids = [i for i in vnet_ids if subscription_of(i) == scope.lower()]
     if graph is None:
         lookups, failed = {}, {i.lower() for i in ids if i}
         subnets, failed_vnets = {}, {v.lower() for v in vnet_ids if v}
     else:
-        lookups, failed = lookup_by_ids(graph, ids, lookup_query, "lookup", collector)
-        subnets, failed_vnets = lookup_by_ids(graph, vnet_ids, subnet_query, "subnet lookup", collector)
+        options = {"subscription_id": scope} if scope is not None else {}
+        lookups, failed = lookup_by_ids(graph, ids, lookup_query, "lookup", collector, **options)
+        subnets, failed_vnets = lookup_by_ids(graph, vnet_ids, subnet_query, "subnet lookup", collector, **options)
         failed_vnets |= truncated_vnets(subnets)
-    scopes = readable_scopes(cred, collector) if endpoints else None
+    scopes = readable_scopes(cred, collector) if endpoints and scope is None else None
 
     records = [
         endpoint_record(pe, zone_groups[pe["id"]], lookups, failed, subnets, failed_vnets, scopes)
@@ -392,6 +399,7 @@ def main() -> int:
     )
     logging.getLogger("azure").setLevel(logging.WARNING)
     load_dotenv()
+    target_only = target_subscription_scope() is not None
 
     output_dir = Path(os.environ.get("EVIDENCE_DIR", "./evidence"))
     collector = Collector(logger)
@@ -431,7 +439,8 @@ def main() -> int:
         subscription_id=subscription_id,
         subscription_source=sub["subscription_source"],
         collector=collector,
-        results={"private_endpoints": endpoints, "provider_registration_status": registration, "excluded": excluded},
+        results={"private_endpoints": endpoints, "provider_registration_status": registration, "excluded": excluded,
+                 "lookup_scope": "target_subscription_only" if target_only else "accessible_subscriptions"},
         summary={
             **summarize(endpoints),
             "provider_registration_status": registration,
