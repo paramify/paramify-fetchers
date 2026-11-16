@@ -28,10 +28,10 @@ from azure_common import (  # noqa: E402
     credential,
     failure_reason,
     model_attr,
+    report_failure,
     resolve_subscription,
     sanitize_for_filename,
     write_evidence,
-    report_failure,
 )
 
 logger = logging.getLogger("azure_defender_plans")
@@ -122,6 +122,7 @@ def project_pricing(pricing) -> dict:
             {
                 "name": model_attr(ext, "name"),
                 "is_enabled": model_attr(ext, "is_enabled"),
+                "additional_extension_properties": model_attr(ext, "additional_extension_properties"),
             }
             for ext in (model_attr(pricing, "extensions") or [])
         ],
@@ -130,22 +131,16 @@ def project_pricing(pricing) -> dict:
 
 # --- pure transforms (flat snake_case dicts in, evidence records out) ---
 
-def _as_bool(value) -> bool:
-    """Coerce azure-mgmt-security's STRING boolean enums to a real bool.
-
-    `Extension.is_enabled` is typed `str` and carries the `IsEnabled` enum whose
-    members are the literal strings "True" and "False", so a plain `bool(value)`
-    reports a DISABLED extension as enabled (`bool("False") is True`). Storage and
-    network return real JSON booleans.
-    """
-    if isinstance(value, bool) or value is None:
-        return bool(value)
-    return str(value).strip().lower() in ("true", "1", "yes", "on", "enabled")
-
-
 def _optional_bool(value) -> bool | None:
-    """Like `_as_bool`, but a field the API left out stays None rather than False."""
-    return None if value is None else _as_bool(value)
+    """Keep omitted or unrecognized SDK flags unknown rather than disabled."""
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower() if value is not None else ""
+    if text in ("true", "1", "yes", "on", "enabled"):
+        return True
+    if text in ("false", "0", "no", "off", "disabled"):
+        return False
+    return None
 
 
 def _scope_id(value) -> str | None:
@@ -169,11 +164,14 @@ def pricing_record(pricing: dict) -> dict:
     """Normalize one projected Defender plan.
 
     `extensions` collapses the SDK's list of {name, is_enabled, ...} objects into a
-    flat {name: bool} map, which is how Prowler's checks read it.
+    flat {name: bool | None} map; missing or unrecognized flags stay unknown.
     """
     extensions = pricing.get("extensions") or []
     inherited_from = _scope_id(pricing.get("inherited_from"))
     return {
+        # SDK-projected values before convenience normalization, not raw HTTP.
+        # Retain nullable/future flags and extension settings such as exclusions.
+        "observed_configuration": pricing,
         "resource_id": pricing.get("id"),
         "resource_name": pricing.get("name"),
         "pricing_tier": pricing.get("pricing_tier"),
@@ -189,7 +187,7 @@ def pricing_record(pricing: dict) -> dict:
         "deprecated": bool(pricing.get("deprecated")),
         "replaced_by": sorted(pricing.get("replaced_by") or []),
         "extensions": {
-            ext.get("name"): _as_bool(ext.get("is_enabled"))
+            ext.get("name"): _optional_bool(ext.get("is_enabled"))
             for ext in extensions
             if ext.get("name")
         },

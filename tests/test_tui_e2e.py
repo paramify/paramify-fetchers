@@ -11,16 +11,16 @@ import yaml
 
 pytest.importorskip("textual", reason="TUI tests need the 'tui' extra")
 
-from textual.widgets import Button, DataTable, RichLog  # noqa: E402
+from textual.widgets import DataTable, RichLog  # noqa: E402
 
 from framework import api  # noqa: E402
 from framework.paramify_auth import UPLOAD_TOKEN_ENV  # noqa: E402
 from framework.tui.app import FetcherApp  # noqa: E402
-from framework.tui.modals import ConfirmModal, MultiPickerModal, PreviewModal  # noqa: E402
+from framework.tui.modals import ConfirmModal, PreviewModal  # noqa: E402
 from framework.tui.screens.evidence import EvidencePage  # noqa: E402
-from framework.tui.screens.manifest import ManifestPanel  # noqa: E402
+from framework.tui.screens.fetchers import FetchersPage  # noqa: E402
+from framework.tui.screens.paramify import ParamifyPage  # noqa: E402
 from framework.tui.screens.run import RunPage  # noqa: E402
-from framework.tui.screens.upload import UploadPage  # noqa: E402
 from framework.tui.screens.welcome import WelcomeScreen  # noqa: E402
 from framework.tui.screens.workspace import WorkspaceScreen  # noqa: E402
 
@@ -83,22 +83,27 @@ def test_demo_manifest_end_to_end(demo_workspace, no_network, monkeypatch, tui_s
             await pilot.pause()
             assert isinstance(app.screen, WorkspaceScreen)
 
-            # Manifest: add demo_hello through the picker; the edit is saved.
-            page = await _tab(pilot, "2", ManifestPanel)
-            assert "manifest is empty" in _text(page.query_one("#manifest-empty-hint"))
-            await pilot.press("a")
-            assert isinstance(app.screen, MultiPickerModal)
-            await pilot.press(*"demo_hello", "enter")
-            assert "demo_hello" in _text(app.screen.query_one("#multi-pick-chosen"))
-            await pilot.press("ctrl+s")
+            # Fetchers: find demo_hello in the catalog and add it with a; the edit is saved.
+            page = await _tab(pilot, "1", FetchersPage)
+            assert "press a on a fetcher to add it" in _text(page.query_one("#manifest-empty-hint"))
+            await pilot.press("slash", *"demo_hello", "escape")
             await pilot.pause()
+            tree = page.query_one("#catalog-tree")
+            for _ in range(12):  # past the kind and platform headings to the fetcher
+                if tree.cursor_node is not None and isinstance(tree.cursor_node.data, dict):
+                    break
+                await pilot.press("down")
+                await pilot.pause()
+            await pilot.press("a")
+            await pilot.pause()
+            assert str(tree.cursor_node.label) == "[x] demo_hello"
             assert [row[0] for row in _rows(page.query_one("#manifest-entries", DataTable))] == ["demo_hello"]
             assert _text(page.query_one("#manifest-issues")) == "✓ manifest is runnable"
             shipped = yaml.safe_load((REPO_ROOT / "examples" / "demo.yaml").read_text())
             assert yaml.safe_load(manifest.read_text())["run"] == shipped["run"]
 
             # Run: execute it for real.
-            run = await _tab(pilot, "3", RunPage)
+            run = await _tab(pilot, "2", RunPage)
             await pilot.press("ctrl+r")
             banner = run.query_one("#run-banner")
             await _until(pilot, lambda: "run complete" in _text(banner), "the run")
@@ -109,7 +114,7 @@ def test_demo_manifest_end_to_end(demo_workspace, no_network, monkeypatch, tui_s
             [run_dir] = (root / "evidence").glob("run-*")
 
             # Evidence: the run and its file, then the enveloped evidence itself.
-            evidence = await _tab(pilot, "4", EvidencePage)
+            evidence = await _tab(pilot, "3", EvidencePage)
             [listed_run] = _rows(evidence.query_one("#evidence-runs", DataTable))
             assert listed_run[0] == run_dir.name.removeprefix("run-")
             assert listed_run[2:] == ["1", "0"]
@@ -122,42 +127,40 @@ def test_demo_manifest_end_to_end(demo_workspace, no_network, monkeypatch, tui_s
             assert '"policy": "require-phishing-resistant-mfa"' in shown
             await pilot.press("escape")
 
-            # Paramify: with no token the upload is refused before anything is sent.
-            upload = await _tab(pilot, "5", UploadPage)
-            ready = dict(row[:2] for row in _rows(upload.query_one("#evidence-summary", DataTable)))
-            assert ready["selected run"] == listed_run[0]
-            assert ready["result"] == "1/1 ok"
-            assert ready["API token"] == "missing"
-            assert ready["upload files"] == "1"
-            assert upload.query_one("#upload-submit", Button).disabled
-
-            # The scripts preview is a dry-run and needs no token.
-            log = upload.query_one("#upload-log", RichLog)
-            upload_banner = upload.query_one("#upload-banner")
-            await pilot.press("p")
-            await _until(pilot, lambda: "preview complete" in _text(upload_banner), "the scripts preview")
-            assert "[create] demo_hello  set=EVD-DEMO-HELLO" in _log(log)
-            assert _text(upload_banner) == "preview complete — create=1 update=0 drift=0 noop=0"
-            await _until(pilot, lambda: _focused_in(upload), "focus back in the Paramify page")
+            # Paramify: with no token the page says why, and the syncs and upload stay off.
+            page = await _tab(pilot, "4", ParamifyPage)
+            summary = page.query_one("#pf-summary")
+            await _until(pilot, lambda: "No Paramify API token found" in _text(summary), "the status read")
+            [row] = _rows(page.query_one("#pf-grid", DataTable))
+            assert row[0] == "demo_hello"
+            assert not any(page.check_action(a, ()) for a in ("sync_scripts", "sync_validators", "upload_run"))
 
             # Upload dry-run: the TUI has no switch, so fake a token and force dry_run=True.
             monkeypatch.setenv(UPLOAD_TOKEN_ENV, "unused")
+            # The fake token must not reach a real workspace: each status read fails fast.
+            def offline(*a, **kw):
+                raise RuntimeError("offline in this test")
+
+            for read in ("list_evidence_sets", "list_capabilities", "scripts_sync"):
+                monkeypatch.setattr(api, read, offline)
             real_upload, real_plan = api.upload_run, api.plan_upload
             # The confirm plans online when a token resolves; this one is fake, so plan offline.
             monkeypatch.setattr(api, "plan_upload", lambda *a, **kw: real_plan(*a, **{**kw, "online": False}))
             monkeypatch.setattr(api, "upload_run", lambda *a, **kw: real_upload(*a, **{**kw, "dry_run": True}))
             await pilot.press("ctrl+r")
-            assert not upload.query_one("#upload-submit", Button).disabled
-            await pilot.press("ctrl+u")
-            assert isinstance(app.screen, ConfirmModal)
+            await _until(pilot, lambda: page.check_action("upload_run", ()), "the token to show")
+            await pilot.press("u")
+            await _until(pilot, lambda: isinstance(app.screen, ConfirmModal), "the upload confirm")
             confirm = _text(app.screen.query_one("#modal-title"))
             assert "1 deliver" in confirm  # the plan's totals line
             assert confirm.endswith("Upload 1 evidence file(s) to https://app.paramify.com/api/v0?")
             await pilot.press("y")
-            await _until(pilot, lambda: "upload complete" in _text(upload_banner), "the upload dry-run")
+            activity = page.query_one("#pf-activity")
+            log = page.query_one("#pf-log", RichLog)
+            await _until(pilot, lambda: "upload complete" in _text(activity), "the upload dry-run")
             assert "(dry-run)" in _log(log)
             assert "[SKIP] demo_hello.json  would_upload  set=EVD-DEMO-HELLO" in _log(log)
-            assert _text(upload_banner) == "evidence upload complete — uploaded=0 duplicates=0 errors=0"
+            assert _text(activity) == "evidence upload complete — uploaded=0 duplicates=0 errors=0"
             assert not (run_dir / "upload_log.json").exists()
 
     asyncio.run(asyncio.wait_for(drive(), 120))

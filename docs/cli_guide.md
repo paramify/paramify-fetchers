@@ -56,8 +56,10 @@ paramify validate <manifest>   # validate a manifest without running
 paramify run      <manifest>   # run it
 paramify runs                  # past runs under an output dir (newest first)
 paramify evidence <file>       # read one evidence file, or an issue-report sidecar
+paramify preset   <fetcher>    # settings for a pipeline fetcher's Paramify preset
 paramify upload   [run-dir]    # push a run's evidence to Paramify (default: latest run)
 paramify stacks                # list the workspace's stacks (name, id)
+paramify status   <manifest>   # what each fetcher has in Paramify; exit 1 until all are ready, 2 on errors
 paramify issues   <sub>        # send a run's issue reports into assessment pipelines; list/close their jobs
 paramify programs <sub>        # list workspace programs; turn them into targets
 paramify assessments <sub>     # list workspace assessments; point issue reports at one
@@ -288,6 +290,56 @@ entries that need attention. Each item has `entry_key` and `fetcher`:
 - `notes`: the run changed something for the entry, for example it dropped an
   optional secret. `note` tells what.
 
+## Check the setup in Paramify
+
+`paramify status` reads the workspace and reports, for each evidence fetcher in
+a manifest, what Paramify has for it. It changes nothing.
+
+```bash
+paramify status manifests/acme.yaml
+```
+
+| Column | Meaning |
+|---|---|
+| evidence set | `ok` when the set exists. `create` when the first scripts sync makes it. |
+| script | The state that `paramify scripts sync --dry-run` reports: `ok`, `update`, `create`, `drift` or `error`. |
+| validators | The registry validators that Paramify pairs with the set, out of all of them. `none` when the registry has none for the set. |
+| capabilities | The solution capabilities that hold a pair from this set. |
+| artifacts | The artifacts on the set. |
+| ready | The set exists, its script is in sync, it has each registry validator, and it has an artifact. |
+
+A line under the table counts each column across the fetchers. Scan-report
+fetchers go to an assessment, not to an evidence set, so the table leaves them out.
+
+Every read goes to one workspace: the base URL from `paramify.base_url` in the
+uploader config (`upload.yaml` or `--config`), else `PARAMIFY_API_BASE_URL`,
+else app.paramify.com. The first line of the output names it.
+
+`?` in a cell means the read for it failed, so the value is unknown. The error
+is shown under the table. `-` means nothing was read, because there is no API
+token. Without a token, the command shows only what the manifest and the
+registry hold, and leaves out the line of counts.
+
+`--json` prints the full status. In it, an unknown value is `null`: the
+evidence set's `exists` and `artifact_count`, and each validator's `paired`.
+
+### Exit codes
+
+| Code | Meaning |
+|---|---|
+| 0 | Every fetcher is ready. |
+| 1 | Some fetchers are not ready yet. A sync, a validator pair or an upload can fix it. |
+| 2 | The command cannot tell, and waiting will not change that: the manifest or the uploader config cannot be read, there is no API token, a workspace read failed (for example, an expired token gets HTTP 401), the manifest names a fetcher that does not exist, or the manifest has no evidence fetchers. |
+
+A deployment can wait for 0 before it runs headless, and stop on 2:
+
+```bash
+until paramify status manifests/acme.yaml >/dev/null; do
+  [ $? -eq 2 ] && exit 2
+  sleep 60
+done
+```
+
 ## Scan results, not evidence
 
 Some tools already calculate the findings, so you do not need to make a claim
@@ -320,6 +372,17 @@ uploads to an evidence set like any other evidence. Then an inventory pipeline o
 that set turns each record into an Inventory item. The pipeline reads the file as
 the full estate, so `paramify upload` sends an inventory only when the run
 collected all of it. See [`inventory_fetchers_guide.md`](inventory_fetchers_guide.md).
+
+### `paramify preset <fetcher>`
+
+Building the inventory pipeline's preset in Paramify takes a sample file, a data
+path, a unique ID field and a rule for the parent component. `paramify preset
+sophos_endpoint_inventory` prints them from the fetcher's `pipeline:` block and
+its newest run, and lists the other fetchers that share the same ID scheme. With
+no run yet, the sample and the `asset_type` values are missing, so run the
+fetcher first. It reads runs from `<repo>/evidence`; `-f MANIFEST` uses that
+manifest's `output_dir`, and `--output-dir` overrides both. `--json` prints the
+same facts as data.
 
 ## See what a platform has (discovery)
 
