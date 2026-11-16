@@ -1518,6 +1518,17 @@ def test_analytics_rules_connection_read_from_the_api_wins_over_a_confirmed_one(
     assert ws["enabled_rules_confirmed_quiet"] == 0 and ev["summary"]["enabled_rules_confirmed_quiet"] == 0
 
 
+def test_analytics_rules_confirmed_kind_never_overrides_a_connection_the_api_lists_disabled(azure, tmp_path, monkeypatch):
+    incident_rules_workspace(azure, [incident_rule("mdc", "Azure Security Center")],
+                             stable=[connection("asc", "AzureSecurityCenter", alerts="Disabled")])
+    monkeypatch.setenv(CONFIRMED, "AzureSecurityCenter")
+    code, ev = run("sentinel_analytics_rules", tmp_path)
+    ws = ws_a(ev)
+    assert ws["enabled_rules_quiet"] == []  # the API says Disabled, so the rule is not quiet
+    assert [r["name"] for r in ws["enabled_rules_missing_data"] if r["name"] == "mdc"] == ["mdc"]
+    assert ws["enabled_rules_confirmed_quiet"] == 0 and ev["summary"]["enabled_rules_confirmed_quiet"] == 0
+
+
 def test_analytics_rules_confirmed_connection_spares_an_unreadable_connector_listing(azure, tmp_path, monkeypatch):
     incident_rules_workspace(azure, [incident_rule("mdc", "Azure Security Center")],
                              stable=Resp(403, {"error": {"code": "AuthorizationFailed", "message": "no"}}),

@@ -339,6 +339,8 @@ def quiet_rules(
             f"reads as unknown rather than quiet: {exc}"
         )
     quiet = []
+    # Kinds the API lists in any alert state: there the API answers, so the setting never overrides a Disabled one.
+    listed = {c.get("kind") for c in (stable or []) + (preview or [])}
     for r in missing:
         through = alert_connections(r.get("product_filter"), (stable or []) + (preview or []))
         if through:
@@ -350,7 +352,8 @@ def quiet_rules(
                 + ("its own connection" if own else "Defender XDR, which carries that product's alerts,")
                 + " has alerts enabled",
             })
-        elif (kind := ALERT_PRODUCT_KINDS.get((r.get("product_filter") or "").lower())) in (confirmed or ()):
+        elif (kind := ALERT_PRODUCT_KINDS.get((r.get("product_filter") or "").lower())) in (confirmed or ()) \
+                and kind not in listed:
             quiet.append({
                 "name": r["name"], "display_name": r["display_name"], "product_filter": r.get("product_filter"),
                 "alerts_enabled_on": [kind], "confirmed_by_configuration": True,

@@ -196,7 +196,9 @@ schemas and the `paramify` CLI — not the internal code.
   `confirmed_by_configuration: true` and a reason saying the connection is
   confirmed by configuration, not read from the API, and the new
   `enabled_rules_confirmed_quiet` count (per workspace and in the
-  summary) counts them. A kind that sends no product's alerts fails the run as
+  summary) counts them. A connection of that kind the API does list, in any
+  alert state, wins over the setting, so one listed with alerts Disabled is
+  never confirmed. A kind that sends no product's alerts fails the run as
   `bad_config`. Left empty, the evidence is unchanged.
 - **`aws_route53_resolver_dns_security`** (`EVD-R53-RESOLVER-DNS-SECURITY`) —
   one record per VPC in the region with its Route 53 Resolver DNSSEC validation

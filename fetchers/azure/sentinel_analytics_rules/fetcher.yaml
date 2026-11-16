@@ -76,7 +76,9 @@ config_schema:
       SENTINEL_WORKSPACES when only some workspaces have the connection. An enabled
       incident-creation rule whose product sent no alert and has no connection
       read from the API reads as quiet when its product's kind is listed; its
-      record says it is confirmed by configuration, not read. Allowed kinds:
+      record says it is confirmed by configuration, not read. A connection of
+      that kind the API does list, in any alert state, wins over the setting,
+      so one listed with alerts Disabled is never confirmed. Allowed kinds:
       AzureActiveDirectory, AzureAdvancedThreatProtection, AzureSecurityCenter,
       IOT, MicrosoftCloudAppSecurity, MicrosoftDefenderAdvancedThreatProtection,
       OfficeATP (case-insensitive). Any other kind fails the run as bad_config
