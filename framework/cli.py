@@ -16,6 +16,7 @@ Read / discover:
   paramify manifests [--json]                  # discovered run manifests
   paramify runs [--output-dir DIR] [--json]    # past runs under an output dir
     paramify evidence <path> [--json]            # read one evidence file (or issue-report sidecar)
+    paramify preset <fetcher> [-f MANIFEST] [--output-dir DIR] [--json]  # settings for a pipeline's Paramify preset
     paramify samples status [--json]             # which fetchers have a committed evidence sample
     paramify samples show <fetcher> [--json]     # one fetcher's sample: one record + field coverage
     paramify samples backfill [--evidence DIR] [--fetcher NAME ...] [--scrub WORD ...]
@@ -1102,6 +1103,42 @@ def runs_cmd(
         )
 
 
+@app.command("preset")
+def preset_cmd(
+    fetcher: str = typer.Argument(..., help="A pipeline fetcher's name"),
+    file: Optional[str] = typer.Option(None, "-f", "--file", help="Manifest whose run.output_dir holds the runs"),
+    output_dir: Optional[str] = typer.Option(None, "-o", "--output-dir", help="Base dir to find the newest run in (default: the -f manifest's output_dir, else <repo>/evidence)"),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON"),
+):
+    """Print the settings to enter when building the Paramify preset for a pipeline fetcher."""
+    root = api.find_repo_root()
+    out = Path(output_dir) if output_dir else None
+    if out is None and file:
+        try:
+            manifest = api.read_manifest(api.resolve_manifest_path(root, file), must_exist=True)
+        except (api.ManifestNotFound, OSError, ValueError) as e:
+            _err(str(e))
+            raise typer.Exit(1)
+        configured = (manifest.get("run") or {}).get("output_dir")
+        out = Path(configured) if configured else None
+    try:
+        sheet = api.preset_sheet(root, fetcher, output_dir=out)
+    except KeyError:
+        names = list(api.discover_fetchers(root))
+        _err(f"Unknown fetcher: {fetcher}{api._did_you_mean(fetcher, names)}")
+        raise typer.Exit(2)
+    except ValueError as e:
+        if json_out:
+            typer.echo(json.dumps({"error": str(e)}, indent=2))
+        else:
+            _err(str(e))
+        raise typer.Exit(1)
+    if json_out:
+        typer.echo(json.dumps(sheet, indent=2))
+        return
+    typer.echo(api.render_preset_sheet(sheet))
+
+
 @app.command("evidence")
 def evidence_cmd(
     path: str = typer.Argument(..., help="Path to an evidence JSON file, or an issue-report file"),
@@ -1481,6 +1518,134 @@ def stacks_cmd(
     width = max(len(s["name"]) for s in stacks)
     for s in stacks:
         typer.echo(f"{s['name']:<{width}}  {style.dim(s['id'])}")
+
+
+_SCRIPT_LABELS = {"in_sync": "ok", "update": "update", "create": "create", "drift": "drift", "error": "error"}
+
+
+def _status_cells(row: dict, online: bool, errors: Optional[dict] = None) -> List[str]:
+    """One status row as text cells: fetcher, set, script, validators, capabilities, artifacts, ready.
+
+    Offline, a workspace cell is "-" (not read). Online, a cell whose read
+    failed is "?" (unknown), never a value that looks read.
+    """
+    errors = errors or {}
+    evidence_set = row["evidence_set"]
+    sets_unknown = evidence_set.get("exists") is None
+    validators = row["validators"]
+    paired = sum(v["paired"] is True for v in validators)
+    if not validators:
+        val = "none"
+    elif not online:
+        val = f"{len(validators)} in registry"
+    elif any(v["paired"] is None for v in validators):
+        val = f"?/{len(validators)}"
+    else:
+        val = f"{paired}/{len(validators)}"
+    caps = len({p["capability_id"] for p in row["pairs"]})
+    if not online:
+        set_cell, script, cap_cell, arts = "-", "-", "-", "-"
+    else:
+        set_cell = "?" if sets_unknown else ("ok" if evidence_set["exists"] else "create")
+        script = "?" if row["script"] is None and "scripts" in errors else _SCRIPT_LABELS.get(row["script"] or "", "-")
+        cap_cell = "?" if "capabilities" in errors or sets_unknown else (str(caps) if caps else "-")
+        arts = "?" if evidence_set["artifact_count"] is None else str(evidence_set["artifact_count"])
+    return [row["name"], set_cell, script, val, cap_cell, arts, "READY" if row["ready"] else ""]
+
+
+def status_totals(status: dict) -> str:
+    """The grid's totals line: how far each setup step has come, across the fetchers.
+
+    A count whose read failed is "?". Empty when nothing was read (no token):
+    0/n would look like a count.
+    """
+    if not status["workspace"]["token"]:
+        return ""
+    rows = status["fetchers"]
+    errors = status.get("errors") or {}
+    n = len(rows)
+    sets_known = "evidence_sets" not in errors
+
+    def count(known: bool, value: int) -> str:
+        return f"{value}/{n}" if known else f"?/{n}"
+
+    sets = sum(r["evidence_set"].get("exists") is True for r in rows)
+    scripts = sum(r["script"] == "in_sync" for r in rows)
+    validators = sum(all(v["paired"] is True for v in r["validators"]) for r in rows)
+    links = sum(len(r["pairs"]) for r in rows)
+    uploaded = sum((r["evidence_set"]["artifact_count"] or 0) > 0 for r in rows)
+    links_cell = f"{links}" if sets_known and "capabilities" not in errors else "?"
+    return (f"evidence sets {count(sets_known, sets)}  scripts {count('scripts' not in errors, scripts)}  "
+            f"validators {count(sets_known, validators)}  capabilities {links_cell} links  "
+            f"uploaded {count(sets_known, uploaded)}")
+
+
+def status_exit_code(status: dict) -> int:
+    """`paramify status`'s exit code: 0 ready, 1 not ready yet, 2 cannot tell.
+
+    2 is for what waiting will not fix, so a wait-until-ready loop stops on it:
+    no token, a failed read (an expired token is a 401), a manifest entry that
+    names no fetcher, or no evidence fetcher to check at all.
+    """
+    rows = status["fetchers"]
+    if not status["workspace"]["token"] or status.get("errors") or status.get("skipped") or not rows:
+        return 2
+    return 0 if all(r["ready"] for r in rows) else 1
+
+
+@app.command("status")
+def status_cmd(
+    manifest: str = typer.Argument(..., help="Manifest whose fetchers to check (path or bare name)"),
+    config: Optional[str] = typer.Option(None, "--config", help="Uploader config YAML"),
+    json_out: bool = typer.Option(False, "--json", help="Emit the status as JSON"),
+):
+    """What each manifest fetcher has in Paramify: evidence set, script,
+    validators, capabilities, artifacts. Read-only.
+
+    Exit 0 when every fetcher is ready, 1 when some are not yet, 2 when it
+    cannot tell: a setup error, no token, a failed read, an unknown fetcher,
+    or no evidence fetcher in the manifest.
+    """
+    try:
+        root = api.find_repo_root()
+        path = api.resolve_manifest_path(root, manifest)
+        status = api.paramify_status(root, path, Path(config).resolve() if config else None)
+    except Exception as e:  # noqa: BLE001 — a setup error, reported as one line
+        if json_out:
+            typer.echo(json.dumps({"ok": False, "errors": [str(e)]}, indent=2))
+        else:
+            _err(str(e))
+        raise typer.Exit(2)
+    code = status_exit_code(status)
+    if json_out:
+        typer.echo(json.dumps(status, indent=2))
+        raise typer.Exit(code)
+
+    ws = status["workspace"]
+    online = ws["token"]
+    errors = status["errors"]
+    typer.echo(f"{ws['base_url']}  " + (style.ok("token set") if online else style.warn("no API token")))
+    header = ["fetcher", "evidence set", "script", "validators", "capabilities", "artifacts", "ready"]
+    table = [header] + [_status_cells(r, online, errors) for r in status["fetchers"]]
+    widths = [max(len(row[i]) for row in table) for i in range(len(header))]
+    for i, cells in enumerate(table):
+        line = "  ".join(c.ljust(w) for c, w in zip(cells, widths)).rstrip()
+        typer.echo(style.head(line) if i == 0 else line)
+    totals = status_totals(status) if status["fetchers"] else ""
+    if totals:
+        typer.echo("")
+        typer.echo(totals)
+    if status["pipelines_count"]:
+        typer.echo(style.dim(f"{status['pipelines_count']} scan-report fetcher(s): see `paramify issues`"))
+    if not status["fetchers"]:
+        typer.echo(style.warn("no evidence fetchers in the manifest to check"))
+    for name in status["skipped"]:
+        typer.echo(style.warn(f"skipped {name}: no such fetcher"))
+    for part, message in errors.items():
+        typer.echo(style.warn(f"could not read {part.replace('_', ' ')}: {message}"))
+    if not online:
+        typer.echo(style.warn("Set PARAMIFY_UPLOAD_API_TOKEN (or PARAMIFY_API_TOKEN) to read the workspace."))
+    raise typer.Exit(code)
 
 
 @validators_app.command("check")

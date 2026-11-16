@@ -2,7 +2,7 @@ name: azure_devops_work_items
 version: 0.2.0
 description: >-
   Shows Azure DevOps change and security work items with state, owner, planned
-  date and approval, the share of change items approved, self-approvals, linked
+  date and approval: the share of changes approved, self-approvals, linked
   changes, and open, overdue or unassigned security work.
 category: azure
 
@@ -165,36 +165,36 @@ evidence_set:
     - approval_types — List of configured work item types whose items need an approval: the approval_types setting, or every type in work_item_types when it's empty
     - approval_mentions — True if a comment line that starts with @mentions counts as approval when the rest of the line matches the approval pattern (the approval_mentions setting); false if such a line counts only when the whole line matches
     - projects_collected — Number of projects whose work items were read
-    - work_item_types_missing — List of configured types that no project defines; null if a project's items couldn't be listed
-    - work_items_total — Number of work items collected; null if a project's items couldn't be listed
-    - work_items_by_type — Number of work items of each type; null if a project's items couldn't be listed
-    - work_items_by_state_category — Number of work items in each state category (Proposed, InProgress, Resolved, Completed, Removed); null if a project's items couldn't be listed
-    - work_item_states_undefined — List of item states, as type: state, that the item's type no longer defines (as after a process change); an item in such a state has an unknown state category and counts as neither open nor finished; null if a project's items couldn't be listed
-    - work_items_open — Number of work items in a state whose category isn't Completed or Removed; null if a project's items couldn't be listed
-    - approval_history_collected — True if every item's state history and comments were read; false if not
+    - work_item_types_missing — List of configured types that at least one collected project doesn't define; null if the project list or a project's items couldn't be read
+    - work_items_total — Number of work items collected; null if the project list or a project's items couldn't be read
+    - work_items_by_type — Number of work items of each type; null if the project list or a project's items couldn't be read
+    - work_items_by_state_category — Number of work items in each state category (Proposed, InProgress, Resolved, Completed, Removed, or unknown for a state its type no longer defines); null if the project list or a project's items couldn't be read
+    - work_item_states_undefined — List of item states, as type: state, that the item's type no longer defines (as after a process change); an item in such a state has an unknown state category and counts as neither open nor finished; null if the project list or a project's items couldn't be read
+    - work_items_open — Number of work items in a state whose category isn't Completed or Removed; null if the project list or a project's items couldn't be read
+    - approval_history_collected — True if every item's state history and comments were read; false if not, or if the project list or a project's items couldn't be read
 
     Are changes approved and linked to what they changed?
-    - change_items — Number of items of a configured change type; null if a project's items couldn't be listed
-    - change_items_finished — Number of change items in a Completed state; a Removed (cancelled) item isn't finished; null if a project's items couldn't be listed
-    - change_items_approved — Number of change items approved: moved into one of the configured approval states (a state such as Awaiting Approval doesn't count), or given a comment matching the approval pattern (after any leading @mentions when approval_mentions is on), and not withdrawn since by a move back to a state before the approval states or to a state or with a reason naming Rejected; null if a project's items or a change item's history or comments couldn't be read
-    - finished_change_items_needing_approval — Number of finished change items (in a Completed state) of a type in approval_types, other than refused ones; open items are left out, as they may still be waiting on their approval, and so are refused items (whose state or reason names Rejected, or whose state is named Removed), which were turned down rather than left unapproved; null if a project's items couldn't be listed
-    - finished_change_items_needing_approval_approved — Number of finished change items of a type in approval_types, other than refused ones, that are approved, as change_items_approved counts approval; null if a project's items or a change item's history or comments couldn't be read
-    - finished_change_items_approved_percentage — Percentage of finished change items needing an approval (refused ones left out) that are approved = finished_change_items_needing_approval_approved / finished_change_items_needing_approval × 100 (a whole number, 0–100); 0 when finished_change_items_needing_approval is 0; null if a project's items or a change item's history or comments couldn't be read. A finished item whose approval was withdrawn and not given again counts in the denominator only
-    - finished_change_items_without_approval — List of finished change items (by id) never approved, or whose approval was withdrawn and not given again, of every change type and including refused ones, so it doesn't line up with finished_change_items_approved_percentage, which counts only the approval types and leaves refused items out; null if a project's items or a change item's history or comments couldn't be read
-    - change_items_approved_by_requester — List of change items (by id) whose approval in effect (the first since any withdrawal) was given by the person who created the item; null if a project's items or a change item's history or comments couldn't be read
-    - change_items_with_linked_changes — Number of change items linked to a TFVC changeset, Git commit or pull request; null if a project's items couldn't be listed
-    - finished_change_items_without_linked_change — List of finished change items (by id) linked to no changeset, commit or pull request; null if a project's items couldn't be listed
-    - change_items_linked_changes_checked — Number of approved change items with linked changes that the two checks below cover: every linked change is a TFVC changeset that was read. An item linked to a Git commit or pull request isn't covered, as their dates and authors aren't read; null if a project's items or a change item's history or comments couldn't be read
-    - change_items_changed_before_approval — List of change items (by id) with a linked changeset made before the item's approval in effect; null if a project's items or a change item's history or comments couldn't be read, or if any approved change item with linked changes isn't covered by change_items_linked_changes_checked
-    - change_items_approved_by_change_author — List of change items (by id) approved by the person who made or checked in a linked changeset; null if a project's items or a change item's history or comments couldn't be read, or if any approved change item with linked changes isn't covered by change_items_linked_changes_checked
+    - change_items — Number of items of a configured change type; null if the project list or a project's items couldn't be read
+    - change_items_finished — Number of change items in a Completed state; a Removed (cancelled) item isn't finished; null if the project list or a project's items couldn't be read
+    - change_items_approved — Number of change items approved: moved into one of the configured approval states (a state such as Awaiting Approval doesn't count), or given a comment matching the approval pattern (after any leading @mentions when approval_mentions is on), and not withdrawn since by a move back to a state before the approval states or to a state or with a reason naming Rejected; null if the project list, a project's items or a change item's history or comments couldn't be read
+    - finished_change_items_needing_approval — Number of finished change items (in a Completed state) of a type in approval_types, other than refused ones; open items are left out, as they may still be waiting on their approval, and so are refused items (whose state or reason names Rejected, or whose state is named Removed), which were turned down rather than left unapproved; null if the project list or a project's items couldn't be read
+    - finished_change_items_needing_approval_approved — Number of finished change items of a type in approval_types, other than refused ones, that are approved, as change_items_approved counts approval; null if the project list, a project's items or a change item's history or comments couldn't be read
+    - finished_change_items_approved_percentage — Percentage of finished change items needing an approval (refused ones left out) that are approved = finished_change_items_needing_approval_approved / finished_change_items_needing_approval × 100 (a whole number, 0–100); 0 when finished_change_items_needing_approval is 0; null if the project list, a project's items or a change item's history or comments couldn't be read. A finished item whose approval was withdrawn and not given again counts in the denominator only
+    - finished_change_items_without_approval — List of finished change items (by id) never approved, or whose approval was withdrawn and not given again, of every change type and including refused ones, so it doesn't line up with finished_change_items_approved_percentage, which counts only the approval types and leaves refused items out; null if the project list, a project's items or a change item's history or comments couldn't be read
+    - change_items_approved_by_requester — List of change items (by id) whose approval in effect (the first since any withdrawal) was given by the person who created the item; null if the project list, a project's items or a change item's history or comments couldn't be read
+    - change_items_with_linked_changes — Number of change items linked to a TFVC changeset, Git commit or pull request; null if the project list or a project's items couldn't be read
+    - finished_change_items_without_linked_change — List of finished change items (by id) linked to no changeset, commit or pull request; null if the project list or a project's items couldn't be read
+    - change_items_linked_changes_checked — Number of approved change items with linked changes that the two checks below cover: every linked change is a TFVC changeset that was read. An item linked to a Git commit or pull request isn't covered, as their dates and authors aren't read; null if the project list, a project's items or a change item's history or comments couldn't be read
+    - change_items_changed_before_approval — List of change items (by id) with a linked changeset made before the item's approval in effect; null if the project list, a project's items or a change item's history or comments couldn't be read, or if any approved change item with linked changes isn't covered by change_items_linked_changes_checked
+    - change_items_approved_by_change_author — List of change items (by id) approved by the person who made or checked in a linked changeset; null if the project list, a project's items or a change item's history or comments couldn't be read, or if any approved change item with linked changes isn't covered by change_items_linked_changes_checked
 
     Is security work owned and on time?
-    - tagged_items_open — Number of open items with a configured tag; null if a project's items couldn't be listed
-    - tagged_items_open_by_priority — Number of open tagged items at each priority (1 highest), with unset for none; null if a project's items couldn't be listed
-    - tagged_items_overdue — List of open tagged items (by id) whose planned date (due, target or finish date, the first one set) has passed; null if a project's items couldn't be listed
-    - tagged_items_overdue_high_priority — List of overdue tagged items (by id) at priority 1 or 2, or severity 1 or 2; null if a project's items couldn't be listed
-    - tagged_items_open_unassigned — List of open tagged items (by id) assigned to no one; null if a project's items couldn't be listed
-    - tagged_items_open_without_planned_date — Number of open tagged items with no due, target or finish date; null if a project's items couldn't be listed
+    - tagged_items_open — Number of open items with a configured tag; null if the project list or a project's items couldn't be read
+    - tagged_items_open_by_priority — Number of open tagged items at each priority (1 highest), with unset for none; null if the project list or a project's items couldn't be read
+    - tagged_items_overdue — List of open tagged items (by id) whose planned date (due, target or finish date, the first one set) has passed; null if the project list or a project's items couldn't be read
+    - tagged_items_overdue_high_priority — List of overdue tagged items (by id) at priority 1 or 2, or severity 1 or 2; null if the project list or a project's items couldn't be read
+    - tagged_items_open_unassigned — List of open tagged items (by id) assigned to no one; null if the project list or a project's items couldn't be read
+    - tagged_items_open_without_planned_date — Number of open tagged items with no due, target or finish date; null if the project list or a project's items couldn't be read
 
     What isn't collected?
     - not_collected — What the fetcher deliberately doesn't collect, by area: descriptions, comment text and attachments; the dates and authors of linked Git commits and pull requests; items outside the selection; and projects the identity can't see

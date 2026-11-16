@@ -1,20 +1,7 @@
 name: azure_log_analytics_query_audit
 version: 0.2.1
-description: >
-  For every Log Analytics workspace in the subscription, Sentinel or not: whether
-  query auditing is on (a diagnostic setting exporting the workspace's Audit
-  category) and where it goes. From LAQueryLogs over the lookback: queries per
-  week split into people and applications, the weeks with no human query, and
-  each user who queried the logs with their query count and last query. This
-  collector's own queries are excluded.
-  Workspaces the resource_exclusions patterns take out are listed under excluded
-  instead, each with the pattern that matched, and every count covers only
-  in-scope workspaces. The summary echoes resource_exclusion_patterns, lists
-  resource_exclusion_patterns_unmatched (patterns that matched no workspace,
-  such as a mistyped name, or null when the workspace list could not be read), and counts excluded_workspaces and
-  in_scope_workspaces (0 when none was found or the patterns took out every
-  workspace, which a check can catch by requiring more than 0; both are null
-  when the workspace list couldn't be read).
+description: >-
+  Shows whether query auditing is on for each Log Analytics workspace, where the audit logs go, and in which weeks people queried the logs.
 category: azure
 
 supports_targets: true
@@ -90,12 +77,33 @@ ksis:
 evidence_set:
   reference_id: EVD-AZURE-LOG-ANALYTICS-QUERY-AUDIT
   name: Azure Log Analytics Query Audit
-  instructions: >
-    Script: azure/log_analytics_query_audit/fetcher.py. ARM REST: Log Analytics workspaces and their diagnostic
-    settings; auditing is on when one enables category Audit or categoryGroup
-    audit/allLogs. LAQueryLogs on the setting's destination, filtered to this
-    workspace's _ResourceId, per startofweek(TimeGenerated): human when
-    AADEmail is set, excluding this
-    collector (RequestClientApp paramify-fetchers). Weeks before LAQueryLogs'
-    table retention are not retained (null), never counted as weeks without
-    review. Roles: Reader and Log Analytics Reader.
+  instructions: |
+    Script: azure/log_analytics_query_audit/fetcher.py
+
+    Access: Reader on the subscription, and Log Analytics Reader on the workspace that receives the audit logs.
+
+    Commands Executed:
+    - GET /subscriptions — picks a subscription when none is set
+    - GET Microsoft.OperationalInsights/workspaces — every workspace
+    - GET Microsoft.SecurityInsights/onboardingStates (per workspace) — whether Sentinel is on
+    - GET Microsoft.Insights/diagnosticSettings (per workspace) — whether the Audit category is exported, and where
+    - GET the audit destination workspace and its tables/LAQueryLogs (per workspace with a workspace destination) — the audit table's retention
+    - KQL on LAQueryLogs, run twice (per workspace with a workspace destination) — queries per week by people (a signed-in user, so AADEmail is set) and by applications, and queries per user; this fetcher's own queries are left out
+
+    Output: azure_log_analytics_query_audit_<subscription>.json — for each workspace, whether query auditing is on and where it goes, queries per week split into people and applications, and each user who queried with a count and last query, plus the workspaces left out and why; weeks that start before LAQueryLogs' retention read null (not retained) and never count as weeks without human queries.
+
+    Summary fields:
+
+    How many workspaces were read?
+    - workspaces_collected — Number of in-scope workspaces read, Sentinel or not
+    - sentinel_workspaces — Number of in-scope workspaces read that have Microsoft Sentinel onboarded
+
+    Is query auditing on?
+    - workspaces_with_query_auditing — Number of workspaces with a diagnostic setting that exports the Audit category (or the audit or allLogs category group)
+    - workspaces_without_query_auditing — Number of workspaces whose diagnostic settings were read and have no such setting; workspaces whose settings couldn't be read are in neither count
+
+    Which workspaces are left out of scope?
+    - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every workspace is in scope
+    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no workspace, such as a mistyped name; null when the workspace list could not be read
+    - excluded_workspaces — Number of workspaces left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, and no other count includes it; null when the workspace list could not be read
+    - in_scope_workspaces — Number of workspaces found and in scope; 0 means none was found or the patterns took out every workspace, which a check can catch by requiring more than 0; null when the workspace list could not be read

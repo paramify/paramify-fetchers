@@ -10,7 +10,40 @@ schemas and the `paramify` CLI — not the internal code.
 
 ## [Unreleased]
 
+### Added
+
+- **`wiz_inventory`**, the Wiz cloud resource inventory, as a pipeline fetcher (`kind: inventory`, `id_scheme:
+  wiz-resource-id`). One record per resource from `cloudResourcesV2` under `payload.data`, keyed by the Wiz resource
+  id, with its cloud ID (`external_id`), account, region, type, IPs, OS, image, environment and owner, and internet
+  exposure; `asset_type` is the Wiz resource type. The Wiz id is the `Asset ID` column of
+  `wiz_vulnerability_findings`, so a scan report can link to it. Other tags only with `include_tags`; a run with any
+  collection failure writes no records. Scoped by resource type, account and project; needs only `read:resources`. See
+  `fetchers/wiz/inventory/README.md`.
+- TUI: a pipeline fetcher's "sends to" cell ends in `· pipeline`, its detail pane names the pipeline type and ID
+  scheme, and its entry form hides `delivery` and offers `no_request` as `evidence` or `refuse` only. `P` on the
+  Manifest tab opens the preset sheet. The upload log flags a pipeline batch that is submitted but not yet approved.
+- `paramify preset <fetcher>` prints the settings to enter when building a pipeline's Paramify preset: sample file, data
+  path, unique ID and scheme, the `asset_type` values of the newest run, and the other fetchers that share the ID
+  scheme. `--json`, `-f` and `--output-dir` pick the output.
+- `paramify validate` refuses `delivery: direct` and `no_request: direct` on a pipeline fetcher entry, and notes
+  `approval: MANUAL` on one (the pipeline waits for someone to approve each batch). It also refuses a registry
+  validator that targets a pipeline evidence set, since a failing validator means the batch never approves.
+  Validator sync leaves pipeline sets out of an explicit `reference_ids` list.
+
 ### Breaking
+
+- **`kind: inventory` requires a `pipeline:` block.** A `fetcher.yaml` with
+  `kind: inventory` and no `pipeline: {type: inventory, id_scheme: …}` fails the
+  schema, and a schema failure drops the fetcher from discovery. Migration: add
+  `pipeline: {type: inventory, id_scheme: <scheme>}` (the scheme list is in the
+  [pipeline fetchers guide](docs/pipeline_fetchers_guide.md)).
+
+- **Inventory records must carry `asset_type`.** Advanced config derives each
+  Inventory item's parent component from it, so a `kind: inventory` record
+  without a non-empty string `asset_type` now breaks the inventory contract
+  and the run is not sent. `metadata.inventory.by_asset_type` counts the
+  records per type (largest first). Migration: set a non-empty `asset_type`
+  (such as `endpoint`) on every record; `_template_inventory` already writes it.
 
 - **Datadog evidence: some fields are removed, renamed, or now mean something
   else.** Re-check any validator or query that reads these fields:
@@ -46,6 +79,44 @@ schemas and the `paramify` CLI — not the internal code.
     figures were numbers that looked complete, and the run exited 0.
 
 ### Added
+
+- **`pipeline:` block in `fetcher.yaml`.** A fetcher whose output feeds a Paramify
+  pipeline declares `pipeline: {type, id_scheme}` (`asset_id_field` for a
+  scan-report pipeline). `kind: issue_report` may declare `vulnerability` or
+  `configuration`; evidence and discovery fetchers refuse it (for `kind:
+  inventory`, see **Breaking**). The envelope records it as `metadata.pipeline` and
+  `paramify describe` shows it. `github_repository_inventory` and
+  `sophos_endpoint_inventory` 0.2.0 declare it, and so does `aws_config_inventory`
+  (`id_scheme: aws-arn`).
+
+- **Pipeline files upload as the full envelope, and the result says whether the
+  pipeline ran.** `paramify upload` sends an inventory (or any pipeline) file as
+  the whole envelope even when `artifact_payload: payload` is set, because
+  Paramify's inventory pipeline reads `payload.data`; the WAF scan reads the same
+  bytes. When the batch is approved on submit, the entry says `APPROVED: pipeline
+  runs now` and where to look (Monitoring → Inventory); when it waits for a
+  person it says `SUBMITTED: waiting for approval; the pipeline has not run`. The
+  entry result in `--json` gains `pipeline: {type, approved}`. A file sent direct
+  (the workspace has no batches) reports `approved: null`; `false` means a batch
+  is submitted and waiting for a person. `--plan` warns when
+  the batch will approve MANUAL: the entry's `approval: MANUAL` for a new batch
+  (each new batch takes the entry's approval, so a MANUAL set alone does not
+  hold it), or a resumed batch created MANUAL. There is no warning when the
+  workspace has no batches. A batch approved on submission that has not flipped
+  to APPROVED yet when read back counts as `approved: true`.
+- `azure_aks_cluster_configuration` 0.4.0 adds each cluster's
+  `configuration_observations`: SDK-projected RBAC, local-account, private-cluster
+  and authorized API-server IP-range values before normalization. Missing values
+  remain null, distinct from explicit false or empty lists. Existing normalized
+  flags and summary counts keep their meanings.
+
+- Selected-subscription collection now avoids cross-subscription discovery in
+  VNet egress, Private DNS, WAF policies and alert action-group references when
+  `AZURE_TARGET_SUBSCRIPTION_ONLY=true`. Foreign relationships remain unknown
+  rather than deleted. Resource diagnostic settings report the selected scope.
+  Sentinel data sources retain service-supplied last-data KQL without executing
+  it in this mode when its workspace/function scope cannot be established.
+  Default broad discovery remains unchanged.
 
 - **`azure_entra_privileged_roles` 0.3.0: an approved principals setting.** The
   optional `approved_principal_ids` setting (`AZURE_ENTRA_APPROVED_PRINCIPAL_IDS`)
@@ -87,6 +158,16 @@ schemas and the `paramify` CLI — not the internal code.
   Graph remains tenant-wide. Missing reads, licensing limits and unsupported APIs
   remain recorded failures or unknown values. No source access is changed.
 
+- **`paramify status <manifest>` shows what each fetcher has in Paramify.** For
+  each evidence fetcher in the manifest, it shows the evidence set, the script
+  state, the paired validators, the solution capabilities, the artifacts, and
+  whether the fetcher is ready. It changes nothing in the workspace. It exits 1
+  until every fetcher is ready, so a deployment can use it as a check, and 2
+  when it cannot tell: no token, a failed read such as an expired token, an
+  unreadable manifest or uploader config, an unknown fetcher, or no evidence
+  fetchers. A value it could not read shows as `?` (`null` in `--json`). Every
+  read goes to the uploader config's `paramify.base_url` when it sets one. The
+  evidence-set and capability reads now keep each validator pair.
 - **`aws_route53_resolver_dns_security`** (`EVD-R53-RESOLVER-DNS-SECURITY`) —
   one record per VPC in the region with its Route 53 Resolver DNSSEC validation
   status (`NOT_CONFIGURED` when the VPC has no DNSSEC config), its DNS Firewall
@@ -99,7 +180,14 @@ schemas and the `paramify` CLI — not the internal code.
   `KSI-SVC-VCM`, `KSI-CNA-RNT` and `KSI-MLA-LET`. `aws_discovery_beta` now
   lists DNS Firewall rule group associations (`dns_firewall_association`) per
   region, so discovery covers the `route53resolver` service this fetcher reads.
-
+- **The TUI asks for the stack when it makes a new manifest.** After the name,
+  `n` on the welcome screen shows the stacks of the workspace. Pick one, or
+  skip and set it later on the manifest screen. The TUI writes the manifest
+  only after this step, with `run.paramify.stack` and `stack_name` when you
+  pick a stack. Without an API token, or when the stack list fails, the step
+  still shows. It tells why there is no list and offers to make the manifest
+  without a stack. The form refuses a name that is already in use before the
+  stack step, and keeps the typed name.
 - **Evidence uploads go out as batches.** `paramify upload` now sends the files
   of each fetcher entry as one batch. Paramify submits and approves a batch as
   one unit. The batch goes through the channel of the evidence set, on the
@@ -1651,6 +1739,69 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **The TUI shows the catalog and the manifest on one Fetchers page.** The
+  Catalog and Manifest tabs are now one tab, so the TUI has four tabs:
+  Fetchers, Run, Evidence and Paramify (keys `1` to `4`). The catalog and a
+  detail pane are at the top, and the manifest is across the full width below
+  them. The detail pane shows the item in the list that has focus. Press `a`, or enter, on a catalog
+  fetcher to add it to the manifest, and focus stays in the catalog. The
+  catalog shows `[x]` before each fetcher that is in the manifest and `[ ]`
+  before the rest, as the add-fetchers picker did. `a` on a fetcher that is
+  already in the manifest moves the manifest cursor to it, and `a` on the
+  manifest list moves to the catalog filter (its footer hint reads "find to
+  add"). Enter in the filter moves to the first fetcher it shows. Tab moves
+  from the catalog to the manifest list, the output dir, the stack, owner and
+  Save row, and the detail pane. Escape stays in the list you were in. The
+  footer shows the keys of the list that has focus. The manifest list shows
+  at least twelve rows on a tall terminal and at most 65% of the page. On a
+  short terminal, such as 80×24, the twelve-row floor gives way so the
+  catalog keeps half the page, and the blank rows around the filter and the
+  settings row are dropped. An empty manifest takes only the rows of its
+  hint. The add-fetchers picker is removed.
+- **The Paramify tab in the TUI can show the solution capabilities.** `[` and `]`
+  switch between the view by fetcher and the view by capability. The view by
+  capability lists each capability in the workspace with its validator
+  pairs and the fetchers they come from. The count includes pairs whose
+  evidence sets are not in the manifest, and the row says how many come from
+  other evidence sets. On a short terminal the view bar is hidden (`[` and
+  `]` still switch views) and the pairs pane gives way, as the fetcher
+  detail does, so the capability list keeps its rows. Under it, the highlighted capability shows each
+  pair: the fetcher, the function, and the validators in the pair. `/`
+  filters by capability id or name. If the token cannot read the
+  capabilities, the view tells you. The view by fetcher still works.
+- **The TUI's Paramify tab is a setup grid.** It has one row for each evidence
+  fetcher in the manifest: the evidence set, the script, the validators, the
+  linked solution capabilities, the artifacts, and whether the fetcher is
+  ready. Under the grid, a line counts each column. The highlighted fetcher
+  shows its validators and the capabilities that its validator pairs prove.
+  `/` filters the grid. `w` hides the fetchers that are ready, so the grid
+  lists only what needs work, and shows them again; the footer reads
+  `w hide ready` or `w show all`. The validators count is out of the
+  fetchers that have validators in the registry. `s` syncs the scripts, `v` syncs the validators and `u` uploads the newest run,
+  each after a preview and a confirm, and the grid then reads the workspace
+  again. Without an API token, a bar says how to set one, and the three keys
+  are off. A cell or count whose read failed shows `?`, as in `paramify
+  status`, and an uploader config that cannot be read shows in the bar. On a
+  short terminal, such as 80×24, the detail under the grid gives way so the
+  grid keeps its rows. The tab reads the workspace only when it shows. The scripts force
+  and reassociate options are no longer in the TUI; `paramify scripts sync`
+  keeps them.
+- **Scan reports are on their own Pipelines tab in the TUI.** The tabs are
+  Fetchers, Run, Evidence, Paramify and Pipelines (keys `1` to `5`). The
+  Pipelines tab lists the scan-report fetchers in the manifest, with the assessment
+  each one sends to and its close-cycle setting, read as the manifest list
+  reads them: an assessment set for the whole platform counts, and a close
+  policy that is not set reads "close unset". `i` sends the reports, `j`
+  lists the pipeline jobs and `C` closes a cycle, as before. The Paramify tab
+  keeps the evidence upload and the scripts sync. One Paramify operation
+  still runs at a time across both tabs: while an upload, sync, send or cycle
+  close runs, the other tab refuses to start another and says so. The tab's
+  label carries a `beta` tag.
+- **Only the TUI panel that has focus has a color.** The other panels have a
+  gray border, and the list in them has a gray cursor. The catalog's cursor
+  stays bright while its filter has focus, because up, down and enter in the
+  filter move and pick that cursor. Tables and the catalog tree have no fill
+  of their own, so the panel border is the only outline.
 - **Each batch the upload creates is approved on submission by default.** The
   upload now sends the entry's `approval` (default `SUBMISSION`) when it creates
   a batch. Before, a batch took the evidence set's mode, so a set made `MANUAL`
@@ -2396,6 +2547,69 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- **`paramify upload` no longer sends an inventory direct when its channel has
+  no artifact request.** A Paramify inventory pipeline runs only on a file in an
+  approved batch, so a direct upload was stored and built nothing. The file now
+  goes in an evidence-level batch. `delivery: direct` or `no_request: direct` on
+  an inventory entry is refused, and so is an evidence set with validators
+  attached (its batches never approve). `--plan` warns when the set approves
+  MANUAL or the workspace has no batches.
+
+- **Re-uploading an inventory that went direct before now runs the pipeline.**
+  When the workspace has batches, files of the run that an earlier upload sent
+  direct (with no batch) are sent again in a batch, with a plan warning, instead
+  of being reported as already delivered while Paramify built nothing. With
+  batches off nothing changes. A pipeline run already in a submitted or approved
+  batch is a no-op even if the set has since gained a validator, and a no-op
+  result carries `pipeline: {type, approved}` too.
+
+- **A run-level `delivery: direct` or `no_request: direct` no longer refuses
+  every inventory.** A pipeline entry ignores a `direct` it inherits from
+  `run.paramify` and uses `delivery: auto` and `no_request: evidence`;
+  `paramify validate` notes it, `paramify run` records those settings, and the
+  upload plan compares against them. `direct` on the entry itself is still a
+  validate error. A run recorded before this fix still refuses at upload; the
+  refusal now says to set `no_request: evidence` on the entry or remove
+  `direct` from `run.paramify`, then run again.
+
+- **`paramify preset` (and `P` in the TUI) finds the sample of a per-target
+  inventory.** It looked for `sophos_endpoint_inventory.json`, but the shipped
+  inventory fetchers write one file per tenant or org
+  (`sophos_endpoint_inventory_<tenant>.json`), so it never found one. It now takes
+  the fetcher's files from the run's invocations (else `<stem>*.json` files whose
+  envelope names the fetcher), skips ghost runs as `paramify runs` does, uses the
+  first file as the sample and sums `asset_type` counts across the files. An
+  unreadable file says `could not read <path>`; `--json` gains `problem`.
+
+- **Saving a pipeline entry's form in the TUI keeps its settings.** The form hid
+  `no_request` and `delivery`, and the save removed every key it did not show,
+  so `no_request: refuse` was lost. The form now offers `no_request` (`evidence`
+  or `refuse`) on a pipeline entry, still hides `delivery`, and a save touches
+  only the keys the form shows.
+- `azure_private_endpoint_configuration` 0.3.2 uses the existing native strict
+  subscription setting for related Resource Graph lookups and skips wider
+  visibility discovery in that mode. Foreign references remain unknown; an
+  invalid strict flag or missing explicit target stops before authentication. Scoped lookups
+  reject out-of-scope response rows. `results.lookup_scope` records the mode;
+  default broad discovery and exclusion behavior remain unchanged.
+
+- Azure Service Health uses API `2025-04-01` for Azure Government event
+  lists, individual events and both detail actions. Other clouds retain
+  `2025-05-01`; evidence fields and collection scope are unchanged.
+- Key Vault key rotation derives a missing ARM `vault_uri` from the selected
+  Azure cloud instead of defaulting sovereign-cloud reads to the public host.
+  ARM-provided URIs and rotation-policy configured/readability semantics are
+  unchanged.
+
+- **`azure_defender_plans` 0.3.1 preserves pricing observations.** Each plan
+  retains `observed_configuration` with the selected SDK-projected attributes,
+  including extension `additional_extension_properties` such as exclusions.
+  These are projected observations, not raw HTTP or proof of effective resource
+  coverage. Missing or unrecognized extension, enforcement and inheritance flags
+  stay `null` rather than `false`; extension summary counts include only flags
+  explicitly enabled. Existing security-contact reads and failure handling are
+  unchanged.
+
 - **`azure_entra_authentication_policy` no longer shows Microsoft's password
   defaults when the tenant's settings could not be read.** Before, a failed
   `/groupSettings` read fell back to the template, so `password_settings_source`
@@ -2403,6 +2617,11 @@ schemas and the `paramify` CLI — not the internal code.
   the defaults, though the tenant may have saved other values. The source and
   those fields are now null, and the failed read still fails the run. Version
   0.3.1.
+- **`azure_app_gateway_waf` `total_waf_policies` is null when the WAF policy
+  list could not be read.** Before, a failed
+  `web_application_firewall_policies.list_all` left only the policies a gateway
+  references, read one by one, so the total looked like a small number of
+  policies. The failed list still fails the run. Version 0.2.2.
 - **`paramify doctor` and the note before `paramify run` find an upload token
   in `.env`.** So do `manifest set-stack` and the stack picker in the TUI.
   Before, only `paramify stacks` and `paramify upload` read `.env`, and the

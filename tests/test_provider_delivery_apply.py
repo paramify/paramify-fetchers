@@ -41,8 +41,10 @@ URL = "https://api.example.test"
 class Harness:
     """One run directory, one fake workspace, and the two providers wired as the CLI will wire them."""
 
-    def __init__(self, fake: Any, run_dir: Path, capability: Any = None, budget: float = 3) -> None:
+    def __init__(self, fake: Any, run_dir: Path, capability: Any = None, budget: float = 3,
+                 upload_cfg: Any = None) -> None:
         self.fake = fake
+        self.upload_cfg = upload_cfg or {}
         self.run_dir = run_dir
         self.events: List[Dict[str, Any]] = []
         self.sent: List[Any] = []  # the multipart parts of each upload
@@ -61,7 +63,7 @@ class Harness:
         self.providers = [EvidenceSetsProvider(False, {}, {}, today=lambda: fake.today), self.delivery]
 
     def plan(self):
-        return engine.plan(self.providers, SyncContext(self.run_dir, {}), Reader(self.res))
+        return engine.plan(self.providers, SyncContext(self.run_dir, self.upload_cfg), Reader(self.res))
 
     def apply(self, plan):
         return {o.action_id: o for o in engine.apply(plan, self.providers, self.res)}
@@ -832,3 +834,143 @@ def test_direct_noop_applies_as_noop_with_no_batch(tmp_path):
     Harness(fake, two_files(tmp_path), capability=BATCHES_OFF).run()
     again = Harness(fake, tmp_path, capability=BATCHES_OFF).run()["delivery/x"]
     assert again.status == "noop" and again.result["mode"] == "direct" and again.result["batch_id"] is None
+
+
+# ---- pipeline entries ---------------------------------------------------------
+
+INVENTORY = {"type": "inventory", "id_scheme": "x-id"}
+
+
+def inventory_run(tmp_path: Path, paramify=None) -> Path:
+    body = env(fetcher="x", pipeline=INVENTORY, inventory={"complete": True})
+    return build(tmp_path, {"inv.json": body}, [inv("x", ["inv.json"])], paramify or {"x": {"use": "x"}})
+
+
+def test_pipeline_file_is_sent_and_scanned_as_the_envelope(tmp_path, monkeypatch):  # Review Focus 2
+    from framework.sync.providers import delivery as delivery_mod
+    scanned: List[bytes] = []
+    real_scan = delivery_mod.waf.scan
+    monkeypatch.setattr(delivery_mod.waf, "scan", lambda content, *a: (scanned.append(content), real_scan(content, *a))[1])
+    fake = FakeParamify()
+    h = Harness(fake, inventory_run(tmp_path), upload_cfg={"artifact_payload": "payload"})
+    out = h.run()
+    assert out["delivery/x"].status == "applied", out["delivery/x"].message
+    sent = [p["file"][1] for p in h.sent if p["file"][0] == "inv.json"]
+    assert len(sent) == 1 and set(json.loads(sent[0])) == {"schema_version", "metadata", "payload"}
+    assert scanned and all(set(json.loads(c)) == {"schema_version", "metadata", "payload"} for c in scanned)
+
+
+def test_ordinary_file_is_still_sent_as_the_payload_when_asked(tmp_path):
+    fake = FakeParamify()
+    h = Harness(fake, two_files(tmp_path), upload_cfg={"artifact_payload": "payload"})
+    h.run()
+    assert json.loads(h.sent[0]["file"][1]) == {"k": 1}
+
+
+def test_approved_pipeline_batch_says_the_pipeline_runs(tmp_path):
+    fake = FakeParamify()
+    outcome = Harness(fake, inventory_run(tmp_path)).run()["delivery/x"]
+    assert outcome.status == "applied", outcome.message
+    assert "APPROVED: pipeline runs now; check Monitoring → Inventory" in outcome.message
+    assert outcome.result["pipeline"] == {"type": "inventory", "approved": True}
+
+
+def test_submitted_pipeline_batch_is_not_success(tmp_path):
+    fake = FakeParamify()
+    outcome = Harness(fake, inventory_run(tmp_path, {"x": {"use": "x", "approval": "MANUAL"}})).run()["delivery/x"]
+    assert "SUBMITTED: waiting for approval; the pipeline has not run" in outcome.message
+    assert outcome.result["pipeline"]["approved"] is False
+
+
+class SlowApprovalFake(FakeParamify):
+    """A batch approved on submission whose approval has not landed by the read-back."""
+
+    def _submit(self, batch):
+        out = super()._submit(batch)
+        if out.status_code == 200 and batch["whenToApprove"] == "SUBMISSION":
+            batch["status"] = "SUBMITTED"
+            return type(out)(200, dict(batch))
+        return out
+
+
+def test_pipeline_batch_approved_on_submission_but_not_yet_counts_as_approved(tmp_path):
+    outcome = Harness(SlowApprovalFake(), inventory_run(tmp_path)).run()["delivery/x"]
+    assert "approved on submission; not approved yet" in outcome.message
+    assert "the pipeline runs once Paramify approves it" in outcome.message
+    assert outcome.result["status"] == "SUBMITTED"
+    assert outcome.result["pipeline"] == {"type": "inventory", "approved": True}
+
+
+def test_ordinary_entry_result_has_no_pipeline_key(tmp_path):
+    outcome = Harness(FakeParamify(), two_files(tmp_path)).run()["delivery/x"]
+    assert "pipeline" not in outcome.result
+
+
+def test_direct_pipeline_entry_reports_approved_null(tmp_path):
+    fake = FakeParamify()
+    fake.batches_flag_off()
+    outcome = Harness(fake, inventory_run(tmp_path), capability=Capability(False, FLAG_OFF)).run()["delivery/x"]
+    assert outcome.status == "applied", outcome.message
+    assert outcome.result["mode"] == "direct"
+    assert outcome.result["pipeline"] == {"type": "inventory", "approved": None}
+    assert "sent direct: this workspace has no batches; the pipeline runs the pre-batch way" in outcome.message
+
+
+def test_pipeline_entry_resends_files_sent_direct_before_batches(tmp_path):
+    # The first upload went direct (batches off); with batches on, the re-upload sends it again in a batch.
+    fake = FakeParamify()
+    fake.batches_flag_off()
+    run_dir = inventory_run(tmp_path)
+    first = Harness(fake, run_dir, capability=Capability(False, FLAG_OFF)).run()["delivery/x"]
+    assert first.status == "applied" and first.result["mode"] == "direct"
+    fake.batches_flag_off(False)
+    h = Harness(fake, run_dir)
+    plan = h.plan()
+    [action] = [a for a in plan.actions if a.provider == "delivery"]
+    assert action.verb == "deliver"
+    assert ("1 file(s) of this run went direct before; sending them again in a batch so the pipeline runs"
+            in action.warnings)
+    outcome = h.apply(plan)["delivery/x"]
+    assert outcome.status == "applied", outcome.message
+    assert outcome.result["uploaded"] == ["inv.json"] and outcome.result["mode"] == "batch"
+    assert outcome.result["pipeline"] == {"type": "inventory", "approved": True}
+
+
+def test_pipeline_noop_result_carries_the_pipeline(tmp_path):
+    fake = FakeParamify()
+    run_dir = inventory_run(tmp_path)
+    Harness(fake, run_dir).run()
+    again = Harness(fake, run_dir).run()["delivery/x"]
+    assert again.status == "noop", again.message
+    assert again.result["pipeline"] == {"type": "inventory", "approved": True}
+
+
+def test_already_delivered_pipeline_run_with_a_new_validator_is_noop(tmp_path):
+    fake = FakeParamify()
+    run_dir = inventory_run(tmp_path)
+    Harness(fake, run_dir).run()
+    fake._evidence[0]["validators"] = [{"validatorEvidencePairId": "vp-0", "id": "vl-0", "name": "VAL-1",
+                                        "type": "REGEX"}]
+    again = Harness(fake, run_dir).run()["delivery/x"]
+    assert again.status == "noop", again.message
+    assert again.result["pipeline"] == {"type": "inventory", "approved": True}
+
+
+def test_pipeline_entry_recorded_with_the_pipeline_defaults_goes_in_a_batch(tmp_path):
+    # A run recorded under run.paramify no_request: direct holds the pipeline default for the inventory entry.
+    fake = FakeParamify()
+    with_request(fake)
+    fake._requests.clear()  # a channel with no artifact request: where no_request: direct would send it direct
+    h = Harness(fake, inventory_run(tmp_path, {"x": {"use": "x", "delivery": "auto", "no_request": "evidence"}}))
+    plan = h.plan()
+    [action] = [a for a in plan.actions if a.provider == "delivery"]
+    assert action.verb == "deliver" and action.payload["target"] == "EVIDENCE"
+
+
+def test_pipeline_entry_recorded_with_an_inherited_direct_says_how_to_fix_it(tmp_path):
+    fake = FakeParamify()
+    h = Harness(fake, inventory_run(tmp_path, {"x": {"use": "x", "no_request": "direct"}}))
+    [action] = [a for a in h.plan().actions if a.provider == "delivery"]
+    assert action.verb == "refuse"
+    assert action.fix == ("set no_request: evidence on this entry, or remove direct from run.paramify, "
+                          "then run again")

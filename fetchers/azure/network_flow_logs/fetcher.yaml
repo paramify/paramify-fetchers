@@ -1,12 +1,7 @@
 name: azure_network_flow_logs
 version: 0.2.1
-description: >
-  Inventories Azure Network Watcher and flow logs in the subscription, and works out which virtual
-  networks' traffic is logged. For every Network Watcher: its region. For every flow log: what it
-  logs (a virtual network, subnet, network interface or — legacy — a network security group),
-  whether it is enabled, the storage account it writes to and how long it keeps records, and
-  whether Traffic Analytics sends it to a Log Analytics workspace. For every virtual network and
-  subnet: whether an enabled flow log covers it, and through which target.
+description: >-
+  Shows which virtual networks and subnets have their traffic logged by flow logs, where the logs are kept and for how long, and whether Traffic Analytics is on.
 category: azure
 
 config_schema:
@@ -77,66 +72,83 @@ ksis:
 evidence_set:
   reference_id: EVD-AZURE-NETWORK-FLOW-LOGS
   name: Azure Network Watcher and Flow Logs
-  instructions: >
-    Script: azure/network_flow_logs/fetcher.py. Azure SDK calls: azure-mgmt-network NetworkManagementClient
-    network_watchers.list_all(); flow_logs.list(resource_group, watcher) for each watcher;
-    virtual_networks.list_all() for each VNet's subnets; and, when an NSG flow log exists,
-    network_security_groups.list_all() to see where each NSG is attached.
-    Flow logs: target_type comes from targetResourceId (virtual_network, subnet, network_interface, or
-    network_security_group). legacy_nsg_flow_log marks the last: Microsoft stopped allowing new NSG flow
-    logs after 30 June 2025 and retires them on 30 September 2027, in favour of VNet flow logs.
-    retained_indefinitely is true when no retention policy is enabled or it is set to 0 days, because
-    storage keeps flow log records until a policy deletes them; retention_days is the policy's days
-    otherwise, and null when retained indefinitely. enabled_filtering_criteria is the VNet flow log's
-    filter, when it logs only matching traffic. target_attached is whether the target can produce
-    records: an NSG attached to a subnet or network interface, or a VNet or subnet that exists; null
-    for network interface targets, and when the NSG or VNet list it depends on could not be read
-    (counted in summary.enabled_flow_logs_target_unknown). If the VNet list could not be read,
-    results.virtual_networks and every VNet, subnet and region coverage figure in the summary are null
-    and summary.virtual_networks_read is false: unknown, never "no networks" or "not covered". storage_account_name and
-    storage_account_resource_group locate the destination; whether that storage is immutable is
-    evidenced by azure_log_storage_immutability, which reads the insights-logs-* containers flow logs
-    write to. traffic_analytics_enabled, traffic_analytics_interval_minutes (10 or 60) and
-    traffic_analytics_workspace_id say whether and how often records are analysed into a Log Analytics
-    workspace.
-    Subnets: in_use is true when anything is deployed in the subnet (IP configurations, private
-    endpoints, service association or resource navigation links, application gateway IP
-    configurations). nsg_supported is false for GatewaySubnet, AzureFirewallSubnet,
-    AzureFirewallManagementSubnet and RouteServerSubnet, which cannot take an NSG and so cannot be
-    covered by an NSG flow log. Azure applies only the most specific VNet flow log (network
-    interface, then subnet, then VNet), so a subnet's own flow log replaces the VNet's for that subnet.
-    coverage is subnet or vnet for the VNet flow log in effect when it is enabled and unfiltered; nsg for
-    an enabled NSG flow log on the subnet's NSG (a separate mechanism that counts on its own);
-    subnet_filtered or vnet_filtered when the flow log in effect is filtered and no NSG flow log covers
-    it; none when nothing logs it; and unknown when it is not covered by what was read but its region's
-    flow logs could not be listed (that also sets metadata.partial_failure). flow_log_sources lists every
-    match, including a VNet log a subnet log overrides. A VNet is full when every subnet is covered
-    unfiltered, partial when some are, none when none are, and unknown when any is unknown; a VNet with no
-    subnets is judged on its own flow log the same way (filtered reads partial). Flow logs on network
-    interfaces count as VNet flow logs (vnet_flow_logs) but not towards subnet coverage.
-    network_watcher_in_region is null when the watcher list could not be read.
-    Summary: subnets_in_use_covered over subnets_in_use is the share of subnets with workloads whose
-    traffic is logged (subnets_covered over total_subnets counts empty subnets too);
-    subnets_in_use_without_nsg counts in-use subnets no NSG flow log can reach, which a VNet flow log
-    would cover. enabled_flow_logs_retained_under_90_days and enabled_flow_logs_retained_under_365_days
-    count enabled flow logs with a finite retention shorter than that; minimum_retention_days is the
-    smallest finite retention, null when all are indefinite. regions_without_network_watcher_count
-    counts regions with VNets and no Network Watcher. provider_registration_status (registered /
-    not_registered / unknown) is the Microsoft.Network resource provider's state, so zero flow logs on
-    an unregistered subscription reads as "service not in use" rather than "in use, none configured".
-    Network Watchers, flow logs, virtual networks and subnets the patterns
-    take out are listed under results.excluded, each with the pattern that
-    matched; a flow log removed with its target also names matched_id. A
-    flow log under an excluded watcher stays in scope, and a virtual
-    network whose subnets are all excluded is listed with reason
-    subnets_matched and leaves every count. Summary fields:
-    resource_exclusion_patterns (the configured patterns, empty when none
-    are set), resource_exclusion_patterns_unmatched (patterns that matched
-    nothing, such as a mistyped name, or null when a resource list couldn't be read), excluded_network_watchers,
-    excluded_flow_logs, excluded_virtual_networks, excluded_subnets (how
-    many the patterns took out) and in_scope_network_watchers,
-    in_scope_flow_logs, in_scope_virtual_networks, in_scope_subnets (how
-    many stayed). The watcher and flow log counts are null when the
-    watcher list couldn't be read, and the virtual network and subnet
-    counts when the virtual network list couldn't. results.excluded is
-    always present, empty when nothing is excluded.
+  instructions: |
+    Script: azure/network_flow_logs/fetcher.py
+
+    Access: Reader on the subscription.
+
+    Commands Executed:
+    - subscriptions.list() — picks a subscription when none is set
+    - providers.get("Microsoft.Network") — tells "service not in use" from "in use, none configured"
+    - network_watchers.list_all() — every Network Watcher and its region
+    - flow_logs.list() (per watcher) — each flow log's target, state, storage, retention and Traffic Analytics settings
+    - virtual_networks.list_all() — every virtual network and its subnets, to work out which are covered
+    - network_security_groups.list_all() (only when an NSG flow log exists) — whether each NSG is attached to a subnet or network interface
+
+    Output: azure_network_flow_logs_<subscription>.json — each Network Watcher, flow log, virtual network and subnet with its coverage by flow logs, plus the resources left out and why.
+
+    Summary fields:
+
+    Which resources are left out of scope?
+    - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
+    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no resource, such as a mistyped name; null when the Network Watcher list or the virtual network list could not be read
+    - excluded_network_watchers — Number of Network Watchers left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern; null when the Network Watcher list could not be read
+    - excluded_flow_logs — Number of flow logs left out of scope: an id: pattern named the flow log, or a pattern matched its target (a virtual network, subnet, network interface or NSG) by the target's resource group, region or id. A pattern on its Network Watcher or the watcher's resource group never takes a flow log, since it still logs an in-scope network; null when the Network Watcher list could not be read
+    - excluded_virtual_networks — Number of virtual networks left out of scope because a pattern matched them, or all of their subnets; null when the virtual network list could not be read
+    - excluded_subnets — Number of subnets in in-scope virtual networks left out of scope because a pattern matched their resource group or id (subnets carry no region); the subnets of an excluded virtual network leave with it, uncounted; null when the virtual network list could not be read
+    - in_scope_network_watchers — Number of Network Watchers read and in scope; null when the Network Watcher list could not be read
+    - in_scope_flow_logs — Number of flow logs read and in scope; null when the Network Watcher list could not be read
+    - in_scope_virtual_networks — Number of virtual networks read and in scope; 0 means none was read or the patterns took out every network, which a check can catch by requiring more than 0; null when the virtual network list could not be read
+    - in_scope_subnets — Number of subnets read and in scope; null when the virtual network list could not be read
+
+    Is Network Watcher in place?
+    - provider_registration_status — Whether the Microsoft.Network provider is registered on the subscription: registered, not_registered or unknown
+    - total_network_watchers — Number of in-scope Network Watchers; 0 when the watcher list could not be read
+    - regions_with_virtual_networks — List of regions with at least one in-scope virtual network; null when the virtual network list could not be read
+    - regions_with_virtual_networks_without_network_watcher — List of regions with in-scope virtual networks and no Network Watcher; empty when the watcher list could not be read, since an unread list never reads as missing; null when the virtual network list could not be read
+    - regions_without_network_watcher_count — Number of regions in regions_with_virtual_networks_without_network_watcher; null when the virtual network list could not be read
+
+    Which flow logs exist?
+    - total_flow_logs — Number of in-scope flow logs; 0 when the watcher list could not be read
+    - enabled_flow_logs — Number of in-scope flow logs that are enabled
+    - disabled_flow_logs — Number of in-scope flow logs that are turned off
+    - flow_logs_by_target_type — Number of in-scope flow logs for each kind of target, read from the target's resource id:
+      - virtual_network (logs a whole virtual network)
+      - subnet (logs one subnet)
+      - network_interface (logs one network interface)
+      - network_security_group (a legacy NSG flow log)
+      - unknown (a target of another kind)
+    - vnet_flow_logs — Number of in-scope flow logs that target a virtual network, subnet or network interface (virtual network flow logs, as opposed to the legacy NSG kind)
+    - legacy_nsg_flow_logs — Number of in-scope flow logs that target an NSG; Microsoft stopped allowing new ones after 30 June 2025 and retires them on 30 September 2027, in favour of virtual network flow logs
+    - enabled_flow_logs_filtered — Number of enabled flow logs that log only traffic matching a filter, so they don't cover all of it
+    - enabled_flow_logs_on_unattached_targets — Number of enabled flow logs whose target can't produce records: an NSG attached to no subnet or network interface, or a virtual network or subnet that no longer exists. Network interface targets are not checked
+    - enabled_flow_logs_target_unknown — Number of enabled flow logs whose target could not be checked: a network interface, or an NSG or virtual network list that could not be read
+
+    How long are flow logs kept, and are they analysed?
+    - enabled_flow_logs_retained_indefinitely — Number of enabled flow logs with no retention policy, or a policy of 0 days, so storage keeps the records until something else deletes them
+    - minimum_retention_days — Days of the shortest finite retention among enabled flow logs; null when every enabled flow log is retained indefinitely
+    - enabled_flow_logs_retained_under_90_days — Number of enabled flow logs with a finite retention under 90 days
+    - enabled_flow_logs_retained_under_365_days — Number of enabled flow logs with a finite retention under 365 days
+    - enabled_flow_logs_with_traffic_analytics — Number of enabled flow logs that send records to a Log Analytics workspace through Traffic Analytics
+    - enabled_flow_logs_traffic_analytics_every_10_minutes — Number of enabled flow logs with Traffic Analytics on and analysing every 10 minutes rather than every 60
+
+    Which virtual networks are covered?
+    - virtual_networks_read — True if the virtual network list was read; false if not, in which case every virtual network, subnet and region figure below is null: unknown, never "no networks" or "not covered"
+    - total_virtual_networks — Number of in-scope virtual networks; null when the virtual network list could not be read
+    - virtual_networks_fully_covered — Number of virtual networks whose every subnet is covered (a network with no subnets counts when its own flow log is enabled and unfiltered)
+    - virtual_networks_partially_covered — Number of virtual networks with some subnets covered or only filtered flow logs (a network with no subnets and a filtered flow log counts here)
+    - virtual_networks_not_covered — Number of virtual networks where no subnet is logged at all
+    - virtual_networks_coverage_unknown — Number of virtual networks with a subnet that no flow log read covers but whose region's flow logs could not be listed, so it is unknown whether it is logged
+
+    Which subnets are covered?
+    - total_subnets — Number of in-scope subnets, empty ones included; null when the virtual network list could not be read
+    - subnets_covered — Number of subnets covered: an enabled, unfiltered virtual network or subnet flow log, or an enabled NSG flow log on the subnet's NSG. Azure applies only the most specific virtual network flow log (subnet over virtual network), so a subnet's own flow log replaces its network's; filtered flow logs don't count here
+    - subnets_covered_percentage — Percentage of subnets that are covered = subnets_covered / total_subnets × 100 (a whole number, 0–100); 0 when total_subnets is 0
+    - subnets_in_use — Number of subnets with something deployed in them: IP configurations, private endpoints, service association or resource navigation links, or application gateway IP configurations
+    - subnets_in_use_covered — Number of in-use subnets that are covered, as defined for subnets_covered
+    - subnets_in_use_covered_filtered — Number of in-use subnets whose flow log in effect is filtered and that no NSG flow log covers, so only some of their traffic is logged
+    - subnets_in_use_not_covered — Number of in-use subnets that no flow log logs
+    - subnets_in_use_coverage_unknown — Number of in-use subnets that no flow log read covers but whose region's flow logs could not be listed
+    - subnets_in_use_covered_percentage — Percentage of in-use subnets that are covered = subnets_in_use_covered / subnets_in_use × 100 (a whole number, 0–100); 0 when subnets_in_use is 0
+    - subnets_in_use_without_nsg — Number of in-use subnets that can take an NSG and have none, so no NSG flow log can reach them; a virtual network flow log would
+    - subnets_in_use_nsg_not_supported — Number of in-use subnets that can't take an NSG at all (GatewaySubnet, AzureFirewallSubnet, AzureFirewallManagementSubnet, RouteServerSubnet), so only a virtual network flow log can cover them
