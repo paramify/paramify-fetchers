@@ -1,5 +1,5 @@
 name: azure_storage_encryption_status
-version: 0.4.1
+version: 0.5.0
 description: >-
   Shows how each storage account is encrypted and exposed, how old its access keys are, whether it replicates to a healthy second region, which containers are public, and its owner.
 category: azure
@@ -101,21 +101,21 @@ evidence_set:
     Summary fields:
 
     What was checked?
-    - total_storage_accounts — Number of in-scope storage accounts; every account count and percentage below covers only these; reads 0, not null, when the storage account list could not be read, so read it together with in_scope_storage_accounts
+    - total_storage_accounts — Number of in-scope storage accounts; every account count and percentage below covers only these; null when the storage account list could not be read, as is every count and percentage below
     - provider_registration_status — Whether Azure Storage (Microsoft.Storage) is registered on the subscription: registered, not_registered or unknown
 
     Which resources are left out of scope?
     - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
     - resource_exclusion_patterns_unmatched — List of configured patterns that matched no storage account or blob container, such as a mistyped name; null when the storage account list or any account's container list could not be read
     - excluded_storage_accounts — Number of storage accounts left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, no other count includes them, and their containers are never read; null when the storage account list could not be read
-    - excluded_containers — Number of blob containers an id: pattern took out of an in-scope account; each is listed under excluded. An excluded account's containers are never read, so they are not counted here
+    - excluded_containers — Number of blob containers an id: pattern took out of an in-scope account; each is listed under excluded. An excluded account's containers are never read, so they are not counted here; null when the storage account list or any account's container list could not be read
     - in_scope_storage_accounts — Number of storage accounts in scope; null when the storage account list could not be read, 0 means none, or the patterns took out every account, which a check can catch by requiring more than 0
-    - in_scope_containers — Number of blob containers listed and in scope; never null, and accounts whose container list failed add none
+    - in_scope_containers — Number of blob containers listed and in scope; null when the storage account list or any account's container list could not be read
 
     Who holds the encryption keys?
     - customer_managed_key_storage — Number of storage accounts encrypted with a customer-managed key held in Key Vault
     - platform_managed_key_storage — Number of storage accounts encrypted with Microsoft's platform-managed key
-    - cmk_percentage — Percentage of storage accounts using a customer-managed key = customer_managed_key_storage / total_storage_accounts × 100 (a whole number, rounded down; reads 0 when total_storage_accounts is 0)
+    - cmk_percentage — Percentage of storage accounts using a customer-managed key = customer_managed_key_storage / total_storage_accounts × 100 (a whole number, rounded down; reads 0 when total_storage_accounts is 0, null when the storage account list could not be read)
     - infrastructure_encryption_accounts — Number of storage accounts with infrastructure (double) encryption on
 
     Is data encrypted in transit?
@@ -138,24 +138,24 @@ evidence_set:
     - geo_redundant_accounts — Number of storage accounts that replicate to a second region (GRS, RA-GRS, GZRS or RA-GZRS)
     - read_access_geo_redundant_accounts — Number of storage accounts whose second-region copy can be read (RA-GRS or RA-GZRS)
     - geo_replication_stats_collected_accounts — Number of geo-redundant storage accounts whose replication status was read
-    - geo_replication_live_accounts — Number of geo-redundant storage accounts whose replication status is Live (replicating normally)
+    - geo_replication_live_accounts — Number of geo-redundant storage accounts whose replication status is Live (replicating normally); null when any account's replication status could not be read
     - geo_replication_max_sync_lag_minutes — Number of minutes the second-region copy furthest behind trails its primary: the time since it last synced, measured when its replication status was read; null when there is no geo-redundant account or any one's last sync time is unknown
-    - geo_failover_ready_accounts — Number of geo-redundant storage accounts that Azure reports can fail over to the second region now
+    - geo_failover_ready_accounts — Number of geo-redundant storage accounts that Azure reports can fail over to the second region now; null when any account's replication status could not be read
     - secondary_unavailable_accounts — Number of geo-redundant storage accounts whose second region is reported unavailable
     - geo_failed_over_accounts — Number of storage accounts that have failed over to their second region at least once
 
     Can deleted or changed data be recovered?
-    - blob_versioning_accounts — Number of storage accounts with blob versioning on
-    - container_soft_delete_accounts — Number of storage accounts that keep deleted blob containers for a retention period (container soft delete)
-    - share_soft_delete_accounts — Number of storage accounts that keep deleted file shares for a retention period (share soft delete)
-    - containers_with_immutability_policy — Number of blob containers with a time-based retention (immutability) policy
-    - containers_with_legal_hold — Number of blob containers under a legal hold
+    - blob_versioning_accounts — Number of storage accounts with blob versioning on; null when any account's blob service properties could not be read
+    - container_soft_delete_accounts — Number of storage accounts that keep deleted blob containers for a retention period (container soft delete); null when any account's blob service properties could not be read
+    - share_soft_delete_accounts — Number of storage accounts that keep deleted file shares for a retention period (share soft delete); null when any account's file service properties could not be read
+    - containers_with_immutability_policy — Number of blob containers with a time-based retention (immutability) policy; null when any account's container list could not be read
+    - containers_with_legal_hold — Number of blob containers under a legal hold; null when any account's container list could not be read
 
     Which containers can be read anonymously?
-    - total_containers — Number of blob containers across all storage accounts whose containers were listed
-    - containers_with_public_access_level — Number of blob containers set to the Blob or Container public access level
-    - anonymously_accessible_containers — Number of blob containers that can be read without signing in through the account's public endpoint: the container has a public access level, its account does not forbid public blob access (Azure allows it when the setting is on or was never set), and the account's network admits public clients. The network does not when public network access is Disabled, or when it isn't SecuredByPerimeter and the firewall's default action is Deny with no IP (IPv4 or IPv6) or virtual network rule; a Deny whose IPv4 or virtual network rule list the API didn't return counts as admitting, and a missing IPv6 list as none. Not evaluated: which addresses a rule admits, network security perimeters, the trusted-services bypass and private endpoints
-    - accounts_with_containers_not_collected — Number of storage accounts whose container list failed; their containers are missing from the counts
+    - total_containers — Number of blob containers across all storage accounts whose containers were listed; null when any account's container list could not be read
+    - containers_with_public_access_level — Number of blob containers set to the Blob or Container public access level; null when any account's container list could not be read
+    - anonymously_accessible_containers — Number of blob containers that can be read without signing in through the account's public endpoint: the container has a public access level, its account does not forbid public blob access (Azure allows it when the setting is on or was never set), and the account's network admits public clients. The network does not when public network access is Disabled, or when it isn't SecuredByPerimeter and the firewall's default action is Deny with no IP (IPv4 or IPv6) or virtual network rule; a Deny whose IPv4 or virtual network rule list the API didn't return counts as admitting, and a missing IPv6 list as none. Not evaluated: which addresses a rule admits, network security perimeters, the trusted-services bypass and private endpoints; null as total_containers
+    - accounts_with_containers_not_collected — Number of storage accounts whose container list failed; their containers are missing from the counts, which are null (null here too when the storage account list could not be read)
 
     Is each account owned and classified?
     - accounts_with_owner_tag — Number of storage accounts with an owner tag (the first configured owner tag key present, such as Owner)
