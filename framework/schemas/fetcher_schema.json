@@ -138,6 +138,33 @@
       }
     },
 
+    "pipeline": {
+      "type": "object",
+      "description": "The Paramify pipeline this fetcher's output feeds. Required of `kind: inventory`; optional on `kind: issue_report`; refused elsewhere. The uploader reads it from the envelope to route the file. See docs/pipeline_fetchers_design.md.",
+      "additionalProperties": false,
+      "required": ["type", "id_scheme"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["inventory", "vulnerability", "configuration"],
+          "description": "Which kind of Paramify pipeline the output feeds."
+        },
+        "id_scheme": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+          "description": "Kebab-case name of the identifier the records carry (e.g. github-repository-url), so one pipeline's runs line up with each other."
+        },
+        "asset_id_field": {
+          "type": "string",
+          "description": "The report column holding each asset's identifier. Not allowed on an inventory, whose ID is always `unique_asset_identifier`."
+        },
+        "preset": {
+          "not": {},
+          "description": "Reserved: a preset reference once the Paramify API can create presets. Not supported yet."
+        }
+      }
+    },
+
     "issue_report": {
       "type": "object",
       "description": "Paramify assessment-intake identity for a `kind: issue_report` fetcher — the analogue of `evidence_set`, and equally fetcher-knowledge. Deliberately holds no assessmentId: which assessment a report goes to is a per-customer choice that lives in the manifest (`config.assessment_id`, written by `paramify assessments select`). See docs/issue_report_fetchers_guide.md.",
@@ -179,6 +206,46 @@
   },
 
   "allOf": [
+    {
+      "$comment": "A pipeline block names the Paramify pipeline the output feeds. Only an inventory or an issue_report has one: an evidence file goes to its evidence set alone, and a discovery fetcher's output is not uploaded.",
+      "if": {
+        "properties": { "kind": { "enum": ["inventory", "issue_report"] } },
+        "required": ["kind"]
+      },
+      "else": {
+        "not": { "required": ["pipeline"] }
+      }
+    },
+    {
+      "$comment": "An inventory always feeds an inventory pipeline, and its records are identified by unique_asset_identifier, so asset_id_field has nothing to name.",
+      "if": {
+        "properties": { "kind": { "const": "inventory" } },
+        "required": ["kind"]
+      },
+      "then": {
+        "required": ["pipeline"],
+        "properties": {
+          "pipeline": {
+            "properties": { "type": { "const": "inventory" } },
+            "not": { "required": ["asset_id_field"] }
+          }
+        }
+      }
+    },
+    {
+      "$comment": "An issue_report's pipeline, when it has one, is a scan-report pipeline.",
+      "if": {
+        "properties": { "kind": { "const": "issue_report" } },
+        "required": ["kind"]
+      },
+      "then": {
+        "properties": {
+          "pipeline": {
+            "properties": { "type": { "enum": ["vulnerability", "configuration"] } }
+          }
+        }
+      }
+    },
     {
       "$comment": "The two kinds have disjoint identity blocks, and mixing them is always a mistake worth failing discovery over: an issue_report fetcher with an evidence_set would be silently ignored by both uploaders, and an evidence fetcher with an issue_report block would never reach an assessment.",
       "if": {

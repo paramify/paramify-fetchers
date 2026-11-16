@@ -18,6 +18,7 @@ from framework.contract import (
     EvidenceSet,
     Fetcher,
     IssueReport,
+    Pipeline,
     PlatformSpec,
     Requires,
     Secret,
@@ -145,6 +146,15 @@ def _parse_fetcher(data: dict, path: Path) -> Fetcher:
             title=raw_ir.get("title"),
         )
 
+    pipeline = None
+    raw_pl = data.get("pipeline")
+    if raw_pl:
+        pipeline = Pipeline(
+            type=raw_pl["type"],
+            id_scheme=raw_pl["id_scheme"],
+            asset_id_field=raw_pl.get("asset_id_field"),
+        )
+
     config_schema = _parse_config_schema(data.get("config_schema"))
     if data.get("kind") == "issue_report":
         # Every issue-report fetcher takes the same two fields naming the
@@ -175,6 +185,7 @@ def _parse_fetcher(data: dict, path: Path) -> Fetcher:
         ksis=list(data.get("ksis") or []),
         kind=data.get("kind", "evidence"),
         issue_report=issue_report,
+        pipeline=pipeline,
         depends_on=list(data.get("depends_on") or []),
     )
 

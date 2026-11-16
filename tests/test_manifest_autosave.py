@@ -60,7 +60,9 @@ def _targets(path: Path, name: str) -> list:
 
 
 async def _manifest_tab(pilot):
-    await pilot.press("2")
+    await pilot.press("1")
+    await pilot.pause()
+    await pilot.press("tab")  # from the catalog to the manifest list
     await pilot.pause()
 
 
