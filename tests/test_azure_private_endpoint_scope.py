@@ -54,6 +54,8 @@ def fixture(monkeypatch):
         private_dns_zone_groups=NS(list=zone_groups),
     )
     monkeypatch.setitem(sys.modules, "azure.mgmt.network", sdk)
+    # Strict mode adds azure-core boundary policies; the SDK client here is fake.
+    monkeypatch.setattr(native, "arm_client_kwargs", lambda: {})
     monkeypatch.setattr(native, "resource_graph_client", lambda credential: object())
     discovery = Mock(return_value={"subscriptions": {SUB, OTHER}, "resource_groups": set()})
     monkeypatch.setattr(native, "readable_scopes", discovery)
