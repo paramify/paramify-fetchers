@@ -1724,6 +1724,11 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **`collection_succeeded` now covers two Entra evidence sets.** It is listed
+  against `EVD-AZURE-ENTRA-APP-CREDS` (`azure_entra_app_registrations`) and
+  `EVD-AZURE-ENTRA-SERVICE-PRINCIPALS` (`azure_entra_service_principals`), so a
+  failed run of either fetcher fails its evidence set. Consumers that keep their
+  own criteria for these sets get collection health from this registry file.
 - **The TUI shows the catalog and the manifest on one Fetchers page.** The
   Catalog and Manifest tabs are now one tab, so the TUI has four tabs:
   Fetchers, Run, Evidence and Paramify (keys `1` to `4`). The catalog and a
