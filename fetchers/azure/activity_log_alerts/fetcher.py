@@ -47,6 +47,7 @@ from azure_common import (  # noqa: E402
     sanitize_for_filename,
     write_evidence,
 )
+from azure_rest import target_subscription_scope
 from resource_exclusions import ResourceExclusions  # noqa: E402
 
 logger = logging.getLogger("azure_activity_log_alerts")
@@ -338,6 +339,8 @@ def main() -> int:
     # The azure-* SDKs log every request header at INFO; warnings still get through.
     logging.getLogger("azure").setLevel(logging.WARNING)
     load_dotenv()
+    strict = target_subscription_scope() is not None
+    outside_scope = []
 
     output_dir = Path(os.environ.get("EVIDENCE_DIR", "./evidence"))
     collector = Collector(logger)
@@ -395,6 +398,10 @@ def main() -> int:
             referenced += [g for a in alerts for m in matching_processing_rules(a["scopes"], processing_rules)
                            for g in m["rule"]["added_action_group_ids"]]
             referenced += [g for p in in_scope_processing for g in p["added_action_group_ids"]]
+            if strict:
+                prefix = f"/subscriptions/{subscription_id}/".lower()
+                outside_scope = sorted({g for g in referenced if not g.lower().startswith(prefix)})
+                referenced = [g for g in referenced if g.lower().startswith(prefix)]
             add_referenced_groups(rest, referenced, by_id, collector)
             alerts = [with_routing(a, by_id, processing_rules) for a in alerts]
             processing_rules = in_scope_processing
@@ -425,6 +432,7 @@ def main() -> int:
         subscription_source=sub["subscription_source"],
         collector=collector,
         results={
+            **({"read_scope":"target_subscription", "outside_read_scope_action_group_ids":outside_scope} if strict else {}),
             "activity_log_alerts": alerts,
             # Emitted so the evidence carries the list it is judged against.
             "monitored_operations": {

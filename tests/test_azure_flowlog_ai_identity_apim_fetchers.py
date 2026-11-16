@@ -841,6 +841,19 @@ def test_collect_reads_identity_holders_from_resource_graph(monkeypatch):
     assert system_assigned[0]["principal_id"] == "ps"
 
 
+def test_summary_fields_are_documented(assert_summary_documented):
+    kinds = ["github_actions", "azure_devops", "aks_workload_identity", "google", "aws", "other"]
+    fics = [{"issuer_kind": k, "broad_subject": False, "nonstandard_audience": False} for k in kinds]
+    user = {**mi.identity_record({"kind": "user_assigned", "principal_id": "pu"}, {}, {"pu": []}),
+            "attached_resources": [], "federated_credentials": fics}
+    system = mi.identity_record({"kind": "system_assigned", "principal_id": "ps", "resource_type": "microsoft.web/sites"},
+                                {}, {"ps": []})
+    summary = {**mi.summarize([user], [system], "read"), "provider_registration_status": "registered",
+               **mi.ResourceExclusions().summary([], ("user_assigned_identity", "system_assigned_identity"),
+                                                 {"user_assigned_identities": 1, "system_assigned_identities": 1})}
+    assert_summary_documented("azure/managed_identity_configuration", summary)
+
+
 def test_graph_role_reads_follow_next_link():
     import entra_graph
 

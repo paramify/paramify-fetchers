@@ -118,6 +118,7 @@ requires:
     - azure-mgmt-web
     - cryptography
     - msgraph-sdk
+    - microsoft-kiota-http
 
 auth:
   passthrough_env:

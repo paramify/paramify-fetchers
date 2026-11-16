@@ -59,6 +59,10 @@ If you have a question about this repo, ask DeepWiki. It answers in plain Englis
     <td align="center" width="128"><a href="fetchers/fedramp_marketplace/"><img src="fetchers/logos/fedramp.png" alt="FedRAMP Marketplace" width="48" height="48"></a><br><sub>FedRAMP Marketplace</sub></td>
     <td align="center" width="128"><a href="fetchers/qualys/"><img src="fetchers/logos/qualys.svg" alt="Qualys" width="48" height="48"></a><br><sub>Qualys</sub></td>
   </tr>
+  <tr>
+    <td align="center" width="128"><a href="fetchers/sophos/"><img src="fetchers/logos/sophos.png" alt="Sophos" width="48" height="48"></a><br><sub>Sophos</sub></td>
+    <td align="center" width="128"><a href="fetchers/cornerstone/"><img src="fetchers/logos/cornerstone.png" alt="Cornerstone" width="48" height="48"></a><br><sub>Cornerstone</sub></td>
+  </tr>
 </table>
 
 </div>
@@ -122,7 +126,7 @@ pip install -e '.[all]'      # '[all]' bundles the TUI; use `pip install -e .` f
 Each platform has its own requirements:
 
 - Most fetchers call a CLI, such as `aws`, `jq`, `curl` or `kubectl`. Install only the CLIs for the platforms that you use.
-- Azure, GCP and Oracle Cloud use the official SDKs, not a CLI. Install them with `pip install -e '.[azure]'`, `pip install -e '.[gcp]'` or `pip install -e '.[oci]'`. These extras are only needed for those platforms, so `[all]` does not include them. Azure signs in with `DefaultAzureCredential` and GCP with Application Default Credentials, so neither one needs a key file. OCI uses an API signing key that the runner injects as a secret, or an instance or resource principal where it is deployed; see [`fetchers/oci/README.md`](fetchers/oci/README.md).
+- Azure, GCP and Oracle Cloud use the official SDKs, not a CLI. Install them with `pip install -e '.[azure]'`, `pip install -e '.[gcp]'` or `pip install -e '.[oci]'`. These extras are only needed for those platforms, so `[all]` does not include them. Azure signs in with `DefaultAzureCredential` and GCP with Application Default Credentials, so neither one needs a key file. For a collector limited to one explicit Azure subscription, see the [Azure read scope guide](docs/azure_read_scope.md). OCI uses an API signing key that the runner injects as a secret, or an instance or resource principal where it is deployed; see [`fetchers/oci/README.md`](fetchers/oci/README.md).
 - Most platforms have a credential setup guide at `fetchers/<category>/README.md`. Select a logo under [Supported services](#supported-services) to open its folder.
 
 ---

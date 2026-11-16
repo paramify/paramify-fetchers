@@ -270,7 +270,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `cm-2`, `cm-3`, `cm-5`, `cm-6`, `cm-7`, `cm-8.1`, `si-3`
 
-*9 fetchers:* [`aws_cloudformation_drift`](../fetchers/aws/cloudformation_drift), [`aws_codepipeline_config`](../fetchers/aws/codepipeline_config), [`azure_app_service_deployments`](../fetchers/azure/app_service_deployments), [`azure_change_provenance`](../fetchers/azure/change_provenance), [`azure_change_work_items`](../comparators/azure/change_work_items), [`azure_container_workloads_configuration`](../fetchers/azure/container_workloads_configuration), [`azure_devops_pipelines`](../fetchers/azure/devops_pipelines), [`github_deployment_controls`](../fetchers/github/deployment_controls), [`gitlab_ci_cd_pipeline_config`](../fetchers/gitlab/ci_cd_pipeline_config)
+*10 fetchers:* [`aws_cloudformation_drift`](../fetchers/aws/cloudformation_drift), [`aws_codepipeline_config`](../fetchers/aws/codepipeline_config), [`azure_app_service_deployments`](../fetchers/azure/app_service_deployments), [`azure_change_provenance`](../fetchers/azure/change_provenance), [`azure_change_work_items`](../comparators/azure/change_work_items), [`azure_container_workloads_configuration`](../fetchers/azure/container_workloads_configuration), [`azure_devops_pipelines`](../fetchers/azure/devops_pipelines), [`github_deployment_controls`](../fetchers/github/deployment_controls), [`github_workflow_runs`](../fetchers/github/workflow_runs), [`gitlab_ci_cd_pipeline_config`](../fetchers/gitlab/ci_cd_pipeline_config)
 
 #### ⬜ `KSI-CMT-RVP` — Reviewing Change Procedures
 
@@ -286,7 +286,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `cm-3`, `cm-3.2`, `cm-4.2`, `si-2`
 
-*9 fetchers:* [`aws_codebuild_pipeline_config`](../fetchers/aws/codebuild_pipeline_config), [`aws_codepipeline_config`](../fetchers/aws/codepipeline_config), [`azure_devops_pipelines`](../fetchers/azure/devops_pipelines), [`github_actions_security`](../fetchers/github/actions_security), [`github_branch_protection`](../fetchers/github/branch_protection), [`github_deployment_controls`](../fetchers/github/deployment_controls), [`github_pull_request_checks`](../fetchers/github/pull_request_checks), [`gitlab_ci_cd_pipeline_config`](../fetchers/gitlab/ci_cd_pipeline_config), [`wiz_code_findings`](../fetchers/wiz/code_findings)
+*10 fetchers:* [`aws_codebuild_pipeline_config`](../fetchers/aws/codebuild_pipeline_config), [`aws_codepipeline_config`](../fetchers/aws/codepipeline_config), [`azure_devops_pipelines`](../fetchers/azure/devops_pipelines), [`github_actions_security`](../fetchers/github/actions_security), [`github_branch_protection`](../fetchers/github/branch_protection), [`github_deployment_controls`](../fetchers/github/deployment_controls), [`github_pull_request_checks`](../fetchers/github/pull_request_checks), [`github_workflow_runs`](../fetchers/github/workflow_runs), [`gitlab_ci_cd_pipeline_config`](../fetchers/gitlab/ci_cd_pipeline_config), [`wiz_code_findings`](../fetchers/wiz/code_findings)
 
 ### RPL — Recovery Planning  (2/2)
 
@@ -330,7 +330,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `cm-2.2`, `cm-7.5`, `cm-8`, `cm-8.1`, `cm-12`, `cm-12.1`, `cp-2.8`
 
-*18 fetchers:* [`aws_detect_new_aws_resource`](../fetchers/aws/detect_new_aws_resource), [`aws_resource_inventory`](../fetchers/aws/resource_inventory), [`azure_entra_service_principals`](../fetchers/azure/entra_service_principals), [`azure_resource_inventory`](../fetchers/azure/resource_inventory), [`azure_sql_managed_instance_configuration`](../fetchers/azure/sql_managed_instance_configuration), [`azure_storage_encryption_status`](../fetchers/azure/storage_encryption_status), [`crowdstrike_hosts`](../fetchers/crowdstrike/hosts), [`datadog_agent_hosts`](../fetchers/datadog/agent_hosts), [`datadog_apm_services`](../fetchers/datadog/apm_services), [`datadog_containers`](../fetchers/datadog/containers), [`github_repository_inventory`](../fetchers/github/repository_inventory), [`gitlab_project_summary`](../fetchers/gitlab/project_summary), [`k8s_eks_pod_inventory`](../fetchers/k8s/eks_pod_inventory), [`rippling_devices`](../fetchers/rippling/devices), [`sentinelone_agents`](../fetchers/sentinelone/agents), [`sentinelone_xdr_assets`](../fetchers/sentinelone/xdr_assets), [`sophos_endpoint_inventory`](../fetchers/sophos/endpoint_inventory), [`wiz_scan_coverage`](../fetchers/wiz/scan_coverage)
+*19 fetchers:* [`aws_detect_new_aws_resource`](../fetchers/aws/detect_new_aws_resource), [`aws_resource_inventory`](../fetchers/aws/resource_inventory), [`azure_entra_service_principals`](../fetchers/azure/entra_service_principals), [`azure_resource_inventory`](../fetchers/azure/resource_inventory), [`azure_sql_managed_instance_configuration`](../fetchers/azure/sql_managed_instance_configuration), [`azure_storage_encryption_status`](../fetchers/azure/storage_encryption_status), [`crowdstrike_hosts`](../fetchers/crowdstrike/hosts), [`datadog_agent_hosts`](../fetchers/datadog/agent_hosts), [`datadog_apm_services`](../fetchers/datadog/apm_services), [`datadog_containers`](../fetchers/datadog/containers), [`github_repository_inventory`](../fetchers/github/repository_inventory), [`gitlab_project_summary`](../fetchers/gitlab/project_summary), [`k8s_eks_pod_inventory`](../fetchers/k8s/eks_pod_inventory), [`rippling_devices`](../fetchers/rippling/devices), [`sentinelone_agents`](../fetchers/sentinelone/agents), [`sentinelone_xdr_assets`](../fetchers/sentinelone/xdr_assets), [`sophos_endpoint_inventory`](../fetchers/sophos/endpoint_inventory), [`wiz_inventory`](../fetchers/wiz/inventory), [`wiz_scan_coverage`](../fetchers/wiz/scan_coverage)
 
 #### `KSI-PIY-RES` — Reviewing Executive Support
 
@@ -418,7 +418,7 @@ python tools/gen_ksi_mapping.py
 
 ## By fetcher
 
-328 of 344 fetchers carry a mapping.
+330 of 346 fetchers carry a mapping.
 
 ### aws  (82)
 
@@ -700,7 +700,7 @@ python tools/gen_ksi_mapping.py
 | [`gcp_secret_manager_configuration`](../fetchers/gcp/secret_manager_configuration) | `KSI-SVC-ASM` |
 | [`gcp_vpc_network_configuration`](../fetchers/gcp/vpc_network_configuration) | `KSI-CNA-ULN` |
 
-### github  (15)
+### github  (16)
 
 | Fetcher | Indicators |
 |---|---|
@@ -719,6 +719,7 @@ python tools/gen_ksi_mapping.py
 | [`github_secret_scanning`](../fetchers/github/secret_scanning) | `KSI-SVC-ASM` |
 | [`github_significant_change_notifications`](../fetchers/github/significant_change_notifications) | `KSI-CMT-LMC` |
 | [`github_vulnerability_disclosure`](../fetchers/github/vulnerability_disclosure) | `KSI-PIY-RVD` |
+| [`github_workflow_runs`](../fetchers/github/workflow_runs) | `KSI-CMT-RMV`, `KSI-CMT-VTD` |
 
 ### gitlab  (4)
 
@@ -852,7 +853,7 @@ python tools/gen_ksi_mapping.py
 | [`splunk_log_source_freshness`](../fetchers/splunk/log_source_freshness) | `KSI-MLA-LET`, `KSI-MLA-OSM` |
 | [`splunk_role_index_access`](../fetchers/splunk/role_index_access) | `KSI-MLA-ALA` |
 
-### wiz  (11)
+### wiz  (12)
 
 | Fetcher | Indicators |
 |---|---|
@@ -863,6 +864,7 @@ python tools/gen_ksi_mapping.py
 | [`wiz_file_integrity_monitoring`](../fetchers/wiz/file_integrity_monitoring) | `KSI-MLA-OSM`, `KSI-SVC-VRI` |
 | [`wiz_host_configuration_posture`](../fetchers/wiz/host_configuration_posture) | `KSI-MLA-EVC`, `KSI-SVC-ACM` |
 | [`wiz_infrastructure_vulnerabilities`](../fetchers/wiz/infrastructure_vulnerabilities) | `KSI-SVC-EIS` |
+| [`wiz_inventory`](../fetchers/wiz/inventory) | `KSI-PIY-GIV` |
 | [`wiz_posture_issues`](../fetchers/wiz/posture_issues) | `KSI-CNA-EIS`, `KSI-SVC-EIS` |
 | [`wiz_scan_coverage`](../fetchers/wiz/scan_coverage) | `KSI-CNA-EIS`, `KSI-PIY-GIV` |
 | [`wiz_tenant_security_settings`](../fetchers/wiz/tenant_security_settings) | `KSI-CNA-RNT`, `KSI-IAM-SNU` |

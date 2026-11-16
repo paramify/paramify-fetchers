@@ -246,9 +246,10 @@ def run_waf(monkeypatch, tmp_path, patterns):
     return _run(waf, monkeypatch, tmp_path, patterns, "azure_front_door_waf_policies")
 
 
-def test_waf_policies_without_patterns_add_only_empty_exclusion_fields(monkeypatch, tmp_path):
+def test_waf_policies_without_patterns_add_only_empty_exclusion_fields(monkeypatch, tmp_path, assert_summary_documented):
     code, evidence = run_waf(monkeypatch, tmp_path, None)
     assert code == 0 and evidence["results"]["excluded"] == []
+    assert_summary_documented("azure/front_door_waf_policies", evidence["summary"])
     records = sorted((fd.waf_policy_record(p) for p in WAF_POLICIES[:3]), key=lambda r: r["id"].lower())
     assert evidence["results"]["waf_policies"] == records
     assert evidence["summary"] == {

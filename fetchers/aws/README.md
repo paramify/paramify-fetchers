@@ -9,6 +9,67 @@ AWS fetchers pull evidence and scan reports from your AWS accounts using the AWS
 - [`inspector_ecr_findings`](inspector_ecr_findings/README.md) collects detailed active findings, image inventory and coverage as evidence.
 - [`inspector_ecr_report`](inspector_ecr_report/README.md) converts the same Inspector APIs to a CSV for a Paramify vulnerability assessment. The existing uploader posts it directly to the intake API. No S3 bucket or KMS key is needed.
 
+## Config inventory prerequisites
+
+[`aws_config_inventory`](config_inventory/fetcher.yaml) reads a Config aggregator
+once for its entire scope. It supports commercial AWS and GovCloud; each partition
+needs its own credentials and aggregator. See the [inventory manifest and pipeline
+setup](../../docs/inventory_fetchers_guide.md).
+
+Before collecting:
+
+1. **Enable and start AWS Config recording in every intended account and region**, including
+   regions where you do not normally deploy. Configure the recorder's IAM role and
+   delivery channel. Include the resource types you want to inventory, especially
+   `AWS::EC2::Instance`; the fetcher's `resource_types` option cannot enable recording.
+   [AWS recorder setup](https://docs.aws.amazon.com/config/latest/developerguide/manual-setup.title.html).
+2. **Choose recording frequency deliberately.** Continuous recording follows resource
+   changes; daily recording can lag by a day and is unsuitable when you need frequent
+   inventory refreshes. Both still incur aggregation delay.
+   [Recording frequency](https://docs.aws.amazon.com/config/latest/developerguide/managing-recorder_console-change-recording-frequency.html).
+3. **Configure the aggregator's scope.** An organization aggregator requires the management
+   account or a properly registered delegated administrator, plus an aggregation role
+   that can read Organizations. For individual-account aggregators, authorize collection
+   from each source account/region. Choose `AllAwsRegions: true` on every source to
+   include regions outside your deployment list. This enables aggregation, **not recording**.
+   [Aggregator setup](https://docs.aws.amazon.com/config/latest/developerguide/aggregated-create.html),
+   [source authorization](https://docs.aws.amazon.com/config/latest/developerguide/aggregated-add-authorization.html).
+4. **Grant the fetcher read access in the aggregator account:**
+   `config:DescribeConfigurationAggregators`,
+   `config:DescribeConfigurationAggregatorSourcesStatus`, and
+   `config:SelectAggregateResourceConfig`. For cross-account collection, also configure
+   the runner's `sts:AssumeRole` permission and the reader role's trust policy.
+   The fetcher never changes Config settings.
+
+Check each source account/region with its own credentials:
+
+```bash
+aws configservice describe-configuration-recorders --profile source-account --region us-east-1
+aws configservice describe-configuration-recorder-status --profile source-account --region us-east-1
+```
+
+Confirm the desired types are included and the recorder reports `recording: true`.
+Then check the aggregator using the collection profile:
+
+```bash
+aws configservice describe-configuration-aggregators --configuration-aggregator-names organization-inventory --profile inventory-reader --region us-east-1
+aws configservice describe-configuration-aggregator-sources-status --configuration-aggregator-name organization-inventory --profile inventory-reader --region us-east-1
+```
+
+For GovCloud, substitute the GovCloud profile and aggregator region, such as
+`us-gov-west-1`. The fetcher requires nonempty source statuses, all `SUCCEEDED`;
+`FAILED` or `OUTDATED` blocks upload. Successful status verifies aggregator source
+health, not that every recorder is enabled. Compare the configured scope against
+your account/region inventory; this fetcher makes no independent EC2 scan.
+
+Global resources have special recording regions. Avoid recording the same global
+IAM resources in multiple regions; duplicate asset identifiers cause the fetcher
+to withhold the inventory. See [AWS resource recording guidance](https://docs.aws.amazon.com/config/latest/developerguide/select-resources.html).
+
+For ongoing coverage, automate Config onboarding for new accounts and regions and
+consider SCPs that prevent unauthorized recording changes. SCPs constrain permissions;
+they do not enable Config or start recorders.
+
 ## Credential setup
 
 Use a dedicated read-only role or IAM policy for evidence collection rather than admin credentials.
