@@ -139,3 +139,71 @@ def test_welcome_relative_reads_old_and_suffixed_run_ids():
     old = "2020-01-02T03-04-05Z"
     assert WelcomeScreen._relative(old) != old
     assert WelcomeScreen._relative(old + "-a1f3") == WelcomeScreen._relative(old)
+
+
+def test_a_pipeline_entry_ignores_an_inherited_direct():
+    m = parse_manifest({"run": {"paramify": {"delivery": "direct", "no_request": "direct", "approval": "MANUAL"},
+                                "fetchers": [{"use": "x"}, {"use": "y", "paramify": {"no_request": "direct"}}]}})
+    x, y = m.entries
+    assert resolved_paramify(m, x, pipeline=True) == {"delivery": "auto", "no_request": "evidence", "approval": "MANUAL"}
+    assert resolved_paramify(m, x) == {"delivery": "direct", "no_request": "direct", "approval": "MANUAL"}
+    # The entry's own setting stays (validate refuses it).
+    assert resolved_paramify(m, y, pipeline=True) == {"delivery": "auto", "no_request": "direct", "approval": "MANUAL"}
+
+
+def test_run_metadata_records_the_pipeline_defaults_under_a_run_level_direct(tmp_path, repo_root, monkeypatch):
+    import dataclasses
+
+    from framework.contract import Pipeline
+    real = api.discover_fetchers
+
+    def with_pipeline(root):
+        found = dict(real(root))
+        found["demo_hello"] = dataclasses.replace(found["demo_hello"], pipeline=Pipeline("inventory", "x-id"))
+        return found
+
+    monkeypatch.setattr(api, "discover_fetchers", with_pipeline)
+    manifest = {"run": {"output_dir": str(tmp_path / "out"), "paramify": {"no_request": "direct"},
+                        "fetchers": [{"use": "demo_hello"}]}}
+    summary = api.run(manifest, repo_root)
+    meta = json.loads((tmp_path / "out" / f"run-{summary['run_id']}" / "_run_metadata.json").read_text())
+    assert meta["paramify"]["demo_hello"]["no_request"] == "evidence"
+
+
+def test_run_metadata_keeps_a_run_level_direct_for_an_ordinary_entry(tmp_path, repo_root):
+    manifest = {"run": {"output_dir": str(tmp_path / "out"), "paramify": {"no_request": "direct"},
+                        "fetchers": [{"use": "demo_hello"}]}}
+    summary = api.run(manifest, repo_root)
+    meta = json.loads((tmp_path / "out" / f"run-{summary['run_id']}" / "_run_metadata.json").read_text())
+    assert meta["paramify"]["demo_hello"] == {"use": "demo_hello", "no_request": "direct"}
+
+
+def test_new_manifest_path_records_a_picked_stack(tmp_path):
+    path = api.new_manifest_path(tmp_path, "aws-prod", stack="stk-1", stack_name="Alpha")
+    assert path == tmp_path / "manifests" / "aws-prod.yaml"
+    run = yaml.safe_load(path.read_text())["run"]
+    assert run["paramify"] == {"stack": "stk-1", "stack_name": "Alpha"}
+    assert run["fetchers"] == []
+
+
+def test_new_manifest_path_without_a_stack_writes_no_paramify_block(tmp_path):
+    path = api.new_manifest_path(tmp_path, "aws-prod")
+    assert "paramify" not in yaml.safe_load(path.read_text())["run"]
+
+
+def test_new_manifest_target_checks_the_name_without_writing(tmp_path):
+    assert api.new_manifest_target(tmp_path, " aws-prod ") == tmp_path / "manifests" / "aws-prod.yaml"
+    assert not (tmp_path / "manifests").exists()
+    for bad in ("", "  ", "a/b", ".hidden"):
+        try:
+            api.new_manifest_target(tmp_path, bad)
+        except ValueError:
+            continue
+        raise AssertionError(f"{bad!r} was accepted")
+    api.new_manifest_path(tmp_path, "taken")
+    try:
+        api.new_manifest_target(tmp_path, "taken.yaml")
+    except FileExistsError:
+        pass
+    else:
+        raise AssertionError("an existing manifest was accepted")

@@ -112,7 +112,9 @@ def _fanout_manifest(tmp_path: Path):
 
 
 async def _open_targets(app, pilot):
-    await pilot.press("2")          # manifest tab
+    await pilot.press("1")          # Fetchers tab
+    await pilot.pause()
+    await pilot.press("tab")  # from the catalog to the manifest list
     await pilot.pause()
     await pilot.press("t")
     await pilot.pause()
@@ -213,7 +215,9 @@ def test_the_entry_editor_says_where_targets_are_edited(tmp_path, run_tui):
     manifest, name, fields = _fanout_manifest(tmp_path)
 
     async def body(app, pilot):
-        await pilot.press("2")
+        await pilot.press("1")
+        await pilot.pause()
+        await pilot.press("tab")  # from the catalog to the manifest list
         await pilot.pause()
         await pilot.press("e")
         await pilot.pause()
@@ -256,7 +260,9 @@ def _duplicate_fanout_manifest(tmp_path: Path):
 
 
 async def _select_second_entry(app, pilot):
-    await pilot.press("2")
+    await pilot.press("1")
+    await pilot.pause()
+    await pilot.press("tab")  # from the catalog to the manifest list
     await pilot.pause()
     await pilot.press("down")
     await pilot.pause()

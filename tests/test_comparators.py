@@ -512,7 +512,7 @@ def test_a_half_written_input_is_missing_not_compared(tmp_path):
 ])
 def test_an_inventory_input_the_runner_marked_incomplete_is_not_complete(tmp_path, payload, state, reason):
     left = input_fetcher(tmp_path, "left")
-    right = input_fetcher(tmp_path, "right", raw=json.dumps(payload), extra="kind: inventory\n")
+    right = input_fetcher(tmp_path, "right", raw=json.dumps(payload), extra="kind: inventory\npipeline: {type: inventory, id_scheme: t-id}\n")
     cmp = template_comparator(tmp_path, left, right)
     _, run_dir, _ = run(tmp_path, manifest(tmp_path, left, right, cmp))
 

@@ -1,13 +1,7 @@
 name: azure_managed_redis_configuration
 version: 0.2.1
-description: >
-  For each Azure Managed Redis (Microsoft.Cache/redisEnterprise) cluster in the
-  subscription, and each database on it, reports the transport and access posture:
-  the cluster's minimum TLS version, public network access and private endpoint
-  connections, customer-managed-key encryption, and per database the client protocol
-  (Encrypted = TLS only, Plaintext = non-TLS accepted), whether access-key
-  authentication is disabled so only Entra ID can be used, persistence and
-  geo-replication. Classic Azure Cache for Redis (Microsoft.Cache/redis) is not read.
+description: >-
+  Shows each Azure Managed Redis cluster's transport and access posture: minimum TLS version, public network access, private endpoints, customer-managed-key encryption, and per database the client protocol and key authentication.
 category: azure
 
 config_schema:
@@ -72,27 +66,46 @@ ksis:
 evidence_set:
   reference_id: EVD-AZURE-MANAGED-REDIS-CONFIG
   name: Azure Managed Redis Configuration
-  instructions: >
-    Script: azure/managed_redis_configuration/fetcher.py. Azure SDK calls (azure-mgmt-redisenterprise
-    RedisEnterpriseManagementClient): redis_enterprise.list() for every cluster in the
-    subscription, then databases.list_by_cluster(resource_group, cluster) for each.
-    Access keys are never listed. minimum_tls_version comes from the cluster;
-    client_protocol and access_keys_authentication from each database.
-    tls_only is true when the cluster floor is 1.2 or higher AND the cluster has at least
-    one database AND every database's client_protocol is Encrypted; it is null (unknown)
-    when the database list could not be read (databases_read false). entra_only is true when every database has
-    access_keys_authentication Disabled. private_only is true when public network
-    access is Disabled and at least one private endpoint connection is Approved.
-    public_network_access is null on clusters created before Azure returned the property;
-    null is counted as not disabled and tallied in summary.public_network_access_unset_clusters.
-    summary.total_clusters and summary.total_databases are the counts collected.
+  instructions: |
+    Script: azure/managed_redis_configuration/fetcher.py
 
-    Clusters the resource_exclusions patterns take out are listed under results.excluded instead,
-    each with the pattern that matched; their databases are never read and leave with them, so
-    summary.total_databases and the database counts cover only in-scope clusters.
+    Access: Reader on the subscription. Classic Azure Cache for Redis (Microsoft.Cache/redis) is not read. Access keys are never listed.
+
+    Commands Executed:
+    - subscriptions.list() — picks a subscription when none is set
+    - providers.get("Microsoft.Cache") — tells "Redis not in use" from "no clusters"
+    - redis_enterprise.list() — every Azure Managed Redis cluster in the subscription
+    - databases.list_by_cluster() (per in-scope cluster) — each database's client protocol, access-key authentication, persistence and geo-replication
+
+    Output: azure_managed_redis_configuration_<subscription>.json — each cluster with its databases and posture verdicts, plus the clusters left out and why.
+
+    Summary fields:
 
     Which resources are left out of scope?
-      - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every cluster is in scope
-      - resource_exclusion_patterns_unmatched — List of configured patterns that matched no cluster, such as a mistyped name, or null when the list could not be read
-      - excluded_redis_clusters — Number of clusters left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, and no other count includes them or their databases; null if the list couldn't be read
-      - in_scope_redis_clusters — Number of clusters read and in scope; null if the list couldn't be read, and 0 means there are none or the patterns took out every cluster, which a check can catch by requiring more than 0
+    - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every cluster is in scope
+    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no cluster, such as a mistyped name; null when the cluster list could not be read
+    - excluded_redis_clusters — Number of clusters left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, gets no database read, and no other count includes it or its databases; null when the cluster list could not be read
+    - in_scope_redis_clusters — Number of clusters read and in scope; null when the cluster list could not be read; 0 means there are none or the patterns took out every cluster, which a check can catch by requiring more than 0
+
+    Which clusters and databases exist?
+    - total_clusters — Number of in-scope clusters; every cluster count below is out of this total; reads 0, not null, when the cluster list could not be read, so read it together with in_scope_redis_clusters
+    - total_databases — Number of databases read across the in-scope clusters; clusters whose database list could not be read add none
+    - provider_registration_status — Whether the Redis provider (Microsoft.Cache) is registered on the subscription: registered, not_registered or unknown
+    - databases_unread_clusters — Number of clusters whose database list could not be read, so both per-cluster verdicts are null: tls_only (minimum TLS 1.2 or higher, at least one database, and every database Encrypted) and entra_only (at least one database, and every database with access-key authentication Disabled)
+
+    Is traffic encrypted?
+    - tls_only_clusters — Number of clusters with a minimum TLS version of 1.2 or higher, at least one database, and every database accepting only encrypted client connections; clusters whose database list could not be read are not counted
+    - tls_only_percentage — Percentage of clusters that are TLS-only = tls_only_clusters / total_clusters × 100 (a whole number, rounded down; reads 0 when total_clusters is 0); clusters whose database list could not be read count in the total but never as TLS-only
+    - recommended_minimum_tls_clusters — Number of clusters whose minimum TLS version is 1.2 or 1.3; a cluster with no minimum version is not counted
+    - encrypted_protocol_databases — Number of databases whose client protocol is Encrypted (TLS only)
+    - plaintext_protocol_databases — Number of databases that do not require an encrypted client protocol (Plaintext, which accepts non-TLS connections, or no protocol reported)
+    - customer_managed_key_clusters — Number of clusters encrypted with a customer-managed key
+
+    Who can reach the clusters?
+    - public_network_access_disabled_clusters — Number of clusters with public network access set to Disabled; a cluster that reports none is not counted
+    - public_network_access_unset_clusters — Number of clusters that report no public network access setting (older clusters from before Azure returned it), which count as not disabled
+    - private_only_clusters — Number of clusters with public network access Disabled and at least one Approved private endpoint connection
+
+    How do clients authenticate?
+    - access_keys_disabled_databases — Number of databases with access-key authentication Disabled, so only Microsoft Entra ID can be used
+    - access_keys_enabled_databases — Number of databases not reporting access-key authentication Disabled, including those reporting nothing, which are treated as Enabled (the service default before 2024)

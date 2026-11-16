@@ -115,6 +115,9 @@ def _outputs() -> dict:
             ("upload_dry_run", ["upload", "--dry-run", str(run_dir.relative_to(REPO_ROOT))]),
         ):
             outputs[name] = _capture(args, _paramify(args))
+        # No run under this directory, so the sheet is the same on every machine.
+        args = ["preset", "sophos_endpoint_inventory", "--output-dir", "tests/goldens/cli/no-runs"]
+        outputs["preset"] = _capture(args, _paramify(args))
     finally:
         # Only the run this script started: another run in the checkout may be writing beside it.
         if run_dir is not None:

@@ -292,6 +292,16 @@ def test_sql_encryption_counts_only_in_scope_instances_and_their_databases(monke
     assert summary["resource_exclusion_patterns_unmatched"] == ["rg:typo"]
 
 
+def test_sql_encryption_summary_matches_the_instructions(monkeypatch, tmp_path, assert_summary_documented):
+    _, evidence = run_sql(monkeypatch, tmp_path, encryption, PATTERNS)
+    assert_summary_documented("azure/sql_managed_instance_encryption", evidence["summary"])
+
+
+def test_sql_backups_summary_matches_the_instructions(monkeypatch, tmp_path, assert_summary_documented):
+    _, evidence = run_sql(monkeypatch, tmp_path, backups, PATTERNS)
+    assert_summary_documented("azure/sql_managed_instance_backups", evidence["summary"])
+
+
 def test_sql_backups_without_patterns_add_only_empty_exclusion_fields(monkeypatch, tmp_path):
     code, evidence = run_sql(monkeypatch, tmp_path, backups, None)
     summary, results = evidence["summary"], evidence["results"]
@@ -542,10 +552,11 @@ def test_log_analytics_unread_workspace_list_leaves_unmatched_patterns_null(monk
     assert "matched nothing" not in caplog.text
 
 
-def test_log_analytics_excludes_by_group_and_region(monkeypatch, tmp_path):
+def test_log_analytics_excludes_by_group_and_region(monkeypatch, tmp_path, assert_summary_documented):
     code, evidence = run_law(monkeypatch, tmp_path, PATTERNS)
     summary, results = evidence["summary"], evidence["results"]
     assert code == 0
+    assert_summary_documented("azure/log_analytics_workspaces", summary)
     assert [w["name"] for w in results["workspaces"]] == ["law-in"]
     assert _excluded(results) == [("workspace", "law-out", "rg:rg-out"),
                                   ("workspace", "law-south", "location:regionsouth")]

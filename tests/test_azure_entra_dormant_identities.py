@@ -648,7 +648,7 @@ class Session:
     def __init__(self, answers):
         self.answers, self.urls = answers, []
 
-    def get(self, url, headers=None, params=None, timeout=None):
+    def get(self, url, headers=None, params=None, timeout=None, allow_redirects=True):
         self.urls.append(url)
         return self.answers[url]
 
