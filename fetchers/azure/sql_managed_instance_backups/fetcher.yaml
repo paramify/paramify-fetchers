@@ -1,5 +1,5 @@
 name: azure_sql_managed_instance_backups
-version: 0.4.1
+version: 0.5.0
 description: >-
   Shows whether each SQL Managed Instance's databases keep enough backup retention, whether backup storage and compute survive a zone or region loss, and the failovers run recently.
 category: azure
@@ -106,33 +106,33 @@ evidence_set:
     - excluded_managed_instances — Number of managed instances left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, its databases and their retention are never read, and no other count includes it
     - excluded_instance_failover_groups — Number of instance failover groups left out of scope because every instance of the group in this subscription is excluded; each is listed under excluded, naming that instance in matched_id
     - excluded_failovers — Number of failovers of an excluded failover group or instance, or of one no longer listed whose resource id a pattern matches; null when the failover history wasn't read in full, since no failover was tested against the patterns
-    - in_scope_managed_instances — Number of managed instances read and in scope; 0 means none was read or the patterns took out every instance, which a check can catch by requiring more than 0
-    - in_scope_instance_failover_groups — Number of instance failover groups read and in scope; 0 means none was read or the patterns took out every group
+    - in_scope_managed_instances — Number of managed instances read and in scope; null when the instance list could not be read; 0 means none was read or the patterns took out every instance, which a check can catch by requiring more than 0
+    - in_scope_instance_failover_groups — Number of instance failover groups read and in scope; null when the instance list could not be read or a failover group list failed for a resource group and region holding an in-scope instance; 0 means none was read or the patterns took out every group
     - in_scope_failovers — Number of failovers read and in scope; null when the failover history wasn't read in full
 
     What was checked?
-    - total_managed_instances — Number of in-scope SQL Managed Instances; reads 0, not null, when the instance list could not be read (the run then fails)
+    - total_managed_instances — Number of in-scope SQL Managed Instances; null when the instance list could not be read (the run then fails), as is every count below that is built from instances
     - total_user_databases — Number of user databases on in-scope instances (system databases left out); null if any instance's database list couldn't be read
     - instances_stopped — Number of instances whose state is Stopped; Azure takes no backups while an instance is stopped, so read retention together with this
     - provider_registration_status — Whether the SQL provider (Microsoft.Sql) is registered on the subscription: registered, not_registered or unknown
 
     Do databases keep short-term (point-in-time-restore) backups long enough?
-    - databases_retention_at_least_7_days — Number of user databases whose point-in-time-restore retention is 7 days or more (Azure's default is 7; the range is 1 to 35)
-    - databases_retention_below_7_days — Number of user databases whose retention policy was read and is under 7 days
-    - databases_missing_retention_policy — Number of user databases with no short-term retention policy (the read answered 404)
-    - databases_retention_unknown — Number of user databases whose retention couldn't be judged because the policy read failed or returned no day count; a database with no policy is in databases_missing_retention_policy instead
+    - databases_retention_at_least_7_days — Number of user databases whose point-in-time-restore retention is 7 days or more (Azure's default is 7; the range is 1 to 35); null when any instance's database list couldn't be read
+    - databases_retention_below_7_days — Number of user databases whose retention policy was read and is under 7 days; null when any instance's database list couldn't be read
+    - databases_missing_retention_policy — Number of user databases with no short-term retention policy (the read answered 404); null when any instance's database list couldn't be read
+    - databases_retention_unknown — Number of user databases whose retention couldn't be judged because the policy read failed or returned no day count; a database with no policy is in databases_missing_retention_policy instead; null when any instance's database list couldn't be read
 
     Are long-term backups kept?
-    - databases_with_long_term_retention — Number of user databases with a weekly, monthly or yearly long-term retention tier on (a duration of PT0S or none means that tier is off)
-    - databases_long_term_retention_unknown — Number of user databases whose long-term retention policy couldn't be read, so they count in neither field above nor as unconfigured
+    - databases_with_long_term_retention — Number of user databases with a weekly, monthly or yearly long-term retention tier on (a duration of PT0S or none means that tier is off); null when any instance's database list couldn't be read
+    - databases_long_term_retention_unknown — Number of user databases whose long-term retention policy couldn't be read, so they count in neither field above nor as unconfigured; null when any instance's database list couldn't be read
 
     Is backup storage redundant?
-    - instances_by_current_backup_storage_redundancy — Number of instances for each backup storage redundancy currently in effect, keyed by the value Azure reports (Local, Zone, Geo or GeoZone), or unknown when it reports none; a change to the requested value applies only to future backups and can take up to 24 hours. Geo keeps its primary-region copies in a single availability zone
+    - instances_by_current_backup_storage_redundancy — Number of instances for each backup storage redundancy currently in effect, keyed by the value Azure reports (Local, Zone, Geo or GeoZone), or unknown when it reports none, and null when the instance list could not be read; a change to the requested value applies only to future backups and can take up to 24 hours. Geo keeps its primary-region copies in a single availability zone
     - instances_backup_storage_zone_redundant — Number of instances whose current backup storage redundancy is Zone or GeoZone
 
     Does the instance survive a zone or region loss?
     - instances_zone_redundant — Number of instances with compute zone redundancy on, a setting separate from backup storage redundancy (Azure omits it when off, so absent counts as off)
-    - instances_in_failover_group — Number of instances that are in an instance failover group
+    - instances_in_failover_group — Number of instances that are in an instance failover group; null when any instance's failover group membership is unknown
     - instances_failover_group_unknown — Number of instances whose failover group membership is unknown: the failover group list for their resource group and region failed and no other region's list showed them in a group
     - total_instance_failover_groups — Number of in-scope instance failover groups, each counted once although Azure lists it from every region it spans; null if a failover group list failed for a resource group and region holding an in-scope instance (a failed list where every instance is excluded is only logged as a warning, and the run doesn't fail)
     - failover_groups_manual_policy — Number of failover groups whose failover policy is Manual, so a failover needs someone to start it; null if a failover group list failed for a resource group and region holding an in-scope instance
