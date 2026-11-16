@@ -1756,6 +1756,12 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **Checkov is installed in its own environment.** `requirements.txt`, the `checkov` extra and `all` no longer install
+  the `checkov` package, and the Docker image puts it in its own virtualenv with only the `checkov` executable on
+  `PATH`. Checkov pins exact versions of libraries other fetchers also use, such as boto3, so sharing an environment
+  held those back. Install it with `pipx install checkov`. The `checkov` extra still installs azure-identity for
+  `checkov_bicep`. `INSTALL_EXTRAS` without `checkov` still builds the image without it.
+
 - **`collection_succeeded` now covers two Entra evidence sets.** It is listed
   against `EVD-AZURE-ENTRA-APP-CREDS` (`azure_entra_app_registrations`) and
   `EVD-AZURE-ENTRA-SERVICE-PRINCIPALS` (`azure_entra_service_principals`), so a
