@@ -26,7 +26,7 @@ import sys
 import tempfile
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -40,6 +40,7 @@ from typing import (
     Optional,
     Set,
     Tuple,
+    Union,
 )
 
 from framework import patterns
@@ -1095,16 +1096,18 @@ def _run_concurrently(fetcher, entry, output_dir, inv_dir, setup, on_line,
                 prepared.append((target, stage, *setup(target, stage)))
             # Submitted only once every note is out, so on_note (this thread) and
             # on_line (the workers) are never called at the same time.
-            pending = [
-                (None, env, stage) if secrets_seen is None
-                else (pool.submit(work, target, env, secrets_seen, stage), None, stage)
+            # Each item is the submitted invocation, or the result of a target whose setup failed.
+            pending: List[Tuple[Union["Future[InvocationResult]", InvocationResult], Path]] = [
+                (env if secrets_seen is None else pool.submit(work, target, env, secrets_seen, stage), stage)
                 for target, stage, env, secrets_seen in prepared
             ]
             try:
-                for future, failed, stage in pending:
-                    result = failed if future is None else future.result()
-                    if future is not None:
-                        _merge_staged(result, stage, inv_dir, rel)
+                for item, stage in pending:
+                    if isinstance(item, InvocationResult):
+                        results.append(item)
+                        continue
+                    result = item.result()
+                    _merge_staged(result, stage, inv_dir, rel)
                     results.append(result)
             except BaseException:
                 pool.shutdown(wait=False, cancel_futures=True)
