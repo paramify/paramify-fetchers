@@ -10,18 +10,24 @@ The runner's contract with a fetcher:
 - Capture stdout, stderr, exit code, duration
 - Diff the output dir to discover what files the fetcher wrote
 - Continue on per-target failures (each target is its own failure domain)
+- With an entry's `concurrency` above 1, run up to that many targets at once,
+  each writing to its own staging dir that is moved into place in target order
 - For a comparator: set COMPARATOR_INPUTS to an index of its inputs' files, and
   pass no category secrets, config or passthrough env
 """
 
 import json
 import os
+import secrets
+import shutil
 import signal
 import subprocess
 import sys
 import tempfile
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import (
@@ -32,6 +38,7 @@ from typing import (
     List,
     NamedTuple,
     Optional,
+    Set,
     Tuple,
 )
 
@@ -96,6 +103,13 @@ _STATUS_ERROR_MAX_CHARS = 4000
 # error_code the runner sets when an invocation overwrote or deleted a file an
 # earlier invocation in the same run wrote (see _clobbered).
 OUTPUT_OVERWRITTEN_CODE = "output_overwritten"
+# Exit code the runner records for an invocation it never started (setup failed).
+_NOT_STARTED_EXIT_CODE = 255
+# Prefix of the per-invocation staging dirs a concurrent fan-out writes to. A dot
+# dir inside the run dir: the same filesystem as the destination, so moving the
+# files into place is a rename, and no uploader collects it (they read top-level
+# files). It is removed once the entry finishes.
+_STAGING_PREFIX = ".paramify-staging-"
 
 
 class _FileId(NamedTuple):
@@ -138,15 +152,20 @@ def _clobbered(before: Dict[str, _FileId], directory: Path) -> Tuple[List[str], 
     after = _file_ids(directory)
     overwritten = sorted(n for n, fid in before.items() if n in after and after[n] != fid)
     deleted = sorted(n for n in before if n not in after)
+    return overwritten, _clobber_reason(overwritten, deleted)
+
+
+def _clobber_reason(overwritten: List[str], deleted: List[str]) -> Optional[str]:
+    """Why an invocation fails for writing over or deleting earlier files, or None if it did neither."""
     if not overwritten and not deleted:
-        return [], None
+        return None
     parts = []
     if overwritten:
         parts.append("overwrote " + ", ".join(overwritten))
     if deleted:
         parts.append("deleted " + ", ".join(deleted))
-    return overwritten, (f"{' and '.join(parts)}, which an earlier entry or target wrote in this run. "
-                         "Give each entry its own target, or remove the duplicate entry.")
+    return (f"{' and '.join(parts)}, which an earlier entry or target wrote in this run. "
+            "Give each entry its own target, or remove the duplicate entry.")
 
 
 def _redact(text: str, secret_values) -> str:
@@ -615,6 +634,61 @@ def _kill_process_group(proc: subprocess.Popen) -> None:
             pass
 
 
+class _Running:
+    """The fetcher processes one concurrent fan-out has running, so an interrupt can stop them all.
+
+    stop() kills every one and marks the fan-out stopped; a process added after
+    that is killed at once, which covers a worker that started its fetcher
+    while the interrupt was being handled.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._procs: Set[subprocess.Popen] = set()
+        self._stopped = False
+
+    def add(self, proc: subprocess.Popen) -> None:
+        with self._lock:
+            self._procs.add(proc)
+            stopped = self._stopped
+        if stopped:
+            _kill_process_group(proc)
+
+    def discard(self, proc: subprocess.Popen) -> None:
+        with self._lock:
+            self._procs.discard(proc)
+
+    def stop(self) -> None:
+        with self._lock:
+            self._stopped = True
+            procs = list(self._procs)
+        for proc in procs:
+            _kill_process_group(proc)
+
+
+@contextmanager
+def sigterm_exits():
+    """Turn SIGTERM into SystemExit(143) for the duration, so a terminated run stops its fetchers.
+
+    Python's default SIGTERM ends the process without unwinding, which leaves
+    every running fetcher behind in its own session. As an exception, it reaches
+    the same cleanup as Ctrl-C. Signal handlers can only be set from the main
+    thread; anywhere else this does nothing.
+    """
+    if threading.current_thread() is not threading.main_thread():
+        yield
+        return
+
+    def handler(signum, frame):
+        raise SystemExit(128 + signum)
+
+    previous = signal.signal(signal.SIGTERM, handler)
+    try:
+        yield
+    finally:
+        signal.signal(signal.SIGTERM, previous)
+
+
 def _drain(stream, sink: List[str], on_line: Optional[Callable[[str], None]],
            secret_values=None) -> None:
     """Read a subprocess pipe to EOF, accumulating lines and optionally
@@ -653,6 +727,7 @@ def _invoke(
     inputs_index: Optional[dict] = None,
     entry_key: Optional[str] = None,
     patterns_meta: Optional[Dict[str, List[dict]]] = None,
+    running: Optional[_Running] = None,
 ) -> InvocationResult:
     """Run one fetcher invocation.
 
@@ -716,6 +791,8 @@ def _invoke(
         t_out.start()
         t_err.start()
 
+        if running is not None:
+            running.add(proc)
         timed_out = False
         try:
             proc.wait(timeout=timeout)
@@ -723,6 +800,15 @@ def _invoke(
             timed_out = True
             _kill_process_group(proc)
             proc.wait()
+        except BaseException:
+            # Ctrl-C or a SIGTERM turned into SystemExit: the fetcher is in its
+            # own session, so nothing else would stop it.
+            _kill_process_group(proc)
+            proc.wait()
+            raise
+        finally:
+            if running is not None:
+                running.discard(proc)
 
         # The group kill closes every inherited pipe write end, so both threads
         # see EOF. The deadline is belt-and-braces, and it covers the case a
@@ -756,19 +842,9 @@ def _invoke(
     rel = output_dir.relative_to(run_dir) if output_dir != run_dir else None
     outputs = sorted(f"{rel}/{name}" if rel else name for name in (after - before))
 
-    # A file the invocation wrote over is not one of its outputs (its name was
-    # there before), so it would be lost without a word. Fail the invocation the
-    # way a timeout does: a non-zero exit, a reason, and the runner's own code.
     overwritten, clobber = _clobbered(before_ids, output_dir)
-    overwritten = [f"{rel}/{name}" if rel else name for name in overwritten]
-    if clobber:
-        if exit_code == 0:
-            exit_code = 1
-        error = f"{error}; {clobber}" if error else clobber
-        error_code = error_code or OUTPUT_OVERWRITTEN_CODE
-        stderr += f"\nrunner: {clobber}"
 
-    return InvocationResult(
+    result = InvocationResult(
         fetcher_name=fetcher.name,
         fetcher_version=fetcher.version,
         target=target.values if target else None,
@@ -783,8 +859,26 @@ def _invoke(
         error_code=error_code,
         entry_key=entry_key,
         config_patterns=patterns_meta,
-        overwritten=overwritten,
     )
+    _fail_for_clobber(result, [f"{rel}/{name}" if rel else name for name in overwritten], clobber)
+    return result
+
+
+def _fail_for_clobber(result: InvocationResult, overwritten: List[str], clobber: Optional[str]) -> None:
+    """Record what the invocation wrote over, and fail it if it overwrote or deleted earlier files.
+
+    A file the invocation wrote over is not one of its outputs (its name was
+    there before), so it would be lost without a word. Fail the invocation the
+    way a timeout does: a non-zero exit, a reason, and the runner's own code.
+    """
+    result.overwritten = overwritten
+    if not clobber:
+        return
+    if result.exit_code == 0:
+        result.exit_code = 1
+    result.error = f"{result.error}; {clobber}" if result.error else clobber
+    result.error_code = result.error_code or OUTPUT_OVERWRITTEN_CODE
+    result.stderr += f"\nrunner: {clobber}"
 
 
 def _emit_notes(
@@ -858,6 +952,9 @@ def run_entry(
     A comparator gets `inputs_index` as $COMPARATOR_INPUTS. Callers pick the
     category blocks with contract.platform_for, which gives a comparator none: no
     secrets, config or passthrough env, so it gets no credentials from the runner.
+
+    `entry.concurrency` above 1 runs up to that many targets at once (see
+    _run_concurrently). Results are in target order either way.
     """
     output_dir.mkdir(parents=True, exist_ok=True)
     inv_dir = invocation_dir(fetcher, output_dir)
@@ -893,37 +990,177 @@ def run_entry(
         return [_invoke(fetcher, env, None, inv_dir, on_line, secrets_seen, output_dir,
                         entry_key=entry_key, patterns_meta=patterns_meta)]
 
-    results = []
-    for target in entry.targets:
+    def setup(target: TargetInstance, env_dir: Path):
+        """The env and seen secrets for one target, or the failed result if it cannot be set up."""
+        secrets_seen: set = set()
         try:
-            secrets_seen = set()
-            notes = []
+            notes: List[Tuple[str, str]] = []
             shadowed: List[Tuple[str, str]] = []
-            env = _build_env(fetcher, entry, target, inv_dir, platform_spec, platform_cfg,
+            env = _build_env(fetcher, entry, target, env_dir, platform_spec, platform_cfg,
                              secrets_seen, notes, shadowed, merged)
             _emit_notes(notes, on_note)
             _emit_shadowed(shadowed, on_note)
-            results.append(_invoke(fetcher, env, target, inv_dir, on_line, secrets_seen, output_dir,
-                                   entry_key=entry_key, patterns_meta=patterns_meta))
+            return env, secrets_seen
         except (RuntimeError, SecretResolutionError) as e:
-            now = _utc_now()
             # The fetcher never ran, so it had no chance to report anything. The
             # runner knows exactly what went wrong here, so it fills the channel
             # in itself rather than leaving the envelope to guess from stderr.
             reason = _redact(f"runner: failed to set up target invocation: {e}", secrets_seen)
-            results.append(InvocationResult(
-                fetcher_name=fetcher.name,
-                fetcher_version=fetcher.version,
-                target=target.values,
-                started_at=now,
-                completed_at=now,
-                duration_sec=0.0,
-                exit_code=255,
-                stdout="",
-                stderr=reason,
-                outputs=[],
-                error=reason,
-                error_code="runner_setup_failed",
-                entry_key=entry_key,
-            ))
+            return _not_started(fetcher, target, entry_key, reason, "runner_setup_failed"), None
+
+    if entry.concurrency > 1 and len(entry.targets) > 1:
+        return _run_concurrently(fetcher, entry, output_dir, inv_dir, setup, on_line,
+                                 entry_key, patterns_meta)
+
+    results = []
+    for target in entry.targets:
+        env, secrets_seen = setup(target, inv_dir)
+        if secrets_seen is None:
+            results.append(env)
+            continue
+        results.append(_invoke(fetcher, env, target, inv_dir, on_line, secrets_seen, output_dir,
+                               entry_key=entry_key, patterns_meta=patterns_meta))
     return results
+
+
+def _not_started(fetcher: Fetcher, target: Optional[TargetInstance], entry_key: Optional[str],
+                 reason: str, error_code: str) -> InvocationResult:
+    """The failed result of an invocation the runner never started."""
+    now = _utc_now()
+    return InvocationResult(
+        fetcher_name=fetcher.name,
+        fetcher_version=fetcher.version,
+        target=target.values if target else None,
+        started_at=now,
+        completed_at=now,
+        duration_sec=0.0,
+        exit_code=_NOT_STARTED_EXIT_CODE,
+        stdout="",
+        stderr=reason,
+        outputs=[],
+        error=reason,
+        error_code=error_code,
+        entry_key=entry_key,
+    )
+
+
+def _target_label(target: TargetInstance) -> str:
+    return ", ".join(f"{k}={v}" for k, v in target.values.items()) or "target"
+
+
+def _run_concurrently(fetcher, entry, output_dir, inv_dir, setup, on_line,
+                      entry_key, patterns_meta) -> List[InvocationResult]:
+    """Run an entry's targets up to entry.concurrency at a time.
+
+    Every target is set up first, in target order and on this thread, so notes
+    arrive in the order a serial run gives them. Each invocation then writes to
+    its own empty staging dir (EVIDENCE_DIR), so its outputs are exactly what it
+    wrote, whatever its siblings are doing. Staged files are moved into the
+    invocation dir in target order, as each target and every one before it is
+    done, so a name two targets share is caught as an overwrite of the earlier
+    target's file, as in a serial run. A fetcher cannot see its siblings' files
+    while it runs, so it can no longer delete an earlier target's file.
+
+    Live lines are prefixed with the target, since siblings interleave, and the
+    callback is never called from two threads at once.
+    """
+    staging_root = output_dir / f"{_STAGING_PREFIX}{secrets.token_hex(4)}"
+    lock = threading.Lock()
+    rel = inv_dir.relative_to(output_dir) if inv_dir != output_dir else None
+
+    def line_sink(target):
+        if on_line is None:
+            return None
+        label = _target_label(target)
+
+        def forward(line: str) -> None:
+            with lock:
+                on_line(f"[{label}] {line}")
+        return forward
+
+    running = _Running()
+
+    def work(target, env, secrets_seen, stage):
+        return _invoke(fetcher, env, target, stage, line_sink(target), secrets_seen, stage,
+                       entry_key=entry_key, patterns_meta=patterns_meta, running=running)
+
+    results: List[InvocationResult] = []
+    try:
+        with ThreadPoolExecutor(max_workers=min(entry.concurrency, len(entry.targets)),
+                                thread_name_prefix=f"paramify-{fetcher.name}") as pool:
+            prepared = []
+            for i, target in enumerate(entry.targets):
+                stage = staging_root / str(i)
+                stage.mkdir(parents=True)
+                prepared.append((target, stage, *setup(target, stage)))
+            # Submitted only once every note is out, so on_note (this thread) and
+            # on_line (the workers) are never called at the same time.
+            pending = [
+                (None, env, stage) if secrets_seen is None
+                else (pool.submit(work, target, env, secrets_seen, stage), None, stage)
+                for target, stage, env, secrets_seen in prepared
+            ]
+            try:
+                for future, failed, stage in pending:
+                    result = failed if future is None else future.result()
+                    if future is not None:
+                        _merge_staged(result, stage, inv_dir, rel)
+                    results.append(result)
+            except BaseException:
+                pool.shutdown(wait=False, cancel_futures=True)
+                running.stop()
+                raise
+    finally:
+        shutil.rmtree(staging_root, ignore_errors=True)
+    return results
+
+
+def _merge_staged(result: InvocationResult, stage: Path, inv_dir: Path, rel: Optional[Path]) -> None:
+    """Move what one concurrent invocation wrote into the invocation dir, and set its outputs.
+
+    A name already in the invocation dir came from an earlier entry or target, as
+    in a serial run: a file is replaced and the invocation fails for overwriting
+    it; a directory is merged into; a file and a directory of one name are left
+    as they were, and the invocation fails.
+    """
+    def named(name: str) -> str:
+        return f"{rel}/{name}" if rel else name
+
+    outputs, overwritten, conflicts = [], [], []
+    for src in sorted(stage.iterdir()):
+        dest = inv_dir / src.name
+        if not dest.exists() and not dest.is_symlink():
+            os.replace(src, dest)
+            outputs.append(src.name)
+        elif src.is_dir() and not src.is_symlink() and dest.is_dir() and not dest.is_symlink():
+            _merge_dir(src, dest)
+        elif dest.is_file() and not src.is_dir():
+            os.replace(src, dest)
+            overwritten.append(src.name)
+        else:
+            conflicts.append(src.name)
+    result.outputs = sorted(named(n) for n in outputs)
+    clobber = _clobber_reason(overwritten, [])
+    if conflicts:
+        both = (f"wrote {', '.join(conflicts)}, which an earlier entry or target wrote in this run "
+                f"as a different kind of file; kept the earlier one")
+        clobber = f"{clobber}; {both}" if clobber else both
+    _fail_for_clobber(result, [named(n) for n in overwritten], clobber)
+
+
+def _merge_dir(src: Path, dest: Path) -> None:
+    """Move src's contents into the existing dir dest, as a serial run would have left it.
+
+    A file replaces a file of the same name. Where a file and a directory share a
+    name, the earlier one stays: a serial fetcher could not have written over it.
+    """
+    for child in src.iterdir():
+        target = dest / child.name
+        child_dir = child.is_dir() and not child.is_symlink()
+        target_dir = target.is_dir() and not target.is_symlink()
+        if child_dir and target_dir:
+            _merge_dir(child, target)
+        elif not target.exists() and not target.is_symlink():
+            os.replace(child, target)
+        elif not child_dir and not target_dir:
+            os.replace(child, target)

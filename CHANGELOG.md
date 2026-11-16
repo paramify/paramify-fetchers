@@ -12,6 +12,11 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- Manifest: `concurrency` on a fetcher entry (1 to 32, default 1) runs up to that many of its targets at once. Each
+  concurrent target writes to its own staging directory, moved into the run directory in target order, so results,
+  envelopes and `_run_metadata.json` keep target order and a file name two targets share still fails the later one
+  with `output_overwritten`. Live output lines start with the target. `paramify validate` notes a `concurrency` that
+  has no effect (a fetcher without targets, or fewer than two).
 - **`wiz_inventory`**, the Wiz cloud resource inventory, as a pipeline fetcher (`kind: inventory`, `id_scheme:
   wiz-resource-id`). One record per resource from `cloudResourcesV2` under `payload.data`, keyed by the Wiz resource
   id, with its cloud ID (`external_id`), account, region, type, IPs, OS, image, environment and owner, and internet
@@ -2568,6 +2573,11 @@ schemas and the `paramify` CLI — not the internal code.
   - `datadog_siem_configuration`: the suppression rule field `rule_id`.
 
 ### Fixed
+
+- **`paramify run` stops its running fetchers on Ctrl-C or SIGTERM.** Each fetcher runs in its own session, so before,
+  an interrupted run left it running and writing into the run directory. The runner now kills the fetcher's process
+  group before exiting, and a run with `concurrency` starts none of its queued targets. `paramify run` turns SIGTERM
+  into exit code 143 so it reaches the same cleanup.
 
 - **Disk, Key Vault, storage and SQL Managed Instance fetchers: an unread list
   gives null counts, not 0.** When a list the run needs is refused (403),

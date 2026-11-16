@@ -97,7 +97,7 @@ from framework.issue_reports import (
     ISSUE_REPORTS_DIR,
 )
 from framework.paramify.client import ApiError
-from framework.runner.executor import is_credential_env_name
+from framework.runner.executor import is_credential_env_name, sigterm_exits
 from framework.secret_resolver import (
     env_var_name,
     is_env_ref_attempt,
@@ -1432,11 +1432,12 @@ def run_cmd(
             )
 
     try:
-        summary = api.run(
-            m, root,
-            on_event=None if json_out else _human_run_printer(err=print_run_dir),
-            manifest_path=mpath,
-        )
+        with sigterm_exits():
+            summary = api.run(
+                m, root,
+                on_event=None if json_out else _human_run_printer(err=print_run_dir),
+                manifest_path=mpath,
+            )
     except (ValueError, RuntimeError) as e:
         if json_out:
             typer.echo(json.dumps({"ok": False, "error": str(e)}, indent=2))
