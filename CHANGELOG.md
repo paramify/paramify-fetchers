@@ -2643,6 +2643,14 @@ schemas and the `paramify` CLI — not the internal code.
     role assignments, attachments or federated credentials are unread, and
     `user_assigned_identities_no_resource_attached` and the federated credential
     counts are null when their lists are unread for any identity.
+  - When any identity's role assignments are not read, the role counts
+    (`identities_with_broad_role`, `identities_with_subscription_or_higher_role`,
+    the four `identities_<capability>` counts,
+    `identities_without_role_assignments` and
+    `role_assignments_unresolved_role`) are null. When Microsoft Graph is not
+    read (`graph_access` `not_authorized` or `failed`),
+    `identities_with_graph_roles` and `identities_with_privileged_graph_roles`
+    are null. Before they read 0.
 
 - **`azure_entra_authentication_policy` no longer shows Microsoft's password
   defaults when the tenant's settings could not be read.** Before, a failed

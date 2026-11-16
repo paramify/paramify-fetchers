@@ -288,6 +288,13 @@ FEDERATED_COUNTS = (
     "federated_credentials_by_issuer_kind", "federated_credentials_broad_subject",
     "federated_credentials_nonstandard_audience",
 )
+# Counts built from each identity's role assignments, and from its Graph app role assignments.
+ROLE_COUNTS = (
+    "identities_with_broad_role", "identities_with_subscription_or_higher_role",
+    "identities_without_role_assignments", "role_assignments_unresolved_role",
+    *(f"identities_{cap}" for cap in CAPABILITIES),
+)
+GRAPH_COUNTS = ("identities_with_graph_roles", "identities_with_privileged_graph_roles")
 
 
 def unattached_status(identity: dict):
@@ -320,6 +327,14 @@ def summarize(user_assigned: list[dict] | None, system_assigned: list[dict] | No
         counts["user_assigned_identities_no_resource_attached"] = None
     if any(i["federated_credentials"] is None for i in user_assigned or []):
         for key in FEDERATED_COUNTS:
+            counts[key] = None
+    everyone = (user_assigned or []) + (system_assigned or [])
+    # An identity whose role or Graph assignments were not read could hold any role, so the count is unknown.
+    if any(i["role_assignments"] is None for i in everyone):
+        for key in ROLE_COUNTS:
+            counts[key] = None
+    if any(i["graph_app_roles"] is None for i in everyone):
+        for key in GRAPH_COUNTS:
             counts[key] = None
     return counts
 

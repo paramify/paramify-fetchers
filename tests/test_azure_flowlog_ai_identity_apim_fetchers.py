@@ -914,6 +914,27 @@ def test_unread_federated_credentials_leave_unattached_with_roles_unknown():
     assert attached["unattached_identities_with_roles"] == 0  # attached settles it
 
 
+def test_unread_role_or_graph_assignments_give_null_role_and_graph_counts():
+    role = [{"broad_role": True, "scope_level": "subscription", "role_resolved": True,
+             **dict.fromkeys(mi.CAPABILITIES, True)}]
+    base = {"kind": "system_assigned", "principal_id": "ps", "resource_type": "t"}
+    system = mi.identity_record(base, {"ps": role}, {"ps": [{"privileged": True}]})
+    known = mi.summarize([_uai([], [], role)], [system], "read")
+    assert known["identities_with_broad_role"] == 2
+    assert known["identities_with_privileged_graph_roles"] == 1
+    # The role assignment list was not read: every identity's roles are unknown, so no role count stands.
+    roles_unread = mi.summarize([_uai([], [], None)], [mi.identity_record(base, None, {"ps": []})], "read")
+    assert all(roles_unread[k] is None for k in mi.ROLE_COUNTS)
+    assert roles_unread["identities_role_assignments_unknown"] == 2
+    assert roles_unread["identities_with_graph_roles"] == 0  # Graph was read
+    # Graph was not read (not_authorized or failed): every identity's Graph roles are unknown.
+    graph_unread = mi.summarize([{**_uai([], [], role), "graph_app_roles": None, "has_privileged_graph_role": None}],
+                                [], "not_authorized")
+    assert all(graph_unread[k] is None for k in mi.GRAPH_COUNTS)
+    assert graph_unread["identities_graph_roles_unknown"] == 1
+    assert graph_unread["identities_with_broad_role"] == 1  # roles were read
+
+
 @pytest.mark.parametrize("unread", ["user", "system", "both"])
 def test_unread_identity_lists_give_null_counts_and_graph_access(unread):
     user = None if unread in ("user", "both") else []
