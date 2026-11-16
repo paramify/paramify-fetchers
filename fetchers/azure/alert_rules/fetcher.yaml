@@ -1,5 +1,5 @@
 name: azure_alert_rules
-version: 0.3.1
+version: 0.4.0
 description: >-
   Shows every metric, log search and smart detector alert rule and whether
   each one actually reaches a person.
@@ -116,14 +116,14 @@ evidence_set:
     - action_groups_notifying_people — Number of deliverable action groups that notify a person
 
     Are notifications being suppressed?
-    - enabled_rules_suppressed — Number of enabled rules whose notifications an active suppression rule always switches off
-    - enabled_rules_possibly_suppressed — Number of enabled rules whose notifications a suppression rule might switch off (it covers only part of the scope, has conditions, or has a schedule that can't be evaluated)
+    - enabled_rules_suppressed — Number of enabled rules whose notifications an active suppression rule always switches off; null when the alert processing rule list could not be read
+    - enabled_rules_possibly_suppressed — Number of enabled rules whose notifications a suppression rule might switch off (it covers only part of the scope, has conditions, or has a schedule that can't be evaluated); null when the alert processing rule list could not be read
     - processing_rules — Number of alert processing rules in the subscription
-    - suppressing_processing_rules_active — Number of enabled suppression rules that are active now, or whose schedule can't rule it out
+    - suppressing_processing_rules_active — Number of enabled suppression rules that are active now, or whose schedule can't rule it out; null when the alert processing rule list could not be read
 
     Does every enabled rule reach a person?
-    - enabled_rules_reaching_human — Number of enabled rules that notify a person and aren't suppressed
-    - enabled_rules_reaching_human_unknown — Number of enabled rules where it's unknown whether they reach a person: they notify only webhooks, Logic Apps, Functions, runbooks or Event Hubs (code that may or may not tell anyone), an action group couldn't be read, one that notifies a person is added only some of the time, or a suppression rule might apply
-    - enabled_rules_not_reaching_human — Number of enabled rules that notify no deliverable action group, or that a suppression rule always switches off
-    - reaching_human_percentage — Percentage of enabled alerting rules that reach a person = enabled_rules_reaching_human / enabled_alerting_rules × 100 (a whole number, 0–100); 0 when enabled_alerting_rules is 0. Rules where reaching a person is unknown (enabled_rules_reaching_human_unknown) count in the total but not as reaching, so they lower it
-    - all_enabled_rules_reach_human — True if every enabled alerting rule reaches a person; false if any doesn't, or none is enabled; null if none fails but some are unknown
+    - enabled_rules_reaching_human — Number of enabled rules that notify a person and aren't suppressed; null when the alert processing rule list could not be read
+    - enabled_rules_reaching_human_unknown — Number of enabled rules where it's unknown whether they reach a person: they notify only webhooks, Logic Apps, Functions, runbooks or Event Hubs (code that may or may not tell anyone), an action group couldn't be read, one that notifies a person is added only some of the time, or a suppression rule might apply; null when the alert processing rule list could not be read
+    - enabled_rules_not_reaching_human — Number of enabled rules that notify no deliverable action group, or that a suppression rule always switches off; null when the alert processing rule list could not be read
+    - reaching_human_percentage — Percentage of enabled alerting rules that reach a person = enabled_rules_reaching_human / enabled_alerting_rules × 100 (a whole number, 0–100); 0 when enabled_alerting_rules is 0. Rules where reaching a person is unknown (enabled_rules_reaching_human_unknown) count in the total but not as reaching, so they lower it; null when the alert processing rule list could not be read
+    - all_enabled_rules_reach_human — True if every enabled alerting rule reaches a person; false if any doesn't, or none is enabled; null if none fails but some are unknown; null when the alert processing rule list could not be read

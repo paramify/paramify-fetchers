@@ -195,9 +195,11 @@ def _tri(groups: list[dict], has: Callable[[dict], bool]) -> Optional[bool]:
     return False
 
 
-def route(enabled: bool, group_ids: list[str], alert_scopes: list[str], groups: dict, rules: list[dict]) -> dict:
-    """Resolve an alert rule's notification path; `groups` is keyed by lower-cased action group id."""
-    matches = matching_processing_rules(alert_scopes, rules)
+def route(enabled: bool, group_ids: list[str], alert_scopes: list[str], groups: dict, rules: list[dict] | None) -> dict:
+    """Resolve an alert rule's notification path; `groups` is keyed by lower-cased action group id.
+
+    rules=None means the processing rule list was not read, so whether anything suppresses the alert is unknown."""
+    matches = matching_processing_rules(alert_scopes, rules or [])
     own = {}
     for gid in group_ids:
         if gid:
@@ -225,7 +227,9 @@ def route(enabled: bool, group_ids: list[str], alert_scopes: list[str], groups: 
     routes = _tri(resolved, lambda g: g["deliverable"]) if enabled else False
     to_person = _tri(resolved, lambda g: g["notifies_people"]) if enabled else False
     suppressors = [m for m in matches if m["rule"]["suppresses_notifications"]]
-    if any(m["applies_to_every_fire"] for m in suppressors):
+    if rules is None and enabled:
+        suppressed = None
+    elif any(m["applies_to_every_fire"] for m in suppressors):
         suppressed = True
     elif suppressors:
         suppressed = None

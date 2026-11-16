@@ -2532,6 +2532,17 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- **`azure_alert_rules` 0.4.0: suppression fields are null when the alert
+  processing rule list could not be read.** The run still exits 1 as
+  `partial_failure`. Before, the refused list read as empty, so every rule showed
+  `suppressed: false` and counted as reaching a person. Now each enabled rule's
+  `suppressed` and `reaches_human` are null, and `enabled_rules_suppressed`,
+  `enabled_rules_possibly_suppressed`, `enabled_rules_reaching_human`,
+  `enabled_rules_reaching_human_unknown`, `enabled_rules_not_reaching_human`,
+  `reaching_human_percentage`, `all_enabled_rules_reach_human` and
+  `suppressing_processing_rules_active` are null. A list that was read and is
+  empty still gives 0 and false.
+
 - **`paramify upload` no longer sends an inventory direct when its channel has
   no artifact request.** A Paramify inventory pipeline runs only on a file in an
   approved batch, so a direct upload was stored and built nothing. The file now
