@@ -1,5 +1,5 @@
 name: azure_aks_cluster_configuration
-version: 0.3.1
+version: 0.4.0
 description: >-
   Shows whether each AKS cluster's API server is private or IP-restricted, who can sign in, and whether it has network policy, auto-upgrade, Defender and Azure Monitor.
 category: azure
@@ -77,7 +77,7 @@ evidence_set:
     - providers.get("Microsoft.ContainerService") — tells "AKS not in use" from "no clusters"
     - managed_clusters.list() — every AKS cluster with its API server, sign-in, network, upgrade, monitoring and node pool settings
 
-    Output: azure_aks_cluster_configuration_<subscription>.json — each AKS cluster's public and private API server names, access settings, authorization, network policy and plugin, requested and running Kubernetes versions, upgrade channels, Defender and Azure Monitor settings and node pools (size, OS, node image, public IPs, FIPS, Trusted Launch, SSH), plus the clusters left out and why.
+    Output: azure_aks_cluster_configuration_<subscription>.json — each AKS cluster's public and private API server names, access settings, authorization, network policy and plugin, requested and running Kubernetes versions, upgrade channels, Defender and Azure Monitor settings and node pools (size, OS, node image, public IPs, FIPS, Trusted Launch, SSH), plus the clusters left out and why. Each cluster's configuration_observations retains the SDK-projected rbac_enabled, local_accounts_disabled, enable_private_cluster and authorized_ip_ranges values before normalization. A null means the SDK supplied no value; explicit false and empty lists stay distinct. These are not raw HTTP responses, proof of effective enforcement or approval of the configured IP ranges. Existing normalized fields and summary counts keep their meanings.
 
     Summary fields:
 

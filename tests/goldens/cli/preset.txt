@@ -1,0 +1,11 @@
+$ paramify preset sophos_endpoint_inventory --output-dir tests/goldens/cli/no-runs
+exit 0
+--- stdout
+Inventory pipeline for EVD-SOPHOS-ENDPOINT-INVENTORY  (attach it to this set, not a new one)
+  Sample file       none yet: run the fetcher first
+  Data path         payload.data
+  Unique ID         unique_asset_identifier   (scheme: sophos-endpoint-id)
+  Parent component  derive from asset_type. The asset_type values need a run (run the fetcher first)
+  Evidence set      approval must be automatic; attach no validators
+  Linked fetchers   none in the catalog use sophos-endpoint-id
+--- stderr
