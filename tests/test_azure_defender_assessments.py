@@ -476,3 +476,20 @@ def test_main_an_unregistered_subscription_counts_zero(monkeypatch, fake_models,
     code, evidence, _ = _run_main(monkeypatch, tmp_path)
     assert code == 0
     assert evidence["summary"]["unhealthy_past_sla_count"] == 0
+
+
+def test_main_summary_documents_every_field(monkeypatch, fake_models, tmp_path, assert_summary_documented):
+    checks = [(AUTH, "High"), (TLS, "Medium"), (CUSTOM, "Low")]
+    _security_module(monkeypatch, [assessment(c) for c, _ in checks])
+    graph = FakeGraph([{"id": assessment(c).id, "severity": s} for c, s in checks])
+    monkeypatch.setattr(da, "resource_graph_client", lambda cred: graph)
+    monkeypatch.setattr(da, "credential", lambda: object())
+    monkeypatch.setattr(da, "load_dotenv", lambda: None)
+    monkeypatch.setenv("EVIDENCE_DIR", str(tmp_path))
+    monkeypatch.setenv("AZURE_SUBSCRIPTION_ID", SUB_ID)
+
+    assert da.main() == 0
+
+    summary = json.loads((tmp_path / f"azure_defender_assessments_{SUB_ID}.json").read_text())["summary"]
+    assert summary["unhealthy_by_severity"] == {"High": 1, "Medium": 1, "Low": 1}
+    assert_summary_documented("azure/defender_assessments", summary)

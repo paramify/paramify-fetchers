@@ -114,6 +114,13 @@ def test_hub_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_
     }
 
 
+def test_hub_summary_matches_the_instructions(monkeypatch, tmp_path, assert_summary_documented):
+    workspaces = [_ws("rg-in", "hub-in", "Hub"), _ws("rg-in", "proj-in", "Project", hub=_hub_id("rg-in", "hub-in")),
+                  _ws("rg-in", "classic", "Default"), _ws("rg-in", "store", "FeatureStore")]
+    _, evidence, *_ = run_hub(monkeypatch, tmp_path, "rg:rg-out", workspaces=workspaces)
+    assert_summary_documented("azure/ai_hub_configuration", evidence["summary"])
+
+
 def test_hub_excludes_by_group_and_region_and_skips_their_reads(monkeypatch, tmp_path):
     code, evidence, paths, diag = run_hub(monkeypatch, tmp_path, "rg:rg-out, location:regioneast, rg:typo")
     summary = evidence["summary"]

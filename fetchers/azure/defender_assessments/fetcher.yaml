@@ -1,27 +1,7 @@
 name: azure_defender_assessments
 version: 0.4.1
-description: >
-  Every Microsoft Defender for Cloud security assessment result on the
-  subscription — one record per (resource, check) pair, each with its
-  Healthy/Unhealthy/NotApplicable status and the assessment's own severity, read
-  from Resource Graph because the subscription's metadata catalogue can rate a
-  check lower than the assessment does. The catalogue's severity is only the
-  fallback, for an assessment Resource Graph does not return (its index lags
-  ARM, or the identity cannot read that row): severity_source says which one a
-  record carries, and the summary counts the records, and the Unhealthy ones, on
-  the fallback or with no severity. This is the per-resource
-  pass/fail detail behind the secure score, not the score itself: it shows
-  exactly which resources fail which checks. A subscription that never
-  registered the Microsoft.Security resource provider reports
-  provider_registration_status: not_registered, which is valid evidence ("not
-  in use") rather than a collection failure. Each Unhealthy record also
-  reports days_open, counted from status_change_date (when it last became
-  Unhealthy; null when that date is missing), and past_sla against a configurable
-  per-severity SLA (30 / 90 / 180 days for High / Medium / Low by default); the
-  summary counts the Unhealthy findings past SLA per severity and in total, each
-  null when the list, the Resource Graph severities or a needed date could not be
-  read, any Unhealthy finding's severity came from the catalogue, or that
-  severity's SLA days are invalid. Needs Reader (or Security Reader).
+description: >-
+  Lists every Defender for Cloud check result on the subscription, showing which resources pass or fail which checks and how severe each failure is.
 category: azure
 
 supports_targets: true
@@ -104,47 +84,57 @@ ksis:
 evidence_set:
   reference_id: EVD-AZURE-DEFENDER-ASSESSMENTS
   name: Microsoft Defender for Cloud Security Assessments
-  instructions: >
-    Script: azure/defender_assessments/fetcher.py. Azure SDK calls
-    (azure-mgmt-security SecurityCenter):
-    assessments.list(scope="subscriptions/<subscription_id>") for every security
-    assessment result on the subscription, and
-    assessments_metadata.list_by_subscription() for each check's categories,
-    threats, type, user impact, implementation effort and policy definition id
-    (the list call does not return metadata). Each assessment's own severity
-    comes from azure-mgmt-resourcegraph ResourceGraphClient
-    resources(QueryRequest(subscriptions=[<subscription_id>], query="SecurityResources
-    | where type =~ 'microsoft.security/assessments' | project id, severity =
-    tostring(properties.metadata.severity) | order by id asc",
-    options=QueryRequestOptions(top=1000, skip_token=<previous page's $skipToken>,
-    result_format="objectArray"))), repeated until no $skipToken is returned and
-    joined on the assessment id. The catalogue's severity, which can be lower than
-    the assessment's, is used only where Resource Graph has none, such as an
-    assessment its index has not caught up with or a row the identity cannot read:
-    severity_source is "assessment" or "catalogue" (null when neither has one),
-    and the summary gives severity_from_catalogue_count and severity_unknown_count,
-    and unhealthy_severity_from_catalogue_count and
-    unhealthy_severity_unknown_count for Unhealthy records only. Assessments about
-    a resource the resource_exclusions patterns take out are listed under
-    results.excluded instead (the entry's id is that resource's id); the summary
-    gives resource_exclusion_patterns (the configured patterns, empty when none are
-    set), resource_exclusion_patterns_unmatched (patterns that matched no
-    assessment, such as a mistyped name, or null when the assessment list couldn't be read), excluded_assessments (how many the
-    patterns took out; no other count includes them) and in_scope_assessments (how
-    many stayed, the same as total_assessments).
-    Each Unhealthy record carries days_open (whole days from status_change_date to
-    the run, null when that date is missing; status_change_date is when the status
-    last changed, so a finding that turns Healthy and then Unhealthy again starts
-    again at 0), sla_days (its severity's limit, null when the severity is unknown)
-    and past_sla (days_open above sla_days, null when either is null); other records
-    carry null for all three. The summary gives
-    sla_days_by_severity, unhealthy_past_sla_by_severity and unhealthy_past_sla_count
-    (every count is null when the assessment list or the Resource Graph severity
-    read failed, or any Unhealthy finding took its severity from the catalogue,
-    which can rate a check lower than its own, so the finding may belong to any
-    severity; a severity's count is also null when its SLA days are invalid or one
-    of its Unhealthy findings has no date; the total is null when any severity's
-    count is null or an Unhealthy finding has no severity) and
-    unhealthy_days_open_unknown_count (null only when the list could not be read).
-    An invalid SLA value (not a whole number above 0) fails the run as bad_config
-    and its sla_days is null, with no fallback to the default.
+  instructions: |
+    Script: azure/defender_assessments/fetcher.py
+
+    Access: Reader or Security Reader on the subscription. A result whose Resource Graph row the identity can't read takes its severity from the check catalogue, which may read lower than the result's own.
+
+    Commands Executed:
+    - subscriptions.list() — picks a subscription when none is set
+    - assessments.list() on the subscription — every check result for every resource; a "not registered" answer means Defender for Cloud is not in use, and any other error fails the run, keeping the results already read
+    - assessments_metadata.list_by_subscription() — each check's categories, threats, type, user impact, remediation effort and policy definition, which the result list doesn't include, and a fallback severity; a failure fails the run
+    - Resource Graph query on SecurityResources (type microsoft.security/assessments, paged to the end) — each result's own severity, which the check catalogue can rate lower; a failure, or a truncated or short result, fails the run and leaves the catalogue severities
+
+    Output: azure_defender_assessments_<subscription>.json — one record per resource and check, with its Healthy, Unhealthy or NotApplicable status, why, when it last changed, its severity and where that came from, how long a failing one has been open and whether that is past its severity's SLA, and the check's remediation effort; results about resources the resource_exclusions patterns take out are listed under excluded instead.
+
+    Summary fields:
+
+    What was checked?
+    - provider_registration_status — Whether Defender for Cloud's provider (Microsoft.Security) is registered on the subscription: registered, not_registered (Defender for Cloud is not in use, so no results are listed) or unknown (the read failed)
+    - total_assessments — Number of in-scope check results, one for each resource and check
+
+    Which resources are left out of scope?
+    - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
+    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no check result, such as a mistyped name, or null when the result list was not read (the read failed, or Defender for Cloud is not registered)
+    - excluded_assessments — Number of check results left out of scope because a pattern matched the resource they are about by resource group or id; a check result has no region, so location: patterns never match one, and results about the subscription itself or an on-premises machine (named by machine name or VM UUID rather than an Azure resource id) stay; each is listed under excluded with the pattern, and no other count includes them
+    - in_scope_assessments — Number of check results read and in scope; equals total_assessments
+
+    Which checks pass and fail?
+    - healthy_count — Number of check results with status Healthy (the resource passes the check)
+    - unhealthy_count — Number of check results with status Unhealthy (the resource fails the check and needs fixing)
+    - not_applicable_count — Number of check results with status NotApplicable (the check doesn't apply to the resource)
+    - healthy_percentage — Percentage of check results that pass = healthy_count / total_assessments × 100 (a whole number, 0–100); 0 when total_assessments is 0. NotApplicable results count in the total but not as passing, so they lower it and 100 is unlikely
+
+    How severe are the failures?
+    - unhealthy_by_severity — Number of failing (Unhealthy) check results for each severity: the result's own severity from Resource Graph, or the check catalogue's when Resource Graph has none; a severity with no failures is left out, and failures with no severity at all are counted in unhealthy_severity_unknown_count instead:
+      - High (the most severe)
+      - Medium (moderate)
+      - Low (the least severe)
+    - unhealthy_severity_from_catalogue_count — Number of failing check results whose severity comes from the check catalogue because Resource Graph had none for them, so it may be lower than the result's own
+    - unhealthy_severity_unknown_count — Number of failing check results with no severity from Resource Graph or the check catalogue
+
+    Are failures fixed within their SLA?
+    - sla_days_by_severity — Days a failing (Unhealthy) check result may stay open before it counts as past SLA, for each severity, from the sla_days_high, sla_days_medium and sla_days_low settings; null for a severity whose setting is not a whole number above 0, which also fails the run:
+      - High (30 by default)
+      - Medium (90 by default)
+      - Low (180 by default)
+    - unhealthy_past_sla_by_severity — Number of failing check results open longer than their severity's SLA days, for each severity. Days open run in whole days from when the result last became Unhealthy (its status change date) to the run, so a result that passes and then fails again starts again at 0. Every severity reads null when the result list or the Resource Graph severities couldn't be read, or any failing result's severity came from the check catalogue (which can rate a check lower, so the result could belong under any severity); one severity also reads null when its SLA days are null or one of its failing results has no status change date:
+      - High (failing results of High severity)
+      - Medium (failing results of Medium severity)
+      - Low (failing results of Low severity)
+    - unhealthy_past_sla_count — Number of failing check results of any severity open longer than their severity's SLA days = the sum of unhealthy_past_sla_by_severity; null when any severity in unhealthy_past_sla_by_severity is null or a failing result has no severity
+    - unhealthy_days_open_unknown_count — Number of failing check results with no status change date, so how long they have been open is unknown; null only when the result list couldn't be read
+
+    Does each result carry its own severity?
+    - severity_from_catalogue_count — Number of check results of any status whose severity comes from the check catalogue because Resource Graph had none for them (its index lags, or the identity can't read that row)
+    - severity_unknown_count — Number of check results of any status with no severity from Resource Graph or the check catalogue
