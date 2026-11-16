@@ -150,3 +150,9 @@ oci
 # Qualys category (fetchers/qualys/*) — the VM/PC API answers in XML that names an
 # external DTD; defusedxml parses it with entities and external references refused.
 defusedxml
+
+# AWS category: aws_inspector_ecr_findings and aws_inspector_ecr_report call Inspector
+# and ECR through boto3 (botocore is imported directly too), in one process. The other AWS
+# fetchers use the aws CLI and jq and do not need it.
+boto3
+botocore

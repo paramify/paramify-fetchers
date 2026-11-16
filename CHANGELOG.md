@@ -1761,6 +1761,26 @@ schemas and the `paramify` CLI — not the internal code.
   `EVD-AZURE-ENTRA-SERVICE-PRINCIPALS` (`azure_entra_service_principals`), so a
   failed run of either fetcher fails its evidence set. Consumers that keep their
   own criteria for these sets get collection health from this registry file.
+
+- **`aws_inspector_ecr_findings` and `aws_inspector_ecr_report` 0.2.0: new scope settings, boto3 collection and a
+  smaller evidence format.**
+  - New scope settings, applied as Inspector filters so out-of-scope findings are never downloaded: `in_use_only`
+    (images running in ECS or EKS), `last_in_use_days`, `pushed_within_days` and `min_severity` (UNTRIAGED is always
+    kept). With a usage filter, an image that Inspector has no coverage record for is out of scope rather than a gap.
+  - Multi-architecture index digests (OCI image indexes, Docker manifest lists) are left out of the image inventory,
+    since Inspector scans the per-platform images they point to rather than the index; they are no longer reported as
+    coverage gaps. They are counted in `summary.index_digest_count`. With `image_tags`, an untagged per-platform
+    image is selected when its Inspector coverage carries a requested tag (the index's tags).
+  - AWS calls go through boto3 in one process instead of one `aws` CLI process per page, every paged API requests its
+    largest page, and up to eight repositories' images are listed concurrently. `boto3` is now in
+    `requirements.txt` and a new `aws` extra.
+  - Evidence format: fields shared by every finding of a vulnerability ID (description, CVSS, references, EPSS,
+    remediation and similar) are stored once under `results.vulnerabilities`; each finding keeps the rest, plus any
+    shared field whose value differs, and `absent_fields` for stored fields it lacks. Images keep only the ECR fields
+    used and a `resource_id`, and no longer embed their coverage record (it is in `results.coverage`). The JSON is
+    written compact. The CSV report's columns and values are unchanged.
+  - File names are unchanged for targets that do not use the new settings.
+
 - **The TUI shows the catalog and the manifest on one Fetchers page.** The
   Catalog and Manifest tabs are now one tab, so the TUI has four tabs:
   Fetchers, Run, Evidence and Paramify (keys `1` to `4`). The catalog and a

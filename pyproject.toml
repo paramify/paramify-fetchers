@@ -128,6 +128,8 @@ gcp = [
 oci = ["oci"]
 # Qualys returns XML that names an external DTD; the fetchers parse it with defusedxml.
 qualys = ["defusedxml"]
+# The Inspector ECR fetchers call AWS through boto3; the other AWS fetchers use the aws CLI.
+aws = ["boto3", "botocore"]
 # Convenience: every front-end + dev tooling in one install. azure-identity comes with checkov, for
 # checkov_bicep's Entra sign-in to TFVC; the azure-mgmt SDKs stay out (see the azure extra).
 all = ["textual>=8,<9", "checkov", "azure-identity>=1.25.3,<2", "pytest", "ruff", "mypy", "defusedxml"]
