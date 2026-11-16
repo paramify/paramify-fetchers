@@ -142,7 +142,7 @@ def _count(rules: list[dict], field: str, value) -> int:
 SUPPRESSION_FIELDS = (
     "enabled_rules_suppressed", "enabled_rules_possibly_suppressed", "enabled_rules_reaching_human",
     "enabled_rules_reaching_human_unknown", "enabled_rules_not_reaching_human", "reaching_human_percentage",
-    "all_enabled_rules_reach_human", "suppressing_processing_rules_active",
+    "all_enabled_rules_reach_human", "suppressing_processing_rules_active", "processing_rules",
 )
 
 
@@ -306,7 +306,7 @@ def main() -> int:
             **summarize(rules, group_records, processing_rules, processing_read),
             "provider_registration_status": registration,
             **exclusions.summary(excluded, ("alert_rule", "action_group", "processing_rule"), {
-                "alert_rules": len(rules), "action_groups": len(group_records), "processing_rules": len(processing_rules)}),
+                "alert_rules": len(rules), "action_groups": len(group_records), "processing_rules": len(processing_rules) if processing_read else None}),
         },
     )
 

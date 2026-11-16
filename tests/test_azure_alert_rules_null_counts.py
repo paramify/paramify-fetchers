@@ -64,6 +64,8 @@ def test_refused_processing_rule_list_gives_null_suppression_fields(monkeypatch,
     assert code == 1
     assert (rules[0]["suppressed"], rules[0]["reaches_human"]) == (None, None)
     assert {k: summary[k] for k in SUPPRESSION_FIELDS if summary[k] is not None} == {}
+    for key in ("processing_rules", "in_scope_processing_rules", "excluded_processing_rules"):
+        assert summary[key] is None, key
     # What does not depend on the processing rules still reads.
     assert summary["total_alert_rules"] == 1 and summary["enabled_alerting_rules"] == 1
 
@@ -74,6 +76,8 @@ def test_read_empty_processing_rule_list_still_counts_zero_and_false(monkeypatch
     assert (rules[0]["suppressed"], rules[0]["reaches_human"]) == (False, True)
     assert summary["enabled_rules_suppressed"] == 0 and summary["enabled_rules_possibly_suppressed"] == 0
     assert summary["suppressing_processing_rules_active"] == 0
+    assert (summary["processing_rules"], summary["in_scope_processing_rules"],
+            summary["excluded_processing_rules"]) == (0, 0, 0)
     assert summary["enabled_rules_reaching_human"] == 1 and summary["all_enabled_rules_reach_human"] is True
 
 

@@ -2539,8 +2539,9 @@ schemas and the `paramify` CLI — not the internal code.
   `suppressed` and `reaches_human` are null, and `enabled_rules_suppressed`,
   `enabled_rules_possibly_suppressed`, `enabled_rules_reaching_human`,
   `enabled_rules_reaching_human_unknown`, `enabled_rules_not_reaching_human`,
-  `reaching_human_percentage`, `all_enabled_rules_reach_human` and
-  `suppressing_processing_rules_active` are null. A list that was read and is
+  `reaching_human_percentage`, `all_enabled_rules_reach_human`,
+  `suppressing_processing_rules_active`, `processing_rules`,
+  `in_scope_processing_rules` and `excluded_processing_rules` are null. A list that was read and is
   empty still gives 0 and false.
 
 - **`paramify upload` no longer sends an inventory direct when its channel has
