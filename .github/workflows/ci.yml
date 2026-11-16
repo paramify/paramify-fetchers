@@ -7,9 +7,10 @@ name: CI
 #   oci-sdk   — the OCI fetchers run against recorded responses (needs the oci extra)
 #   smoke     — the CLI discovery surface works across all fetchers, and the
 #               demo run / validate / upload --dry-run output matches its goldens
-#   tui       — the terminal UI on the lowest and latest textual 8: pilot tests,
-#               SVG snapshots, the end-to-end demo flow, a 160x50 layout check,
-#               and a real pty launch
+#   tui       — the terminal UI on the lowest textual 8 with the oldest Python and
+#               the latest textual 8 with the deployed Python: pilot tests, SVG
+#               snapshots, the end-to-end demo flow, a 160x50 layout check, and a
+#               real pty launch. The only job that runs the TUI suite.
 #   lint      — the framework's own code passes ruff + mypy
 #   secrets   — no credentials in the tree or its full git history
 # Fetchers can't be integration-tested here (no live tenants); that signal comes
@@ -22,7 +23,11 @@ on:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # A new push to a pull request replaces the run before it. Runs on main are
+  # never cancelled: with `true` here, merges landing close together cancelled
+  # each other and main went days without one finished run. They queue instead
+  # (a group holds one running and one pending), so the newest merge always runs.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -73,8 +78,15 @@ jobs:
       # fetcher.yaml and _categories/*.yaml. `-n auto` (pytest-xdist) spreads the
       # suite over the runner's cores: serial it took over 4 minutes. A test that
       # fails here but passes alone shares state with another test; fix the test.
+      #
+      # The TUI suite is left to the `tui` job, which runs it on the oldest and
+      # the deployed Python. Here it ran five more times and took about half of
+      # each row. Keep these three in step with that job's pytest step.
       - name: pytest
-        run: pytest -q -n auto
+        run: >-
+          pytest -q -n auto
+          --ignore-glob='tests/test_tui_*.py'
+          --ignore=tests/test_manifest_autosave.py --ignore=tests/test_target_editor.py
 
   azure-sdk:
     name: azure-sdk (surface)
@@ -196,7 +208,7 @@ jobs:
         run: python tools/cli_goldens.py
 
   tui:
-    name: tui (textual ${{ matrix.textual }})
+    name: tui (textual ${{ matrix.textual }}, py ${{ matrix.python-version }})
     runs-on: ubuntu-latest
     # A wedged app or pty would otherwise hold the runner for the 6h default.
     timeout-minutes: 15
@@ -204,22 +216,27 @@ jobs:
       fail-fast: false
       matrix:
         # The lowest textual the tui extra allows and the newest it resolves to,
-        # so a textual release that breaks the console fails here first.
+        # so a textual release that breaks the console fails here first. Each is
+        # paired with one end of the Python range the `test` matrix covers (the
+        # oldest, and the one deploy/Dockerfile runs), since no other job runs
+        # the TUI suite.
         include:
           - textual: lowest
+            python-version: "3.11"
             pin: "textual==8.0.0"
             # SVGs are compared on latest only, since a textual minor can render
             # differently. --deselect, not --ignore: an ignore does not drop a
             # file named on the command line, and a skip would trip --fail-on-skip.
             pytest-args: "--deselect tests/test_tui_snapshots.py"
           - textual: latest
+            python-version: "3.14"
             pin: "textual>=8,<9"
             pytest-args: ""
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
           cache: pip
           cache-dependency-path: pyproject.toml
       # snapshots extra: pytest-textual-snapshot, kept out of dev because it caps
@@ -232,9 +249,11 @@ jobs:
       # Pilot suites, SVG snapshots, the end-to-end demo flow, the 160x50 layout
       # check and the pty launch.
       # --fail-on-skip (tests/conftest.py) fails the job if any of them skipped.
+      # `-n auto` as in the `test` job: serial, this step took 8 to 11 minutes and
+      # set the wall time of the whole workflow.
       - name: pytest (TUI)
         run: >-
-          pytest -q -rsx --fail-on-skip --snapshot-report snapshot_report.html
+          pytest -q -rsx -n auto --fail-on-skip --snapshot-report snapshot_report.html
           ${{ matrix.pytest-args }}
           tests/test_tui_*.py tests/test_manifest_autosave.py tests/test_target_editor.py
       # Side-by-side SVG diff of every mismatched snapshot. Refresh after an
