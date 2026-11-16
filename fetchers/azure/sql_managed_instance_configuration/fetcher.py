@@ -57,6 +57,8 @@ MANAGED_INSTANCE_DELEGATION = "microsoft.sql/managedinstances"
 ANY_ADDRESS = ("*", "0.0.0.0/0", "any", "internet")
 ALL_PORTS = ("*", "0-65535")
 INTERNET_DESTINATIONS = ("*", "0.0.0.0/0", "internet")
+# Sources that cover every address in the subnet.
+EVERY_SUBNET = ("*", "0.0.0.0/0", "virtualnetwork")
 SMB_PORT = 445
 # Private, shared (CGNAT), loopback and link-local space; a source reaching past these includes public addresses.
 NON_PUBLIC_RANGES = tuple(ipaddress.ip_network(n) for n in (
@@ -298,7 +300,8 @@ def allows_public_all_ports_inbound(rule: dict) -> bool:
     )
 
 
-# Same reading as azure_network_security_groups: the first all-port, all-protocol outbound rule to the Internet decides.
+# Same reading as azure_network_security_groups: the first all-port, all-protocol outbound rule to the Internet decides,
+# except that a Deny limited to some sources is skipped, since egress from the rest still flows.
 def unrestricted_internet_outbound(group: dict) -> bool:
     rules = sorted(
         (*group["security_rules"], *group["default_security_rules"]),
@@ -308,13 +311,16 @@ def unrestricted_internet_outbound(group: dict) -> bool:
         if (
             lower(rule.get("direction")) == "outbound"
             and rule.get("protocol") == "*"
-            and "*" in _values(rule, "destination_port_range", "destination_port_ranges")
+            and any(str(p).strip() in ALL_PORTS for p in _values(rule, "destination_port_range", "destination_port_ranges"))
             and any(
                 lower(d) in INTERNET_DESTINATIONS
                 for d in _values(rule, "destination_address_prefix", "destination_address_prefixes")
             )
         ):
-            return lower(rule.get("access")) == "allow"
+            if lower(rule.get("access")) == "allow":
+                return True
+            if any(lower(s) in EVERY_SUBNET for s in _values(rule, "source_address_prefix", "source_address_prefixes")):
+                return False
     return False
 
 

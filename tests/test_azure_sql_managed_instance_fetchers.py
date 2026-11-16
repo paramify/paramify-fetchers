@@ -345,6 +345,27 @@ def test_custom_outbound_deny_overrides_the_default_internet_allow(monkeypatch):
     assert summary["instances_subnet_unrestricted_internet_outbound"] == 0
 
 
+@pytest.mark.parametrize("source", ["*", "0.0.0.0/0", "VirtualNetwork"])
+def test_outbound_deny_with_a_covering_source_restricts_egress(monkeypatch, source):
+    deny = rule("deny-internet-out", 4000, "Outbound", "Deny", "*", source, "Internet", "*")
+    instances, _, _ = run_configuration(monkeypatch, sql_client(), net=network(rules=[deny]))
+    assert instances["mi-east"]["subnet_unrestricted_internet_outbound"] is False
+
+
+@pytest.mark.parametrize("source", ["10.0.1.0/24", "AzureLoadBalancer", "Internet"])
+def test_source_limited_outbound_deny_leaves_egress_unrestricted(monkeypatch, source):
+    deny = rule("deny-internet-out", 4000, "Outbound", "Deny", "*", source, "Internet", "*")
+    instances, summary, _ = run_configuration(monkeypatch, sql_client(), net=network(rules=[deny]))
+    assert instances["mi-east"]["subnet_unrestricted_internet_outbound"] is True
+    assert summary["instances_subnet_unrestricted_internet_outbound"] == 2
+
+
+def test_full_port_range_deny_counts_as_every_port(monkeypatch):
+    deny = rule("deny-internet-out", 4000, "Outbound", "Deny", "*", "*", "Internet", "0-65535")
+    instances, _, _ = run_configuration(monkeypatch, sql_client(), net=network(rules=[deny]))
+    assert instances["mi-east"]["subnet_unrestricted_internet_outbound"] is False
+
+
 def test_subnet_without_nsg_or_route_table_reads_false_not_null(monkeypatch):
     bare = {("rg-net", "vnet-mi", mi): subnet(mi, nsg=None, route_table=None) for mi in ("mi-east", "mi-west")}
     instances, summary, collector = run_configuration(monkeypatch, sql_client(), net=network(subnets=bare))

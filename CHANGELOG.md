@@ -2532,6 +2532,15 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- **`azure_sql_managed_instance_configuration` 0.5.0: only a catch-all Internet
+  Deny that covers every source restricts the subnet's Internet egress.** Before,
+  any catch-all Deny toward the Internet counted, whatever its source, so a Deny
+  limited to one subnet's addresses marked the instance restricted. Now the Deny
+  must have a source of `*`, `0.0.0.0/0` or `VirtualNetwork`; a source-limited
+  Deny is skipped and the walk goes on to the next rule. A port range of
+  `0-65535` now counts as `*`. Affects `subnet_unrestricted_internet_outbound`
+  and `instances_subnet_unrestricted_internet_outbound`.
+
 - **`paramify upload` no longer sends an inventory direct when its channel has
   no artifact request.** A Paramify inventory pipeline runs only on a file in an
   approved batch, so a direct upload was stored and built nothing. The file now
