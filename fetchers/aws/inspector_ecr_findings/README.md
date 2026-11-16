@@ -34,25 +34,23 @@ are never downloaded:
 
 | Setting | Inspector filter | Effect |
 | --- | --- | --- |
-| `in_use_only: true` | `ecrImageInUseCount >= 1` | Images running in ECS or EKS now. |
-| `last_in_use_days: N` | `ecrImageLastInUseAt` | Images that ran in ECS or EKS within N days. |
 | `pushed_within_days: N` | `ecrImagePushedAt` | Images pushed within N days. Applied to the ECR inventory locally, since coverage has no push-date filter. |
 | `min_severity: HIGH` | `severity` | Findings at or above the severity. UNTRIAGED is always kept. |
 
-Settings combine with AND. Usage is known only to Inspector, so with
-`in_use_only` or `last_in_use_days` an image is in scope only when Inspector
-returns a matching coverage record. An image Inspector has never covered is
-then out of scope, not a coverage gap; run once without usage filters to audit
-coverage of the whole registry.
+Settings combine with AND.
 
 Multi-architecture images: ECR lists an OCI image index (or Docker manifest
 list) and each per-platform image it points to as separate digests, and tags
 usually sit on the index. Inspector scans the per-platform images, never the
 index, so index digests are left out of the inventory (counted in
 `summary.index_digest_count`) instead of appearing as permanent coverage gaps.
-With `image_tags`, an untagged per-platform image is selected when Inspector's
-coverage record for it carries a requested tag, which is how Inspector reports
-the index's tags. Suppressed and closed findings
+
+`image_tags` matches tags on the image itself, in ECR and in Inspector. The
+per-platform images of a multi-architecture index are untagged, and Inspector
+does not give them the index's tags, so a tag filter leaves every
+multi-architecture image out of scope. For a registry that pushes
+multi-architecture images, scope by `repositories`, `pushed_within_days` or
+`min_severity` instead. Suppressed and closed findings
 are outside this version's scope. Each finding retains its native AWS fields,
 including packages, fixed versions, vulnerability aliases, CVSS and timestamps
 when the API supplies them. Fields that describe the vulnerability rather than

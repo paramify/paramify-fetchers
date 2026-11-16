@@ -1764,13 +1764,12 @@ schemas and the `paramify` CLI — not the internal code.
 
 - **`aws_inspector_ecr_findings` and `aws_inspector_ecr_report` 0.2.0: new scope settings, boto3 collection and a
   smaller evidence format.**
-  - New scope settings, applied as Inspector filters so out-of-scope findings are never downloaded: `in_use_only`
-    (images running in ECS or EKS), `last_in_use_days`, `pushed_within_days` and `min_severity` (UNTRIAGED is always
-    kept). With a usage filter, an image that Inspector has no coverage record for is out of scope rather than a gap.
+  - New scope settings, applied as Inspector filters so out-of-scope findings are never downloaded:
+    `pushed_within_days` and `min_severity` (UNTRIAGED is always kept).
   - Multi-architecture index digests (OCI image indexes, Docker manifest lists) are left out of the image inventory,
     since Inspector scans the per-platform images they point to rather than the index; they are no longer reported as
-    coverage gaps. They are counted in `summary.index_digest_count`. With `image_tags`, an untagged per-platform
-    image is selected when its Inspector coverage carries a requested tag (the index's tags).
+    coverage gaps. They are counted in `summary.index_digest_count`. `image_tags` still matches only tags on the
+    image itself, so it leaves multi-architecture images out.
   - AWS calls go through boto3 in one process instead of one `aws` CLI process per page, every paged API requests its
     largest page, and up to eight repositories' images are listed concurrently. `boto3` is now in
     `requirements.txt` and a new `aws` extra.
