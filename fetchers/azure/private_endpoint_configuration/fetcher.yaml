@@ -1,5 +1,5 @@
 name: azure_private_endpoint_configuration
-version: 0.3.1
+version: 0.3.2
 description: >-
   Shows each private endpoint's target service and approval status, whether the target's public network access is closed, and whether the endpoint subnet's network security group applies to endpoint traffic.
 category: azure
@@ -71,18 +71,18 @@ evidence_set:
   instructions: |
     Script: azure/private_endpoint_configuration/fetcher.py
 
-    Access: Reader on the subscription. Optional: Reader on the other subscriptions the endpoints connect to; without it, targets there read not_visible, and their public access state (target_public_network_access_state) reads not_visible too.
+    Access: Reader on the subscription. Optional: Reader on the other subscriptions the endpoints connect to; without it, targets there read not_visible, and their public access state (target_public_network_access_state) reads not_visible too. With AZURE_TARGET_SUBSCRIPTION_ONLY=true, an explicit AZURE_SUBSCRIPTION_ID is required before authentication, related lookups query only that subscription, and wider visibility discovery is skipped. Unqueried or unreadable relationships remain unknown. Supply this shared setting through the native Azure auth passthrough environment when using a manifest; no extra access is requested.
 
     Commands Executed:
     - subscriptions.list() — picks a subscription when none is set
     - providers.get("Microsoft.Network") — tells "networking not in use" from "no endpoints"
     - private_endpoints.list_by_subscription() — every private endpoint with its connections and subnet
     - private_dns_zone_groups.list() (per endpoint) — the zone groups that publish the endpoint's DNS records; a failed read leaves the answer null, counted as not published
-    - Resource Graph query on the target resources and the endpoints' network interfaces, not scoped to a subscription — each target's existence and public network access, and each endpoint's private IPs
+    - Resource Graph query on the target resources and the endpoints' network interfaces — each target's existence and public network access, and each endpoint's private IPs; scoped to the selected subscription in strict mode, otherwise unscoped
     - Resource Graph query on the endpoints' virtual networks — each endpoint subnet's network policy, network security group and route table
-    - Resource Graph query on resource groups, not scoped to a subscription, with subscriptions.list() — the resource groups and subscriptions the credential can read, so a missing target or subnet reads not_found only where its resource group is readable, and not_visible otherwise
+    - Resource Graph query on resource groups, not scoped to a subscription, with subscriptions.list() — default mode only; the resource groups and subscriptions the credential can read, so a missing target or subnet reads not_found only where its resource group is readable, and not_visible otherwise
 
-    Output: azure_private_endpoint_configuration_<subscription>.json — each endpoint with its connections, approval, subnet, private IPs, zone groups and each target's public access, plus the endpoints left out and why.
+    Output: azure_private_endpoint_configuration_<subscription>.json — each endpoint with its connections, approval, subnet, private IPs, zone groups and each target's public access, plus the endpoints left out and why. results.lookup_scope records target_subscription_only or accessible_subscriptions. Strict mode retains foreign references without querying them or interpreting their absence as deletion; malformed/out-of-scope lookup responses fail the affected chunk. Resource exclusions still apply before per-endpoint reads.
 
     Summary fields:
 
