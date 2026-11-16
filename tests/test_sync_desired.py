@@ -1,12 +1,12 @@
 """desired_from_run: one EntryDesired per manifest entry, read from a run dir."""
 import json
 
-from framework.sync.providers.desired import desired_from_run
+from framework.sync.providers.desired import desired_from_run, pipeline_of
 from framework.sync.state import RunState
 
 
 def env(*, fetcher="x", ref="EVD-X", name="Set X", status="success", target=None,
-        inventory=None, category="cat"):
+        inventory=None, category="cat", pipeline=None):
     md = {
         "fetcher_name": fetcher, "fetcher_version": "0.1.0", "run_id": "RID",
         "collected_at": "2026-01-01T00:00:00Z", "status": status,
@@ -16,6 +16,8 @@ def env(*, fetcher="x", ref="EVD-X", name="Set X", status="success", target=None
         md["target"] = target
     if inventory is not None:
         md["inventory"] = inventory
+    if pipeline is not None:
+        md["pipeline"] = pipeline
     return {"schema_version": "1.0", "metadata": md, "payload": {"k": 1}}
 
 
@@ -194,3 +196,33 @@ def test_skip_kind_separates_errors_from_decisions(tmp_path):
     [e] = desired_from_run(tmp_path, {"skip_failed": True})
     assert {f.original_file_name: f.skip_kind for f in e.files} == {
         "a.json": "skipped", "b.json": "error", "c.json": "error", "d.json": "error", "e.json": "skipped"}
+
+
+INV = {"type": "inventory", "id_scheme": "x-id"}
+
+
+def test_old_inventory_run_is_a_pipeline_entry():
+    assert pipeline_of({"inventory": {"complete": True}}) == {"type": "inventory"}
+    assert pipeline_of({"pipeline": INV, "inventory": {}}) == INV
+    assert pipeline_of({}) is None
+
+
+def test_pipeline_entry_defaults_no_request_to_evidence(tmp_path):
+    build(tmp_path, {"a.json": env(pipeline=INV, inventory={"complete": True})}, [inv("x", ["a.json"])])
+    [e] = desired_from_run(tmp_path, {})
+    assert e.pipeline == INV and e.no_request == "evidence"
+    assert e.files[0].pipeline is True
+
+
+def test_ordinary_entry_has_no_pipeline(tmp_path):
+    build(tmp_path, {"a.json": env()}, [inv("x", ["a.json"])])
+    [e] = desired_from_run(tmp_path, {})
+    assert e.pipeline is None and not e.files[0].pipeline
+
+
+def test_old_inventory_run_through_desired_from_run_is_a_pipeline_entry(tmp_path):  # Review Focus 1
+    # A run collected before the pipeline block: metadata.inventory, no metadata.pipeline.
+    build(tmp_path, {"a.json": env(inventory={"complete": True})}, [inv("x", ["a.json"])], {"x": {"use": "x"}})
+    [e] = desired_from_run(tmp_path, {})
+    assert e.pipeline == {"type": "inventory"} and e.no_request == "evidence"
+    assert e.files[0].pipeline is True and e.files[0].kind == "inventory"

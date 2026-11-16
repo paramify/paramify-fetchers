@@ -12,8 +12,12 @@ as it did before batches. See
 
 **You need:** [the repo installed](../README.md#install) ·
 [a completed run](cli_guide.md#collect-then-upload) · a Paramify account that
-can create API keys. The TUI's **Paramify** tab does the same upload and script
-sync ([TUI walkthrough](https://support.paramify.com/hc/en-us/articles/55867428958355-Setup-Fetchers)).
+can create API keys. In the TUI, the **Paramify** tab shows what each fetcher in the
+manifest has in Paramify, the same table as
+[`paramify status`](cli_guide.md#check-the-setup-in-paramify). From there, `s`
+syncs the scripts, `v` syncs the validators and `u` uploads the newest run. The
+**Pipelines** tab sends scan reports
+([TUI walkthrough](https://support.paramify.com/hc/en-us/articles/55867428958355-Setup-Fetchers)).
 
 ---
 
@@ -280,6 +284,11 @@ run:
         no_request: refuse  # refuse this entry instead
 ```
 
+A [pipeline fetcher](pipeline_fetchers_guide.md)'s entry ignores a `direct` it
+inherits from `run.paramify`: it uses `delivery: auto` and `no_request:
+evidence`, and `paramify validate` notes it. Set on the entry itself, `direct`
+is a validate error.
+
 | `no_request` | Result when the channel has no artifact request |
 |---|---|
 | `direct` (default) | Sends the entry direct, with a warning. |
@@ -442,3 +451,13 @@ results, see [verify validators](suggest_validator_guide.md#5-verify-in-paramify
 | The run also collected scan reports | `paramify upload` sends evidence only. Send reports with the [issues uploader](../uploaders/paramify_issues/README.md). |
 
 **More detail:** [upload options](../uploaders/paramify_evidence/README.md#config---config-optional)
+
+**A pipeline file is the exception.** A file from a [pipeline
+fetcher](pipeline_fetchers_guide.md), such as an inventory, never goes direct
+while the workspace has batches: a direct upload is stored and builds nothing.
+With no artifact request it goes in an evidence-level batch on the set. A
+manifest entry with `delivery: direct` or `no_request: direct` on the entry itself
+is refused; the same setting inherited from `run.paramify` is ignored. When
+the workspace has no batches, the file is sent direct with the note `sent direct:
+this workspace has no batches; the pipeline runs the pre-batch way`, and `--json`
+shows `pipeline.approved: null`.

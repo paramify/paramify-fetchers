@@ -201,7 +201,7 @@ class FakeAzure:
             {"id": "sp-la", "displayName": "la-automation", "appId": "app-1"}]})
         self.arm.update(EXTRA_ARM)
 
-    def get(self, url, params=None, headers=None, timeout=None):
+    def get(self, url, params=None, headers=None, timeout=None, allow_redirects=True):
         parsed = urlparse(url)
         query = dict(p.split("=", 1) for p in parsed.query.split("&") if p) if parsed.query else {}
         query.update(params or {})
@@ -219,7 +219,7 @@ class FakeAzure:
             return body
         return Resp(200, body)
 
-    def post(self, url, json=None, headers=None, timeout=None, params=None):
+    def post(self, url, json=None, headers=None, timeout=None, params=None, allow_redirects=True):
         if url.endswith("/directoryObjects/getByIds"):
             self.calls.append(("POST", url, ",".join(json["ids"])))
             return self.graph_post_response
@@ -1044,9 +1044,10 @@ def test_data_sources_unknown_ingestion_reads_null(azure, tmp_path, monkeypatch)
         "connectors_configured_without_data": None, "connectors_unhealthy": None}
 
 
-def test_analytics_rules_merge_preview_kinds(azure, tmp_path):
+def test_analytics_rules_merge_preview_kinds(azure, tmp_path, assert_summary_documented):
     code, ev = run("sentinel_analytics_rules", tmp_path)
     assert code == 0
+    assert_summary_documented("azure/sentinel_analytics_rules", ev["summary"])
     ws = ws_a(ev)
     by_name = {r["name"]: r for r in ws["rules"]}
     assert by_name["nrt"]["seen_in"] == ["preview"] and by_name["fusion"]["seen_in"] == ["stable", "preview"]
@@ -1555,12 +1556,13 @@ def test_analytics_rules_without_the_table_list_still_list_rules(azure, tmp_path
     assert ev["summary"]["enabled_rules_tables_unknown"] is None
 
 
-def test_incidents(azure, tmp_path):
+def test_incidents(azure, tmp_path, assert_summary_documented):
     xdr = azure.arm[(f"{SI_A}/incidents", "2025-09-01")]["value"][0]["properties"]
     xdr.update(providerName="Microsoft XDR", providerIncidentId="4521")
     xdr["additionalData"]["providerIncidentUrl"] = "https://security.microsoft.com/incidents/4521?tid=t-1"
     code, ev = run("sentinel_incidents", tmp_path)
     assert code == 0
+    assert_summary_documented("azure/sentinel_incidents", ev["summary"])
     ws = ws_a(ev)
     names = [i["name"] for i in ws["incidents"]]
     assert names == ["i-closed", "i-new"]  # the old closed one is outside the lookback
@@ -2359,9 +2361,10 @@ def test_incident_entity_identifiers(entity, expected):
     assert MODS["sentinel_incidents"].entity_id(entity) == expected
 
 
-def test_automation_rules(azure, tmp_path):
+def test_automation_rules(azure, tmp_path, assert_summary_documented):
     code, ev = run("sentinel_automation_rules", tmp_path)
     assert code == 0
+    assert_summary_documented("azure/sentinel_automation_rules", ev["summary"])
     ws = ws_a(ev)
     assert ws["active_rules"] == 1 and ws["expired_rules"] == 1
     assert ws["active_actions_by_type"] == {"RunPlaybook": 1}
@@ -2610,10 +2613,11 @@ EXTRA_ARM = {
 }
 
 
-def test_entra_diagnostic_settings(azure, tmp_path):
+def test_entra_diagnostic_settings(azure, tmp_path, assert_summary_documented):
     code, ev = run("entra_diagnostic_settings", tmp_path)
     assert code == 0
     s = ev["summary"]
+    assert_summary_documented("azure/entra_diagnostic_settings", s)
     assert s["key_categories_to_sentinel"] == {"AuditLogs": True, "SignInLogs": True}
     assert s["audit_and_signin_logs_to_sentinel"] is True and s["categories_not_exported"] == ["ProvisioningLogs"]
     coverage = {c["category"]: c for c in ev["results"]["category_coverage"]}

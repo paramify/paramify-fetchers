@@ -121,6 +121,11 @@ def test_aks_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_
     assert summary["private_clusters"] == 2 and summary["total_agent_pools"] == 6
 
 
+def test_aks_summary_matches_the_instructions(monkeypatch, tmp_path, assert_summary_documented):
+    _, evidence = run_aks(monkeypatch, tmp_path, "rg:rg-out")
+    assert_summary_documented("azure/aks_cluster_configuration", evidence["summary"])
+
+
 def test_aks_excludes_by_group_and_region_and_recounts(monkeypatch, tmp_path):
     code, evidence = run_aks(monkeypatch, tmp_path, "rg:rg-out, location:regioneast, rg:typo")
     summary = evidence["summary"]
@@ -363,9 +368,10 @@ def run_vms(monkeypatch, tmp_path, patterns, extra=()):
     return code, evidence, reads
 
 
-def test_vms_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_path):
+def test_vms_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_path, assert_summary_documented):
     code, evidence, _ = run_vms(monkeypatch, tmp_path, None)
     summary, results = evidence["summary"], evidence["results"]
+    assert_summary_documented("azure/vm_hardening_status", summary)
     assert code == 0 and results["excluded"] == []
     assert _added(summary) == _empty(("virtual_machines", 3), ("scale_sets", 3))
     assert _rest(summary) == {**vms.summarize(results["virtual_machines"], results["virtual_machine_scale_sets"]),
@@ -439,9 +445,10 @@ def run_disks(monkeypatch, tmp_path, patterns):
     return _run(disks, monkeypatch, tmp_path, patterns, "azure_disk_encryption_status")
 
 
-def test_disks_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_path):
+def test_disks_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_path, assert_summary_documented):
     code, evidence = run_disks(monkeypatch, tmp_path, None)
     summary = evidence["summary"]
+    assert_summary_documented("azure/disk_encryption_status", summary)
     assert code == 0 and evidence["results"]["excluded"] == []
     assert _added(summary) == _empty(("disks", 4))
     assert _rest(summary) == {**disks.summarize(evidence["results"]["disks"]), "provider_registration_status": "registered"}

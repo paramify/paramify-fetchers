@@ -58,6 +58,10 @@ def writes(permissions):
     return sorted(str(k) for k, v in permissions.items() if v == "write") if isinstance(permissions, dict) else []
 
 
+def grants(scopes, scope):
+    return bool(scopes) and (scope in scopes or "*" in scopes)
+
+
 def runner_labels(runs_on):
     if isinstance(runs_on, dict):
         return [str(x) for x in ([runs_on.get("group")] if runs_on.get("group") else [])
@@ -107,7 +111,7 @@ def analyse(name, text):
         # Without a block at the top or on every job, a job's token takes the repository default.
         "permissions_set": top is not None or bool(job_rows) and all(j["permissions_set"] for j in job_rows),
         "writes": sorted(set((top or []) + [w for j in job_rows for w in j["writes"] or []])),
-        "oidc": "id-token" in (top or []) or any("id-token" in (j["writes"] or []) for j in job_rows),
+        "oidc": grants(top, "id-token") or any(grants(j["writes"], "id-token") for j in job_rows),
         "self_hosted": any("self-hosted" in j["runs_on"] for j in job_rows),
         "runner_labels": sorted({label for j in job_rows for label in j["runs_on"]}),
         "references": len(classified),
@@ -154,7 +158,61 @@ def runners(client, path, include):
         for r in found]
 
 
-def repo_record(client, org, repo, files, include_runners):
+def runner_groups(client, base, include):
+    """The organization's runner groups, the runners in each and the repositories that may use them."""
+    if not include:
+        return None
+    groups = client.paginate_required(f"{base}/actions/runner-groups", key="runner_groups")
+    if groups is None:
+        return None
+    rows = []
+    for g in groups:
+        path = f"{base}/actions/runner-groups/{g.get('id')}"
+        members = client.paginate_required(f"{path}/runners", key="runners")
+        repos = client.paginate_required(f"{path}/repositories", key="repositories") \
+            if g.get("visibility") == "selected" else None
+        if members is None or g.get("visibility") == "selected" and repos is None:
+            return None
+        rows.append({
+            "name": g.get("name"),
+            "default": g.get("default"),
+            "inherited_from_enterprise": g.get("inherited"),
+            # all: every repository; selected: only `repositories`; private: private repositories only.
+            "visibility": g.get("visibility"),
+            "repositories": None if repos is None else sorted(r.get("name") for r in repos),
+            "allows_public_repositories": g.get("allows_public_repositories"),
+            "restricted_to_workflows": g.get("restricted_to_workflows"),
+            "selected_workflows": g.get("selected_workflows") or [],
+            "runners": sorted(r.get("name") for r in members),
+        })
+    return rows
+
+
+def oidc_template(client, base):
+    """The organization's OIDC subject template; {} when it was never customized (404)."""
+    before = len(client.failures)
+    found, body = client.lookup(f"{base}/actions/oidc/customization/sub")
+    return body if found else None if len(client.failures) > before else {}
+
+
+def oidc_claims(setting, org_template):
+    """The claim keys a repository's OIDC subject is built from, or None when unknown.
+
+    use_default true is GitHub's own subject (repo, context), whatever the organization's template says. false with
+    keys is the repository's own template; false without keys opts in to the organization's template.
+    """
+    if setting is None or setting.get("use_default") not in (True, False):
+        return None
+    if setting["use_default"]:
+        return ["repo", "context"]
+    if setting.get("include_claim_keys"):
+        return setting["include_claim_keys"]
+    if org_template is None:
+        return None
+    return org_template.get("include_claim_keys") or ["repo", "context"]
+
+
+def repo_record(client, org, repo, files, include_runners, org_template):
     name = repo["name"]
     base = f"repos/{org}/{name}"
     perms = client.get(f"{base}/actions/permissions")
@@ -164,8 +222,11 @@ def repo_record(client, org, repo, files, include_runners):
     token = client.get(f"{base}/actions/permissions/workflow") if enabled else None
     allowed = selected(client, base, perms.get("allowed_actions")) if enabled else None
     hosted = runners(client, f"{base}/actions/runners", include_runners)
+    # Read only where a workflow asks for an OIDC token: elsewhere the subject is never issued.
+    uses_oidc = enabled and any(w.get("oidc") for w in files.get(name, []))
+    oidc = client.get(f"{base}/actions/oidc/customization/sub") if uses_oidc else None
     if enabled and (token is None or perms.get("allowed_actions") == "selected" and allowed is None) \
-            or include_runners and hosted is None:
+            or include_runners and hosted is None or uses_oidc and oidc is None:
         return {"repository": name, "collected": False}
     return {
         "repository": name,
@@ -178,6 +239,12 @@ def repo_record(client, org, repo, files, include_runners):
         "default_workflow_permissions": (token or {}).get("default_workflow_permissions"),
         "can_approve_pull_request_reviews": (token or {}).get("can_approve_pull_request_reviews"),
         "self_hosted_runners": hosted,
+        "oidc_subject": None if oidc is None else {
+            "use_default": oidc.get("use_default"),
+            "include_claim_keys": oidc.get("include_claim_keys"),
+            "use_immutable_subject": oidc.get("use_immutable_subject"),
+            "effective_claim_keys": oidc_claims(oidc, org_template),
+        },
         "workflows": files.get(name, []),
     }
 
@@ -202,13 +269,21 @@ def collect(client, org, repos, config):
         "self_hosted_runners_allowed_in": (client.get(f"{base}/actions/permissions/self-hosted-runners")
                                            or {}).get("enabled_repositories"),
         "self_hosted_runners": runners(client, f"{base}/actions/runners", include),
+        "runner_groups": runner_groups(client, base, include),
+        "oidc_subject_template": oidc_template(client, base),
     }
-    records = [repo_record(client, login, r, files, include) for r in repos]
+    records = [repo_record(client, login, r, files, include, organization["oidc_subject_template"]) for r in repos]
     done = [r for r in records if r["collected"]]
     active = [r for r in done if r["actions_enabled"]]
     flows = [(r["repository"], w) for r in active for w in r["workflows"]]
     parsed = [(repo, w) for repo, w in flows if w["parsed"]]
     token = organization["workflow_token"] or {}
+    groups = organization["runner_groups"]
+    template = organization["oidc_subject_template"]
+    oidc = [r for r in done if r.get("oidc_subject")]
+
+    def group_names(test):
+        return None if groups is None else sorted(g["name"] for g in groups if test(g))
     return {
         "summary": {
             "organization_allowed_actions": organization["allowed_actions"],
@@ -248,6 +323,23 @@ def collect(client, org, repos, config):
             # A public repository's runner executes code from anyone who can open a pull request.
             "public_repositories_with_self_hosted_runners": None if not include else sorted(
                 r["repository"] for r in done if r["visibility"] == "public" and r["self_hosted_runners"]),
+            "runner_groups": None if groups is None else len(groups),
+            "runner_groups_open_to_all_repositories": group_names(lambda g: g["visibility"] == "all"),
+            "runner_groups_allowing_public_repositories": group_names(lambda g: g["allows_public_repositories"]),
+            "runner_groups_not_restricted_to_workflows": group_names(lambda g: not g["restricted_to_workflows"]),
+            "organization_oidc_subject_claims": None if template is None
+            else template.get("include_claim_keys") or ["repo", "context"],
+            "repositories_with_custom_oidc_subject": sorted(r["repository"] for r in oidc
+                                                            if r["oidc_subject"]["use_default"] is False
+                                                            and r["oidc_subject"]["include_claim_keys"]),
+            "repositories_on_organization_oidc_template": sorted(r["repository"] for r in oidc
+                                                                 if r["oidc_subject"]["use_default"] is False
+                                                                 and not r["oidc_subject"]["include_claim_keys"]),
+            # A subject without the repository is the same for every repository, so a cloud trust policy keyed on
+            # it cannot tell them apart.
+            "repositories_oidc_subject_without_repository": sorted(
+                r["repository"] for r in oidc if r["oidc_subject"]["effective_claim_keys"] is not None
+                and not {"repo", "repository", "repository_id"} & set(r["oidc_subject"]["effective_claim_keys"])),
             "not_collected": [r["repository"] for r in records if not r["collected"]],
         },
         "organization": organization,
