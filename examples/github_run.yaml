@@ -51,6 +51,9 @@ run:
     - use: github_deployment_controls
       targets: [*github_target]
 
+    - use: github_workflow_runs
+      targets: [*github_target]
+
     - use: github_vulnerability_disclosure
       targets: [*github_target]
 

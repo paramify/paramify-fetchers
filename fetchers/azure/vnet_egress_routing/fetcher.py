@@ -34,7 +34,7 @@ from azure_common import (  # noqa: E402
     vnet_id_of,
     write_evidence,
 )
-from azure_rest import int_config  # noqa: E402
+from azure_rest import int_config, target_subscription_scope  # noqa: E402
 from resource_exclusions import ResourceExclusions  # noqa: E402
 from scope_exclusions import excluded_item  # noqa: E402
 
@@ -790,7 +790,10 @@ def collect(subscription_id, cred, collector: Collector):
     """VNets, peerings, route tables, NICs, Azure Firewalls and policies, and Virtual WAN hub routing."""
     from azure.mgmt.network import NetworkManagementClient
 
+    strict = target_subscription_scope() is not None
     search = new_hub_search()
+    if strict:
+        search.update(read_scope="target_subscription", cross_subscription_search_skipped=True)
     client = collector.guard(
         "network.NetworkManagementClient (init)",
         lambda: NetworkManagementClient(
@@ -853,7 +856,7 @@ def collect(subscription_id, cred, collector: Collector):
     # A spoke's hub often lives in a separate connectivity subscription; look in every other one this credential sees.
     unresolved = unresolved_spokes(vnets, peers_by_vnet, hubs)
     search["spokes_needing_search"] = len(unresolved)
-    if unresolved:
+    if unresolved and not strict:
         others = _attempt(
             search, "subscription.subscriptions.list",
             lambda: [s for s in enabled_subscription_ids(cred) if s.lower() != subscription_id.lower()], [],
@@ -875,6 +878,7 @@ def main() -> int:
     )
     logging.getLogger("azure").setLevel(logging.WARNING)
     load_dotenv()
+    target_subscription_scope()
 
     output_dir = Path(os.environ.get("EVIDENCE_DIR", "./evidence"))
     collector = Collector(logger)

@@ -36,6 +36,7 @@ from alert_routing import (  # noqa: E402
     tri_state,
 )
 from arm_rest import arm_rest_client, list_all  # noqa: E402
+from azure_rest import target_subscription_scope
 from resource_exclusions import ResourceExclusions  # noqa: E402
 
 logger = logging.getLogger("azure_alert_rules")
@@ -181,6 +182,8 @@ def main() -> int:
     # The azure-* SDKs log every request header at INFO; warnings still get through.
     logging.getLogger("azure").setLevel(logging.WARNING)
     load_dotenv()
+    strict = target_subscription_scope() is not None
+    outside_scope = []
 
     output_dir = Path(os.environ.get("EVIDENCE_DIR", "./evidence"))
     collector = Collector(logger)
@@ -241,6 +244,10 @@ def main() -> int:
                            for gid in m["rule"]["added_action_group_ids"]]
             referenced += [gid for p in in_scope_processing for gid in p["added_action_group_ids"]]
             by_id = {(g["id"] or "").lower(): g for g in group_records}
+            if strict:
+                prefix = f"/subscriptions/{subscription_id}/".lower()
+                outside_scope = sorted({g for g in referenced if not g.lower().startswith(prefix)})
+                referenced = [g for g in referenced if g.lower().startswith(prefix)]
             add_referenced_groups(rest, referenced, by_id, collector)
             rules = [rule_record(t, r, by_id, processing_rules) for t, r in raw_rules]
             processing_rules = in_scope_processing
@@ -267,6 +274,7 @@ def main() -> int:
         subscription_source=sub["subscription_source"],
         collector=collector,
         results={
+            **({"read_scope":"target_subscription", "outside_read_scope_action_group_ids":outside_scope} if strict else {}),
             "alert_rules": rules,
             "action_groups": sorted(group_records, key=lambda g: (g["id"] or "").lower()),
             "processing_rules": sorted(processing_rules, key=lambda p: (p["id"] or "").lower()),

@@ -3,7 +3,7 @@ display_name: GitHub
 description: >-
   GitHub change-management, supply-chain and code-security evidence: branch
   protection, pull request review and CI checks, Actions security, release
-  integrity, deployment controls, Dependabot, code scanning and secret
+  integrity, deployment controls and approvals, workflow run history, Dependabot, code scanning and secret
   scanning alerts, vulnerability disclosure, organization security settings,
   access, non-user credentials, the audit log, FedRAMP significant change
   notifications, and an inventory of every repository. One organization per target, each with its own token and API

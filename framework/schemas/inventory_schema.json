@@ -10,12 +10,17 @@
       "description": "One record per asset. The inventory pipeline's data path is `payload.data`.",
       "items": {
         "type": "object",
-        "required": ["unique_asset_identifier"],
+        "required": ["unique_asset_identifier", "asset_type"],
         "properties": {
           "unique_asset_identifier": {
             "type": "string",
             "minLength": 1,
             "description": "The asset's stable ID in its own system (an ARN, an Azure resource ID). Unique within the file: the pipeline matches Inventory items on it."
+          },
+          "asset_type": {
+            "type": "string",
+            "minLength": 1,
+            "description": "What kind of asset this is (server, endpoint, repository). Advanced config derives the Inventory item's parent component from it, so every record needs one."
           }
         }
       }

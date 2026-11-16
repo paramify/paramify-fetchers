@@ -1,10 +1,7 @@
 name: azure_sql_managed_instance_encryption
 version: 0.3.1
-description: >
-  For each Azure SQL Managed Instance in the subscription, reports how its data is
-  encrypted at rest: the instance's TDE encryption protector (a service-managed key
-  or a customer-managed Key Vault key, its key URI and whether auto-rotation is on),
-  and Transparent Data Encryption state for every database on the instance.
+description: >-
+  Shows whether each SQL Managed Instance's encryption protector is a customer-managed key with auto-rotation, and whether transparent data encryption is on for every user database.
 category: azure
 
 config_schema:
@@ -64,32 +61,39 @@ ksis:
 evidence_set:
   reference_id: EVD-AZURE-SQLMI-ENCRYPTION
   name: Azure SQL Managed Instance Encryption
-  instructions: >
-    Script: azure/sql_managed_instance_encryption/fetcher.py. Azure SDK calls (azure-mgmt-sql SqlManagementClient, api
-    2025-01-01, Reader is sufficient): managed_instances.list(),
-    managed_instance_encryption_protectors.get(..., "current"),
-    managed_databases.list_by_instance(), and
-    managed_database_transparent_data_encryption.get(..., "current") per user
-    database. Every list follows nextLink. Per instance: `state`;
-    `encryption_protector` with `server_key_type` (ServiceManaged, or AzureKeyVault
-    for a customer-managed key), `server_key_name`, `key_vault_key_uri`,
-    `thumbprint` and `auto_rotation_enabled` (absent reads as false);
-    `customer_managed_key`; null when the protector call failed.
-    `databases_collected` is false when the database list call failed, and
-    `total_user_databases` is then null. Per
-    database: `is_system_database` (master, model, msdb, tempdb — kept in the
-    evidence, not queried, left out of every count), `status`, `tde_state`
-    (Enabled or Disabled) and `tde_enabled` (null when the TDE call failed, so an
-    unanswered call is never read as unencrypted). `all_user_databases_tde_enabled`
-    is false when any user database is known Disabled, null when any TDE call
-    failed (and none is known Disabled) or the instance has no user databases,
-    and true only when every user database answered Enabled. Instance and
-    summary counts split user databases into TDE enabled, disabled and unknown;
-    the summary's `total_user_databases` is null when any database list failed.
-    Resources the resource_exclusions patterns take out are listed under `excluded`
-    instead, each with the pattern that matched, and every count covers only the
-    instances in scope. The summary echoes `resource_exclusion_patterns`, lists
-    `resource_exclusion_patterns_unmatched` (patterns that matched no instance, such
-    as a mistyped name, or null when the instance list could not be read), and counts `excluded_managed_instances` and
-    `in_scope_managed_instances` (0 when none was read or the patterns took out
-    every instance, which a check can catch by requiring more than 0).
+  instructions: |
+    Script: azure/sql_managed_instance_encryption/fetcher.py
+
+    Access: Reader on the subscription.
+
+    Commands Executed:
+    - subscriptions.list() — picks a subscription when none is set
+    - providers.get("Microsoft.Sql") — tells "not registered" apart from "no instances"
+    - managed_instances.list() — every managed instance
+    - managed_instance_encryption_protectors.get() (per in-scope instance) — the TDE protector's key type, key name, Key Vault URI, thumbprint and auto-rotation setting
+    - managed_databases.list_by_instance() (per in-scope instance) — the databases on each instance
+    - managed_database_transparent_data_encryption.get() (per user database) — whether transparent data encryption (TDE) is on
+
+    Output: azure_sql_managed_instance_encryption_<subscription>.json — each SQL Managed Instance with its encryption protector (null, and customer_managed_key with it, when the protector couldn't be read), the TDE state of every user database, and all_user_databases_tde_enabled: false once any user database is Disabled, otherwise null when a TDE state couldn't be read, the database list failed or the instance has no user databases, and true only when every user database answered Enabled; system databases (master, model, msdb, tempdb) are kept but not queried or counted, and instances left out of scope are listed with the pattern that matched.
+
+    Summary fields:
+
+    Which instances are left out of scope?
+    - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every instance is in scope
+    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no managed instance, such as a mistyped name; null if the instance list couldn't be read
+    - excluded_managed_instances — Number of managed instances left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, is not read further, and no other count includes it
+    - in_scope_managed_instances — Number of managed instances read and in scope; 0 means none was read or the patterns took out every instance, which a check can catch by requiring more than 0
+
+    What was checked?
+    - total_managed_instances — Number of in-scope SQL Managed Instances; reads 0, not null, when the instance list could not be read (the run then fails)
+    - total_user_databases — Number of user databases on in-scope instances (system databases left out); null if any instance's database list couldn't be read
+    - provider_registration_status — Whether the SQL provider (Microsoft.Sql) is registered on the subscription: registered, not_registered or unknown
+
+    Is the encryption key customer-managed?
+    - instances_customer_managed_key — Number of instances whose TDE protector is a customer-managed Key Vault key (server key type AzureKeyVault); an instance whose protector couldn't be read doesn't count
+    - instances_key_auto_rotation — Number of instances with key auto-rotation on, where Azure omits the setting when it was never turned on, so absent counts as off; an instance whose protector couldn't be read doesn't count
+
+    Is every user database encrypted?
+    - tde_enabled_user_databases — Number of user databases with TDE Enabled
+    - tde_disabled_user_databases — Number of user databases with TDE Disabled
+    - tde_unknown_user_databases — Number of user databases whose TDE state couldn't be read, so they're never counted as unencrypted; an instance whose database list couldn't be read contributes none to any of the three counts

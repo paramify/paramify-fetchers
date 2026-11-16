@@ -96,10 +96,11 @@ def run_configuration(monkeypatch, tmp_path, patterns):
     return code, json.loads((tmp_path / "azure_app_service_configuration_s1.json").read_text()), set(reads)
 
 
-def test_configuration_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_path):
+def test_configuration_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_path, assert_summary_documented):
     code, evidence, reads = run_configuration(monkeypatch, tmp_path, None)
     summary, results = evidence["summary"], evidence["results"]
     assert code == 0 and results["excluded"] == [] and reads == {"web-in", "web-out", "web-east"}
+    assert_summary_documented("azure/app_service_configuration", evidence["summary"])
     assert set(summary) - set(config_fetcher.summarize(results["web_apps"])) == NEW_FIELDS | {
         "provider_registration_status", "excluded_web_apps", "in_scope_web_apps"}
     assert summary["resource_exclusion_patterns"] == summary["resource_exclusion_patterns_unmatched"] == []
@@ -168,10 +169,11 @@ def _listed(results) -> dict:
     return {p["name"]: (p["number_of_sites"], [s["name"] for s in p["sites"]]) for p in results["app_service_plans"]}
 
 
-def test_plans_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_path):
+def test_plans_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_path, assert_summary_documented):
     code, evidence = run_plans(monkeypatch, tmp_path, None)
     summary, results = evidence["summary"], evidence["results"]
     assert code == 0 and results["excluded"] == []
+    assert_summary_documented("azure/app_service_plans", evidence["summary"])
     assert set(summary) - set(plans_fetcher.summarize(results["app_service_plans"])) == NEW_FIELDS | {
         "provider_registration_status", "excluded_app_service_plans", "excluded_sites",
         "in_scope_app_service_plans", "in_scope_sites"}
@@ -450,10 +452,11 @@ def run_deployments(monkeypatch, tmp_path, patterns, events=None):
     return code, evidence, set(reads), failures
 
 
-def test_deployments_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_path):
+def test_deployments_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_path, assert_summary_documented):
     code, evidence, reads, _ = run_deployments(monkeypatch, tmp_path, None)
     summary, results = evidence["summary"], evidence["results"]
     assert code == 0 and results["excluded"] == []
+    assert_summary_documented("azure/app_service_deployments", evidence["summary"])
     assert reads == {"web-in", "web-in/stage", "web-in/qa", "web-out", "web-out/stage", "web-east", "web-east/stage",
                      "web-id", "web-id/stage"}
     expected = deployments_fetcher.summarize(results["web_apps"], 2, results["activity_log"])

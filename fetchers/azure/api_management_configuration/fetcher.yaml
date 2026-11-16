@@ -1,14 +1,7 @@
 name: azure_api_management_configuration
 version: 0.2.1
-description: >
-  Inventories Azure API Management services in the subscription. For every service: how it is
-  reachable (public network access, virtual network mode, private endpoints), which legacy TLS/SSL
-  versions and cipher suites the gateway accepts, whether legacy management API versions are blocked,
-  its hostnames and certificate expiry, the developer portal and whether self sign-up is open, which
-  security policies apply at global, product, API and operation level, its subscriptions (including the
-  built-in all-access one) and whether audit logs are exported. For its APIs, products and backends:
-  whether they accept plain HTTP, how each API is protected, and whether backends validate certificates
-  and authenticate. Secret named values are checked for Key Vault storage without reading their values.
+description: >-
+  Shows how each API Management service is exposed, which TLS versions and ciphers it accepts, whether its APIs stop callers without a key, and how backends and secrets are protected.
 category: azure
 
 config_schema:
@@ -72,57 +65,81 @@ ksis:
 evidence_set:
   reference_id: EVD-AZURE-API-MANAGEMENT-CONFIG
   name: Azure API Management Configuration
-  instructions: >
-    Script: azure/api_management_configuration/fetcher.py. Azure SDK calls: azure-mgmt-apimanagement ApiManagementClient
-    api_management_service.list(); per service sign_up_settings.get, policy.get (global),
-    product.list_by_service with product_policy.get and product_api.list_by_product per product,
-    api.list_by_service with api_policy.get, api_operation.list_by_api and api_operation_policy.get per
-    API and operation, policy_fragment.list_by_service with policy_fragment.get, subscription.list,
-    backend.list_by_service, identity_provider.list_by_service, named_value.list_by_service,
-    certificate.list_by_service and logger.list_by_service; and azure-mgmt-monitor
-    diagnostic_settings.list for each service.
-    Never written to the evidence: policy XML (only which security elements each policy contains:
-    ip-filter, rate-limit, rate-limit-by-key, quota, quota-by-key, validate-jwt, validate-azure-ad-token,
-    check-header, cors, validate-content, authentication-managed-identity, authentication-certificate;
-    elements inside XML comments do not count),
-    named-value values (only secret, key_vault_backed and secret_stored_in_api_management), subscription
-    keys (only scope, state and allow_tracing), and identity-provider and backend credentials (backends
-    record only auth_configured).
-    TLS: legacy_protocols covers client- and backend-side TLS 1.0, TLS 1.1 and SSL 3.0 from customProperties;
-    source explicit means set, default means unset and Azure's documented default applies (on only for
-    services created on or before 1 April 2018). ciphers covers every suite Azure lets you switch off: the
-    nine CBC and RSA-key-exchange suites default to on for every service and stay on until set to False,
-    and TripleDes168 (TLS_RSA_WITH_3DES_EDE_CBC_SHA) follows the April 2018 rule; each records its
-    weaknesses (cbc, no_forward_secrecy, 3des). weak_ciphers_enabled lists those effectively on. The
-    GCM/ECDHE suites Azure requires for its own platform cannot be switched off and are not listed.
-    minimum_api_version_enforced is true when apiVersionConstraint.minApiVersion is 2019-12-01 or later,
-    Microsoft's recommended floor below which management API versions can read back secrets.
-    Hostname and certificate expiry is recorded with days to expiry at collection time
-    (certificate_days_to_expiry, days_to_expiry); summary counts expired and expiring within 30 days.
-    developer_portal_sign_up is enabled, disabled, not_available_in_tier (the v2 tiers have no sign-up
-    settings), or null when the read failed.
-    Subscriptions: scope_kind is all_apis (the service itself), product or api; built_in_all_access marks
-    the built-in "master" subscription, whose keys work for every API. allow_tracing on a subscription
-    lets its callers request traces that can include request data.
-    APIs: access_control answers whether a call without a subscription key is stopped. It is true when the
-    API requires a subscription key, or when a validate-jwt or validate-azure-ad-token policy runs on every
-    operation's call. Policies apply innermost first (operation, API, open product, global), and an outer
-    scope's policy runs only when every scope inside it keeps <base />; a scope with no policy of its own
-    runs Azure's default, which keeps it. Policy fragments pulled in with <include-fragment> count as
-    part of the policy. An OAuth 2.0 / OpenID Connect server on the API (oauth2_or_openid_configured) only
-    configures the developer portal's test console, so it is not access control. A keyed product's policy
-    never runs for a keyless call; with several open products (ones that require no subscription), each
-    must protect it. False when nothing does; null when a policy or fragment that decides it could not be
-    read. policy_elements lists base when a policy keeps <base />. accepts_http and backend_uses_http mark plain HTTP.
-    audit_logs_exported is true when a diagnostic setting with a destination enables GatewayLogs or the
-    audit or allLogs group, and null when settings could not be read. Lists that could not be read are null
-    and set metadata.partial_failure. A summary with total_apis 0 proves nothing about API protection:
-    there is nothing to protect yet. provider_registration_status (registered / not_registered / unknown)
-    is the Microsoft.ApiManagement resource provider's state.
-    API Management services the resource_exclusions patterns take out are listed under
-    results.excluded instead, each with the pattern that matched; the summary gives
-    resource_exclusion_patterns (the configured patterns, empty when none are set),
-    resource_exclusion_patterns_unmatched (patterns that matched no service, such as a mistyped name, or null when the service list could not be read), excluded_services (how many the patterns took out, null if the list couldn't be read; no other count includes them, and
-    the API, product, backend and certificate counts leave with their service) and
-    in_scope_services (how many stayed; null if the list couldn't be read, and 0 means there are none or the patterns took out every
-    service).
+  instructions: |
+    Script: azure/api_management_configuration/fetcher.py
+
+    Access: Reader on the subscription.
+
+    Commands Executed:
+    - subscriptions.list() — picks a subscription when none is set
+    - providers.get("Microsoft.ApiManagement") — tells an unregistered provider from no services
+    - api_management_service.list() — services with their network, TLS, cipher, hostname and developer portal settings
+    - sign_up_settings.get() (per service) — whether anyone can sign up on the developer portal
+    - policy.get() (per service) — which security elements the global policy contains: ip-filter, rate-limit, rate-limit-by-key, quota, quota-by-key, validate-jwt, validate-azure-ad-token, check-header, cors, validate-content, authentication-managed-identity and authentication-certificate, plus base when it keeps the base policy; elements inside XML comments do not count, and every product, API, operation and fragment policy is read the same way
+    - product.list_by_service(), product_policy.get() and product_api.list_by_product() (per service and product) — products, their policies and the APIs in each
+    - api.list_by_service(), api_policy.get(), api_operation.list_by_api() and api_operation_policy.get() (per service, API and operation) — APIs, operations and their policies
+    - policy_fragment.list_by_service() and policy_fragment.get() (per service and fragment) — reusable policy fragments pulled into policies
+    - subscription.list() (per service) — API Management subscriptions, with their scope, state and tracing
+    - backend.list_by_service() (per service) — backends, their URL, certificate checks and whether they authenticate
+    - identity_provider.list_by_service() (per service) — developer portal sign-in providers
+    - named_value.list_by_service() (per service) — named values and whether secret ones live in Key Vault
+    - certificate.list_by_service() (per service) — uploaded certificates and their expiry
+    - logger.list_by_service() (per service) — where the service sends request logs
+    - diagnostic_settings.list() (per service) — whether gateway logs are exported
+
+    Output: azure_api_management_configuration_<subscription>.json — each service with its network exposure, TLS and cipher settings, certificates, developer portal, policy elements, APIs, products, subscriptions, backends, named values and logging, plus the services left out and why; policy text, named-value values, subscription keys and backend credentials are never recorded. Lists that could not be read are null and set metadata.partial_failure.
+
+    Summary fields:
+
+    Which resources are left out of scope?
+    - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
+    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no API Management service, such as a mistyped name; null when the service list could not be read
+    - excluded_services — Number of services left out of scope because a pattern matched; each is listed under excluded with the pattern, gets no per-service calls, and no other count includes it or the APIs, products, backends and certificates under it; null when the service list could not be read
+    - in_scope_services — Number of services read and in scope; 0 means there are none or the patterns took out every service; null when the service list could not be read
+
+    What was checked?
+    - total_services — Number of in-scope API Management services
+    - provider_registration_status — Whether the API Management provider (Microsoft.ApiManagement) is registered on the subscription: registered, not_registered or unknown
+
+    Can the services be reached from the Internet?
+    - services_with_public_network_access — Number of services whose public network access is not disabled; unset counts as on
+    - services_in_virtual_network — Number of services deployed into a virtual network in External or Internal mode
+    - services_with_private_endpoints — Number of services with at least one private endpoint connection
+
+    Does the gateway accept only strong TLS?
+    - services_with_legacy_tls_or_ssl_enabled — Number of services where TLS 1.0, TLS 1.1 or SSL 3.0 is on for clients or backends: set on, or unset on a service created on or before 1 April 2018, where Azure defaults it on
+    - services_with_weak_ciphers_enabled — Number of services with at least one weak cipher suite effectively on (CBC mode, no forward secrecy, or 3DES); Azure leaves the nine CBC and RSA key-exchange suites, TLS_RSA_WITH_AES_128_GCM_SHA256 among them, on until they are set to False, and 3DES (TripleDes168) on when unset only for a service created on or before 1 April 2018; the ECDHE GCM suites Azure requires cannot be switched off and are not checked
+    - services_minimum_api_version_enforced — Number of services whose minimum management API version is 2019-12-01 or later, Microsoft's recommended floor below which older versions can read secrets back
+
+    Is the developer portal open to sign-ups?
+    - services_developer_portal_enabled — Number of services with the developer portal enabled
+    - services_developer_portal_sign_up_enabled — Number of services where anyone can sign up for a developer portal account; the v2 tiers have no sign-up setting and are not counted
+
+    Are gateway logs exported?
+    - services_with_diagnostic_settings — Number of services with at least one diagnostic setting
+    - services_audit_logs_exported — Number of services with gateway logs exported: a diagnostic setting with a destination enables GatewayLogs or the audit or allLogs category group
+    - services_audit_logs_unknown — Number of services whose diagnostic settings could not be read, so whether logs are exported is unknown
+
+    Do APIs stop callers without a key or token?
+    - total_apis — Number of APIs across the services; 0 proves nothing about protection, since there is nothing to protect yet
+    - apis_accepting_http — Number of APIs that accept plain HTTP or unencrypted WebSocket calls
+    - apis_without_access_control — Number of APIs where a call without a subscription key is not stopped: the API requires no key, and no validate-jwt or validate-azure-ad-token policy runs on every operation's call, counting policy fragments and outer scopes only while every scope inside keeps the base policy; a keyed product's policy never runs for a keyless call, so only products that need no subscription count, and an OAuth 2.0 or OpenID Connect server on the API only configures the portal's test console
+    - apis_access_control_unknown — Number of APIs where nothing found protects them but a policy or fragment that could was not readable
+    - total_products — Number of products across the services
+    - published_products_without_subscription — Number of published products that need no subscription, so anyone can call their APIs without a key
+
+    Who holds keys to the APIs?
+    - total_subscriptions — Number of API Management subscriptions (sets of keys callers use, not Azure subscriptions) across the services
+    - active_all_apis_subscriptions — Number of active API Management subscriptions scoped to every API on their service, the built-in all-access one included
+    - subscriptions_with_tracing_allowed — Number of API Management subscriptions whose callers may request traces, which can include request data
+
+    Are backends reached securely?
+    - total_backends — Number of backends across the services
+    - backends_using_http — Number of backends whose URL is plain HTTP
+    - backends_without_certificate_validation — Number of backends set not to check the certificate's chain or host name
+    - backends_without_auth — Number of backends with no credential configured (header, query, authorization or certificate) that are not an Azure resource
+
+    Are secrets and certificates looked after?
+    - secret_named_values_not_in_key_vault — Number of secret named values stored in API Management and not referenced from Key Vault
+    - certificates_expired — Number of uploaded and hostname certificates that had expired at collection time
+    - certificates_expiring_within_30_days — Number of uploaded and hostname certificates that expire within 30 days of collection
