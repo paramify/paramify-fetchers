@@ -2532,7 +2532,7 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
-- **`azure_aks_cluster_configuration` 0.4.0, `azure_redis_cache_configuration`
+- **`azure_aks_cluster_configuration` 0.5.0, `azure_redis_cache_configuration`
   0.3.0, `azure_managed_redis_configuration` 0.3.0 and
   `azure_rbac_custom_roles` 0.3.0: a list that could not be read gives null
   counts, not 0.**

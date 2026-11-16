@@ -1,5 +1,5 @@
 name: azure_aks_cluster_configuration
-version: 0.4.0
+version: 0.5.0
 description: >-
   Shows whether each AKS cluster's API server is private or IP-restricted, who can sign in, and whether it has network policy, auto-upgrade, Defender and Azure Monitor.
 category: azure
