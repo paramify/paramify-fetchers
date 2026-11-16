@@ -148,6 +148,22 @@ schemas and the `paramify` CLI — not the internal code.
   read the legacy query is sent unchanged. The columns are listed in
   [the fetcher's README](fetchers/wiz/vulnerability_findings/README.md#columns).
 
+- **`azure_entra_pim_assignments` 0.2.0: an approved principals setting.** The
+  optional `approved_principal_ids` setting (`AZURE_ENTRA_APPROVED_PRINCIPAL_IDS`)
+  is the same one `azure_entra_privileged_roles` takes: object ids of the users,
+  groups and service principals approved to hold a privileged directory role,
+  separated by commas, spaces or newlines. `summary.approved_principals_configured`
+  says whether a list is set, and `summary.unapproved_eligible_privileged_principals`
+  counts the distinct users, groups and apps eligible for a privileged role
+  tenant-wide whose object id isn't on it. Direct eligible assignments only: a
+  group is matched by its own id, not its members. The count is null with no
+  list, when an entry isn't an object id (the run then fails as `bad_config`), or
+  when a privileged eligible assignment has no scope; like the other figures, it
+  is left out when a read fails. `results.unapproved_eligible_principals` lists
+  those principals with the privileged roles each is eligible for, and
+  `results.approved_principal_ids` the list they were compared with. Without the
+  setting the evidence is unchanged apart from these four keys (false or null).
+
 - **Optional selected-subscription reads for mixed Entra evidence.**
   `azure_entra_emergency_accounts` 0.2.0 and
   `azure_entra_dormant_identities` 0.3.0 accept `target_subscription_only`
@@ -1739,6 +1755,11 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **`collection_succeeded` now covers two Entra evidence sets.** It is listed
+  against `EVD-AZURE-ENTRA-APP-CREDS` (`azure_entra_app_registrations`) and
+  `EVD-AZURE-ENTRA-SERVICE-PRINCIPALS` (`azure_entra_service_principals`), so a
+  failed run of either fetcher fails its evidence set. Consumers that keep their
+  own criteria for these sets get collection health from this registry file.
 - **The TUI shows the catalog and the manifest on one Fetchers page.** The
   Catalog and Manifest tabs are now one tab, so the TUI has four tabs:
   Fetchers, Run, Evidence and Paramify (keys `1` to `4`). The catalog and a
@@ -2547,6 +2568,67 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- **Disk, Key Vault, storage and SQL Managed Instance fetchers: an unread list
+  gives null counts, not 0.** When a list the run needs is refused (403),
+  throttled or times out, every total, count and percentage built from it is
+  null. Before, they read 0, which looked like "none found". Each run still
+  fails as `partial_failure`.
+  - `azure_disk_encryption_status` 0.3.0: when the disk list is not read, every
+    disk count and percentage is null (including `total_disks`).
+  - `azure_key_vault_configuration` 0.5.0: when the vault list is not read,
+    every count is null. When any vault's diagnostic settings are not read,
+    `vaults_with_diagnostic_settings`, `vaults_with_audit_logging`,
+    `vaults_without_audit_logging` and `audit_logging_percentage` are null too;
+    `vaults_audit_logging_unknown` still says how many.
+  - `azure_storage_encryption_status` 0.5.0: when the account list is not read,
+    every count is null (`total_storage_accounts` included). When any account's
+    container list is not read, the container counts and `in_scope_containers`
+    and `excluded_containers` are null; when any geo-redundant account's
+    replication status is not read, `geo_replication_live_accounts` and
+    `geo_failover_ready_accounts` are null. When any account's blob or file
+    service properties are not read, `blob_versioning_accounts`,
+    `container_soft_delete_accounts` (blob) and `share_soft_delete_accounts`
+    (file) are null; each account records `blob_properties_status` and
+    `file_service_properties_status` (collected, not_supported or failed).
+  - `azure_sql_managed_instance_encryption` 0.4.0: when the instance list is
+    not read, every count is null (`total_managed_instances` and
+    `in_scope_managed_instances` included). The key counts are null when any
+    instance's protector is not read, and the TDE counts when any instance's
+    database list is not read.
+  - `azure_sql_managed_instance_backups` 0.5.0: when the instance list is not
+    read, every instance, database and failover group count is null. The
+    database retention counts are null when any instance's database list is not
+    read, and `instances_in_failover_group` when any instance's failover group
+    membership is unknown.
+
+- **`azure_aks_cluster_configuration` 0.5.0, `azure_redis_cache_configuration`
+  0.3.0, `azure_managed_redis_configuration` 0.3.0 and
+  `azure_rbac_custom_roles` 0.3.0: a list that could not be read gives null
+  counts, not 0.**
+  - When the cluster, cache or role definition list is not read, every count,
+    percentage and list built from it in the summary is null (including
+    `total_clusters`, `total_caches`, `total_role_definitions` and
+    `custom_role_definitions`). Before they read 0 or empty. The run still
+    exits 1 as `partial_failure`.
+  - `azure_redis_cache_configuration`: the counts built from a per-cache read
+    (`access_policy_assignments`, `firewall_allows_all_ips_caches`,
+    `audit_logging_enabled_caches`, `maintenance_window_caches`,
+    `geo_replicated_caches`) are null while any cache's read failed. Before they
+    left that cache out.
+  - `azure_managed_redis_configuration`: the database counts and
+    `tls_only_clusters` (and its percentage) are null while any cluster's
+    database list could not be read. Before they left that cluster out.
+
+- **`azure_sql_managed_instance_configuration` 0.5.0: only a catch-all Internet
+  Deny that covers every source restricts the subnet's Internet egress.** Before,
+  any catch-all Deny toward the Internet counted, whatever its source, so a Deny
+  limited to one subnet's addresses marked the instance restricted. Now the Deny
+  must have a source of `*`, `0.0.0.0/0` or `VirtualNetwork`, or address ranges
+  that together hold the instance's whole subnet (its own range or a wider one);
+  a source-limited Deny is skipped and the walk goes on to the next rule. A port
+  range of `0-65535` now counts as `*`. Affects `subnet_unrestricted_internet_outbound`
+  and `instances_subnet_unrestricted_internet_outbound`.
+
 - **`paramify upload` no longer sends an inventory direct when its channel has
   no artifact request.** A Paramify inventory pipeline runs only on a file in an
   approved batch, so a direct upload was stored and built nothing. The file now
@@ -2610,6 +2692,30 @@ schemas and the `paramify` CLI — not the internal code.
   explicitly enabled. Existing security-contact reads and failure handling are
   unchanged.
 
+- **`azure_managed_identity_configuration` 0.3.0: an unread list gives null
+  counts, not 0, and an unread federated-credential list no longer counts an
+  identity as unattached.**
+  - When the user-assigned identity list or the resource list is not read,
+    every count built from it is null (the totals, the federated credential
+    counts, and the counts over both kinds of identity). Before they read 0.
+    The run still exits 1 as `partial_failure`.
+  - `graph_access` is null, not `not_read`, when an identity list was not read.
+    `not_read` now means both lists were read and held no identity to look up.
+  - Before, an identity whose federated credential list could not be read
+    counted in `unattached_identities_with_roles`. That count and
+    `federated_only_identities_with_roles` are now null while any identity's
+    role assignments, attachments or federated credentials are unread, and
+    `user_assigned_identities_no_resource_attached` and the federated credential
+    counts are null when their lists are unread for any identity.
+  - When any identity's role assignments are not read, the role counts
+    (`identities_with_broad_role`, `identities_with_subscription_or_higher_role`,
+    the four `identities_<capability>` counts,
+    `identities_without_role_assignments` and
+    `role_assignments_unresolved_role`) are null. When Microsoft Graph is not
+    read (`graph_access` `not_authorized` or `failed`),
+    `identities_with_graph_roles` and `identities_with_privileged_graph_roles`
+    are null. Before they read 0.
+
 - **`azure_entra_authentication_policy` no longer shows Microsoft's password
   defaults when the tenant's settings could not be read.** Before, a failed
   `/groupSettings` read fell back to the template, so `password_settings_source`
@@ -2617,11 +2723,35 @@ schemas and the `paramify` CLI — not the internal code.
   the defaults, though the tenant may have saved other values. The source and
   those fields are now null, and the failed read still fails the run. Version
   0.3.1.
+
+- **`azure_network_security_groups` 0.6.0: only a catch-all Internet Deny that
+  covers every source restricts Internet egress.** Before, any catch-all Deny
+  toward the Internet counted, whatever its source, so a Deny limited to one
+  subnet's addresses marked the group restricted. Now the Deny must have a
+  source of `*`, `0.0.0.0/0` or `VirtualNetwork`; a source-limited
+  Deny is skipped and the walk goes on to the next rule. A port range of
+  `0-65535` now counts as `*`. A group with no catch-all rule at all still reads
+  restricted. Affects `unrestricted_internet_outbound_groups` and
+  `restricted_internet_outbound_groups`.
+- **`azure_vpn_gateway_configuration` 0.3.0: `active_active_gateways` and
+  `p2s_enabled_gateways` count only Vpn-type gateways.** Before, an ExpressRoute
+  gateway could be counted too, so the figures could exceed `vpn_gateways`.
 - **`azure_app_gateway_waf` `total_waf_policies` is null when the WAF policy
   list could not be read.** Before, a failed
   `web_application_firewall_policies.list_all` left only the policies a gateway
   references, read one by one, so the total looked like a small number of
   policies. The failed list still fails the run. Version 0.2.2.
+
+- **`azure_network_flow_logs` 0.3.0: flow log counts are null when a flow-log
+  list was not read.** Before, a failed Network Watcher list read as 0 flow
+  logs and 0 watchers, and when one watcher's flow-log list failed the counts
+  covered only the watchers that were read. Now the Network Watcher list failing,
+  or any watcher's flow-log list failing, makes every flow-log count (totals,
+  target types, retention, Traffic Analytics, unattached and unknown targets),
+  `in_scope_flow_logs`, `excluded_flow_logs` and
+  `resource_exclusion_patterns_unmatched` null. When the watcher list failed,
+  `total_network_watchers`, `regions_with_virtual_networks_without_network_watcher`
+  and `regions_without_network_watcher_count` are null too (before: 0, [] and 0). With every list read the output is the same.
 - **`paramify doctor` and the note before `paramify run` find an upload token
   in `.env`.** So do `manifest set-stack` and the stack picker in the TUI.
   Before, only `paramify stacks` and `paramify upload` read `.env`, and the
