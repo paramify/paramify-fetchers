@@ -405,6 +405,8 @@ def main() -> int:
 
     listed = custom_roles is not None
     custom_roles, excluded = split_custom_roles(custom_roles or [], exclusions)
+    if not listed:
+        exclusions.mark_unread()
     exclusions.warn_unmatched(logger)
     counts = exclusions.summary(excluded, ("custom_role",), {"custom_roles": len(custom_roles)})
     # Unknown, not none, when the list wasn't read.

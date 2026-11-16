@@ -517,6 +517,8 @@ def collect(subscription_id, cred, collector: Collector, exclusions: ResourceExc
     system_holders += back
     if excluded is not None:
         excluded += sorted(out_user + out_system, key=lambda e: (e["kind"], e["id"] or ""))
+    if not user_assigned_read or holders is None or roles_by_principal is None:
+        exclusions.mark_unread()
     exclusions.warn_unmatched(logger)
 
     principal_ids = [i["principal_id"] for i in user_assigned if i["principal_id"]]

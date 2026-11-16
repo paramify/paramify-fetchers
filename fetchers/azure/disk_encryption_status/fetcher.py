@@ -314,8 +314,10 @@ def main() -> int:
         )
 
     exclusions.record_invalid(collector)
-    exclusions.warn_unmatched(logger)
     listed = disks is not None
+    if not listed:
+        exclusions.mark_unread()
+    exclusions.warn_unmatched(logger)
     disks = disks or []
 
     evidence = build_payload(

@@ -24,20 +24,20 @@ from framework.contract import ManifestEntry  # noqa: E402
 from framework.paramify_auth import READ_TOKEN_ENV  # noqa: E402
 from framework.runner.manifest_loader import entry_keys  # noqa: E402
 from framework.tui.modals import ConfirmModal, PickerModal  # noqa: E402
-from framework.tui.screens.manifest import ManifestPage  # noqa: E402
-from framework.tui.screens.upload import UploadPage  # noqa: E402
+from framework.tui.screens.manifest import ManifestPanel  # noqa: E402
+from framework.tui.screens.paramify import ParamifyPage  # noqa: E402
 
 URL = "https://api.example.test"  # conftest.FAKE_PARAMIFY_URL
 RUN_ID = "2026-09-01T00-00-00Z"
 
 
 @pytest.fixture
-def paramify(fake_paramify, monkeypatch, no_network):
+def paramify(fake_paramify, monkeypatch, no_network, stub_paramify_status):
     monkeypatch.setenv("PYTHON_DOTENV_DISABLED", "1")
     monkeypatch.delenv(READ_TOKEN_ENV, raising=False)
     monkeypatch.delenv("PARAMIFY_CUSTOM_TAGS", raising=False)
-    # The scripts panel is not under test here.
-    monkeypatch.setattr(UploadPage, "_rebuild_scripts", lambda page: None)
+    # The page's status read is not under test here; the upload plan is.
+    stub_paramify_status()
     return fake_paramify
 
 
@@ -94,11 +94,10 @@ async def _until(pilot, done, what: str, timeout: float = 30.0) -> None:
 
 async def _confirm(app, pilot) -> list:
     """Open the Paramify page, ask to upload, and return the confirm's lines."""
-    await pilot.press("5")
+    await pilot.press("4")
     await pilot.pause()
-    page = app.screen.query_one(UploadPage)
-    page.rebuild()
-    assert not page.query_one("#upload-submit", Button).disabled
+    page = app.screen.query_one(ParamifyPage)
+    await _until(pilot, lambda: page.check_action("upload_run", ()), "the upload key")
     page.action_upload_run()
     await _until(pilot, lambda: isinstance(app.screen, ConfirmModal), "the upload confirm")
     return str(app.screen._message).splitlines()
@@ -123,16 +122,16 @@ def _writes(fake) -> list:
 
 def _log(page) -> str:
     """The log with runs of whitespace as one space: the log wraps long lines."""
-    return " ".join(" ".join(line.text for line in page.query_one("#upload-log", RichLog).lines).split())
+    return " ".join(" ".join(line.text for line in page.query_one("#pf-log", RichLog).lines).split())
 
 
 def _banner(page) -> str:
-    rendered = page.query_one("#upload-banner").render()
+    rendered = page.query_one("#pf-activity").render()
     return getattr(rendered, "plain", str(rendered)).strip()
 
 
-async def _uploaded(app, pilot) -> UploadPage:
-    page = app.screen.query_one(UploadPage)
+async def _uploaded(app, pilot) -> ParamifyPage:
+    page = app.screen.query_one(ParamifyPage)
     await _until(pilot, lambda: "upload complete" in _banner(page) and _log(page), "the upload")
     return page
 
@@ -245,7 +244,7 @@ def test_a_stack_and_owner_picked_after_the_run_are_noted_and_route_nothing_yet(
     name = FETCHER
 
     async def pick(app, pilot, button: str, typed: str) -> list:
-        app.screen.query_one(ManifestPage).query_one(button, Button).press()
+        app.screen.query_one(ManifestPanel).query_one(button, Button).press()
         await _until(pilot, lambda: isinstance(app.screen, PickerModal), f"the {button} picker")
         await _until(pilot, lambda: getattr(app.focused, "id", None) == "picker-filter", "the picker's filter")
         options = [label for _, label in app.screen._options]
@@ -254,11 +253,14 @@ def test_a_stack_and_owner_picked_after_the_run_are_noted_and_route_nothing_yet(
         return options
 
     async def body(app, pilot):
-        await pilot.press("2")
+        await pilot.press("1")
         await pilot.pause()
+        await pilot.press("tab")  # from the catalog to the manifest list
+        page = app.screen.query_one(ManifestPanel)
+        await _until(pilot, lambda: app.focused is not None and page in app.focused.ancestors_with_self,
+                     "focus in the manifest list")
         stacks = await pick(app, pilot, "#manifest-stack", "Staging")
         owners = await pick(app, pilot, "#manifest-owner", "bob")
-        page = app.screen.query_one(ManifestPage)
         labels = (str(page.query_one("#manifest-stack", Button).label),
                   str(page.query_one("#manifest-owner", Button).label))
         lines = await _confirm(app, pilot)
@@ -434,8 +436,8 @@ def test_no_on_the_confirm_sends_nothing(tmp_path, paramify, run_tui):
     async def body(app, pilot):
         await _confirm(app, pilot)
         await _answer(app, pilot, "n")
-        page = app.screen.query_one(UploadPage)
-        return page._busy, page.query_one("#upload-submit", Button).disabled
+        page = app.screen.query_one(ParamifyPage)
+        return page._busy, not page.check_action("upload_run", ())
 
     assert run_tui(body, path) == (False, False)
     assert _writes(paramify) == []
@@ -482,9 +484,9 @@ def test_a_second_upload_while_the_plan_is_made_is_refused(tmp_path, paramify, r
     monkeypatch.setattr(api, "plan_upload", slow_plan)
 
     async def body(app, pilot):
-        await pilot.press("5")
+        await pilot.press("4")
         await pilot.pause()
-        page = app.screen.query_one(UploadPage)
+        page = app.screen.query_one(ParamifyPage)
         page.action_upload_run()
         await _until(pilot, started.is_set, "the plan to start")
         page.action_upload_run()

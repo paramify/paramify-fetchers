@@ -442,6 +442,8 @@ def main() -> int:
             ),
         )
 
+    if any(r is None for r in (watchers, flow_logs, vnets)):
+        exclusions.mark_unread()
     exclusions.warn_unmatched(logger)
     evidence = build_payload(
         subscription_id=subscription_id,

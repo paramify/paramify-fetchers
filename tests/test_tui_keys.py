@@ -31,9 +31,9 @@ pytest.importorskip("textual", reason="TUI tests need the 'tui' extra")
 from textual.widgets import Button, DataTable, Input, TabbedContent, Tree  # noqa: E402
 
 from framework import api  # noqa: E402
-from framework.tui.modals import ConfirmModal, FormModal, MultiPickerModal  # noqa: E402
-from framework.tui.screens.manifest import ManifestPage  # noqa: E402
-from framework.tui.screens.upload import UploadPage  # noqa: E402
+from framework.tui.modals import ConfirmModal, FormModal  # noqa: E402
+from framework.tui.screens.manifest import ManifestPanel  # noqa: E402
+from framework.tui.screens.paramify import ParamifyPage  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -81,7 +81,8 @@ def _focus_id(app) -> str | None:
 # focus: every tab must land inside its own page, or its BINDINGS are dead
 # --------------------------------------------------------------------------- #
 
-def test_each_tab_focuses_a_widget_in_its_own_page(tmp_path, run_tui):
+def test_each_tab_focuses_a_widget_in_its_own_page(tmp_path, run_tui, stub_paramify_status):
+    stub_paramify_status()
     manifest = _write_manifest(tmp_path)
 
     async def body(app, pilot):
@@ -100,11 +101,11 @@ def test_each_tab_focuses_a_widget_in_its_own_page(tmp_path, run_tui):
 
     landed = run_tui(body, manifest)
     assert landed == {
-        "tab-catalog": "catalog-tree",
-        "tab-manifest": "manifest-entries",
+        "tab-fetchers": "catalog-tree",
         "tab-run": "btn-run",
         "tab-evidence": "evidence-runs",
-        "tab-upload": "scripts-preview",
+        "tab-paramify": "pf-grid",
+        "tab-pipelines": "issues-summary",
     }
 
 
@@ -114,24 +115,24 @@ def test_repeat_tab_press_keeps_pane_focus(tmp_path, run_tui):
     manifest = _write_manifest(tmp_path)
 
     async def body(app, pilot):
-        await pilot.press("2")
+        await pilot.press("1")
         await pilot.pause()
-        await pilot.press("2")
+        await pilot.press("1")
         await pilot.pause()
-        assert _focus_id(app) == "manifest-entries"
+        assert _focus_id(app) == "catalog-tree"
         # and a page-level binding still resolves
-        await pilot.press("a")
+        await pilot.press("tab")
         await pilot.pause()
-        return isinstance(app.screen, MultiPickerModal)
+        return _focus_id(app)
 
-    assert run_tui(body, manifest) is True
+    assert run_tui(body, manifest) == "manifest-entries"
 
 
 def test_escape_returns_focus_to_the_pane_default(tmp_path, run_tui):
     manifest = _write_manifest(tmp_path)
 
     async def body(app, pilot):
-        await pilot.press("2")
+        await pilot.press("1")
         await pilot.pause()
         app.screen.query_one("#manifest-output-dir", Input).focus()
         await pilot.pause()
@@ -139,6 +140,7 @@ def test_escape_returns_focus_to_the_pane_default(tmp_path, run_tui):
         await pilot.pause()
         return _focus_id(app)
 
+    # The output dir belongs to the manifest; escape stays in that list.
     assert run_tui(body, manifest) == "manifest-entries"
 
 
@@ -146,37 +148,42 @@ def test_escape_returns_focus_to_the_pane_default(tmp_path, run_tui):
 # bindings: keys the footer advertises must reach their action
 # --------------------------------------------------------------------------- #
 
-def test_preview_keys_are_ours_not_the_command_palette(tmp_path, monkeypatch, run_tui):
+def test_ctrl_p_opens_no_palette_and_page_keys_reach_the_page(tmp_path, monkeypatch, run_tui, stub_paramify_status):
     """Textual claims ctrl+p for its command palette as a priority binding, which
-    outranks the focused widget — ENABLE_COMMAND_PALETTE=False gives it back."""
+    outranks the focused widget — ENABLE_COMMAND_PALETTE=False keeps it off."""
+    stub_paramify_status()
     manifest = _write_manifest(tmp_path)
     calls = []
-    monkeypatch.setattr(UploadPage, "action_preview_scripts", lambda self: calls.append(1))
+    monkeypatch.setattr(ParamifyPage, "action_sync_scripts", lambda self: calls.append(1))
 
     async def body(app, pilot):
-        await pilot.press("5")
+        await pilot.press("4")
+        await app.workers.wait_for_complete()
         await pilot.pause()
         await pilot.press("ctrl+p")
         await pilot.pause()
-        await pilot.press("p")
+        await pilot.press("s")
         await pilot.pause()
         # no palette overlay was pushed over the workspace
         return len(calls), [type(s).__name__ for s in app.screen_stack]
 
     count, stack = run_tui(body, manifest)
-    assert count == 2, "ctrl+p and p should both reach the page's preview action"
+    assert count == 1, "s should reach the page's scripts sync"
     assert stack == ["Screen", "WorkspaceScreen"]
 
 
 def test_enter_on_a_manifest_row_opens_the_editor(tmp_path, monkeypatch, run_tui):
     manifest = _write_manifest(tmp_path)
     calls = []
-    monkeypatch.setattr(ManifestPage, "action_edit_entry", lambda self: calls.append(1))
+    monkeypatch.setattr(ManifestPanel, "action_edit_entry", lambda self: calls.append(1))
 
     async def body(app, pilot):
-        await pilot.press("2")
+        await pilot.press("1")
         await pilot.pause()
-        assert app.screen.query_one("#manifest-entries", DataTable).row_count == 1
+        table = app.screen.query_one("#manifest-entries", DataTable)
+        assert table.row_count == 1
+        table.focus()
+        await pilot.pause()
         await pilot.press("enter")
         await pilot.pause()
         return len(calls)
@@ -189,7 +196,7 @@ def test_enter_on_a_run_drills_into_its_files(tmp_path, run_tui):
     _fake_run(tmp_path, files=2)
 
     async def body(app, pilot):
-        await pilot.press("4")
+        await pilot.press("3")
         await pilot.pause()
         assert _focus_id(app) == "evidence-runs"
         assert app.screen.query_one("#evidence-files", DataTable).row_count == 2
@@ -205,13 +212,13 @@ def test_enter_on_a_run_drills_into_its_files(tmp_path, run_tui):
 # --------------------------------------------------------------------------- #
 
 def test_a_focused_field_swallows_the_global_keys(tmp_path, run_tui):
-    """Every printable global (1-5, m, q, /) types into a focused Input instead
+    """Every printable global (1-4, m, q, /) types into a focused Input instead
     of firing. Left as-is deliberately — priority bindings would make the filter
     boxes untypeable — which is why the footer advertises esc."""
     manifest = _write_manifest(tmp_path)
 
     async def body(app, pilot):
-        await pilot.press("2")
+        await pilot.press("1")
         await pilot.pause()
         field = app.screen.query_one("#manifest-output-dir", Input)
         field.focus()
@@ -221,7 +228,7 @@ def test_a_focused_field_swallows_the_global_keys(tmp_path, run_tui):
         return app.screen.query_one(TabbedContent).active, field.value, app.is_running
 
     tab, value, running = run_tui(body, manifest)
-    assert tab == "tab-manifest", "a global tab key fired from inside a text field"
+    assert tab == "tab-fetchers", "a global tab key fired from inside a text field"
     assert "3" in value and "q" in value
     assert running, "'q' quit the app from inside a text field"
 
@@ -232,7 +239,7 @@ def test_output_dir_survives_focus_and_commits_on_blur(tmp_path, run_tui):
     manifest = _write_manifest(tmp_path)
 
     async def body(app, pilot):
-        await pilot.press("2")
+        await pilot.press("1")
         await pilot.pause()
         field = app.screen.query_one("#manifest-output-dir", Input)
         original = field.value
@@ -346,41 +353,21 @@ def test_form_modal_arrows_walk_buttons_but_a_field_keeps_its_cursor(tmp_path, r
 
 
 def test_disabled_buttons_are_skipped(tmp_path, run_tui):
-    """MultiPicker opens with nothing chosen, so Add is disabled — arrows must
-    not strand focus on a button that cannot take it."""
+    """Arrows must not strand focus on a button that cannot take it."""
     manifest = _write_manifest(tmp_path)
 
     async def body(app, pilot):
-        await pilot.press("2")
+        app.push_screen(ConfirmModal("Remove 'x' from the manifest?"))
         await pilot.pause()
-        await pilot.press("a")
-        await pilot.pause()
-        assert isinstance(app.screen, MultiPickerModal)
-        assert app.screen.query_one("#confirm", Button).disabled
-        app.screen.query_one("#cancel", Button).focus()
+        app.screen.query_one("#yes", Button).disabled = True
+        app.screen.query_one("#no", Button).focus()
         await pilot.pause()
         await pilot.press("left")
         await pilot.pause()
         return _focus_id(app)
 
-    assert run_tui(body, manifest) == "cancel"
+    assert run_tui(body, manifest) == "no"
 
-
-def test_enter_in_the_add_filter_picks_the_fetcher(tmp_path, run_tui):
-    """Focus opens in the filter box, where Enter did nothing: typing a name and
-    pressing Enter left nothing checked, so ctrl+s had nothing to add."""
-    manifest = _write_manifest(tmp_path)
-
-    async def body(app, pilot):
-        await pilot.press("2")
-        await pilot.pause()
-        await pilot.press("a")
-        await pilot.pause()
-        await pilot.press(*"okta_authenticators", "enter")
-        await pilot.pause()
-        return sorted(app.screen._chosen)
-
-    assert run_tui(body, manifest) == ["okta_authenticators"]
 
 def test_catalog_filter_arrows_walk_the_tree(tmp_path, run_tui):
     """Typing in the filter, up/down move the result cursor without leaving the
@@ -402,26 +389,6 @@ def test_catalog_filter_arrows_walk_the_tree(tmp_path, run_tui):
     before, after, focused = run_tui(body, manifest)
     assert after == before + 2, "down did not move the catalog cursor from the filter"
     assert focused == "catalog-search", "down gave away the filter's focus"
-
-
-def test_multipicker_filter_arrows_walk_the_tree(tmp_path, run_tui):
-    manifest = _write_manifest(tmp_path)
-
-    async def body(app, pilot):
-        await pilot.press("2")
-        await pilot.pause()
-        await pilot.press("a")
-        await pilot.pause()
-        assert isinstance(app.screen, MultiPickerModal)
-        tree = app.screen.query_one("#multi-pick-tree", Tree)
-        before = tree.cursor_line
-        await pilot.press("down")
-        await pilot.pause()
-        return before, tree.cursor_line, _focus_id(app)
-
-    before, after, focused = run_tui(body, manifest)
-    assert after == before + 1, "down did not move the picker cursor from the filter"
-    assert focused == "multi-pick-filter"
 
 
 # --------------------------------------------------------------------------- #
@@ -469,13 +436,19 @@ def test_adding_a_comparator_adds_its_inputs(tmp_path, run_tui):
     manifest = _write_manifest(tmp_path)
 
     async def body(app, pilot):
-        await pilot.press("2")
+        await pilot.press("1")
         await pilot.pause()
+        app.screen.query_one("#catalog-search", Input).value = "demo_policy_check"
+        await pilot.pause()
+        tree = app.screen.query_one("#catalog-tree", Tree)
+        tree.focus()
+        await pilot.pause()
+        for _ in range(12):  # past the kind and platform headings to the fetcher
+            if tree.cursor_node is not None and isinstance(tree.cursor_node.data, dict):
+                break
+            await pilot.press("down")
+            await pilot.pause()
         await pilot.press("a")
-        await pilot.pause()
-        await pilot.press(*"demo_policy_check", "enter")
-        await pilot.pause()
-        await pilot.press("ctrl+s")
         await pilot.pause()
 
     run_tui(body, manifest)

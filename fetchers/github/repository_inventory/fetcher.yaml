@@ -1,5 +1,5 @@
 name: github_repository_inventory
-version: 0.1.0
+version: 0.2.0
 description: >-
   Every repository in a GitHub organization as one Inventory record: its
   visibility, archive and fork state, default branch, language, which code
@@ -7,6 +7,9 @@ description: >-
 category: github
 
 kind: inventory
+pipeline:
+  type: inventory
+  id_scheme: github-repository-url
 
 supports_targets: true
 

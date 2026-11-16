@@ -522,3 +522,26 @@ def fake_paramify(monkeypatch):
     monkeypatch.setattr(upload_mod, "Client", functools.partial(
         Client, session=fake.session, sleep=lambda _s: None, retry_budget_s=3))
     return fake
+
+
+@pytest.fixture
+def stub_paramify_status(monkeypatch):
+    """Install a fixed api.paramify_status, so a test that opens the Paramify tab
+    never reads a workspace. Call it with token=False for the offline page."""
+
+    def install(token: bool = True, fetchers=None) -> dict:
+        status = {
+            "workspace": {"base_url": "https://app.paramify.com/api/v0", "base_url_source": "default",
+                          "token": token},
+            "fetchers": fetchers if fetchers is not None else [{
+                "name": "demo_hello", "kind": "evidence",
+                "evidence_set": {"reference_id": "EVD-DEMO-HELLO", "name": "Demo", "id": None, "exists": False,
+                                 "artifact_count": 0},
+                "script": None, "validators": [], "pairs": [], "ready": False,
+            }],
+            "capabilities": [], "pipelines_count": 0, "skipped": [], "errors": {},
+        }
+        monkeypatch.setattr("framework.api.paramify_status", lambda *a, **k: status)
+        return status
+
+    return install
