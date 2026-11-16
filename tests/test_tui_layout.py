@@ -15,11 +15,17 @@ from framework.tui.app import FetcherApp  # noqa: E402
 SMALL = (160, 50)
 
 
+def _shown(widget) -> bool:
+    """Shown on screen: the widget and every container around it display. A
+    ContentSwitcher hides the view it does not show, not the panels in it."""
+    return all(getattr(w, "display", True) for w in widget.ancestors_with_self)
+
+
 def _problems(pane) -> list:
     """Panels squeezed to their border or off the page, controls outside their panel,
     tables that need sideways scrolling."""
     problems = []
-    panels = [p for p in pane.query(".panel") if p.display]
+    panels = [p for p in pane.query(".panel") if _shown(p)]
     for panel in panels:
         if panel.content_region.height < 1:
             problems.append(f"#{panel.id} is squeezed to its border: {panel.region}")
@@ -27,16 +33,16 @@ def _problems(pane) -> list:
             problems.append(f"#{panel.id} runs off the page: {panel.region} not in {pane.region}")
     for control in [*pane.query(Button), *pane.query(Checkbox)]:
         box = next((a for a in control.ancestors if a in panels), pane)
-        if control.display and not box.content_region.contains_region(control.region):
+        if _shown(control) and not box.content_region.contains_region(control.region):
             problems.append(f"#{control.id} sits outside #{box.id}: {control.region}")
     for table in pane.query(DataTable):
-        if table.display and table.max_scroll_x > 0:
+        if _shown(table) and table.max_scroll_x > 0:
             problems.append(f"#{table.id} is {table.max_scroll_x} column(s) too wide")
     return problems
 
 
-@pytest.mark.parametrize("keys", [("1",), ("2",), ("3",), ("4",), ("5",), ("5", "p")],
-                         ids=["catalog", "manifest", "run", "evidence", "paramify", "paramify-preview"])
+@pytest.mark.parametrize("keys", [("1",), ("2",), ("3",), ("4",), ("5",)],
+                         ids=["fetchers", "run", "evidence", "paramify", "pipelines"])
 def test_page_fits_160x50(keys, demo_workspace, no_network):
     async def drive() -> list:
         app = FetcherApp(manifest_path="manifests/demo.yaml", root_override=str(demo_workspace.root))
@@ -49,3 +55,172 @@ def test_page_fits_160x50(keys, demo_workspace, no_network):
             return _problems(app.screen.query_one(TabbedContent).active_pane)
 
     assert asyncio.run(asyncio.wait_for(drive(), 60)) == []
+
+
+def _fifty() -> dict:
+    """A 50-fetcher status with long names, linked capabilities and every state."""
+    rows = []
+    for i in range(50):
+        validators = [{"key": f"k{j}", "role": "configuration", "name": f"check {j}", "paired": j <= i % 4}
+                      for j in range(4)]
+        rows.append({
+            "name": f"azure_defender_regulatory_compliance_{i:02d}", "kind": "evidence",
+            "evidence_set": {"reference_id": f"EVD-AZURE-DEFENDER-REGULATORY-{i:02d}", "name": "x",
+                             "id": f"ev-{i}" if i % 5 else None, "exists": bool(i % 5),
+                             "artifact_count": i % 7},
+            "script": ("in_sync", "update", "create", "drift")[i % 4], "validators": validators,
+            "pairs": [{"pair_id": "p", "validator_key": "k0", "capability_id": "c1", "function": "PROVIDER"}],
+            "ready": i % 3 == 0,
+        })
+    return {"workspace": {"base_url": "https://app.paramify.com/api/v0", "base_url_source": "default", "token": True},
+            "fetchers": rows,
+            "capabilities": [{"id": "c1", "reference_id": "SC-AC-06", "name": "Least privilege",
+                              "functions": [{"type": "PROVIDER", "pairs": []}]}],
+            "pipelines_count": 2, "skipped": [], "errors": {}}
+
+
+@pytest.mark.parametrize("size", [SMALL, (120, 35)], ids=["160x50", "120x35"])
+def test_paramify_page_holds_fifty_fetchers(size, demo_workspace, no_network, monkeypatch):
+    from framework import api
+
+    monkeypatch.setattr(api, "paramify_status", lambda *a, **k: _fifty())
+    monkeypatch.setattr(api, "list_artifacts", lambda set_id: [])
+
+    async def drive():
+        app = FetcherApp(manifest_path="manifests/demo.yaml", root_override=str(demo_workspace.root))
+        async with app.run_test(size=size) as pilot:
+            await pilot.press("4")
+            await asyncio.wait_for(app.workers.wait_for_complete(), 30)
+            await pilot.pause()
+            await pilot.pause()
+            pane = app.screen.query_one(TabbedContent).active_pane
+            grid = pane.query_one("#pf-grid", DataTable)
+            return grid.size.height - 1, _problems(pane)
+
+    rows, problems = asyncio.run(asyncio.wait_for(drive(), 60))
+    assert rows >= 6, f"the grid shows only {rows} rows"
+    if size == SMALL:
+        assert problems == []
+    else:
+        assert [p for p in problems if "too wide" not in p] == []
+
+
+SHORT = (80, 24)
+
+
+def _paramify_at(size, monkeypatch, demo_workspace, keys=()):
+    """Open the Paramify tab at `size` with the fifty-fetcher status, press `keys`,
+    and return the pane's regions and problems."""
+    from framework import api
+
+    monkeypatch.setattr(api, "paramify_status", lambda *a, **k: _fifty())
+    monkeypatch.setattr(api, "list_artifacts", lambda set_id: [])
+
+    async def drive():
+        app = FetcherApp(manifest_path="manifests/demo.yaml", root_override=str(demo_workspace.root))
+        async with app.run_test(size=size) as pilot:
+            await pilot.press("4")
+            await asyncio.wait_for(app.workers.wait_for_complete(), 30)
+            await pilot.pause()
+            for key in keys:
+                await pilot.press(key)
+                await asyncio.wait_for(app.workers.wait_for_complete(), 30)
+                await pilot.pause()
+            for _ in range(4):  # the layout is measured over a few refreshes
+                await pilot.pause()
+            pane = app.screen.query_one(TabbedContent).active_pane
+            shown = {w.id: w.region for w in pane.query("#pf-detail, #pf-activity-panel") if w.display}
+            return pane.query_one("#pf-grid", DataTable).size.height - 1, shown, _problems(pane)
+
+    return asyncio.run(asyncio.wait_for(drive(), 60))
+
+
+def test_paramify_grid_keeps_its_rows_on_80x24(demo_workspace, no_network, monkeypatch):
+    """On a short terminal the detail gives way: the grid keeps its rows, and
+    nothing runs off the page (80 columns is too narrow for every column)."""
+    rows, shown, problems = _paramify_at(SHORT, monkeypatch, demo_workspace)
+    assert rows >= 7, f"the grid shows only {rows} rows"
+    assert "pf-detail" not in shown, "a detail with no room to show anything"
+    assert [p for p in problems if "too wide" not in p] == []
+
+
+def test_paramify_log_fits_on_80x24(demo_workspace, no_network, monkeypatch):
+    """An action's log still shows on a short terminal, inside the page, and the
+    grid keeps some rows."""
+    from framework import api
+
+    monkeypatch.setattr(api, "scripts_sync", lambda root, config_path=None, **kw: {"ok": True})
+    rows, shown, problems = _paramify_at(SHORT, monkeypatch, demo_workspace, keys=("s",))
+    assert "pf-activity-panel" in shown, "the log of s did not show"
+    assert rows >= 3, f"the grid shows only {rows} rows"
+    assert [p for p in problems if "too wide" not in p] == []
+
+
+def test_paramify_detail_comes_back_on_100x30(demo_workspace, no_network, monkeypatch):
+    rows, shown, problems = _paramify_at((100, 30), monkeypatch, demo_workspace)
+    assert "pf-detail" in shown and shown["pf-detail"].height >= 5
+    assert rows >= 7
+    assert [p for p in problems if "too wide" not in p] == []
+
+
+@pytest.mark.parametrize("size", [SMALL, (120, 35)], ids=["160x50", "120x35"])
+def test_capability_view_holds_fifty_fetchers(size, demo_workspace, no_network, monkeypatch):
+    from framework import api
+
+    monkeypatch.setattr(api, "paramify_status", lambda *a, **k: _fifty())
+    monkeypatch.setattr(api, "list_artifacts", lambda set_id: [])
+
+    async def drive():
+        app = FetcherApp(manifest_path="manifests/demo.yaml", root_override=str(demo_workspace.root))
+        async with app.run_test(size=size) as pilot:
+            await pilot.press("4")
+            await asyncio.wait_for(app.workers.wait_for_complete(), 30)
+            await pilot.pause()
+            await pilot.press("right_square_bracket")
+            await pilot.pause()
+            pane = app.screen.query_one(TabbedContent).active_pane
+            return pane.query_one("#pf-cap-grid", DataTable).size.height - 1, _problems(pane)
+
+    rows, problems = asyncio.run(asyncio.wait_for(drive(), 60))
+    assert rows >= 4, f"the capability grid shows only {rows} rows"
+    assert [p for p in problems if "too wide" not in p] == []
+
+
+def _many_capabilities() -> dict:
+    status = _fifty()
+    # The fifty fetchers' pairs prove c1; the rest have none.
+    status["capabilities"] = [{"id": "c1" if i == 0 else f"cap-{i}", "reference_id": f"SC-AC-{i:02d}",
+                               "name": f"Capability {i}", "functions": []} for i in range(30)]
+    return status
+
+
+@pytest.mark.parametrize("size", [SHORT, (100, 30)], ids=["80x24", "100x30"])
+def test_capability_view_keeps_its_rows_on_a_short_terminal(size, demo_workspace, no_network, monkeypatch):
+    """The capability view's pairs pane gives way as the fetcher detail does: the
+    capability grid keeps its rows and nothing runs off the page."""
+    from framework import api
+
+    monkeypatch.setattr(api, "paramify_status", lambda *a, **k: _many_capabilities())
+    monkeypatch.setattr(api, "list_artifacts", lambda set_id: [])
+
+    async def drive():
+        app = FetcherApp(manifest_path="manifests/demo.yaml", root_override=str(demo_workspace.root))
+        async with app.run_test(size=size) as pilot:
+            await pilot.press("4")
+            await asyncio.wait_for(app.workers.wait_for_complete(), 30)
+            await pilot.pause()
+            await pilot.press("right_square_bracket")
+            for _ in range(4):
+                await pilot.pause()
+            pane = app.screen.query_one(TabbedContent).active_pane
+            pairs = pane.query_one("#pf-pairs-panel")
+            return (pane.query_one("#pf-cap-grid", DataTable).size.height - 1,
+                    pairs.region.height if _shown(pairs) else 0, _problems(pane))
+
+    rows, pairs, problems = asyncio.run(asyncio.wait_for(drive(), 60))
+    assert rows >= 7, f"the capability grid shows only {rows} rows"
+    if size == SHORT:
+        assert pairs == 0, "a pairs pane with no room to show a pair"
+    else:
+        assert pairs >= 5
+    assert [p for p in problems if "too wide" not in p] == []
