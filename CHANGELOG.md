@@ -124,8 +124,9 @@ schemas and the `paramify` CLI — not the internal code.
   hold a privileged directory role, separated by commas, spaces or newlines.
   `summary.approved_principals_configured` says whether a list is set, and
   `summary.unapproved_privileged_principals` counts the distinct holders of a
-  privileged role whose object id isn't on it. Only active holders are read, and
-  a group is matched by its own id, not its members. The count is null with no
+  privileged role whose object id isn't on it. Only active, tenant-wide holders
+  are read (a role scoped to an administrative unit isn't checked), and a group
+  is matched by its own id, not its members. The count is null with no
   list, when an entry isn't an object id (the run then fails as `bad_config`), or
   when the role list or a privileged role's members or service principals can't
   be read. `results.unapproved_principals` lists those holders with the
