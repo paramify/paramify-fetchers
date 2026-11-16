@@ -110,9 +110,10 @@ def run_nsg(monkeypatch, tmp_path, patterns):
     return _run(nsg, monkeypatch, tmp_path, patterns, "azure_network_security_groups")
 
 
-def test_nsg_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_path):
+def test_nsg_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_path, assert_summary_documented):
     code, evidence = run_nsg(monkeypatch, tmp_path, None)
     assert code == 0 and evidence["results"]["excluded"] == []
+    assert_summary_documented("azure/network_security_groups", evidence["summary"])
     assert evidence["summary"] == {
         **nsg.summarize(*_nsg_records()), "provider_registration_status": "registered",
         **_added_fields({"network_security_group": 3, "virtual_network": 2, "network_interface": 3}),
@@ -230,9 +231,10 @@ def run_pe(monkeypatch, tmp_path, patterns, reads=None, fail=()):
     return _run(pe, monkeypatch, tmp_path, patterns, "azure_private_endpoint_configuration")
 
 
-def test_private_endpoints_without_patterns_add_only_empty_exclusion_fields(monkeypatch, tmp_path):
+def test_private_endpoints_without_patterns_add_only_empty_exclusion_fields(monkeypatch, tmp_path, assert_summary_documented):
     code, evidence = run_pe(monkeypatch, tmp_path, None)
     assert code == 0 and evidence["results"]["excluded"] == []
+    assert_summary_documented("azure/private_endpoint_configuration", evidence["summary"])
     assert evidence["results"]["private_endpoints"] == _pe_records()
     assert evidence["summary"] == {
         **pe.summarize(_pe_records()), "provider_registration_status": "registered",
@@ -311,9 +313,10 @@ def run_dns(monkeypatch, tmp_path, patterns):
     return _run(dns, monkeypatch, tmp_path, patterns, "azure_private_dns_zone_configuration")
 
 
-def test_private_dns_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_path):
+def test_private_dns_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_path, assert_summary_documented):
     code, evidence = run_dns(monkeypatch, tmp_path, None)
     assert code == 0 and evidence["results"]["excluded"] == []
+    assert_summary_documented("azure/private_dns_zone_configuration", evidence["summary"])
     assert evidence["summary"] == {
         **dns.summarize(*_dns_records()), "provider_registration_status": "registered",
         **_added_fields({"private_dns_zone": 3}),
@@ -398,9 +401,10 @@ def run_egress(monkeypatch, tmp_path, patterns):
     return _run(egress, monkeypatch, tmp_path, patterns, "azure_vnet_egress_routing")
 
 
-def test_egress_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_path):
+def test_egress_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_path, assert_summary_documented):
     code, evidence = run_egress(monkeypatch, tmp_path, None)
     assert code == 0 and evidence["results"]["excluded"] == []
+    assert_summary_documented("azure/vnet_egress_routing", evidence["summary"])
     assert evidence["summary"] == {
         **egress.summarize(*egress.build_records(*_egress_raw())), "provider_registration_status": "registered",
         **_added_fields({"virtual_network": 3, "subnet": 4, "route_table": 1, "network_interface": 2,

@@ -1,5 +1,5 @@
 name: azure_entra_emergency_accounts
-version: 0.1.1
+version: 0.2.0
 description: >-
   Shows which users Conditional Access leaves without MFA through an exclusion, and for each emergency account its sign-in methods, last use and the alert rules that name it.
 category: azure
@@ -16,6 +16,16 @@ output:
   aggregation: per_target
 
 config_schema:
+  target_subscription_only:
+    type: boolean
+    required: false
+    default: false
+    env: AZURE_TARGET_SUBSCRIPTION_ONLY
+    description: >
+      Reject ARM reads and continuations outside the explicit subscription and
+      reject redirects. Requires AZURE_TENANT_ID; the subscription tenant and
+      Microsoft Graph organization must both match it before directory data
+      is read. Missing or mismatched tenant reads fail closed.
   emergency_accounts:
     type: string
     required: false
@@ -69,7 +79,7 @@ evidence_set:
   instructions: |
     Script: azure/entra_emergency_accounts/fetcher.py
 
-    Access: Microsoft Graph Policy.Read.All, Directory.Read.All (or Organization.Read.All, User.Read.All, GroupMember.Read.All and RoleManagement.Read.Directory) and AuditLog.Read.All, and Reader on the subscription, which must be the one that holds the Microsoft Sentinel workspace and log search alert rules for break-glass sign-ins (rules elsewhere aren't read, and the accounts then read as not monitored). Conditional Access, sign-in activity and the registration report need Entra ID P1 or P2. The credential must sign in to the subscription's own tenant; if Microsoft Graph answers for another tenant, the run fails without reading the directory. Emergency accounts are named in ENTRA_EMERGENCY_ACCOUNTS; without it, the enabled users excluded from every enforced MFA policy that includes all users are reported as candidates and none counts as approved.
+    Access: Microsoft Graph Policy.Read.All, Directory.Read.All (or Organization.Read.All, User.Read.All, GroupMember.Read.All and RoleManagement.Read.Directory) and AuditLog.Read.All, and Reader on the subscription, which must be the one that holds the Microsoft Sentinel workspace and log search alert rules for break-glass sign-ins (rules elsewhere aren't read, and the accounts then read as not monitored). Conditional Access, sign-in activity and the registration report need Entra ID P1 or P2. The credential must sign in to the subscription's own tenant; if Microsoft Graph answers for another tenant, the run fails without reading the directory. Emergency accounts are named in ENTRA_EMERGENCY_ACCOUNTS; without it, the enabled users excluded from every enforced MFA policy that includes all users are reported as candidates and none counts as approved. Strict scope: set target_subscription_only to true with an explicit subscription_id and AZURE_TENANT_ID. ARM reads and continuation links must stay in that subscription and redirects are refused. The subscription tenant must match AZURE_TENANT_ID before Graph is read; Graph's organization must also match before any other directory data is read. Missing or refused tenant reads fail closed and remain recorded as failures.
 
     Commands Executed:
     - GET /subscriptions/{id} — the subscription's tenant

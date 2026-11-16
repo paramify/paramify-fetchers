@@ -22,19 +22,24 @@ one does.
 
 | `role` | Asserts | How many |
 |---|---|---|
-| `completeness` | the collection succeeded and the population is real | exactly one per evidence set |
+| `completeness` | the collection succeeded and the population is real | the shared `validators/common/collection_succeeded.yaml`, listed against every set; never a second file |
 | `configuration` | the posture is right | as many as the control needs |
 | `integrity` | the field a count-based rule reads was actually present | one per count-based configuration validator |
 
 Two to five validators per evidence set is the range both arms of a measured
 A/B on live AWS evidence converged on without being told to. Fewer usually
-means something in the narrative is unasserted; many more usually means one
-assertion has been split into fragments that cannot fail independently.
+means something in the narrative is unasserted. More is fine when each one
+checks a distinct condition that can fail on its own (one validator, one
+check); what to avoid is one assertion cut into fragments that cannot fail
+independently. Never merge two checks to stay inside the range.
 
 ## The collection-health validator
 
-Every evidence set gets exactly one. It asserts the run succeeded and the
-envelope is intact, so a failed collection never reads as a compliance verdict.
+Every evidence set gets exactly one, and it **already exists**:
+`validators/common/collection_succeeded.yaml`. Add the set's `reference_id` to
+its `evidence_sets` (registry step 3); do not write another. It asserts the run
+succeeded and the envelope is intact, so a failed collection never reads as a
+compliance verdict. Its shape, for reference:
 
 ```yaml
 regex: '"exit_code":\s*(?<exit_code>-?\d+)'
@@ -71,8 +76,8 @@ thing they assert, and their capture groups start at 1.
 
 ## Compliance validators: the two forms
 
-Build one per distinct assertion. Which form you use decides whether you also
-need an integrity partner.
+Build one per distinct assertion, each checking one condition. Which form you
+use decides whether you also need an integrity partner.
 
 **Form A — read a value (normal polarity).** Self-guarding: the
 `MATCH_COUNT NOT_EQUALS 0` rule proves the field was present.
@@ -172,6 +177,19 @@ Paramify's validator sees.
   scoping, so a pattern spanning two keys can bridge across neighbouring items.
   Fence it with `[^}]*?` when the objects have no nested braces, and test that
   a good item next to a bad one does not splice into a false match.
+- **Keep it to 150 characters, readable at a glance.** The key and its value
+  pattern, nothing else: no lookahead chains, no envelope guards, no "direct
+  member of summary" fences unless the same field name really occurs elsewhere
+  in the real artifact (then a short `"summary":[\s\S]*?` prefix). Two fields of
+  the same flat summary object can be joined with `[\s\S]*?` in the order the
+  fetcher writes them; fields of list items still need the `[^}]*?` fence above.
+  Over 150, warn the user and offer the split.
+- **Compare the evidence to itself, not to today's environment.**
+  `"encrypted_buckets":\s*(?<encrypted_buckets>\d+)[\s\S]*?"total_buckets":\s*(?<total_buckets>[1-9][0-9]*)`
+  with group 1 EQUALS group 2, not `"encrypted_buckets":\s*27`. The `[1-9]`
+  on the total is the precondition that stops an empty population from passing.
+  Hard-coded counts, names and ids break as the company grows; policy thresholds
+  (encoded per the numeric note above) do not.
 - **Do not pin `schema_version`.** It reads like prudent version-safety but
   fails in the dangerous direction: a bump that leaves your anchor untouched
   stops the pattern matching entirely. The presence rules above cover

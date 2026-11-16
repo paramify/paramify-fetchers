@@ -1,9 +1,10 @@
 # Wiz
 
 Read-only fetchers for the Wiz cloud security platform (commercial and Wiz for
-Government): eleven evidence fetchers, below, and three issue reports that send
-findings to a Paramify assessment (see [Issue reports](#issue-reports)). All
-fourteen share one GraphQL client (`_shared/wiz_client.py`) and one pair of
+Government): eleven evidence fetchers, below, one inventory for a Paramify
+inventory pipeline (see [Inventory](#inventory)), and three issue reports that
+send findings to a Paramify assessment (see [Issue reports](#issue-reports)).
+All fifteen share one GraphQL client (`_shared/wiz_client.py`) and one pair of
 secrets. None of them writes to Wiz: the client refuses to send a GraphQL
 mutation.
 
@@ -40,6 +41,16 @@ Read the vulnerability and issue evidence together with `wiz_scan_coverage`:
 zero findings only means something if every account in the boundary is being
 scanned.
 
+## Inventory
+
+This one writes an inventory for a Paramify inventory pipeline, which builds
+Inventory items from it. Setup, the record fields and the pipeline settings are
+in its [README](inventory/README.md).
+
+| Fetcher | What it sends | ID scheme | Wiz scopes |
+|---|---|---|---|
+| [`wiz_inventory`](inventory/README.md) | One record per cloud resource (account, region, type, IPs, OS, owner, internet exposure) under `payload.data`, keyed by the Wiz resource id | `wiz-resource-id` | `read:resources` |
+
 ## Issue reports
 
 These write a CSV for an assessment's pipeline instead of an evidence set. Setup,
@@ -50,7 +61,7 @@ config and the `close_cycle` warning are in
 |---|---|---|---|
 | [`wiz_stig_compliance_report`](stig_compliance_report/README.md) | CONFIGURATION | STIG control pass/fail per rule and resource, for one enabled framework | `read:security_frameworks`, `read:cloud_configuration`, `read:host_configuration` |
 | `wiz_issues_report` | CONFIGURATION | The last completed run of a Wiz Issues report, as Wiz's own CSV. The report is created and scheduled once in Wiz; the fetcher only downloads it | `read:reports` |
-| `wiz_vulnerability_findings` | VULNERABILITY | Every vulnerability finding, in the legacy Paramify column layout | `read:vulnerabilities` |
+| [`wiz_vulnerability_findings`](vulnerability_findings/README.md) | VULNERABILITY | Every vulnerability finding, in the legacy Paramify column layout, plus SLA columns (internet reachability, CISA SSVC, exploitability) | `read:vulnerabilities` |
 
 ## Service account
 

@@ -1,5 +1,5 @@
 name: azure_defender_plans
-version: 0.3.0
+version: 0.3.1
 description: >-
   Shows which Defender for Cloud plans are switched on for the subscription, how much of it each covers, which extensions run, and who Defender for Cloud notifies.
 category: azure
@@ -51,7 +51,7 @@ evidence_set:
     - pricings.list() on the subscription — every Defender plan with its tier, sub-plan, enablement time, remaining free trial, coverage, enforcement, deprecation, inheritance and extensions; a "not registered" answer means Defender for Cloud is not in use; any other error fails the run
     - GET /subscriptions/<subscription>/providers/Microsoft.Security/securityContacts — the Defender for Cloud security contacts (a bare list or a page, followed to the end); a "not registered" answer reads as no contacts, and any other error fails the run and leaves the contacts unread
 
-    Output: azure_defender_plans_<subscription>.json — each Defender for Cloud plan with its tier, sub-plan, when it was switched on (when Azure reports it), coverage, enforcement, deprecation, inheritance and enabled extensions, plus each security contact's notification addresses, phone-number flag, alert settings and role notifications. The fetcher makes no judgement about which plans a system needs.
+    Output: azure_defender_plans_<subscription>.json — each Defender for Cloud plan with its tier, sub-plan, when it was switched on (when Azure reports it), coverage, enforcement, deprecation, inheritance and enabled extensions, plus each security contact's notification addresses, phone-number flag, alert settings and role notifications. The fetcher makes no judgement about which plans a system needs. Each plan retains observed_configuration: the selected SDK-projected pricing attributes before convenience normalization, including each extension's additional_extension_properties such as exclusions. This is not raw HTTP or proof of effective resource coverage. Extension flags, enforce and inherited read null when missing or unrecognized; only explicitly enabled extension flags count in the summaries.
 
     Summary fields:
 
