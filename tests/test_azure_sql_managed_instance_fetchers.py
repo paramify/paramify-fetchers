@@ -360,6 +360,23 @@ def test_source_limited_outbound_deny_leaves_egress_unrestricted(monkeypatch, so
     assert summary["instances_subnet_unrestricted_internet_outbound"] == 2
 
 
+@pytest.mark.parametrize("sources", [["10.0.0.0/27"], ["10.0.0.0/8"], ["10.0.0.0/28", "10.0.0.16/28"]])
+def test_outbound_deny_from_ranges_holding_the_whole_subnet_restricts_egress(monkeypatch, sources):
+    # The fixture subnet is 10.0.0.0/27: its own range, a wider one, or halves that add up to it cover every address.
+    deny = rule("deny-internet-out", 4000, "Outbound", "Deny", "*", None, "Internet", "*",
+                source_address_prefixes=sources)
+    instances, summary, _ = run_configuration(monkeypatch, sql_client(), net=network(rules=[deny]))
+    assert instances["mi-east"]["subnet_unrestricted_internet_outbound"] is False
+    assert summary["instances_subnet_unrestricted_internet_outbound"] == 0
+
+
+def test_outbound_deny_from_half_the_subnet_leaves_egress_unrestricted(monkeypatch):
+    deny = rule("deny-internet-out", 4000, "Outbound", "Deny", "*", None, "Internet", "*",
+                source_address_prefixes=["10.0.0.0/28"])
+    instances, _, _ = run_configuration(monkeypatch, sql_client(), net=network(rules=[deny]))
+    assert instances["mi-east"]["subnet_unrestricted_internet_outbound"] is True
+
+
 def test_full_port_range_deny_counts_as_every_port(monkeypatch):
     deny = rule("deny-internet-out", 4000, "Outbound", "Deny", "*", "*", "Internet", "0-65535")
     instances, _, _ = run_configuration(monkeypatch, sql_client(), net=network(rules=[deny]))
