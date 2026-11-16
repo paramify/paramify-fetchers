@@ -1,5 +1,5 @@
 name: azure_redis_cache_configuration
-version: 0.2.1
+version: 0.3.0
 description: >-
   Shows each classic Azure Cache for Redis cache's transport, authentication, network, audit logging, maintenance and resilience posture, and which caches fail each expectation.
 category: azure
@@ -94,10 +94,10 @@ evidence_set:
     - in_scope_redis_caches — Number of caches read and in scope; null when the cache list could not be read; 0 means there are none or the patterns took out every cache, which a check can catch by requiring more than 0
 
     Which caches exist?
-    - total_caches — Number of in-scope caches; every cache count below is out of this total; reads 0, not null, when the cache list could not be read, so read it together with in_scope_redis_caches
+    - total_caches — Number of in-scope caches; every cache count below is out of this total; null when the cache list could not be read, as is every count below
     - provider_registration_status — Whether the Redis provider (Microsoft.Cache) is registered on the subscription: registered, not_registered or unknown
-    - caches_by_sku — Number of caches for each SKU name Azure reports (such as Basic, Standard or Premium), or unknown when it reports none
-    - caches_by_redis_version — Number of caches for each Redis version Azure reports, or unknown when it reports none
+    - caches_by_sku — Number of caches for each SKU name Azure reports (such as Basic, Standard or Premium), or unknown when it reports none; null when the cache list could not be read
+    - caches_by_redis_version — Number of caches for each Redis version Azure reports, or unknown when it reports none; null when the cache list could not be read
 
     Is traffic encrypted?
     - tls_only_caches — Number of caches with a minimum TLS version of 1.2 or higher and the non-TLS port disabled; a cache with no minimum version accepts TLS 1.0 and is not counted
@@ -109,27 +109,27 @@ evidence_set:
     - auth_not_required_caches — Number of caches that require no authentication (authnotrequired is true)
     - access_keys_disabled_caches — Number of caches with access-key authentication disabled, so only Microsoft Entra ID can be used
     - entra_auth_enabled_caches — Number of caches with Microsoft Entra authentication enabled
-    - access_policy_assignments — Number of Entra principals granted a data-access policy, summed over the caches; a cache whose assignments could not be read adds 0. They take effect only where Entra authentication is enabled
+    - access_policy_assignments — Number of Entra principals granted a data-access policy, summed over the caches; null when the cache list, or any cache's assignments, could not be read. They take effect only where Entra authentication is enabled
 
     Who can reach the caches?
     - public_network_access_disabled_caches — Number of caches with public network access set to Disabled
     - public_network_access_unset_caches — Number of caches that report no public network access setting, which count as not disabled
     - private_only_caches — Number of caches with public network access Disabled and either an Approved private endpoint or VNet injection (a subnet)
     - vnet_injected_caches — Number of caches injected into a virtual network subnet
-    - firewall_allows_all_ips_caches — Number of caches whose firewall rules together admit every IPv4 address, even when split across several rules; caches whose rules could not be read are not counted
+    - firewall_allows_all_ips_caches — Number of caches whose firewall rules together admit every IPv4 address, even when split across several rules; null when the cache list, or any cache's firewall rules, could not be read
 
     Are audit logs exported and maintenance scheduled?
-    - audit_logging_enabled_caches — Number of caches with a diagnostic setting that sends ConnectedClientList or MSEntraAuthenticationAuditLog logs (directly or through the audit or allLogs category group) to a destination; caches whose settings could not be read are not counted
-    - maintenance_window_caches — Number of caches with a patch schedule configured; a cache with none lets Azure pick the time, and one whose schedule could not be read is not counted
+    - audit_logging_enabled_caches — Number of caches with a diagnostic setting that sends ConnectedClientList or MSEntraAuthenticationAuditLog logs (directly or through the audit or allLogs category group) to a destination; null when the cache list, or any cache's settings, could not be read
+    - maintenance_window_caches — Number of caches with a patch schedule configured; a cache with none lets Azure pick the time, null when the cache list, or any cache's schedule, could not be read
 
     Are the caches resilient?
     - replicated_caches — Number of caches not on the Basic SKU, which is a single node with no replica and no SLA
     - zone_redundant_caches — Number of caches spread across more than one zone, or with the zonal allocation policy Automatic (Azure's default for Standard and Premium in zonal regions, which spreads nodes without listing the zones)
-    - geo_replicated_caches — Number of caches with at least one linked server; caches whose linked servers could not be read are not counted
+    - geo_replicated_caches — Number of caches with at least one linked server; null when the cache list, or any cache's linked servers, could not be read
     - persistence_enabled_caches — Number of caches with RDB or AOF persistence enabled
 
     Which caches fail an expectation?
-    - exceptions — List of cache names for each failed expectation, so a reviewer can sample them; each list covers in-scope caches only:
+    - exceptions — List of cache names for each failed expectation, so a reviewer can sample them; each list covers in-scope caches only; null when the cache list could not be read:
       - not_tls_only (minimum TLS version below 1.2 or non-TLS port enabled)
       - non_ssl_port_enabled (non-TLS port enabled)
       - auth_not_required (no authentication required)

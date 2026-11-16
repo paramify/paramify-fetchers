@@ -2565,6 +2565,24 @@ schemas and the `paramify` CLI — not the internal code.
     read, and `instances_in_failover_group` when any instance's failover group
     membership is unknown.
 
+- **`azure_aks_cluster_configuration` 0.5.0, `azure_redis_cache_configuration`
+  0.3.0, `azure_managed_redis_configuration` 0.3.0 and
+  `azure_rbac_custom_roles` 0.3.0: a list that could not be read gives null
+  counts, not 0.**
+  - When the cluster, cache or role definition list is not read, every count,
+    percentage and list built from it in the summary is null (including
+    `total_clusters`, `total_caches`, `total_role_definitions` and
+    `custom_role_definitions`). Before they read 0 or empty. The run still
+    exits 1 as `partial_failure`.
+  - `azure_redis_cache_configuration`: the counts built from a per-cache read
+    (`access_policy_assignments`, `firewall_allows_all_ips_caches`,
+    `audit_logging_enabled_caches`, `maintenance_window_caches`,
+    `geo_replicated_caches`) are null while any cache's read failed. Before they
+    left that cache out.
+  - `azure_managed_redis_configuration`: the database counts and
+    `tls_only_clusters` (and its percentage) are null while any cluster's
+    database list could not be read. Before they left that cluster out.
+
 - **`paramify upload` no longer sends an inventory direct when its channel has
   no artifact request.** A Paramify inventory pipeline runs only on a file in an
   approved batch, so a direct upload was stored and built nothing. The file now
