@@ -22,7 +22,7 @@ Use identical scope settings for evidence and reports. The example selects
 omit the filter to include all images. Confirm it matches your assessment scope.
 
 The report takes the same scope settings as the evidence fetcher, including
-`pushed_within_days` and `min_severity` (see
+`in_use_only`, `last_in_use_days`, `pushed_within_days` and `min_severity` (see
 [its README](../inspector_ecr_findings/README.md#scope-and-collection)). Use the
 same values in both. A narrower scope also narrows what the assessment sees: with
 `close_cycle: after_run`, issues for images or severities that fall out of scope

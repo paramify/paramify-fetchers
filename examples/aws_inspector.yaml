@@ -2,8 +2,9 @@
 # Evidence and scan reports use separate upload commands; see the fetcher READMEs.
 #
 # Every scope setting is shown. They combine with AND, so each one narrows the
-# scope further; omit any you do not need. Use the same scope for the evidence
-# and the report.
+# scope further; omit any you do not need. in_use_only already implies recent
+# use, so pair it with last_in_use_days only to spell the window out. Use the
+# same scope for the evidence and the report.
 run:
   output_dir: ./evidence
   fetchers:
@@ -11,6 +12,8 @@ run:
       config:
         repositories: '["example-service"]'
         image_tags: '["latest", "deployed"]'
+        in_use_only: true
+        last_in_use_days: 30
         pushed_within_days: 90
         min_severity: MEDIUM
       targets:
@@ -20,6 +23,8 @@ run:
       config:
         repositories: '["example-service"]'
         image_tags: '["latest", "deployed"]'
+        in_use_only: true
+        last_in_use_days: 30
         pushed_within_days: 90
         min_severity: MEDIUM
         assessment_id: 123e4567-e89b-12d3-a456-426614174000

@@ -1016,11 +1016,7 @@ CHILD = "sha256:" + "d" * 64
 
 
 def multi_arch(data, child_tags=()):
-    """An OCI index tagged latest and the per-platform image it points to.
-
-    As in ECR and Inspector, the image carries only its own tags (none by
-    default), never the index's.
-    """
+    """An OCI index tagged latest and the untagged image it points to."""
     data["ecr describe-images"]["imageDetails"] = [
         {
             "imageDigest": INDEX,
@@ -1037,11 +1033,11 @@ def multi_arch(data, child_tags=()):
     ]
     data["inspector2 list-coverage"]["coveredResources"][0].update(
         resourceId=REPO + "/" + CHILD,
-        resourceMetadata={"ecrImage": {"tags": list(child_tags), "inUseCount": 2}},
+        resourceMetadata={"ecrImage": {"tags": ["latest"], "inUseCount": 2}},
     )
     advisory = data["inspector2 list-findings"]["findings"][0]
     advisory["resources"][0]["details"]["awsEcrContainerImage"].update(
-        imageHash=CHILD, imageTags=list(child_tags)
+        imageHash=CHILD, imageTags=["latest"]
     )
     return data
 
@@ -1058,24 +1054,12 @@ def test_index_digests_are_not_images_and_never_coverage_gaps(tmp_path):
     assert result.returncode == 0, result.stderr
 
 
-def test_a_tag_filter_leaves_out_the_untagged_images_of_a_tagged_index(tmp_path):
-    # What Inspector returns for ecrImageTags=latest: the index's own inactive
-    # coverage record, and no findings, since the per-platform image is untagged.
+def test_index_tags_select_the_untagged_image_through_inspector_coverage(tmp_path):
     data = multi_arch(responses())
-    data["inspector2 list-coverage"]["coveredResources"][0].update(
-        resourceId=REPO + "/" + INDEX,
-        scanStatus={"statusCode": "INACTIVE", "reason": "UNSUPPORTED_MEDIA_TYPE"},
-        resourceMetadata={"ecrImage": {"tags": ["latest"]}},
-    )
-    data["inspector2 list-findings"]["findings"] = []
-    result, files, calls = run_fetcher(
-        tmp_path, data, "inspector_ecr_findings", AWS_INSPECTOR_IMAGE_TAGS='["latest"]'
-    )
+    result, files, calls = run_fetcher(tmp_path, data, AWS_INSPECTOR_IMAGE_TAGS='["latest"]')
     assert result.returncode == 0, result.stderr
-    results = json.loads(files[0].read_text())["results"]
-    assert results["images"] == [] and results["coverage"] == []
-    assert results["summary"]["index_digest_count"] == 1
-    assert results["coverage_gaps"] == []
+    rows = list(csv.DictReader(io.StringIO(files[0].read_text())))
+    assert [r["Image Digest"] for r in rows] == [CHILD]
     coverage = next(c for c in calls if c["args"][:2] == ["inspector2", "list-coverage"])
     assert coverage["params"]["filterCriteria"]["ecrImageTags"] == [
         {"comparison": "EQUALS", "value": "latest"}
@@ -1098,6 +1082,35 @@ def test_images_keep_only_used_fields_and_reference_coverage_once(tmp_path):
         "repository_arn": REPO,
         "resource_id": REPO + "/" + CHILD,
     }
+
+
+@pytest.mark.parametrize("setting", ["in_use_only", "last_in_use_days"])
+def test_usage_filters_go_to_inspector_and_select_images_by_coverage(tmp_path, setting):
+    data = multi_arch(responses())
+    unused = "sha256:" + "e" * 64
+    data["ecr describe-images"]["imageDetails"].append({"imageDigest": unused})
+    env = (
+        {"AWS_INSPECTOR_IN_USE_ONLY": "true"}
+        if setting == "in_use_only"
+        else {"AWS_INSPECTOR_LAST_IN_USE_DAYS": "30"}
+    )
+    result, files, calls = run_fetcher(tmp_path, data, **env)
+    assert result.returncode == 0, result.stderr
+    coverage = next(c for c in calls if c["args"][:2] == ["inspector2", "list-coverage"])
+    findings = next(c for c in calls if c["args"][:2] == ["inspector2", "list-findings"])
+    if setting == "in_use_only":
+        assert coverage["params"]["filterCriteria"]["ecrImageInUseCount"] == [{"lowerInclusive": 1}]
+        assert findings["params"]["filterCriteria"]["ecrImageInUseCount"] == [{"lowerInclusive": 1}]
+    else:
+        for call in (coverage, findings):
+            (window,) = call["params"]["filterCriteria"]["ecrImageLastInUseAt"]
+            assert set(window) == {"startInclusive"}
+    # The image Inspector did not return for the usage filter is out of scope, not a gap.
+    result, files, _ = run_fetcher(tmp_path / "evidence", data, "inspector_ecr_findings", **env)
+    results = json.loads(files[0].read_text())["results"]
+    assert [i["imageDigest"] for i in results["images"]] == [CHILD]
+    assert results["coverage_gaps"] == []
+    assert results["scope"][setting] == (True if setting == "in_use_only" else 30)
 
 
 def test_push_age_filter_drops_old_images_locally_and_in_inspector(tmp_path):
@@ -1134,7 +1147,8 @@ def test_min_severity_keeps_untriaged_findings(tmp_path):
 @pytest.mark.parametrize(
     "name,value",
     [
-        ("AWS_INSPECTOR_PUSHED_WITHIN_DAYS", "-1"),
+        ("AWS_INSPECTOR_IN_USE_ONLY", "yes"),
+        ("AWS_INSPECTOR_LAST_IN_USE_DAYS", "-1"),
         ("AWS_INSPECTOR_PUSHED_WITHIN_DAYS", "ten"),
         ("AWS_INSPECTOR_PUSHED_WITHIN_DAYS", "99999"),
         ("AWS_INSPECTOR_MIN_SEVERITY", "UNTRIAGED"),
@@ -1161,7 +1175,7 @@ def test_unset_new_settings_keep_the_previous_file_names(tmp_path):
     suffix = __import__("hashlib").sha256(legacy.encode()).hexdigest()[:12]
     assert files[0].name == f"aws_inspector_ecr_report_{ACCOUNT}_{REGION}_{suffix}.csv"
     _, other, _ = run_fetcher(
-        tmp_path / "severity", AWS_INSPECTOR_IMAGE_TAGS='["latest"]', AWS_INSPECTOR_MIN_SEVERITY="LOW"
+        tmp_path / "in_use", AWS_INSPECTOR_IMAGE_TAGS='["latest"]', AWS_INSPECTOR_IN_USE_ONLY="true"
     )
     assert other[0].name != files[0].name
 
@@ -1248,7 +1262,7 @@ def test_repositories_are_listed_concurrently_but_reported_in_order(tmp_path):
 
 
 def test_every_scope_setting_combines_into_one_inspector_query(tmp_path):
-    data = multi_arch(responses(), child_tags=("latest",))
+    data = multi_arch(responses())
     from datetime import datetime, timedelta, timezone
 
     data["ecr describe-images"]["imageDetails"][1]["imagePushedAt"] = (
@@ -1259,6 +1273,8 @@ def test_every_scope_setting_combines_into_one_inspector_query(tmp_path):
         data,
         AWS_INSPECTOR_REPOSITORIES='["example"]',
         AWS_INSPECTOR_IMAGE_TAGS='["latest"]',
+        AWS_INSPECTOR_IN_USE_ONLY="true",
+        AWS_INSPECTOR_LAST_IN_USE_DAYS="30",
         AWS_INSPECTOR_PUSHED_WITHIN_DAYS="90",
         AWS_INSPECTOR_MIN_SEVERITY="MEDIUM",
     )
@@ -1270,6 +1286,8 @@ def test_every_scope_setting_combines_into_one_inspector_query(tmp_path):
         "findingStatus",
         "ecrImageRepositoryName",
         "ecrImageTags",
+        "ecrImageInUseCount",
+        "ecrImageLastInUseAt",
         "ecrImagePushedAt",
         "severity",
     }
@@ -1280,6 +1298,8 @@ def test_every_scope_setting_combines_into_one_inspector_query(tmp_path):
         "scanType",
         "ecrRepositoryName",
         "ecrImageTags",
+        "ecrImageInUseCount",
+        "ecrImageLastInUseAt",
     }
     rows = list(csv.DictReader(io.StringIO(files[0].read_text())))
     assert [r["Image Digest"] for r in rows] == [CHILD]

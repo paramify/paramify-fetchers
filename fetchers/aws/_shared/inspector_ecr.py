@@ -223,6 +223,13 @@ def read_list(name):
     return values
 
 
+def read_bool(name):
+    value = os.environ.get(name, "false").strip().lower()
+    if value not in ("true", "false"):
+        raise CollectionError(f"{name} must be true or false", "bad_config")
+    return value == "true"
+
+
 def read_days(name):
     value = os.environ.get(name, "").strip() or "0"
     if not re.fullmatch(r"\d+", value) or int(value) > 3650:
@@ -244,6 +251,8 @@ def read_scope():
     return {
         "repositories": read_list("AWS_INSPECTOR_REPOSITORIES"),
         "image_tags": read_list("AWS_INSPECTOR_IMAGE_TAGS"),
+        "in_use_only": read_bool("AWS_INSPECTOR_IN_USE_ONLY"),
+        "last_in_use_days": read_days("AWS_INSPECTOR_LAST_IN_USE_DAYS"),
         "pushed_within_days": read_days("AWS_INSPECTOR_PUSHED_WITHIN_DAYS"),
         "min_severity": read_severity("AWS_INSPECTOR_MIN_SEVERITY"),
     }
@@ -253,6 +262,8 @@ def default_scope(repositories=(), image_tags=()):
     return {
         "repositories": list(repositories),
         "image_tags": list(image_tags),
+        "in_use_only": False,
+        "last_in_use_days": 0,
         "pushed_within_days": 0,
         "min_severity": None,
     }
@@ -339,19 +350,27 @@ def expand_finding(finding, vulnerabilities):
     return full
 
 
-def selected(image, scope, cutoff):
+def selected(image, scope, cutoff, inspector_matches):
     """Whether an ECR image belongs in the inventory, the images that must have scan coverage.
 
-    DescribeImages cannot filter by tag or push date, so the ECR listing is
-    narrowed here to match the Inspector queries. Repositories are already
-    filtered.
+    DescribeImages cannot filter by usage, push date or an index's tags, so the
+    ECR listing is narrowed here to match the Inspector queries. Repositories
+    are already filtered. `inspector_matches` holds the resource IDs of the
+    coverage records Inspector returned for the same tag and usage filters, so
+    membership means Inspector says the image matches them.
     """
     if cutoff is not None:
         pushed = parse_time(image.get("imagePushedAt"))
         if pushed is None or pushed < cutoff:
             return False
+    matched = image["resource_id"] in inspector_matches
+    if scope["in_use_only"] or scope["last_in_use_days"]:
+        # Only Inspector knows whether an image is in use.
+        return matched
     if scope["image_tags"]:
-        return bool(set(scope["image_tags"]).intersection(image.get("imageTags") or []))
+        # An untagged per-platform image matches through its index's tags, which
+        # only Inspector's coverage carries.
+        return matched or bool(set(scope["image_tags"]).intersection(image.get("imageTags") or []))
     return True
 
 
@@ -488,6 +507,13 @@ def collect(aws, scope, *, allow_partial=False, now=None):
         if values:
             finding_filter[finding_key] = equal(values)
             coverage_filter[coverage_key] = equal(values)
+    if scope["in_use_only"]:
+        finding_filter["ecrImageInUseCount"] = [{"lowerInclusive": 1}]
+        coverage_filter["ecrImageInUseCount"] = [{"lowerInclusive": 1}]
+    if scope["last_in_use_days"]:
+        since = now - timedelta(days=scope["last_in_use_days"])
+        finding_filter["ecrImageLastInUseAt"] = [{"startInclusive": since}]
+        coverage_filter["ecrImageLastInUseAt"] = [{"startInclusive": since}]
     if cutoff is not None:
         # Coverage has no push-date filter; the inventory applies the cutoff locally.
         finding_filter["ecrImagePushedAt"] = [{"startInclusive": cutoff}]
@@ -559,7 +585,7 @@ def collect(aws, scope, *, allow_partial=False, now=None):
                     findings[finding["findingArn"]] = compact_finding(finding, vulnerabilities)
 
     by_resource = {c.get("resourceId"): c for c in coverage}
-    inventory = [i for i in ecr_images if selected(i, scope, cutoff)]
+    inventory = [i for i in ecr_images if selected(i, scope, cutoff, by_resource.keys())]
     in_scope = {i["resource_id"] for i in inventory}
     coverage = [c for c in coverage if c.get("resourceId") in in_scope]
     gaps = []
