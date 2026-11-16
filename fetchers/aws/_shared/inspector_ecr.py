@@ -47,6 +47,8 @@ PAGE_SIZES = {
     ("inspector2", "list-findings"): 100,
 }
 IMAGE_WORKERS = 8
+INDEX_BATCH = 100
+HASHES_PER_QUERY = 10
 IMAGE_FIELDS = (
     "imageDigest",
     "imageTags",
@@ -350,28 +352,41 @@ def expand_finding(finding, vulnerabilities):
     return full
 
 
-def selected(image, scope, cutoff, inspector_matches):
-    """Whether an ECR image belongs in the inventory, the images that must have scan coverage.
+def selected(image, scope, cutoff):
+    """Whether an ECR image is a candidate for the inventory, before any Inspector query.
 
-    DescribeImages cannot filter by usage, push date or an index's tags, so the
-    ECR listing is narrowed here to match the Inspector queries. Repositories
-    are already filtered. `inspector_matches` holds the resource IDs of the
-    coverage records Inspector returned for the same tag and usage filters, so
-    membership means Inspector says the image matches them.
+    DescribeImages cannot filter by tag or push date, so the ECR listing is
+    narrowed here. Repositories are already filtered. With image_tags, an
+    image is selected by its own tags or by the tags of an index that points
+    to it (`index_tags`, set by collect()). Usage filters are applied later,
+    from Inspector coverage.
     """
     if cutoff is not None:
         pushed = parse_time(image.get("imagePushedAt"))
         if pushed is None or pushed < cutoff:
             return False
-    matched = image["resource_id"] in inspector_matches
-    if scope["in_use_only"] or scope["last_in_use_days"]:
-        # Only Inspector knows whether an image is in use.
-        return matched
     if scope["image_tags"]:
-        # An untagged per-platform image matches through its index's tags, which
-        # only Inspector's coverage carries.
-        return matched or bool(set(scope["image_tags"]).intersection(image.get("imageTags") or []))
+        tags = set(image.get("imageTags") or []) | set(image.get("index_tags") or [])
+        return bool(set(scope["image_tags"]) & tags)
     return True
+
+
+def index_images(manifest):
+    """The digests of the runnable images an image index or manifest list points to.
+
+    Attestation entries (platform os "unknown", or a Docker attestation
+    reference) and nested indexes are not images Inspector scans.
+    """
+    for entry in manifest.get("manifests") or []:
+        if not isinstance(entry, dict) or not nonempty_strings(entry.get("digest")):
+            continue
+        if entry.get("mediaType") in INDEX_MEDIA_TYPES:
+            continue
+        if (entry.get("platform") or {}).get("os") == "unknown":
+            continue
+        if (entry.get("annotations") or {}).get("vnd.docker.reference.type") == "attestation-manifest":
+            continue
+        yield entry["digest"]
 
 
 def collect(aws, scope, *, allow_partial=False, now=None):
@@ -401,6 +416,7 @@ def collect(aws, scope, *, allow_partial=False, now=None):
     repo_list, ecr_images, coverage, findings = [], [], [], {}
     finding_digests, vulnerabilities = {}, {}
     index_digests = 0
+    tagged_indexes = {}
     with attempt("sts get-caller-identity"):
         identity = aws.call("sts", "get-caller-identity")
         if not nonempty_strings(identity.get("Account"), identity.get("Arn")) or not re.fullmatch(
@@ -474,6 +490,8 @@ def collect(aws, scope, *, allow_partial=False, now=None):
             for image in images:
                 if image.get("imageManifestMediaType") in INDEX_MEDIA_TYPES:
                     index_digests += 1
+                    if set(image_tags) & set(image.get("imageTags") or []):
+                        tagged_indexes.setdefault(name, []).append(image)
                     continue
                 ecr_images.append(
                     {
@@ -487,9 +505,47 @@ def collect(aws, scope, *, allow_partial=False, now=None):
                 with attempt("ecr describe-images", repository=name):
                     raise error
 
+    # A tag usually sits on an index, while Inspector scans the untagged images
+    # it points to. Read each tagged index to give those images its tags.
+    index_tags = {}
+    for name, indexes in tagged_indexes.items():
+        with attempt("ecr batch-get-image", repository=name):
+            for start in range(0, len(indexes), INDEX_BATCH):
+                chunk = indexes[start : start + INDEX_BATCH]
+                response = aws.call(
+                    "ecr",
+                    "batch-get-image",
+                    repositoryName=name,
+                    imageIds=[{"imageDigest": i["imageDigest"]} for i in chunk],
+                    acceptedMediaTypes=sorted(INDEX_MEDIA_TYPES),
+                )
+                if response.get("failures"):
+                    reasons = "; ".join(
+                        f"{f.get('imageId', {}).get('imageDigest')}: {f.get('failureCode')}"
+                        for f in response["failures"]
+                    )
+                    raise CollectionError(f"ECR could not read index manifests in {name}: {reasons}")
+                tags_of = {
+                    i["imageDigest"]: set(image_tags) & set(i.get("imageTags") or []) for i in chunk
+                }
+                for image in response.get("images") or []:
+                    try:
+                        manifest = json.loads(image["imageManifest"])
+                    except (KeyError, TypeError, ValueError) as exc:
+                        raise CollectionError(f"ECR returned an unreadable index manifest in {name}") from exc
+                    tags = tags_of.get((image.get("imageId") or {}).get("imageDigest"), set())
+                    for child in index_images(manifest):
+                        index_tags.setdefault((name, child), set()).update(tags)
+    for image in ecr_images:
+        tags = index_tags.get((image["repository"], image["imageDigest"]))
+        if tags:
+            image["index_tags"] = sorted(tags)
+
     cutoff = (
         now - timedelta(days=scope["pushed_within_days"]) if scope["pushed_within_days"] else None
     )
+    inventory = [i for i in ecr_images if selected(i, scope, cutoff)]
+    inventory_keys = {(i["repository"], i["imageDigest"]) for i in inventory}
     finding_filter = {
         "awsAccountId": equal([account]),
         "resourceType": equal([RESOURCE_TYPE]),
@@ -500,13 +556,9 @@ def collect(aws, scope, *, allow_partial=False, now=None):
         "resourceType": equal([RESOURCE_TYPE]),
         "scanType": equal(["PACKAGE"]),
     }
-    for values, finding_key, coverage_key in (
-        (repositories, "ecrImageRepositoryName", "ecrRepositoryName"),
-        (image_tags, "ecrImageTags", "ecrImageTags"),
-    ):
-        if values:
-            finding_filter[finding_key] = equal(values)
-            coverage_filter[coverage_key] = equal(values)
+    if repositories:
+        finding_filter["ecrImageRepositoryName"] = equal(repositories)
+        coverage_filter["ecrRepositoryName"] = equal(repositories)
     if scope["in_use_only"]:
         finding_filter["ecrImageInUseCount"] = [{"lowerInclusive": 1}]
         coverage_filter["ecrImageInUseCount"] = [{"lowerInclusive": 1}]
@@ -519,6 +571,17 @@ def collect(aws, scope, *, allow_partial=False, now=None):
         finding_filter["ecrImagePushedAt"] = [{"startInclusive": cutoff}]
     if scope["min_severity"]:
         finding_filter["severity"] = equal(severities_at_or_above(scope["min_severity"]))
+    # With image_tags, the selected images are named by digest: an image that
+    # inherits its index's tags is untagged in Inspector, so a tag filter misses
+    # it. Coverage has no digest filter and is matched to the inventory below.
+    if image_tags:
+        hashes = sorted({i["imageDigest"] for i in inventory})
+        finding_filters = [
+            {**finding_filter, "ecrImageHash": equal(hashes[start : start + HASHES_PER_QUERY])}
+            for start in range(0, len(hashes), HASHES_PER_QUERY)
+        ]
+    else:
+        finding_filters = [finding_filter]
 
     if account and ecr_state in (None, "ENABLED"):
         with attempt("inspector2 list-coverage"):
@@ -538,8 +601,12 @@ def collect(aws, scope, *, allow_partial=False, now=None):
                     raise CollectionError("Inspector returned invalid coverage identity/status")
                 coverage.append(resource)
         with attempt("inspector2 list-findings"):
-            for finding in aws.pages(
-                "inspector2", "list-findings", "findings", filterCriteria=finding_filter
+            for finding in (
+                record
+                for query in finding_filters
+                for record in aws.pages(
+                    "inspector2", "list-findings", "findings", filterCriteria=query
+                )
             ):
                 if finding.get("awsAccountId") != account or finding.get("status") != "ACTIVE":
                     raise CollectionError(
@@ -566,7 +633,7 @@ def collect(aws, scope, *, allow_partial=False, now=None):
                         or (repositories and detail["repositoryName"] not in repositories)
                         or (
                             image_tags
-                            and not set(image_tags).intersection(detail.get("imageTags", []))
+                            and (detail["repositoryName"], detail["imageHash"]) not in inventory_keys
                         )
                     ):
                         raise CollectionError(
@@ -585,7 +652,9 @@ def collect(aws, scope, *, allow_partial=False, now=None):
                     findings[finding["findingArn"]] = compact_finding(finding, vulnerabilities)
 
     by_resource = {c.get("resourceId"): c for c in coverage}
-    inventory = [i for i in ecr_images if selected(i, scope, cutoff, by_resource.keys())]
+    if scope["in_use_only"] or scope["last_in_use_days"]:
+        inventory = [i for i in inventory if i["resource_id"] in by_resource]
+        inventory_keys = {(i["repository"], i["imageDigest"]) for i in inventory}
     in_scope = {i["resource_id"] for i in inventory}
     coverage = [c for c in coverage if c.get("resourceId") in in_scope]
     gaps = []
@@ -598,7 +667,7 @@ def collect(aws, scope, *, allow_partial=False, now=None):
         ):
             gaps.append(image["resource_id"])
     findings_list = sorted(findings.values(), key=lambda f: f["findingArn"])
-    known_images = {(i["repository"], i["imageDigest"]) for i in inventory}
+    known_images = inventory_keys
     inventory_mismatches = sorted(
         {
             f["findingArn"]

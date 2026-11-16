@@ -246,7 +246,7 @@ def test_all_pages_and_severities_keep_distinct_findings(tmp_path):
         "awsAccountId": [{"comparison": "EQUALS", "value": ACCOUNT}],
         "resourceType": [{"comparison": "EQUALS", "value": "AWS_ECR_CONTAINER_IMAGE"}],
         "findingStatus": [{"comparison": "EQUALS", "value": "ACTIVE"}],
-        "ecrImageTags": [{"comparison": "EQUALS", "value": "deployed"}],
+        "ecrImageHash": [{"comparison": "EQUALS", "value": DIGEST}],
     }
     # One request per page, each asking for the largest page the API allows.
     sizes = {("ecr", "describe-repositories"): 1000, ("ecr", "describe-images"): 1000,
@@ -1054,16 +1054,126 @@ def test_index_digests_are_not_images_and_never_coverage_gaps(tmp_path):
     assert result.returncode == 0, result.stderr
 
 
-def test_index_tags_select_the_untagged_image_through_inspector_coverage(tmp_path):
+ATTESTATION = "sha256:" + "9" * 64
+
+
+def index_manifest(*children):
+    """BatchGetImage's answer for INDEX: an OCI index of `children`, plus an attestation entry."""
+    return {
+        "images": [
+            {
+                "imageId": {"imageDigest": INDEX},
+                "imageManifest": json.dumps(
+                    {
+                        "schemaVersion": 2,
+                        "mediaType": "application/vnd.oci.image.index.v1+json",
+                        "manifests": [
+                            *(
+                                {
+                                    "mediaType": "application/vnd.oci.image.manifest.v1+json",
+                                    "digest": child,
+                                    "platform": {"architecture": "amd64", "os": "linux"},
+                                }
+                                for child in children
+                            ),
+                            {
+                                "mediaType": "application/vnd.oci.image.manifest.v1+json",
+                                "digest": ATTESTATION,
+                                "platform": {"architecture": "unknown", "os": "unknown"},
+                                "annotations": {"vnd.docker.reference.type": "attestation-manifest"},
+                            },
+                        ],
+                    }
+                ),
+            }
+        ],
+        "failures": [],
+    }
+
+
+def test_a_tagged_index_selects_the_untagged_images_it_points_to(tmp_path):
     data = multi_arch(responses())
+    data["ecr batch-get-image"] = index_manifest(CHILD)
     result, files, calls = run_fetcher(tmp_path, data, AWS_INSPECTOR_IMAGE_TAGS='["latest"]')
     assert result.returncode == 0, result.stderr
     rows = list(csv.DictReader(io.StringIO(files[0].read_text())))
     assert [r["Image Digest"] for r in rows] == [CHILD]
-    coverage = next(c for c in calls if c["args"][:2] == ["inspector2", "list-coverage"])
-    assert coverage["params"]["filterCriteria"]["ecrImageTags"] == [
-        {"comparison": "EQUALS", "value": "latest"}
+    (read,) = [c for c in calls if c["args"][:2] == ["ecr", "batch-get-image"]]
+    assert read["params"]["repositoryName"] == "example"
+    assert read["params"]["imageIds"] == [{"imageDigest": INDEX}]
+    assert set(read["params"]["acceptedMediaTypes"]) == collector.INDEX_MEDIA_TYPES
+    # The image is untagged in Inspector, so it is queried by digest; coverage is
+    # matched locally.
+    findings = next(c for c in calls if c["args"][:2] == ["inspector2", "list-findings"])
+    assert findings["params"]["filterCriteria"]["ecrImageHash"] == [
+        {"comparison": "EQUALS", "value": CHILD}
     ]
+    assert "ecrImageTags" not in findings["params"]["filterCriteria"]
+    coverage = next(c for c in calls if c["args"][:2] == ["inspector2", "list-coverage"])
+    assert "ecrImageTags" not in coverage["params"]["filterCriteria"]
+    result, files, _ = run_fetcher(
+        tmp_path / "evidence", data, "inspector_ecr_findings", AWS_INSPECTOR_IMAGE_TAGS='["latest"]'
+    )
+    (image,) = json.loads(files[0].read_text())["results"]["images"]
+    assert (image["imageDigest"], image["imageTags"], image["index_tags"]) == (CHILD, [], ["latest"])
+
+
+def test_untagged_images_outside_a_tagged_index_stay_out(tmp_path):
+    data = multi_arch(responses())
+    other = "sha256:" + "e" * 64
+    data["ecr describe-images"]["imageDetails"].append({"imageDigest": other})
+    data["ecr batch-get-image"] = index_manifest(CHILD)
+    result, files, _ = run_fetcher(
+        tmp_path, data, "inspector_ecr_findings", AWS_INSPECTOR_IMAGE_TAGS='["latest"]'
+    )
+    assert result.returncode == 0, result.stderr
+    images = json.loads(files[0].read_text())["results"]["images"]
+    assert [i["imageDigest"] for i in images] == [CHILD]
+
+
+def test_no_tag_filter_reads_no_index_manifests(tmp_path):
+    data = multi_arch(responses())
+    result, _, calls = run_fetcher(tmp_path, data, "inspector_ecr_findings")
+    assert result.returncode == 0, result.stderr
+    assert not [c for c in calls if c["args"][:2] == ["ecr", "batch-get-image"]]
+
+
+def test_findings_are_queried_ten_digests_at_a_time(tmp_path):
+    data = responses()
+    digests = sorted([DIGEST] + ["sha256:" + f"{n:02d}" * 32 for n in range(11)])
+    data["ecr describe-images"]["imageDetails"] = [
+        {"imageDigest": d, "imageTags": ["deployed"]} for d in digests
+    ]
+    result, files, calls = run_fetcher(
+        tmp_path, data, "inspector_ecr_findings", AWS_INSPECTOR_IMAGE_TAGS='["deployed"]'
+    )
+    assert result.returncode == 0, result.stderr
+    queries = [c for c in calls if c["args"][:2] == ["inspector2", "list-findings"]]
+    sent = [[v["value"] for v in q["params"]["filterCriteria"]["ecrImageHash"]] for q in queries]
+    assert sent == [digests[:10], digests[10:]]
+    assert len(json.loads(files[0].read_text())["results"]["findings"]) == 1
+
+
+@pytest.mark.parametrize("kind", ["error", "failures", "unreadable"])
+def test_an_unreadable_index_is_a_recorded_failure(tmp_path, kind):
+    data = multi_arch(responses())
+    data["ecr batch-get-image"] = {
+        "error": {"_error": "AccessDeniedException: ecr:BatchGetImage"},
+        "failures": {"images": [], "failures": [
+            {"imageId": {"imageDigest": INDEX}, "failureCode": "ImageNotFound"}
+        ]},
+        "unreadable": {"images": [{"imageId": {"imageDigest": INDEX}, "imageManifest": "{"}]},
+    }[kind]
+    result, files, _ = run_fetcher(
+        tmp_path, data, "inspector_ecr_findings", AWS_INSPECTOR_IMAGE_TAGS='["latest"]'
+    )
+    assert result.returncode == 1
+    evidence = json.loads(files[0].read_text())
+    (failure,) = evidence["metadata"]["api_failures"]
+    assert (failure["operation"], failure["repository"]) == ("ecr batch-get-image", "example")
+    assert evidence["results"]["collection_complete"] is False
+    result, files, _ = run_fetcher(tmp_path / "report", data, AWS_INSPECTOR_IMAGE_TAGS='["latest"]')
+    assert result.returncode == 1 and not files
 
 
 def test_images_keep_only_used_fields_and_reference_coverage_once(tmp_path):
@@ -1262,7 +1372,8 @@ def test_repositories_are_listed_concurrently_but_reported_in_order(tmp_path):
 
 
 def test_every_scope_setting_combines_into_one_inspector_query(tmp_path):
-    data = multi_arch(responses())
+    data = multi_arch(responses(), child_tags=("latest",))
+    data["ecr batch-get-image"] = index_manifest(CHILD)
     from datetime import datetime, timedelta, timezone
 
     data["ecr describe-images"]["imageDetails"][1]["imagePushedAt"] = (
@@ -1285,7 +1396,7 @@ def test_every_scope_setting_combines_into_one_inspector_query(tmp_path):
         "resourceType",
         "findingStatus",
         "ecrImageRepositoryName",
-        "ecrImageTags",
+        "ecrImageHash",
         "ecrImageInUseCount",
         "ecrImageLastInUseAt",
         "ecrImagePushedAt",
@@ -1297,9 +1408,30 @@ def test_every_scope_setting_combines_into_one_inspector_query(tmp_path):
         "resourceType",
         "scanType",
         "ecrRepositoryName",
-        "ecrImageTags",
         "ecrImageInUseCount",
         "ecrImageLastInUseAt",
     }
     rows = list(csv.DictReader(io.StringIO(files[0].read_text())))
     assert [r["Image Digest"] for r in rows] == [CHILD]
+
+
+def test_tags_and_usage_both_apply_to_an_image_behind_a_tagged_index(tmp_path):
+    # The index is tagged, but Inspector returns no in-use coverage for its image.
+    data = multi_arch(responses())
+    data["ecr batch-get-image"] = index_manifest(CHILD)
+    data["inspector2 list-coverage"]["coveredResources"] = []
+    data["inspector2 list-findings"]["findings"] = []
+    result, files, calls = run_fetcher(
+        tmp_path,
+        data,
+        "inspector_ecr_findings",
+        AWS_INSPECTOR_IMAGE_TAGS='["latest"]',
+        AWS_INSPECTOR_IN_USE_ONLY="true",
+    )
+    assert result.returncode == 0, result.stderr
+    results = json.loads(files[0].read_text())["results"]
+    assert results["images"] == [] and results["coverage_gaps"] == []
+    findings = next(c for c in calls if c["args"][:2] == ["inspector2", "list-findings"])
+    criteria = findings["params"]["filterCriteria"]
+    assert criteria["ecrImageHash"] == [{"comparison": "EQUALS", "value": CHILD}]
+    assert criteria["ecrImageInUseCount"] == [{"lowerInclusive": 1}]

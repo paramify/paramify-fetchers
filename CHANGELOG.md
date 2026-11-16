@@ -1775,8 +1775,10 @@ schemas and the `paramify` CLI — not the internal code.
     kept). With a usage filter, an image that Inspector has no coverage record for is out of scope rather than a gap.
   - Multi-architecture index digests (OCI image indexes, Docker manifest lists) are left out of the image inventory,
     since Inspector scans the per-platform images they point to rather than the index; they are no longer reported as
-    coverage gaps. They are counted in `summary.index_digest_count`. With `image_tags`, an untagged per-platform
-    image is selected when its Inspector coverage carries a requested tag (the index's tags).
+    coverage gaps. They are counted in `summary.index_digest_count`.
+  - `image_tags` selects the images a tagged index points to: the collector reads each tagged index's manifest with
+    ECR `BatchGetImage` (a new permission, needed only with `image_tags`) and queries those images' findings by
+    digest. Before, a tag filter matched only tagged images, so multi-architecture images were left out.
   - AWS calls go through boto3 in one process instead of one `aws` CLI process per page, every paged API requests its
     largest page, and up to eight repositories' images are listed concurrently. `boto3` is now in
     `requirements.txt` and a new `aws` extra.

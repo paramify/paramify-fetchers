@@ -33,7 +33,7 @@ config_schema:
     type: string
     default: '[]'
     env: AWS_INSPECTOR_IMAGE_TAGS
-    description: JSON array of up to ten image tags, matched with OR. Empty includes untagged images too. A multi-architecture index's tags select the images it points to. Tags do not prove deployment.
+    description: JSON array of up to ten image tags, matched with OR. Empty includes untagged images too. An image matches by its own tags or by the tags of a multi-architecture index that points to it (read with ECR BatchGetImage). Tags do not prove deployment.
   in_use_only:
     type: boolean
     default: false
@@ -59,4 +59,4 @@ ksis:
 evidence_set:
   reference_id: EVD-INSPECTOR-ECR-FINDINGS
   name: Inspector ECR Vulnerability Findings and Coverage
-  instructions: 'Script: aws/inspector_ecr_findings/fetcher.py. Read-only AWS APIs: STS GetCallerIdentity; ECR DescribeRepositories and DescribeImages; Inspector2 BatchGetAccountStatus, ListCoverage and ListFindings. Includes all active finding severities in the declared scope.'
+  instructions: 'Script: aws/inspector_ecr_findings/fetcher.py. Read-only AWS APIs: STS GetCallerIdentity; ECR DescribeRepositories, DescribeImages and, with image_tags, BatchGetImage; Inspector2 BatchGetAccountStatus, ListCoverage and ListFindings. Includes all active finding severities in the declared scope.'

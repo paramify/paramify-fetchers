@@ -34,7 +34,7 @@ config_schema:
     type: string
     default: '[]'
     env: AWS_INSPECTOR_IMAGE_TAGS
-    description: JSON array of up to ten image tags, matched with OR. Empty includes untagged images too. A multi-architecture index's tags select the images it points to. Tags do not prove deployment.
+    description: JSON array of up to ten image tags, matched with OR. Empty includes untagged images too. An image matches by its own tags or by the tags of a multi-architecture index that points to it (read with ECR BatchGetImage). Tags do not prove deployment.
   in_use_only:
     type: boolean
     default: false

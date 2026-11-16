@@ -50,9 +50,15 @@ list) and each per-platform image it points to as separate digests, and tags
 usually sit on the index. Inspector scans the per-platform images, never the
 index, so index digests are left out of the inventory (counted in
 `summary.index_digest_count`) instead of appearing as permanent coverage gaps.
-With `image_tags`, an untagged per-platform image is selected when Inspector's
-coverage record for it carries a requested tag, which is how Inspector reports
-the index's tags. Suppressed and closed findings
+
+With `image_tags`, an image matches by its own tags or by the tags of an index
+that points to it. The per-platform images of a multi-architecture index are
+untagged in ECR and in Inspector, so the collector reads each tagged index's
+manifest (ECR `BatchGetImage`) to find them, recording the index's matching tags
+as `index_tags` on each. Attestation entries and nested indexes are skipped.
+Findings for the selected images are then requested by digest, ten digests per
+`ListFindings` query, and coverage is matched to them locally, since neither a
+tag filter nor coverage would find an untagged image. Suppressed and closed findings
 are outside this version's scope. Each finding retains its native AWS fields,
 including packages, fixed versions, vulnerability aliases, CVSS and timestamps
 when the API supplies them. Fields that describe the vulnerability rather than
@@ -93,7 +99,7 @@ The evidence is compact JSON. `results` contains:
 
 - `scope`: every setting as applied, plus `pushed_after` (the cutoff timestamp) when `pushed_within_days` is set.
 - `summary`: finding, severity, vulnerability, image, index-digest and coverage-gap counts, and findings per repository and per vulnerability ID.
-- `images`: one record per selected image: `imageDigest`, `imageTags`, `imagePushedAt`, `lastRecordedPullTime`, `imageSizeInBytes`, `imageManifestMediaType`, `repository`, `repository_arn`, and `resource_id` (the key of its coverage record).
+- `images`: one record per selected image: `imageDigest`, `imageTags`, `imagePushedAt`, `lastRecordedPullTime`, `imageSizeInBytes`, `imageManifestMediaType`, `repository`, `repository_arn`, `resource_id` (the key of its coverage record), and `index_tags` when it was selected through a tagged index.
 - `coverage`: Inspector coverage records for the selected images, once each.
 - `vulnerabilities`: per vulnerability ID, the fields shared by its findings: `description`, `remediation`, `epss`, `exploitabilityDetails`, `inspectorScoreDetails`, and under `packageVulnerabilityDetails` the `source`, `sourceUrl`, `cvss`, `referenceUrls`, `relatedVulnerabilities` and vendor fields.
 - `findings`: each ACTIVE finding without those shared fields. A finding keeps any shared field whose value differs from its vulnerability's, and lists in `absent_fields` any stored field it did not have. Combining a finding with its vulnerability entry (finding values win) gives the original Inspector record; `expand_finding()` in `_shared/inspector_ecr.py` does exactly that.
@@ -116,6 +122,7 @@ Read-only calls:
 - `sts:GetCallerIdentity`
 - `ecr:DescribeRepositories`
 - `ecr:DescribeImages`
+- `ecr:BatchGetImage`, only with `image_tags`, to read the manifests of tagged indexes
 - `inspector2:BatchGetAccountStatus`
 - `inspector2:ListCoverage`
 - `inspector2:ListFindings`
