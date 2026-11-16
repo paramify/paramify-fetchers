@@ -56,7 +56,10 @@ paramify validate <manifest>   # validate a manifest without running
 paramify run      <manifest>   # run it
 paramify runs                  # past runs under an output dir (newest first)
 paramify evidence <file>       # read one evidence file, or an issue-report sidecar
+paramify preset   <fetcher>    # settings for a pipeline fetcher's Paramify preset
 paramify upload   [run-dir]    # push a run's evidence to Paramify (default: latest run)
+paramify stacks                # list the workspace's stacks (name, id)
+paramify status   <manifest>   # what each fetcher has in Paramify; exit 1 until all are ready, 2 on errors
 paramify issues   <sub>        # send a run's issue reports into assessment pipelines; list/close their jobs
 paramify programs <sub>        # list workspace programs; turn them into targets
 paramify assessments <sub>     # list workspace assessments; point issue reports at one
@@ -216,18 +219,126 @@ paramify upload                     # upload the latest run (get-or-create evide
 ```
 
 `paramify upload` takes an optional run directory. The default is the latest
-run under `--output-dir`. It supports `--dry-run`, `--config` and `--json`. You
-can also call the same uploader directly as
-`python -m uploaders.paramify_evidence <run-dir>`.
+run under `--output-dir`. It sends one batch for each fetcher entry in the run.
+The batch goes through the channel of the evidence set when the set has one.
+When a batch cannot be used, the upload sends the entry
+[direct](uploader_guide.md#when-a-batch-cannot-be-used), the way it did before
+batches.
 
-The uploader is idempotent within a run. It talks to Paramify REST v0 over HTTPS
-only, and it reads `PARAMIFY_UPLOAD_API_TOKEN` (and the optional
-`PARAMIFY_API_BASE_URL`).
+| Flag | Effect |
+|---|---|
+| `--dry-run` | Lists what would upload. Makes no API calls and needs no token. Routing shows as unknown. |
+| `--plan` | Reads the workspace (no changes) and prints the full plan. Applies nothing. |
+| `--stack STACK` | Sends every entry to this stack (an id or a name). It replaces the stack the run recorded. |
+| `--owner USERNAME` | Where a stack has one channel per owner, uses this owner's channel. It replaces the owner the run recorded. |
+| `--with-validators` | Syncs validators for the evidence sets of the run before the batches go out. If the sync fails, the upload sends no batch. With `--dry-run`, it only names the sync it would do. |
+| `--no-tags` | Skips the default custom tags for this upload. |
+| `--config`, `-f`, `-o` | Choose the uploader config, the manifest, and the output directory. |
+| `--json` | Prints the summary: the legacy counts, plus `dropped`, `plan`, `entries`, `outcomes`, `batches` and, with `--with-validators`, `validators`. |
+
+Set the stack in the manifest under `run.paramify` (`stack`, `stack_name`,
+`owner`, `approval`, `delivery`, `no_request`). An entry can set the same keys in its own `paramify`
+block. List the stacks in the workspace with `paramify stacks`. Write one into a
+manifest with `paramify manifest set-stack MANIFEST STACK [--fetcher NAME]`.
+With a token, the command looks up the stack and stores its id and name. Check
+the stack ids against the workspace with `paramify validate --online`.
+
+When an evidence set has two channels on the stack, one for each owner, the
+upload needs an owner. Write one with
+`paramify manifest set-owner MANIFEST USERNAME [--fetcher NAME]`. An empty
+USERNAME removes it. The owner is read only where it breaks such a tie. See
+[Owner](uploader_guide.md#owner). `paramify validate --online` gives a note for
+an owner who has no channel in the workspace.
+
+Uploading the same run again changes nothing. The upload finds the batch it made
+for that run. A new run makes a new batch. If a temporary failure holds a batch
+open, run the same upload again to resume it. Each new batch, and each new
+evidence set, gets the approval mode `SUBMISSION` unless `approval` says
+otherwise: Paramify approves the batch when the upload submits it, whatever
+mode the set has. The upload never changes an existing set. The routing rules and each
+refusal are in [`uploader_guide.md`](uploader_guide.md#how-a-run-is-delivered).
+
+The upload talks to Paramify REST v0 over HTTPS only, and it reads
+`PARAMIFY_UPLOAD_API_TOKEN` (and the optional `PARAMIFY_API_BASE_URL`).
 [`uploaders/paramify_evidence/README.md`](../uploaders/paramify_evidence/README.md)
 shows how to create a Paramify API key with the necessary permissions.
 
+`uploaders/paramify_evidence/uploader.py` still works for old schedules, but it
+is deprecated. It hands the run to the same upload and prints a notice. Use
+`paramify upload`.
+
 The runner does not chain the two stages. That is the customer's job, and
-`run_and_upload.sh` at the repo root is a sample script for it.
+`deploy/run-and-upload.sh <manifest> [stack]` is a sample script for it. It
+uploads the run it just collected.
+
+A script that chains the stages needs the run directory. Two flags of
+`paramify run` give it:
+
+| Flag | Stdout | Stderr |
+|---|---|---|
+| `--print-run-dir` | The run directory, on one line. | The usual progress output: each result, the reason for each failure, and each skipped entry, setup error and note. |
+| `--json` | The run summary. | Nothing. |
+
+The run summary has `run_dir`, `ok` and one record for each invocation in
+`invocations`. A failed invocation has `error`: the reason the fetcher gave, or
+else its last stderr line. It can also have `error_code`. Three lists name the
+entries that need attention. Each item has `entry_key` and `fetcher`:
+
+- `skipped`: the entry did not run. `reason` tells why, for example
+  `not discovered`.
+- `setup_errors`: the setup failed before the fetcher started. `error` tells why.
+- `notes`: the run changed something for the entry, for example it dropped an
+  optional secret. `note` tells what.
+
+## Check the setup in Paramify
+
+`paramify status` reads the workspace and reports, for each evidence fetcher in
+a manifest, what Paramify has for it. It changes nothing.
+
+```bash
+paramify status manifests/acme.yaml
+```
+
+| Column | Meaning |
+|---|---|
+| evidence set | `ok` when the set exists. `create` when the first scripts sync makes it. |
+| script | The state that `paramify scripts sync --dry-run` reports: `ok`, `update`, `create`, `drift` or `error`. |
+| validators | The registry validators that Paramify pairs with the set, out of all of them. `none` when the registry has none for the set. |
+| capabilities | The solution capabilities that hold a pair from this set. |
+| artifacts | The artifacts on the set. |
+| ready | The set exists, its script is in sync, it has each registry validator, and it has an artifact. |
+
+A line under the table counts each column across the fetchers. Scan-report
+fetchers go to an assessment, not to an evidence set, so the table leaves them out.
+
+Every read goes to one workspace: the base URL from `paramify.base_url` in the
+uploader config (`upload.yaml` or `--config`), else `PARAMIFY_API_BASE_URL`,
+else app.paramify.com. The first line of the output names it.
+
+`?` in a cell means the read for it failed, so the value is unknown. The error
+is shown under the table. `-` means nothing was read, because there is no API
+token. Without a token, the command shows only what the manifest and the
+registry hold, and leaves out the line of counts.
+
+`--json` prints the full status. In it, an unknown value is `null`: the
+evidence set's `exists` and `artifact_count`, and each validator's `paired`.
+
+### Exit codes
+
+| Code | Meaning |
+|---|---|
+| 0 | Every fetcher is ready. |
+| 1 | Some fetchers are not ready yet. A sync, a validator pair or an upload can fix it. |
+| 2 | The command cannot tell, and waiting will not change that: the manifest or the uploader config cannot be read, there is no API token, a workspace read failed (for example, an expired token gets HTTP 401), the manifest names a fetcher that does not exist, or the manifest has no evidence fetchers. |
+
+A deployment can wait for 0 before it runs headless, and stop on 2:
+
+```bash
+until paramify status manifests/acme.yaml >/dev/null; do
+  [ $? -eq 2 ] && exit 2
+  sleep 60
+done
+```
 
 ## Scan results, not evidence
 
@@ -261,6 +372,17 @@ uploads to an evidence set like any other evidence. Then an inventory pipeline o
 that set turns each record into an Inventory item. The pipeline reads the file as
 the full estate, so `paramify upload` sends an inventory only when the run
 collected all of it. See [`inventory_fetchers_guide.md`](inventory_fetchers_guide.md).
+
+### `paramify preset <fetcher>`
+
+Building the inventory pipeline's preset in Paramify takes a sample file, a data
+path, a unique ID field and a rule for the parent component. `paramify preset
+sophos_endpoint_inventory` prints them from the fetcher's `pipeline:` block and
+its newest run, and lists the other fetchers that share the same ID scheme. With
+no run yet, the sample and the `asset_type` values are missing, so run the
+fetcher first. It reads runs from `<repo>/evidence`; `-f MANIFEST` uses that
+manifest's `output_dir`, and `--output-dir` overrides both. `--json` prints the
+same facts as data.
 
 ## See what a platform has (discovery)
 

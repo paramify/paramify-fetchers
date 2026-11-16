@@ -767,7 +767,7 @@ def test_collect_vnet_read_failure_leaves_targets_and_coverage_unknown(monkeypat
     monkeypatch.setattr(flow, "project_watcher", lambda w: dict(w))
     monkeypatch.setattr(flow, "project_flow_log", lambda f: dict(f))
     collector = _collector()
-    watchers, flow_logs, vnets = flow.collect(SUB.split("/")[-1], object(), collector)
+    watchers, flow_logs, vnets, _ = flow.collect(SUB.split("/")[-1], object(), collector)
     assert vnets is None
     assert flow_logs[0]["target_attached"] is None  # never "unattached" because the VNet list failed
     assert not collector.ok
@@ -782,6 +782,47 @@ def test_summary_with_unread_vnets_is_unknown_not_zero():
     assert summary["virtual_networks_read"] is False
     assert summary["total_virtual_networks"] is None and summary["virtual_networks_not_covered"] is None
     assert summary["enabled_flow_logs_target_unknown"] == 1
+
+
+def _read_summary(monkeypatch, watchers, list_logs):
+    client = _Client(
+        network_watchers=_Group(list_all=watchers),
+        flow_logs=_Group(list=list_logs),
+    )
+    _fake_module(monkeypatch, "azure.mgmt.network", NetworkManagementClient=lambda **k: client)
+    monkeypatch.setattr(flow, "project_watcher", lambda w: dict(w))
+    monkeypatch.setattr(flow, "project_flow_log", lambda f: dict(f))
+    collector = _collector()
+    watchers, flow_logs, vnets, logs_read = flow.collect(SUB.split("/")[-1], object(), collector)
+    return flow.summarize(watchers, flow_logs or [], vnets, logs_read), collector
+
+
+def test_unread_watcher_list_gives_null_flow_log_counts(monkeypatch):
+    summary, collector = _read_summary(monkeypatch, _raise(RuntimeError("(403) AuthorizationFailed")), lambda rg, n: [])
+    assert not collector.ok
+    for key in flow.FLOW_LOG_KEYS + ("enabled_flow_logs_retained_under_90_days", "total_network_watchers",
+                                     "regions_with_virtual_networks_without_network_watcher",
+                                     "regions_without_network_watcher_count"):
+        assert summary[key] is None, key
+
+
+def test_one_failed_watcher_flow_log_list_gives_null_flow_log_counts(monkeypatch):
+    w = lambda n, loc: {"id": f"{SUB}/resourceGroups/nw/providers/Microsoft.Network/networkWatchers/{n}", "name": n, "location": loc}  # noqa: E731
+    log = {"id": "fl1", "name": "fl1", "target_resource_id": "x", "target_type": "virtual_network", "enabled": True,
+           "retention_days": 30, "retained_indefinitely": False, "legacy_nsg_flow_log": False,
+           "enabled_filtering_criteria": None, "traffic_analytics_enabled": False,
+           "traffic_analytics_interval_minutes": None}
+
+    def list_logs(rg, name):
+        if name == "w2":
+            raise RuntimeError("(403) AuthorizationFailed")
+        return [log]
+
+    summary, collector = _read_summary(monkeypatch, lambda: [w("w1", "eastus"), w("w2", "westus")], list_logs)
+    assert not collector.ok
+    assert summary["total_network_watchers"] == 2
+    for key in flow.FLOW_LOG_KEYS:
+        assert summary[key] is None, key
 
 
 # --- ai_services_configuration ----------------------------------------------- #
@@ -839,6 +880,19 @@ def test_collect_reads_identity_holders_from_resource_graph(monkeypatch):
     assert "isnotnull(identity)" in seen["query"]
     assert [r["resource_id"] for r in user_assigned[0]["attached_resources"]] == ["vm1"]
     assert system_assigned[0]["principal_id"] == "ps"
+
+
+def test_summary_fields_are_documented(assert_summary_documented):
+    kinds = ["github_actions", "azure_devops", "aks_workload_identity", "google", "aws", "other"]
+    fics = [{"issuer_kind": k, "broad_subject": False, "nonstandard_audience": False} for k in kinds]
+    user = {**mi.identity_record({"kind": "user_assigned", "principal_id": "pu"}, {}, {"pu": []}),
+            "attached_resources": [], "federated_credentials": fics}
+    system = mi.identity_record({"kind": "system_assigned", "principal_id": "ps", "resource_type": "microsoft.web/sites"},
+                                {}, {"ps": []})
+    summary = {**mi.summarize([user], [system], "read"), "provider_registration_status": "registered",
+               **mi.ResourceExclusions().summary([], ("user_assigned_identity", "system_assigned_identity"),
+                                                 {"user_assigned_identities": 1, "system_assigned_identities": 1})}
+    assert_summary_documented("azure/managed_identity_configuration", summary)
 
 
 def test_graph_role_reads_follow_next_link():

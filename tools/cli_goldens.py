@@ -26,7 +26,7 @@ PARAMIFY_ENV = (UPLOAD_TOKEN_ENV, READ_TOKEN_ENV, BASE_URL_ENV, ENV_SWITCH)
 # All a command run offline sees of the caller's env, so no platform's credentials reach it.
 OFFLINE_ENV = ("PATH", "HOME", "USER", "LANG", "LC_ALL", "LC_CTYPE", "TERM", "TMPDIR", "TZ",
                "PYTHONPATH", "PYTHONHOME", "PYTHONDONTWRITEBYTECODE", "PYTHONHASHSEED")
-RUN_ID = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z")
+RUN_ID = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z(?:-[0-9a-f]{4})?")
 TIMESTAMP = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})")
 ASCTIME = re.compile(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3}")
 _DURATION = re.compile(r"duration=\d+(?:\.\d+)?s")
@@ -115,6 +115,9 @@ def _outputs() -> dict:
             ("upload_dry_run", ["upload", "--dry-run", str(run_dir.relative_to(REPO_ROOT))]),
         ):
             outputs[name] = _capture(args, _paramify(args))
+        # No run under this directory, so the sheet is the same on every machine.
+        args = ["preset", "sophos_endpoint_inventory", "--output-dir", "tests/goldens/cli/no-runs"]
+        outputs["preset"] = _capture(args, _paramify(args))
     finally:
         # Only the run this script started: another run in the checkout may be writing beside it.
         if run_dir is not None:

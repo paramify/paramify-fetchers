@@ -53,6 +53,15 @@ def resolve_upload_token(
     return None, None
 
 
+def missing_token_error() -> str:
+    """One wording for the missing-token error, since every upload stage raises it."""
+    return (
+        f"{UPLOAD_TOKEN_ENV} is not set (or {READ_TOKEN_ENV} as a fallback). "
+        f"Set it in the environment by any means — export, .env, secret manager, "
+        f"CI secret — or run `paramify doctor <manifest>` to check before a run."
+    )
+
+
 def resolve_base_url(
     config_base_url: Optional[str] = None,
     env: Optional[Mapping[str, str]] = None,

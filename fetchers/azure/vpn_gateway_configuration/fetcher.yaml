@@ -1,13 +1,7 @@
 name: azure_vpn_gateway_configuration
-version: 0.2.0
-description: >
-  For every Azure VPN Gateway (Microsoft.Network/virtualNetworkGateways) in the subscription,
-  reports its type, SKU, generation, active-active and BGP settings and its point-to-site
-  configuration (tunnel protocols and authentication types). For every gateway connection
-  (site-to-site IPsec, VNet-to-VNet) it reports the IKE version, any custom IPsec/IKE policy
-  with its encryption, integrity, DH and PFS groups and SA lifetimes, flags weak algorithms, and
-  for every local network gateway its peer address and address space. Pre-shared keys, RADIUS
-  secrets and authorization keys are never requested or recorded.
+version: 0.2.1
+description: >-
+  Shows each VPN gateway's type, SKU and point-to-site setup, and whether each site-to-site or VNet-to-VNet connection uses IKEv2 and strong IPsec algorithms.
 category: azure
 
 config_schema:
@@ -74,35 +68,54 @@ ksis:
 evidence_set:
   reference_id: EVD-AZURE-VPN-GATEWAY-CONFIG
   name: Azure VPN Gateway and Connection Configuration
-  instructions: >
-    Script: azure/vpn_gateway_configuration/fetcher.py. Azure SDK calls: azure-mgmt-resource resource_groups.list(), then per resource
-    group azure-mgmt-network virtual_network_gateways.list(rg), virtual_network_gateway_connections.list(rg)
-    and local_network_gateways.list(rg) (these operations have no subscription-wide list), then
-    virtual_network_gateway_connections.get(rg, name) per connection, because connection_status is only
-    populated on a GET. Fields are
-    projected from an allow-list, so shared_key, authorization_key and radius_server_secret never enter
-    the evidence. An IPsec or Vnet2Vnet connection is ikev2 when connection_protocol is IKEv2, false when IKEv1, and null
-    (counted in summary.ike_version_unknown_connections) when Azure returns no protocol.
-    explicit_ipsec_policy is true when the connection carries a custom ipsecPolicies entry;
-    ipsec_policy_source is "custom" or "azure_default". weak_ipsec_algorithms lists any DES, 3DES, MD5,
-    SHA1, DH group 1/2 or PFS None in a custom policy; with no custom policy it lists the weak proposals
-    of Azure's default policy, whose IKEv2 main mode uses only DH Group 2
-    (learn.microsoft.com/azure/vpn-gateway/vpn-gateway-about-compliance-crypto), suffixed
-    "(azure_default)". p2s_enabled is true only when the gateway has a client address pool: the list call
-    returns a placeholder point-to-site block on gateways that never configured it.
-    summary.ikev2_connections over summary.ipsec_connections is the IKEv2 coverage.
-    provider_registration_status is for Microsoft.Network.
-    Virtual network gateways, connections and local network gateways the
-    patterns take out are listed under results.excluded, each with the
-    pattern that matched; a connection removed with its gateway also names
-    matched_id. A connection to an excluded local network gateway keeps
-    its verdict. Summary fields: resource_exclusion_patterns (the
-    configured patterns, empty when none are set),
-    resource_exclusion_patterns_unmatched (patterns that matched nothing,
-    such as a mistyped name), excluded_virtual_network_gateways,
-    excluded_connections, excluded_local_network_gateways (how many the
-    patterns took out) and in_scope_virtual_network_gateways,
-    in_scope_connections, in_scope_local_network_gateways (how many
-    stayed); all of them are null when the resource group list couldn't be
-    read. results.excluded is always present, empty when nothing is
-    excluded.
+  instructions: |
+    Script: azure/vpn_gateway_configuration/fetcher.py
+
+    Access: Reader on the subscription.
+
+    Commands Executed:
+    - subscriptions.list() — picks a subscription when none is set
+    - providers.get("Microsoft.Network") — tells "not registered" from "no gateways"
+    - resource_groups.list() — the resource groups to read, because the gateway calls have no subscription-wide list
+    - virtual_network_gateways.list() (per resource group) — each gateway's type, SKU, generation, active-active and BGP settings and point-to-site configuration
+    - virtual_network_gateway_connections.list() (per resource group) — each connection's type, IKE version and IPsec policy
+    - virtual_network_gateway_connections.get() (per connection) — the connection status, which only a get returns
+    - local_network_gateways.list() (per resource group) — each peer's address and address space
+
+    Output: azure_vpn_gateway_configuration_<subscription>.json — each gateway, connection with its IPsec policy and weak algorithms, and local network gateway, plus the resources left out and why; pre-shared keys, authorization keys and RADIUS secrets are never requested or recorded.
+
+    Summary fields:
+
+    Which resources are left out of scope?
+    - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
+    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no virtual network gateway, connection or local network gateway, such as a mistyped name; null when the resource group list, or any resource group's gateway, connection or local network gateway list, could not be read
+    - excluded_virtual_network_gateways — Number of virtual network gateways left out of scope because a pattern matched; each is listed under excluded with the pattern, and no other count includes it; null when the resource group list could not be read
+    - excluded_connections — Number of connections left out of scope because a pattern matched, or because their own gateway (the first one) was excluded, which names that gateway in matched_id; a connection to an excluded second gateway or local network gateway stays in scope with its verdict; null when the resource group list could not be read
+    - excluded_local_network_gateways — Number of local network gateways left out of scope because a pattern matched; null when the resource group list could not be read
+    - in_scope_virtual_network_gateways — Number of virtual network gateways read and in scope; null when the resource group list could not be read
+    - in_scope_connections — Number of connections read and in scope; null when the resource group list could not be read
+    - in_scope_local_network_gateways — Number of local network gateways read and in scope; null when the resource group list could not be read
+
+    Which gateways and connections were checked?
+    - total_gateways — Number of in-scope virtual network gateways, VPN and ExpressRoute
+    - vpn_gateways — Number of those whose gateway type is Vpn
+    - active_active_gateways — Number of gateways with active-active mode on
+    - p2s_enabled_gateways — Number of gateways with point-to-site on, which needs a client address pool; the list call returns a placeholder block for gateways that never set it up
+    - total_connections — Number of in-scope connections of every type
+    - ipsec_connections — Number of connections of type IPsec or VNet-to-VNet, the tunnels the checks below cover
+    - total_local_network_gateways — Number of in-scope local network gateways
+    - provider_registration_status — Whether the networking provider (Microsoft.Network) is registered on the subscription: registered, not_registered or unknown
+
+    Do tunnels use IKEv2?
+    - ikev2_connections — Number of IPsec and VNet-to-VNet connections whose protocol is IKEv2
+    - ikev1_connections — Number of those connections whose protocol is IKEv1
+    - ike_version_unknown_connections — Number of those connections where Azure returned no protocol, so the IKE version is unknown
+    - ikev2_percentage — Percentage of those connections that use IKEv2 = ikev2_connections / ipsec_connections × 100 (rounded down to a whole number); 0 when ipsec_connections is 0
+
+    Do tunnels avoid weak IPsec algorithms?
+    - explicit_ipsec_policy_connections — Number of those connections with a custom IPsec and IKE policy
+    - azure_default_ipsec_policy_connections — Number of those connections with no custom policy, so Azure's default policy applies
+    - weak_ipsec_policy_connections — Number of those connections with at least one weak algorithm (DES, 3DES, MD5, SHA1, DH group 1 or 2, PFS group 1 or 2, or None) in their custom policy; a connection on the default policy always counts, because Azure's default IKEv2 main mode offers DH group 2, listed per connection with an (azure_default) suffix
+
+    Are the connections up?
+    - connected_connections — Number of in-scope connections of any type whose status is Connected

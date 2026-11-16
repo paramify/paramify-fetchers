@@ -616,8 +616,8 @@ def _is_benign_unsupported(exc: BaseException) -> bool:
 def collect_storage_accounts(
     subscription_id, cred, collector: Collector, now: datetime | None = None,
     exclusions: ResourceExclusions | None = None, excluded: list | None = None,
-) -> list[dict]:
-    """One storage_accounts.list() plus a blob/file service GET and a container list per account,
+) -> list[dict] | None:
+    """One storage_accounts.list() (None when it couldn't be read) plus a blob/file service GET and a container list per account,
     and a get_properties(expand=geoReplicationStats) per geo-redundant account. Accounts the
     exclusions take out go to `excluded` with none of those reads.
 
@@ -635,14 +635,16 @@ def collect_storage_accounts(
 
     client = collector.guard("storage.StorageManagementClient (init)", _client)
     if client is None:
-        return []
+        return None
 
     def _list():
         # ItemPaged: the SDK follows nextLink itself, so pagination is handled.
         projected = [project_storage_account(a) for a in client.storage_accounts.list()]
         return [(p, account_record(p, run_start, owner_keys, classification_keys)) for p in projected]
 
-    listed = collector.guard("storage.storage_accounts.list", _list, default=[])
+    listed = collector.guard("storage.storage_accounts.list", _list)
+    if listed is None:
+        return None
     if exclusions:
         kept, out = exclusions.split([account for _, account in listed], "storage_account")
         in_scope = {id(account) for account in kept}
@@ -767,7 +769,7 @@ def main() -> int:
     subscription_id = sub["subscription_id"]
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
-    accounts: list[dict] = []
+    accounts: list[dict] | None = None
     excluded: list[dict] = []
     exclusions = ResourceExclusions.from_env()
     registration = REGISTRATION_UNKNOWN
@@ -794,8 +796,11 @@ def main() -> int:
         )
 
     exclusions.record_invalid(collector)
-    accounts, out = exclude_containers(exclusions, accounts)
+    listed = accounts is not None
+    accounts, out = exclude_containers(exclusions, accounts or [])
     excluded += out
+    if not listed or any(a.get("containers_status") == CONTAINERS_FAILED for a in accounts):
+        exclusions.mark_unread()
     exclusions.warn_unmatched(logger)
 
     evidence = build_payload(
@@ -811,7 +816,7 @@ def main() -> int:
             **summarize(accounts),
             "provider_registration_status": registration,
             **exclusions.summary(excluded, ("storage_account", "container"), {
-                "storage_accounts": len(accounts),
+                "storage_accounts": len(accounts) if listed else None,
                 "containers": sum(len(a.get("containers") or []) for a in accounts),
             }),
         },

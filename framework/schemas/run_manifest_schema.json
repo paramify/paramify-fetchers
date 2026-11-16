@@ -101,9 +101,56 @@
                     }
                   }
                 }
+              },
+              "paramify": {
+                "$ref": "#/$defs/paramify"
               }
             }
           }
+        },
+        "paramify": {
+          "$ref": "#/$defs/paramify"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "paramify": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Where the uploader sends this evidence and how new evidence sets are approved.",
+      "properties": {
+        "stack": {
+          "type": "string",
+          "minLength": 1
+        },
+        "stack_name": {
+          "type": "string"
+        },
+        "owner": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Paramify username whose channel the upload uses when the stack has one channel per owner."
+        },
+        "approval": {
+          "enum": [
+            "MANUAL",
+            "SUBMISSION_WITH_PASSING_VALIDATORS",
+            "SUBMISSION"
+          ]
+        },
+        "no_request": {
+          "enum": [
+            "direct",
+            "evidence",
+            "refuse"
+          ]
+        },
+        "delivery": {
+          "enum": [
+            "auto",
+            "direct"
+          ]
         }
       }
     }

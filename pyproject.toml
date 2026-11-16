@@ -58,6 +58,7 @@ azure = [
     "azure-mgmt-security>=7.0.0,<8",
     "azure-mgmt-authorization>=4.0.0,<5",
     "msgraph-sdk>=1.61.0,<2",
+    "microsoft-kiota-http>=1.16.0,<2",
     # Reads the subject and expiry of the CAs trusted for certificate sign-in.
     "cryptography>=42.0.0,<51",
     "azure-mgmt-sql>=4.0.0,<5",
@@ -72,7 +73,7 @@ azure = [
     "azure-mgmt-msi>=7.1.0,<8",
     "azure-mgmt-apimanagement>=5.0.0,<6",
     "azure-mgmt-appcontainers>=5.1.0,<6",
-    "azure-mgmt-containerinstance>=10.1.0,<11",
+    "azure-mgmt-containerinstance>=10.1.0,<12",
     "azure-mgmt-mongocluster>=1.2.0,<2",
     "azure-mgmt-kusto>=4.0.0,<5",
     "azure-mgmt-eventhub>=12.0.0,<13",

@@ -208,6 +208,13 @@ def cluster_record(cluster: dict) -> dict:
         "resource_group": resource_group_from_id(resource_id),
         "provisioning_state": cluster.get("provisioning_state"),
         "sku_tier": cluster.get("sku_tier"),
+        # SDK-projected values before normalization, not the raw HTTP response.
+        # None means no value was supplied, not explicit false or an empty list.
+        "configuration_observations": {
+            key: cluster.get(key)
+            for key in ("rbac_enabled", "local_accounts_disabled",
+                        "enable_private_cluster", "authorized_ip_ranges")
+        },
         # --- API server exposure ---
         "public_fqdn": cluster.get("public_fqdn"),
         "private_fqdn": private_fqdn,
@@ -396,8 +403,10 @@ def main() -> int:
         )
 
     exclusions.record_invalid(collector)
-    exclusions.warn_unmatched(logger)
     listed = clusters is not None
+    if not listed:
+        exclusions.mark_unread()
+    exclusions.warn_unmatched(logger)
     clusters = clusters or []
 
     evidence = build_payload(

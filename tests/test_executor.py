@@ -23,6 +23,7 @@ from pathlib import Path
 import pytest
 
 from framework import api
+from framework.envelope import is_enveloped
 from framework.contract import (
     ConfigField,
     Fetcher,
@@ -341,6 +342,24 @@ def test_effective_config_skips_an_unset_reference_like_the_runner(tmp_path, mon
                  "platforms": {"testcat": {"config": {"patterns": "qa.*"}}}}}
     [field] = api.effective_config(m, ["t_fetcher"], tmp_path, {"t_fetcher": fetcher}, {})["t_fetcher"]
     assert (field["value"], field["source"]) == ("qa.*", "platforms.testcat")
+
+
+def test_effective_config_keys_two_entries_of_one_fetcher_apart(tmp_path):
+    fetcher = make_fetcher(tmp_path, config_schema={"hosts": cfg("hosts", "HOSTS")})
+    m = {"run": {"fetchers": [{"use": "t_fetcher", "config": {"hosts": "first"}},
+                              {"use": "t_fetcher", "config": {"hosts": "second"}}]}}
+    view = api.effective_config(m, ["t_fetcher", "t_fetcher#1"], tmp_path, {"t_fetcher": fetcher}, {})
+    # The plain name is the first entry's key, the entry a write by fetcher name reaches.
+    assert [(k, [f["value"] for f in v]) for k, v in view.items()] == [
+        ("t_fetcher", ["first"]), ("t_fetcher#1", ["second"])]
+
+
+def test_validate_names_the_entry_an_error_is_about(tmp_path):
+    fetcher = make_fetcher(tmp_path, config_schema={"hosts": cfg("hosts", "HOSTS", required=True)})
+    m = {"run": {"fetchers": [{"use": "t_fetcher", "config": {"hosts": "h"}}, {"use": "t_fetcher"}]}}
+    errors = api.validate(m, REPO_ROOT, {"t_fetcher": fetcher}, {})
+    assert [e for e in errors if "'hosts'" in e] == [
+        f"t_fetcher#1: required config 'hosts' not set ({api.config_hint(fetcher, 'hosts')})"]
 
 
 LEAK_PROBE = "leak-probe-aaaaaaaa"
@@ -1111,3 +1130,152 @@ def test_shadowed_credentials_are_reported(tmp_path, monkeypatch):
     seen: list = []
     _emit_shadowed(shadowed, seen.append)
     assert "CLOUD_ACCESS_KEY_ID" in seen[0] and "CLOUD_PROFILE" in seen[0]
+
+
+# --------------------------------------------------------------------------- #
+# An output that overwrites an earlier one in the same run
+# --------------------------------------------------------------------------- #
+
+_CLOBBER_MESSAGE = ("overwrote demo_hello.json, which an earlier entry or target wrote in this run. "
+                    "Give each entry its own target, or remove the duplicate entry.")
+
+
+def test_a_second_entry_that_overwrites_the_first_entrys_file_fails(tmp_path):
+    m = {"run": {"output_dir": str(tmp_path / "evidence"),
+                 "fetchers": [{"use": "demo_hello"}, {"use": "demo_hello"}]}}
+    events: list = []
+
+    summary = api.run(m, REPO_ROOT, on_event=events.append)
+
+    first, second = summary["invocations"]
+    assert summary["ok"] is False
+    assert (first["entry_key"], first["exit_code"], first["outputs"]) == ("demo_hello", 0, ["demo_hello.json"])
+    assert second["entry_key"] == "demo_hello#1"
+    assert second["exit_code"] != 0 and second["outputs"] == []
+    assert second["overwritten"] == ["demo_hello.json"] and "overwritten" not in first
+    assert _CLOBBER_MESSAGE in second["stderr_tail"]
+    results = [e for e in events if e["event"] == "fetcher_result"]
+    assert "error" not in results[0]
+    assert results[1]["error"] == _CLOBBER_MESSAGE
+    assert results[1]["error_code"] == "output_overwritten"
+
+
+def _target_fetcher(tmp_path, file_name_expr):
+    fdir = tmp_path / "fetcher"
+    fdir.mkdir()
+    (fdir / "fetcher.py").write_text(
+        "import os\n"
+        f"name = {file_name_expr}\n"
+        "open(os.path.join(os.environ['EVIDENCE_DIR'], name), 'w').write('{}')\n"
+    )
+    return make_fetcher(fdir, supports_targets=True,
+                        target_schema={"region": TargetField(name="region", type="string", env="REGION")})
+
+
+def _two_regions():
+    return ManifestEntry(use="t_fetcher",
+                         targets=[TargetInstance(values={"region": r}, secrets={}) for r in ("a", "b")])
+
+
+def test_a_fan_out_that_writes_one_name_per_target_passes(tmp_path):
+    fetcher = _target_fetcher(tmp_path, "'out_' + os.environ['REGION'] + '.json'")
+
+    results = run_entry(fetcher, _two_regions(), tmp_path / "out")
+
+    assert [(r.exit_code, r.outputs, r.error) for r in results] == [
+        (0, ["out_a.json"], None), (0, ["out_b.json"], None)]
+
+
+def test_a_fan_out_that_writes_the_same_name_for_each_target_fails_the_second(tmp_path):
+    fetcher = _target_fetcher(tmp_path, "'out.json'")
+
+    first, second = run_entry(fetcher, _two_regions(), tmp_path / "out")
+
+    assert (first.exit_code, first.outputs, first.error) == (0, ["out.json"], None)
+    assert second.exit_code == 1 and second.outputs == []
+    assert second.error == ("overwrote out.json, which an earlier entry or target wrote in this run. "
+                            "Give each entry its own target, or remove the duplicate entry.")
+    assert second.error_code == "output_overwritten"
+    assert (first.overwritten, second.overwritten) == ([], ["out.json"])
+
+
+def test_a_file_a_later_target_overwrote_is_left_unwrapped(tmp_path):
+    # Wrapping runs after every target of an entry. Target a's result still names
+    # out.json, which now holds target b's data: wrapping it would label b's data
+    # as a's, with a's status. Left raw, the upload refuses it.
+    fetcher = _target_fetcher(tmp_path, "'out.json'")
+    out = tmp_path / "out"
+    results = run_entry(fetcher, _two_regions(), out)
+
+    api._wrap_results(results, fetcher, "RID", out)
+
+    assert not is_enveloped(json.loads((out / "out.json").read_text()))
+
+
+def test_files_of_a_clean_fan_out_are_wrapped(tmp_path):
+    fetcher = _target_fetcher(tmp_path, "'out_' + os.environ['REGION'] + '.json'")
+    out = tmp_path / "out"
+    results = run_entry(fetcher, _two_regions(), out)
+
+    api._wrap_results(results, fetcher, "RID", out)
+
+    for region in ("a", "b"):
+        doc = json.loads((out / f"out_{region}.json").read_text())
+        assert is_enveloped(doc) and doc["metadata"]["target"] == {"region": region}
+
+
+def test_two_fetchers_with_different_file_names_in_one_run_dir_pass(tmp_path):
+    out = tmp_path / "out"
+    for name in ("one", "two"):
+        fdir = tmp_path / name
+        fdir.mkdir()
+        (fdir / "fetcher.py").write_text(
+            f"import os\nopen(os.path.join(os.environ['EVIDENCE_DIR'], '{name}.json'), 'w').write('{{}}')\n")
+        [r] = run_entry(make_fetcher(fdir, name=name), ManifestEntry(use=name), out)
+        assert (r.exit_code, r.outputs, r.error) == (0, [f"{name}.json"], None)
+
+
+def test_deleting_an_earlier_output_fails_the_invocation(tmp_path):
+    out = tmp_path / "out"
+    out.mkdir()
+    (out / "earlier.json").write_text("{}")
+    fdir = tmp_path / "fetcher"
+    fdir.mkdir()
+    (fdir / "fetcher.py").write_text("import os\nos.remove(os.path.join(os.environ['EVIDENCE_DIR'], 'earlier.json'))\n")
+
+    [r] = run_entry(make_fetcher(fdir), ManifestEntry(use="t_fetcher"), out)
+
+    assert r.exit_code == 1 and r.outputs == []
+    assert r.error == ("deleted earlier.json, which an earlier entry or target wrote in this run. "
+                       "Give each entry its own target, or remove the duplicate entry.")
+
+
+def test_a_fetcher_that_fails_and_overwrites_keeps_its_exit_code_and_reason(tmp_path):
+    out = tmp_path / "out"
+    out.mkdir()
+    (out / "t_fetcher.json").write_text('{"earlier": true}')
+    fdir = tmp_path / "fetcher"
+    fdir.mkdir()
+    (fdir / "fetcher.py").write_text(_REPORTING_FETCHER)
+
+    [r] = run_entry(make_fetcher(fdir), ManifestEntry(use="t_fetcher"), out)
+
+    assert r.exit_code == 1 and r.outputs == []
+    assert r.error_code == "target_unreachable"
+    assert r.error.startswith("the real reason; overwrote t_fetcher.json, which an earlier entry")
+
+
+def test_validate_notes_two_entries_of_a_fetcher_with_no_targets(tmp_path):
+    m = {"run": {"output_dir": str(tmp_path / "evidence"),
+                 "fetchers": [{"use": "demo_hello"}, {"use": "demo_hello"}]}}
+
+    assert api.validate(m, REPO_ROOT) == []
+    assert api.validate_notes(m, REPO_ROOT) == [
+        "entries demo_hello and demo_hello#1 run the same fetcher with no targets; "
+        "they write the same files, so the second entry's run fails."]
+
+
+def test_validate_notes_nothing_for_one_entry_per_fetcher(tmp_path):
+    m = {"run": {"output_dir": str(tmp_path / "evidence"), "fetchers": [{"use": "demo_hello"}]}}
+
+    assert api.validate_notes(m, REPO_ROOT) == []

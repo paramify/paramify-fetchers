@@ -1,0 +1,45 @@
+name: aws_inspector_ecr_report
+version: 0.1.0
+description: Converts active Inspector ECR findings to a complete CSV for a Paramify vulnerability assessment, preserving finding and image identity, package details, severity and observation dates.
+category: aws
+kind: issue_report
+supports_targets: true
+runtime:
+  type: python
+  entry: fetcher.py
+  timeout: 3600
+output:
+  type: csv
+  path: aws_inspector_ecr_report.csv
+  aggregation: per_target
+secrets: []
+target_schema:
+  region:
+    type: string
+    required: false
+    env: AWS_DEFAULT_REGION
+    description: AWS region; defaults to the AWS CLI credential/configuration chain.
+  profile:
+    type: string
+    required: false
+    env: AWS_PROFILE
+    description: AWS profile; omit for the ambient role or credentials.
+config_schema:
+  repositories:
+    type: string
+    default: '[]'
+    env: AWS_INSPECTOR_REPOSITORIES
+    description: JSON array of up to ten exact repository names. Empty selects all repositories in the account and region.
+  image_tags:
+    type: string
+    default: '[]'
+    env: AWS_INSPECTOR_IMAGE_TAGS
+    description: JSON array of up to ten image tags, matched with OR. Empty includes untagged images too. Tags do not prove deployment.
+  allow_empty:
+    type: boolean
+    default: false
+    env: AWS_INSPECTOR_ALLOW_EMPTY
+    description: Allow a header-only zero-finding report after successful collection and coverage checks. Does not allow missing images, disabled scanning or incomplete coverage.
+issue_report:
+  assessment_type: VULNERABILITY
+  title: Inspector ECR Vulnerability Findings

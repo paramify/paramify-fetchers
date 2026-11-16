@@ -1,7 +1,8 @@
 """WorkspaceScreen — the five-tab fetcher workspace.
 
-Hosts the shared chrome (AppHeader + HintFooter) and the Catalog / Manifest /
-Run / Evidence / Paramify tabs. The App pushes this once a manifest is chosen
+Hosts the shared chrome (AppHeader + HintFooter) and the Fetchers / Run /
+Evidence / Paramify / Pipelines tabs. Fetchers holds the catalog and the manifest on one
+page. The App pushes this once a manifest is chosen
 (from the welcome front door, or directly via --manifest). The active manifest can be
 swapped in place with the quick-picker (`m`), which reloads the pages.
 """
@@ -14,15 +15,16 @@ from textual.screen import Screen
 from textual.widgets import TabbedContent, TabPane
 
 from framework.tui.components.chrome import AppHeader, HintFooter
-from framework.tui.screens.catalog import CatalogPage
+from framework.tui.screens.catalog import CatalogPanel
 from framework.tui.screens.evidence import EvidencePage
-from framework.tui.screens.manifest import ManifestPage
+from framework.tui.screens.fetchers import FetchersPage
+from framework.tui.screens.paramify import ParamifyPage
+from framework.tui.screens.pipelines import PipelinesPage
 from framework.tui.screens.run import RunPage
-from framework.tui.screens.upload import UploadPage
 
 
 class WorkspaceScreen(Screen):
-    TAB_IDS = ["tab-catalog", "tab-manifest", "tab-run", "tab-evidence", "tab-upload"]
+    TAB_IDS = ["tab-fetchers", "tab-run", "tab-evidence", "tab-paramify", "tab-pipelines"]
 
     # A one-shot callable that overrides the default focus for the next pane
     # activation (used by the search shortcut to land on the filter box instead
@@ -37,11 +39,11 @@ class WorkspaceScreen(Screen):
     WORKSPACE_HINTS = [("1-5", "tabs"), ("m", "manifest"), ("esc", "leave field"), ("q", "quit")]
 
     BINDINGS = [
-        Binding("1", "go_tab(0)", "Catalog"),
-        Binding("2", "go_tab(1)", "Manifest"),
-        Binding("3", "go_tab(2)", "Run"),
-        Binding("4", "go_tab(3)", "Evidence"),
-        Binding("5", "go_tab(4)", "Paramify"),
+        Binding("1", "go_tab(0)", "Fetchers"),
+        Binding("2", "go_tab(1)", "Run"),
+        Binding("3", "go_tab(2)", "Evidence"),
+        Binding("4", "go_tab(3)", "Paramify"),
+        Binding("5", "go_tab(4)", "Pipelines"),
         Binding("slash", "focus_search", "Search"),
         Binding("escape", "unfocus", "Unfocus", show=False),
         Binding("m", "switch_manifest", "Manifest…"),
@@ -51,21 +53,22 @@ class WorkspaceScreen(Screen):
 
     def compose(self) -> ComposeResult:
         yield AppHeader()
-        with TabbedContent(initial="tab-catalog"):
-            with TabPane("Catalog", id="tab-catalog"):
-                yield CatalogPage(id="catalog-page")
-            with TabPane("Manifest", id="tab-manifest"):
-                yield ManifestPage(id="manifest-page")
+        with TabbedContent(initial="tab-fetchers"):
+            with TabPane("Fetchers", id="tab-fetchers"):
+                yield FetchersPage(id="fetchers-page")
             with TabPane("Run", id="tab-run"):
                 yield RunPage(id="run-page")
             with TabPane("Evidence", id="tab-evidence"):
                 yield EvidencePage(id="evidence-page")
-            with TabPane("Paramify", id="tab-upload"):
-                yield UploadPage(id="upload-page")
+            with TabPane("Paramify", id="tab-paramify"):
+                yield ParamifyPage(id="paramify-page")
+            # "beta": a tag after the name, in the theme's warning color.
+            with TabPane("Pipelines [$warning]beta[/]", id="tab-pipelines"):
+                yield PipelinesPage(id="pipelines-page")
         yield HintFooter()
 
     def on_mount(self) -> None:
-        self.query_one(CatalogPage).rebuild()
+        self.query_one(CatalogPanel).rebuild()
         self.reload()
         # Land focus inside the opening pane so its key bindings are live from
         # the first keystroke (not only after the user clicks into it).
@@ -73,15 +76,16 @@ class WorkspaceScreen(Screen):
 
     def reload(self) -> None:
         """Refresh the manifest-dependent pages + chrome (after load / switch)."""
-        self.query_one(ManifestPage).rebuild()
+        self.query_one(FetchersPage).rebuild()
         try:
             self.query_one(EvidencePage).rebuild_runs()
         except Exception:
             pass
-        try:
-            self.query_one(UploadPage).rebuild()
-        except Exception:
-            pass
+        for page in (ParamifyPage, PipelinesPage):
+            try:
+                self.query_one(page).rebuild()
+            except Exception:
+                pass
         self.query_one(RunPage).reset_state()  # clear stale run state (no-op if running)
         self._update_chrome()
 
@@ -98,14 +102,30 @@ class WorkspaceScreen(Screen):
         tab = (tabs.active or "").removeprefix("tab-")
         name = self.app.manifest_path.name if self.app.manifest_path else "?"
         self.query_one(AppHeader).set_crumb(f"{name}  ›  {tab}")
-        page_hints: list = []
-        pane = tabs.active_pane
-        if pane is not None:
-            for child in pane.walk_children():
-                if getattr(child, "HINTS", None):
-                    page_hints = list(child.HINTS)
-                    break
-        self.query_one(HintFooter).set_hints(page_hints + self.WORKSPACE_HINTS)
+        self.query_one(HintFooter).set_hints(self._hints(tabs.active_pane) + self.WORKSPACE_HINTS)
+
+    def _hints(self, pane) -> list:
+        """The keys that work where focus is: the HINTS of the nearest widget
+        around the focused one that has them, then the page's own.
+
+        A page can hold more than one list (the Fetchers page holds the catalog
+        and the manifest), so the page's first HINTS would advertise keys that
+        do nothing in the other list.
+        """
+        if pane is None:
+            return []
+        page = next((c for c in pane.walk_children() if getattr(c, "HINTS", None)), None)
+        focused = self.focused
+        near = None
+        if focused is not None and focused in pane.walk_children():
+            near = next((w for w in focused.ancestors_with_self if getattr(w, "HINTS", None)), None)
+        hints = list(near.HINTS) if near is not None else []
+        if page is not None and page is not near:
+            hints += list(page.HINTS)
+        return hints
+
+    def on_descendant_focus(self, event) -> None:
+        self._update_chrome()
 
     def _go_to_tab(self, tab_id: str) -> None:
         tabs = self.query_one(TabbedContent)
@@ -151,17 +171,17 @@ class WorkspaceScreen(Screen):
 
     def action_refresh(self) -> None:
         self.app.refresh_catalog()
-        self.query_one(CatalogPage).rebuild()
+        self.query_one(CatalogPanel).rebuild()
 
     def action_focus_search(self) -> None:
-        self._focus_override = lambda: self.query_one(CatalogPage).focus_search()
+        self._focus_override = lambda: self.query_one(CatalogPanel).focus_search()
         tabs = self.query_one(TabbedContent)
-        if tabs.active == "tab-catalog":
+        if tabs.active == "tab-fetchers":
             # No TabActivated fires when already here; run the override directly.
             self.call_after_refresh(self._focus_active_pane)
         else:
             self.set_focus(None)
-            tabs.active = "tab-catalog"  # TabActivated → _focus_active_pane consumes the override
+            tabs.active = "tab-fetchers"  # TabActivated → _focus_active_pane consumes the override
 
     def action_switch_manifest(self) -> None:
         self.app.open_manifest_picker()

@@ -54,7 +54,7 @@ RETRY_CODES = {"1920", "1960", "1965", "1981", "1999"}
 HINTS = {
     "2000": "check QUALYS_USERNAME and QUALYS_PASSWORD; SSO users cannot use the API with a password",
     "2002": "the Qualys user account is inactive",
-    "2003": "the subscription's registration is not complete; log in to the Qualys UI once with this user",
+    "2003": "registration is not complete; call acceptEULA.php (API-only user) or log in to the Qualys UI once",
     "2011": "the user needs SecureID, which blocks API access",
     "2012": "the subscription's licence does not allow this API",
 }

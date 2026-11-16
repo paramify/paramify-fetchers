@@ -1,12 +1,12 @@
 name: github_actions_security
-version: 0.1.0
+version: 0.2.0
 description: >-
   GitHub Actions supply-chain controls: which actions may run and whether
   they must be pinned to a commit, the workflow token's default access, fork
-  pull request approval, self-hosted runners, and what every workflow file on
-  the default branch does (unpinned actions, missing permissions blocks,
-  privileged triggers that check out pull request code, untrusted input in
-  scripts, OIDC).
+  pull request approval, self-hosted runners and runner groups, OIDC subject
+  claim settings, and what every workflow file on the default branch does
+  (unpinned actions, missing permissions blocks, privileged triggers that
+  check out pull request code, untrusted input in scripts, OIDC).
 category: github
 
 supports_targets: true
@@ -57,9 +57,9 @@ config_schema:
     default: true
     env: GITHUB_INCLUDE_SELF_HOSTED_RUNNERS
     description: >-
-      List self-hosted runners. The organization's runners need the
-      Self-hosted runners (organization) read permission; set false to run
-      without it, and runner fields are null.
+      List self-hosted runners and runner groups. The organization's runners
+      and groups need the Self-hosted runners (organization) read permission;
+      set false to run without it, and runner fields are null.
 
 secrets: []
 
@@ -75,7 +75,8 @@ evidence_set:
   instructions: >-
     Script: github/actions_security/fetcher.py. Organization and repository Actions policy (allowed actions, SHA pinning
     required, workflow token default and PR approval, fork PR approval,
-    retention, self-hosted runners), and per workflow file on the default
+    retention, self-hosted runners, runner groups and the repositories each
+    serves, OIDC subject claims), and per workflow file on the default
     branch: action references not pinned to a full commit SHA, permissions
     blocks, privileged triggers that check out pull request code, untrusted
     event fields in scripts, OIDC, and self-hosted runner use.

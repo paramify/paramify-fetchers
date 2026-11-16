@@ -1,0 +1,20 @@
+# Synthetic example. Replace the profile, assessment ID and scope before use.
+# Evidence and scan reports use separate upload commands; see the fetcher READMEs.
+run:
+  output_dir: ./evidence
+  fetchers:
+    - use: aws_inspector_ecr_findings
+      config:
+        image_tags: '["latest", "deployed"]'
+      targets:
+        - profile: example-gov
+          region: us-gov-west-1
+    - use: aws_inspector_ecr_report
+      config:
+        image_tags: '["latest", "deployed"]'
+        assessment_id: 123e4567-e89b-12d3-a456-426614174000
+        close_cycle: never
+        allow_empty: false
+      targets:
+        - profile: example-gov
+          region: us-gov-west-1

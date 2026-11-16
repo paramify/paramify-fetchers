@@ -1,25 +1,28 @@
 {
   "sample_schema_version": "1.0",
   "fetcher_name": "azure_key_vault_key_rotation",
-  "fetcher_version": "0.1.0",
+  "fetcher_version": "0.6.0",
   "source": "live",
-  "captured_on": "2026-09-09",
+  "captured_on": "2026-11-09",
   "reviewed": false,
   "collections": [
     {
       "path": "results.key_vaults[]",
-      "records": 2,
+      "records": 1,
       "fields": {
+        "certificates": 0,
+        "certificates_message": 0,
+        "certificates_status": 1,
         "data_plane_message": 0,
-        "data_plane_status": 2,
-        "id": 2,
-        "keys": 2,
-        "location": 2,
-        "name": 2,
-        "rbac_authorization_enabled": 2,
-        "resource_group": 2,
-        "secrets": 0,
-        "vault_uri": 2
+        "data_plane_status": 1,
+        "id": 1,
+        "keys": 1,
+        "location": 1,
+        "name": 1,
+        "rbac_authorization_enabled": 1,
+        "resource_group": 1,
+        "secrets": 1,
+        "vault_uri": 1
       }
     },
     {
@@ -40,6 +43,7 @@
         "recovery_level": 2,
         "rotation_enabled": 2,
         "rotation_policy": 2,
+        "rotation_policy_configured": 2,
         "rotation_policy_readable": 2,
         "rotation_policy_source": 2,
         "updated": 2
@@ -47,90 +51,155 @@
     },
     {
       "path": "results.key_vaults[].keys[].rotation_policy.lifetime_actions[]",
-      "records": 2,
+      "records": 3,
       "fields": {
-        "action": 2,
-        "time_after_create": 0,
+        "action": 3,
+        "time_after_create": 1,
         "time_before_expiry": 2
+      }
+    },
+    {
+      "path": "results.key_vaults[].secrets[]",
+      "records": 1,
+      "fields": {
+        "created": 1,
+        "enabled": 1,
+        "expiration_set": 1,
+        "expires": 0,
+        "id": 1,
+        "location": 1,
+        "name": 1,
+        "not_before": 0,
+        "updated": 1
       }
     }
   ],
   "payload": {
     "metadata": {
       "api_failures": [],
-      "datetime": "2026-09-09T16:10:07Z",
-      "environment": "test",
+      "datetime": "2026-11-09T22:49:08Z",
+      "environment": null,
       "partial_failure": false,
       "subscription_id": "00000000-0000-4000-8000-111111111111",
-      "subscription_source": "target"
+      "subscription_source": "ambient_default"
     },
     "results": {
+      "app_service_certificates": [],
+      "excluded": [],
       "key_vaults": [
         {
+          "certificates": [],
+          "certificates_message": null,
+          "certificates_status": "accessible",
           "data_plane_message": null,
           "data_plane_status": "accessible",
-          "id": "/subscriptions/00000000-0000-4000-8000-111111111111/resourceGroups/rg-example-example-profile/providers/Microsoft.KeyVault/vaults/kv-pf-jov5akcv",
+          "id": "/subscriptions/00000000-0000-4000-8000-111111111111/resourceGroups/rg-example-example-sbx/providers/Microsoft.KeyVault/vaults/kv-example-example-example",
           "keys": [
             {
-              "created": "2026-08-14T16:23:41Z",
+              "created": "2026-11-09T22:48:32Z",
               "curve_name": null,
               "enabled": true,
               "expiration_set": false,
               "expires": null,
-              "id": "/subscriptions/00000000-0000-4000-8000-111111111111/resourceGroups/rg-example-example-profile/providers/Microsoft.KeyVault/vaults/kv-pf-jov5akcv/keys/storage-cmk",
+              "id": "/subscriptions/00000000-0000-4000-8000-111111111111/resourceGroups/rg-example-example-sbx/providers/Microsoft.KeyVault/vaults/kv-example-example-example/keys/sample-rotate",
               "key_size": 2048,
               "key_type": "RSA",
               "location": "eastus",
-              "name": "storage-cmk",
+              "name": "sample-rotate",
               "not_before": null,
-              "recovery_level": "CustomizedRecoverable",
-              "rotation_enabled": false,
+              "recovery_level": "CustomizedRecoverable+Purgeable",
+              "rotation_enabled": true,
               "rotation_policy": {
-                "created": null,
-                "expires_in": null,
-                "id": null,
+                "created": "2026-11-09T22:48:33Z",
+                "expires_in": "P2Y",
+                "id": "https://kv-example-example-example.vault.azure.net/keys/sample-rotate/rotationpolicy",
                 "lifetime_actions": [
                   {
-                    "action": "Notify",
-                    "time_after_create": null,
-                    "time_before_expiry": "P30D"
+                    "action": "Rotate",
+                    "time_after_create": "P18M",
+                    "time_before_expiry": null
                   }
                 ],
-                "updated": null
+                "updated": "2026-11-09T22:48:33Z"
               },
+              "rotation_policy_configured": true,
               "rotation_policy_readable": true,
               "rotation_policy_source": "data_plane",
-              "updated": "2026-08-14T16:23:41Z"
+              "updated": "2026-11-09T22:48:32Z"
             }
           ],
           "location": "eastus",
-          "name": "kv-pf-jov5akcv",
+          "name": "kv-example-example-example",
           "rbac_authorization_enabled": false,
-          "resource_group": "rg-example-example-profile",
-          "secrets": [],
-          "vault_uri": "https://kv-pf-jov5akcv.vault.azure.net/"
+          "resource_group": "rg-example-example-sbx",
+          "secrets": [
+            {
+              "created": "2026-10-29T21:31:31Z",
+              "enabled": true,
+              "expiration_set": false,
+              "expires": null,
+              "id": "/subscriptions/00000000-0000-4000-8000-111111111111/resourceGroups/rg-example-example-sbx/providers/Microsoft.KeyVault/vaults/kv-example-example-example/secrets/example-upload-token",
+              "location": "eastus",
+              "name": "example-upload-token",
+              "not_before": null,
+              "updated": "2026-10-29T21:31:31Z"
+            }
+          ],
+          "vault_uri": "https://kv-example-example-example.vault.azure.net/"
         }
       ],
-      "provider_registration_status": "registered"
+      "provider_registration_status": "registered",
+      "web_provider_registration_status": "registered"
     },
     "summary": {
-      "data_plane_accessible_vaults": 2,
+      "app_service_certificates_by_source": {
+        "key_vault": 0,
+        "managed": 0,
+        "uploaded": 0
+      },
+      "app_service_certificates_expiring_within_30_days": 0,
+      "app_service_certificates_key_vault_sync_failing": 0,
+      "certificate_accessible_vaults": 1,
+      "certificate_auto_renew_percentage": 0,
+      "certificate_not_authorized_vaults": 0,
+      "certificates_expiring_within_30_days": 0,
+      "certificates_with_auto_renew": 0,
+      "certificates_with_readable_policy": 0,
+      "certificates_without_expiry": 0,
+      "data_plane_accessible_vaults": 1,
       "data_plane_inaccessible_vaults": 0,
       "enabled_keys": 2,
-      "enabled_secrets": 0,
+      "enabled_secrets": 1,
+      "excluded_app_service_certificates": 0,
+      "excluded_certificates": 0,
+      "excluded_key_vaults": 0,
+      "excluded_keys": 0,
+      "excluded_secrets": 0,
+      "expired_app_service_certificates": 0,
+      "expired_certificates": 0,
+      "in_scope_app_service_certificates": 0,
+      "in_scope_certificates": 0,
+      "in_scope_key_vaults": 1,
+      "in_scope_keys": 2,
+      "in_scope_secrets": 1,
       "key_expiration_percentage": 0,
       "keys_with_expiration": 0,
       "keys_with_readable_rotation_policy": 2,
-      "keys_with_rotation_enabled": 0,
-      "keys_with_rotation_policy": 2,
+      "keys_with_rotation_enabled": 1,
+      "keys_with_rotation_policy": 1,
       "provider_registration_status": "registered",
       "rbac_authorization_vaults": 0,
-      "rotation_enabled_percentage": 0,
+      "resource_exclusion_patterns": [],
+      "resource_exclusion_patterns_unmatched": [],
+      "rotation_enabled_percentage": 50,
       "secret_expiration_percentage": 0,
       "secrets_with_expiration": 0,
-      "total_key_vaults": 2,
+      "total_app_service_certificates": 0,
+      "total_certificates": 0,
+      "total_key_vaults": 1,
       "total_keys": 2,
-      "total_secrets": 0
+      "total_secrets": 1,
+      "web_provider_registration_status": "registered"
     }
   }
 }

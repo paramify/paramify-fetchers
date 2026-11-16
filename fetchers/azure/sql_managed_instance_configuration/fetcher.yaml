@@ -1,5 +1,5 @@
 name: azure_sql_managed_instance_configuration
-version: 0.4.0
+version: 0.4.1
 description: >-
   Shows how each SQL Managed Instance is reached, signed in to and audited, its subnet's NSG rules and routes,
   its maintenance window and its sensitivity-labeled database columns.
@@ -97,7 +97,7 @@ evidence_set:
 
     Which instances are left out of scope?
     - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every instance is in scope
-    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no managed instance, such as a mistyped name
+    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no managed instance, such as a mistyped name; null if the instance list couldn't be read
     - excluded_managed_instances — Number of managed instances left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, is not read further, and no other count includes them
     - in_scope_managed_instances — Number of managed instances read and in scope; 0 means none was read or the patterns took out every instance, which a check can catch by requiring more than 0
 

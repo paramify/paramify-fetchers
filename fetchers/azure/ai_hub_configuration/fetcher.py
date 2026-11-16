@@ -283,7 +283,6 @@ def unread_summary(exclusions: ResourceExclusions, registration: str) -> dict:
         **counts,
         "provider_registration_status": registration,
         **exclusions.summary([], KINDS, {"hubs": None, "projects": None, "other_workspaces": None}),
-        **{f"excluded_{k}s": None for k in KINDS},
     }
 
 
@@ -468,6 +467,8 @@ def main() -> int:
         )
 
     exclusions.record_invalid(collector)
+    if workspaces is None:
+        exclusions.mark_unread()
     exclusions.warn_unmatched(logger)
 
     read = workspaces is not None

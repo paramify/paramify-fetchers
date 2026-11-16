@@ -1,6 +1,6 @@
 name: aws_ecr_image_scanning
-version: 0.2.0
-description: Lists AWS ECR repositories with their image scan-on-push configuration and image tag mutability, the registry scanning type and frequency, and a per-repository summary of the latest image scan finding severity counts (critical, high, medium).
+version: 0.3.0
+description: Lists ECR repositories, effective scanning configuration and latest-image findings across basic, manual and enhanced scanning, preserving scan status, timestamps and every severity.
 category: aws
 
 supports_targets: true
@@ -8,6 +8,8 @@ supports_targets: true
 runtime:
   type: bash
   entry: fetcher.sh
+  # Enhanced scans are counted by reading every finding page (~90s per 10k findings).
+  timeout: 3600
 
 output:
   type: json
@@ -33,4 +35,4 @@ ksis:
 evidence_set:
   reference_id: EVD-ECR-IMAGE-SCANNING
   name: ECR Image Scanning Configuration
-  instructions: 'Script: aws/ecr_image_scanning/fetcher.sh. Commands executed: aws ecr describe-repositories, aws ecr get-registry-scanning-configuration, aws ecr describe-images, aws ecr describe-image-scan-findings.'
+  instructions: 'Script: aws/ecr_image_scanning/fetcher.sh. Commands executed: aws ecr describe-repositories, aws ecr get-registry-scanning-configuration, aws ecr batch-get-repository-scanning-configuration, aws ecr describe-images, aws ecr describe-image-scan-findings.'

@@ -29,6 +29,7 @@ from azure_common import (  # noqa: E402
     REGISTRATION_UNKNOWN,
     Collector,
     arm_client_kwargs,
+    arm_endpoint,
     arm_id_key,
     build_payload,
     classify_failure_code,
@@ -37,12 +38,12 @@ from azure_common import (  # noqa: E402
     failure_reason,
     model_attr,
     provider_registration_status,
+    report_failure,
     resolve_subscription,
     resource_group_from_id,
     sanitize_for_filename,
     sorted_counts,
     write_evidence,
-    report_failure,
 )
 from resource_exclusions import ResourceExclusions  # noqa: E402
 
@@ -63,10 +64,16 @@ ROTATE_ACTION = "rotate"
 SOURCE_DATA_PLANE = "data_plane"
 SOURCE_MANAGEMENT_PLANE = "management_plane"
 
-# Fallback host suffix, used only when ARM returned no `vault_uri`. Prowler
-# hardcodes this form; preferring `vault_uri` is what keeps this correct in the
-# sovereign clouds (vault.usgovcloudapi.net / vault.azure.cn).
+# Cloud-specific fallback, used only when ARM returned no `vault_uri`.
+# ARM-provided URI remains preferred; derive the fallback from the same authority
+# as the management client rather than sending sovereign reads to the public cloud.
 DEFAULT_VAULT_URI_SUFFIX = "vault.azure.net"
+_ARM_TO_VAULT_SUFFIX = {
+    "https://management.azure.com": DEFAULT_VAULT_URI_SUFFIX,
+    "https://management.usgovcloudapi.net": "vault.usgovcloudapi.net",
+    "https://management.chinacloudapi.cn": "vault.azure.cn",
+    "https://management.microsoftazure.de": "vault.microsoftazure.de",
+}
 
 # Certificates carry their own data-plane grant (an access policy can allow keys and not certificates).
 CERTIFICATES_ACCESSIBLE = "accessible"
@@ -370,6 +377,11 @@ def rotation_policy_record(policy: dict | None) -> dict | None:
     }
 
 
+def policy_is_configured(policy: dict | None) -> bool:
+    """Was this policy set by someone? Key Vault answers a never-set key with a default."""
+    return bool(policy) and (policy.get("id") is not None or policy.get("created") is not None)
+
+
 def has_rotate_action(policy: dict | None) -> bool:
     """Prowler's keyvault_key_rotation_enabled predicate, case-insensitively.
 
@@ -413,6 +425,7 @@ def key_record(
         "key_size": key.get("key_size"),
         "curve_name": key.get("curve_name"),
         "rotation_policy": policy,
+        "rotation_policy_configured": policy_is_configured(policy),
         "rotation_enabled": has_rotate_action(policy),
         "rotation_policy_source": policy_source if policy else None,
         "rotation_policy_readable": bool(policy_readable),
@@ -571,11 +584,12 @@ def merge_rotation_policies(keys: list[dict], data_plane_policies: dict) -> list
             keys.append(record)
             by_name[name] = record
         if policy is None:
-            # A 404 (or an ungranted policy read) for one key: what the management
-            # plane knows stands, and readability is not upgraded.
+            # An ungranted policy read for one key: what the management plane knows
+            # stands, and readability is not upgraded.
             continue
         normalized = rotation_policy_record(policy)
         record["rotation_policy"] = normalized
+        record["rotation_policy_configured"] = policy_is_configured(normalized)
         record["rotation_enabled"] = has_rotate_action(normalized)
         record["rotation_policy_source"] = SOURCE_DATA_PLANE
         record["rotation_policy_readable"] = True
@@ -679,7 +693,9 @@ def summarize(vaults: list[dict]) -> dict:
         "total_keys": len(keys),
         "enabled_keys": sum(1 for key in keys if key["enabled"]),
         "keys_with_readable_rotation_policy": len(visible_keys),
-        "keys_with_rotation_policy": sum(1 for key in keys if key["rotation_policy"]),
+        "keys_with_rotation_policy": sum(
+            1 for key in keys if key["rotation_policy_configured"]
+        ),
         "keys_with_rotation_enabled": rotating,
         "rotation_enabled_percentage": coverage_percentage(rotating, len(visible_keys)),
         "keys_with_expiration": keys_with_expiration,
@@ -708,17 +724,13 @@ def is_data_plane_inaccessible(exc: BaseException) -> bool:
 
 
 def vault_data_plane_uri(vault: dict) -> str | None:
-    """The vault's data-plane URL: `vault_uri` from ARM, else Prowler's form.
-
-    Prowler hardcodes f"https://{name}.vault.azure.net/"; preferring ARM's own
-    `vault_uri` is what keeps this correct in Azure Government / China
-    (vault.usgovcloudapi.net / vault.azure.cn).
-    """
+    """Prefer ARM's vault URI; otherwise derive its host in the selected cloud."""
     uri = vault.get("vault_uri")
     if uri:
         return uri
     name = vault.get("name")
-    return f"https://{name}.{DEFAULT_VAULT_URI_SUFFIX}/" if name else None
+    suffix = _ARM_TO_VAULT_SUFFIX[arm_endpoint()]
+    return f"https://{name}.{suffix}/" if name else None
 
 
 def collect_management_plane_keys(client, collector: Collector, group: str, name: str) -> list[dict]:
@@ -859,7 +871,8 @@ def collect_rotation_policies(vault: dict, cred, collector: Collector) -> None:
         except Exception as exc:  # noqa: BLE001 — boundary: classify, don't crash
             if is_data_plane_inaccessible(exc):
                 # Prowler's `_get_single_rotation_policy` returns (name, None) here.
-                # A key with no policy configured answers 404, which is the finding.
+                # A key never given a policy answers a default one, not 404; that is
+                # told apart by its null id (rotation_policy_configured).
                 logger.warning(
                     "key vault %s: no readable rotation policy for key %s — %s",
                     name,
@@ -936,6 +949,14 @@ def collect_certificates(vault: dict, cred, collector: Collector, now: datetime)
     vault["certificates_status"] = CERTIFICATES_ACCESSIBLE
     vault["certificates_message"] = None
     vault["certificates"] = sorted(records, key=lambda r: r.get("name") or "")
+
+
+# Failures of these calls mean a vault or certificate list was not read, so unmatched patterns are unknown.
+UNREAD_LIST_OPERATIONS = {
+    "keyvault.KeyVaultManagementClient (init)", "keyvault.vaults.list_by_subscription",
+    "web.WebSiteManagementClient (init)", "web.certificates.list",
+    "keyvault.keys.list", "keyvault.secrets.list",
+}
 
 
 def collect_key_vaults(subscription_id, cred, collector: Collector, now: datetime | None = None) -> list[dict]:
@@ -1071,6 +1092,11 @@ def main() -> int:
     app_service_certificates, excluded_certificates = exclusions.split(
         app_service_certificates, "app_service_certificate")
     excluded += excluded_certificates
+    lists_read = bool(subscription_id and cred is not None) and not any(
+        f["operation"] in UNREAD_LIST_OPERATIONS or f["operation"].split(" (")[0] in UNREAD_LIST_OPERATIONS
+        for f in collector.failures)
+    if not lists_read:
+        exclusions.mark_unread()
     exclusions.warn_unmatched(logger)
 
     results, summary = evidence_sections(vaults, registration, app_service_certificates, web_registration)

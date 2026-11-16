@@ -174,3 +174,22 @@ condition = "AND"
 paths = ['''fetchers/[^/]+/[^/]+/sample\.json$''']
 regexes = ['''(?m)^\s*"key_algorithm": "KEY_ALG_RSA_2048",\s*$''']
 regexTarget = "line"
+
+# --- False positive: the same public app id in the Conditional Access tests --- #
+# The Microsoft-published Service Management API app id from the entry above
+# also appears in the fetcher's test table (commit 1e74306a, branch fde-963),
+# as the app id paired with the "mfa_required_for_azure_management_api" case.
+# generic-api-key fires on the `_api` in the case name plus the UUID — same
+# name-plus-entropy shape, not a leak. The commit stays in history, and CI scans
+# every fetched branch, so this line must be allowlisted for every PR.
+#
+# Scoped to that test path and that exact tuple line, so any other GUID on it is
+# still reported. `(?m)` is required for the reason documented on the Service
+# Management API entry.
+[[allowlists]]
+description = "Microsoft-published Service Management API app id in the Conditional Access test table is a public constant"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''tests/test_azure_entra_conditional_access_policies\.py$''']
+regexes = ['''(?m)^\s*\("mfa_required_for_azure_management_api", "797f4846-ba00-4fd7-ba43-dac1f8f63013"\),\s*$''']
+regexTarget = "line"
