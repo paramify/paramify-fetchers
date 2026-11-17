@@ -87,15 +87,16 @@ BACKUP_KINDS = {
 
 
 # MySQL labels an on-demand backup FULL / Automatic, the same as a scheduled one (Microsoft's BackupPut.json example,
-# 2023-12-30); only the name, customer_<time>_<id>_<user name>, sets it apart. Scheduled backups are named daily_...
-MYSQL_ON_DEMAND_PREFIX = "customer_"
+# 2023-12-30); only the name, customer_<time>_<id>_<user name>, sets it apart. Scheduled backups are named daily_... in
+# that example but daily-<time>-<id> in a live Azure Government response (2024-12-30), so both separators are accepted.
+MYSQL_ON_DEMAND_PREFIXES = ("customer_", "customer-")
 
 
 def backup_kind(engine: str, backup: Dict[str, Any]) -> str:
     """automatic, manual or unknown, from the exact backupType and source the engine reports. A MySQL backup named
-    customer_... is manual whatever its labels, so a recent on-demand backup never stands in for automatic ones."""
+    customer_... or customer-... is manual whatever its labels, so a recent on-demand backup never stands in for automatic ones."""
     props = backup.get("properties") or {}
-    if engine == "mysql" and str(backup.get("name") or "").lower().startswith(MYSQL_ON_DEMAND_PREFIX):
+    if engine == "mysql" and str(backup.get("name") or "").lower().startswith(MYSQL_ON_DEMAND_PREFIXES):
         return MANUAL
 
     def norm(value):

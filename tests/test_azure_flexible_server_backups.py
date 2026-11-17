@@ -309,3 +309,20 @@ def test_a_recent_mysql_on_demand_backup_does_not_hide_stale_automatic_backups()
     server = db.server_record("mysql", raw_server("my1", "mysql"))
     s = db.with_backups(server, automatic + [recent], SETTINGS, now)
     assert (s["backup_within_window"], s["manual_backup_within_window"], s["manual_backups"]) == (False, True, 1)
+
+
+def test_a_live_mysql_backup_list_is_all_automatic_and_within_the_window():
+    # A real Azure Government response (identifiers replaced): daily-<time>-<id> names, FULL / Automatic, no provisioningState.
+    live = json.loads((FIXTURES / "mysql-backups-live-2024-12-30.json").read_text())["value"]
+    assert all("provisioningState" not in b["properties"] for b in live)
+    assert [db.backup_kind("mysql", b) for b in live] == [db.AUTOMATIC] * 7
+    newest = max(db.parse_time(b["properties"]["completedTime"]) for b in live)
+    s = db.with_backups(db.server_record("mysql", raw_server("my1", "mysql")), live, SETTINGS, newest + timedelta(hours=4))
+    assert (s["automatic_backups"], s["manual_backups"], s["unknown_type_backups"], s["backup_within_window"]) == (7, 0, 0, True)
+
+
+def test_an_on_demand_mysql_backup_named_with_a_hyphen_is_manual():
+    on_demand = json.loads((FIXTURES / "mysql-backup-on-demand-2023-12-30.json").read_text())
+    hyphen = {**on_demand, "name": on_demand["name"].replace("customer_", "customer-", 1)}
+    assert hyphen["name"].startswith("customer-") and db.backup_kind("mysql", hyphen) == db.MANUAL
+    assert db.backup_kind("mysql", {**on_demand, "name": "daily-20261117t212716-00000000"}) == db.AUTOMATIC
