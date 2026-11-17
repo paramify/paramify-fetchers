@@ -160,7 +160,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `cm-2.2`, `cm-8.3`, `sc-13`, `sc-23`, `si-7`, `si-7.1`, `sr-10`
 
-*9 fetchers:* [`azure_container_registry_configuration`](../fetchers/azure/container_registry_configuration), [`azure_devops_pipelines`](../fetchers/azure/devops_pipelines), [`azure_vm_hardening_status`](../fetchers/azure/vm_hardening_status), [`gcp_compute_instance_configuration`](../fetchers/gcp/compute_instance_configuration), [`gcp_gke_cluster_configuration`](../fetchers/gcp/gke_cluster_configuration), [`github_branch_protection`](../fetchers/github/branch_protection), [`github_release_integrity`](../fetchers/github/release_integrity), [`oci_compute_instances`](../fetchers/oci/compute_instances), [`wiz_file_integrity_monitoring`](../fetchers/wiz/file_integrity_monitoring)
+*10 fetchers:* [`azure_container_registry_configuration`](../fetchers/azure/container_registry_configuration), [`azure_devops_pipelines`](../fetchers/azure/devops_pipelines), [`azure_vm_hardening_status`](../fetchers/azure/vm_hardening_status), [`gcp_compute_instance_configuration`](../fetchers/gcp/compute_instance_configuration), [`gcp_gke_cluster_configuration`](../fetchers/gcp/gke_cluster_configuration), [`github_branch_protection`](../fetchers/github/branch_protection), [`github_image_signing`](../fetchers/github/image_signing), [`github_release_integrity`](../fetchers/github/release_integrity), [`oci_compute_instances`](../fetchers/oci/compute_instances), [`wiz_file_integrity_monitoring`](../fetchers/wiz/file_integrity_monitoring)
 
 ### MLA — Monitoring, Logging, and Auditing  (5/5)
 
@@ -702,7 +702,7 @@ python tools/gen_ksi_mapping.py
 | [`gcp_secret_manager_configuration`](../fetchers/gcp/secret_manager_configuration) | `KSI-SVC-ASM` |
 | [`gcp_vpc_network_configuration`](../fetchers/gcp/vpc_network_configuration) | `KSI-CNA-ULN` |
 
-### github  (16)
+### github  (17)
 
 | Fetcher | Indicators |
 |---|---|
@@ -713,6 +713,7 @@ python tools/gen_ksi_mapping.py
 | [`github_code_scanning_alerts`](../fetchers/github/code_scanning_alerts) | `KSI-MLA-EVC`, `KSI-SVC-EIS` |
 | [`github_dependabot_alerts`](../fetchers/github/dependabot_alerts) | `KSI-SCR-MON`, `KSI-SVC-EIS` |
 | [`github_deployment_controls`](../fetchers/github/deployment_controls) | `KSI-CMT-LMC`, `KSI-CMT-RMV`, `KSI-CMT-VTD` |
+| [`github_image_signing`](../fetchers/github/image_signing) | `KSI-SVC-VRI` |
 | [`github_non_user_credentials`](../fetchers/github/non_user_credentials) | `KSI-IAM-SNU`, `KSI-SVC-ASM` |
 | [`github_org_security_settings`](../fetchers/github/org_security_settings) | `KSI-CNA-EIS`, `KSI-IAM-APM`, `KSI-IAM-ELP` |
 | [`github_pull_request_checks`](../fetchers/github/pull_request_checks) | `KSI-CMT-LMC`, `KSI-CMT-VTD` |
