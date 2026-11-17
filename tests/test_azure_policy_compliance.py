@@ -944,6 +944,8 @@ TASK_COUNTS = ("remediation_tasks", "remediation_tasks_by_provisioning_state", "
 def test_counts_are_null_when_the_summary_and_task_reads_failed(monkeypatch, tmp_path):
     summary = _run_main(monkeypatch, tmp_path, fx.empty_collection())
     assert all(summary[k] is None for k in SERVICE_COUNTS + TASK_COUNTS)
+    assert summary["resources_by_compliance_state"] is None and summary["policies_by_compliance_state"] is None
+    assert summary["non_compliant_states_truncated"] is None
 
 
 @needs_sdk
@@ -964,6 +966,7 @@ def test_listed_state_counts_are_null_when_the_states_query_fails(monkeypatch, t
     summary = _run_main(monkeypatch, tmp_path, collected)
     assert summary["listed_non_compliant_states"] is None
     assert summary["listed_distinct_non_compliant_resources"] is None
+    assert summary["non_compliant_states_truncated"] is None
 
 
 DEPLOYMENT_COUNTS = ("remediation_deployments_listed", "remediation_deployments_by_status",
@@ -975,12 +978,13 @@ DEPLOYMENT_COUNTS = ("remediation_deployments_listed", "remediation_deployments_
 def test_deployment_counts_are_null_when_a_deployment_list_was_not_read(monkeypatch, tmp_path):
     summary = _run_main(monkeypatch, tmp_path, {**fx.empty_collection(), "tasks_read": True})
     assert all(summary[k] is None for k in DEPLOYMENT_COUNTS)
-    assert summary["remediation_deployments_truncated"] is False
+    assert summary["remediation_deployments_truncated"] is None
 
 
 def test_deployment_counts_read_zero_when_every_list_was_read(monkeypatch, tmp_path):
     summary = _run_main(monkeypatch, tmp_path, {**fx.empty_collection(), "deployments_complete": True})
     assert all(summary[k] in (0, {}) for k in DEPLOYMENT_COUNTS)
+    assert summary["remediation_deployments_truncated"] is False
     summary = _run_main(monkeypatch, tmp_path, fx.empty_collection(), registration=fx.NOT_REGISTERED)
     assert all(summary[k] in (0, {}) for k in DEPLOYMENT_COUNTS)
 
@@ -992,12 +996,14 @@ def test_assignment_counts_are_null_with_patterns_when_the_summary_was_not_read(
     collected = {**fx.empty_collection(), "latest_pairs": [pair], "latest_pairs_status": fx.LATEST_READ}
     summary = _run_main(monkeypatch, tmp_path, collected)
     assert summary["non_compliant_assignments"] is None and summary["compliant_assignments"] is None
+    assert summary["resources_by_compliance_state"] is None and summary["policies_by_compliance_state"] is None
 
 
 def test_listed_state_counts_read_zero_when_the_list_was_read_and_empty(monkeypatch, tmp_path):
     summary = _run_main(monkeypatch, tmp_path, {**fx.empty_collection(), "states_read": True})
     assert summary["listed_non_compliant_states"] == 0
     assert summary["listed_distinct_non_compliant_resources"] == 0
+    assert summary["non_compliant_states_truncated"] is False
 
 
 def test_counts_read_zero_when_both_reads_came_back_empty(monkeypatch, tmp_path):
@@ -1005,6 +1011,7 @@ def test_counts_read_zero_when_both_reads_came_back_empty(monkeypatch, tmp_path)
     summary = _run_main(monkeypatch, tmp_path, collected)
     assert all(summary[k] == 0 for k in SERVICE_COUNTS + ("remediation_tasks", "remediation_failed_deployments"))
     assert summary["remediation_tasks_by_provisioning_state"] == {}
+    assert summary["resources_by_compliance_state"] == {} and summary["policies_by_compliance_state"] == {}
 
 
 def test_each_read_nulls_only_its_own_counts(monkeypatch, tmp_path):

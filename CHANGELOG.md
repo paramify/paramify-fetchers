@@ -2773,6 +2773,11 @@ schemas and the `paramify` CLI — not the internal code.
     the `remediated_resources_*` counts (and
     `succeeded_remediations_now_non_compliant`) read null, not counts over the
     partial list.
+  - `resources_by_compliance_state` and `policies_by_compliance_state` read null,
+    not `{}`, when the compliance summary could not be read.
+    `non_compliant_states_truncated` reads null when the non-compliant states
+    query failed, and `remediation_deployments_truncated` reads null when the
+    task list or a task's deployment list was not read, not false.
 
 - **`azure_managed_identity_configuration` 0.3.0: an unread list gives null
   counts, not 0, and an unread federated-credential list no longer counts an

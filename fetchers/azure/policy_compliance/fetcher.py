@@ -670,8 +670,10 @@ def summarize(
         if summary_read else None,
         "resource_compliance_percentage": coverage_percentage(compliant, compliant + non_compliant)
         if summary_read else None,
-        "resources_by_compliance_state": subscription_results.get("resource_details") or {},
-        "policies_by_compliance_state": subscription_results.get("policy_details") or {},
+        "resources_by_compliance_state": (subscription_results.get("resource_details") or {})
+        if summary_read else None,
+        "policies_by_compliance_state": (subscription_results.get("policy_details") or {})
+        if summary_read else None,
         # --- per assignment ---
         "assignments_evaluated": len(assignments) if summary_read else None,
         "non_compliant_assignments": sum(1 for a in assignments if not a["is_compliant"]) if summary_read else None,
@@ -681,7 +683,7 @@ def summarize(
         "listed_distinct_non_compliant_resources": len(
             {str(s.get("resource_id") or "").lower() for s in states if s.get("resource_id")}
         ) if states_read else None,
-        "non_compliant_states_truncated": states_truncated,
+        "non_compliant_states_truncated": states_truncated if states_read else None,
         # --- remediation ---
         "remediation_tasks": len(remediations) if tasks_read else None,
         "remediation_tasks_by_provisioning_state": dict(sorted(by_state.items())) if tasks_read else None,
@@ -798,8 +800,8 @@ def in_scope_summary(results: dict, assignments: list[dict], deployments: list[d
         "compliant_resources": compliant if known else None,
         "resources_evaluated": sum(details.values()) if known else None,
         "resource_compliance_percentage": coverage_percentage(compliant, compliant + non_compliant) if known else None,
-        "resources_by_compliance_state": details,
-        "policies_by_compliance_state": results.get("policy_details") or {},
+        "resources_by_compliance_state": details if summary_read else None,
+        "policies_by_compliance_state": (results.get("policy_details") or {}) if summary_read else None,
         # The assignment list comes from the summary, so an unread summary leaves it empty, not zero.
         "non_compliant_assignments": (
             sum(1 for a in assignments if a["is_compliant"] is False) if known and summary_read else None),
@@ -880,8 +882,7 @@ def summarize_remediation_deployments(deployments: list[dict], truncated: bool, 
     }
     if not complete:
         for key in summary:
-            if key != "remediation_deployments_truncated":
-                summary[key] = None
+            summary[key] = None
     return summary
 
 
