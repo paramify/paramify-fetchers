@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Customer-facing availability: Application Insights availability tests and their results, and Standard load balancers' data-path and health-probe availability."""
 
+import html
 import logging
 import os
 import re
@@ -31,6 +32,7 @@ DEFAULT_LOOKBACK_DAYS = 7
 MAX_LOOKBACK_DAYS = 30
 
 READ, ERROR, NOT_APPLICABLE = "read", "error", "not_applicable"
+LB_METRICS = ("data_path", "health_probe")
 
 
 # --- pure transforms ---
@@ -58,6 +60,13 @@ def validation(props: Dict[str, Any]) -> Dict[str, Optional[bool]]:
     return {"checks_status_code": False, "checks_content": False, "checks_ssl": False}
 
 
+def classic_url(props: Dict[str, Any]) -> Optional[str]:
+    """A classic URL ping test keeps its URL in the Url attribute of the Request element of its WebTest XML."""
+    xml = ((props.get("Configuration") or {}).get("WebTest") or "")
+    found = re.search(r'<Request\b[^>]*\bUrl="([^"]+)"', xml)
+    return html.unescape(found.group(1)) if found else None
+
+
 def test_record(raw: Dict[str, Any]) -> Dict[str, Any]:
     props = raw.get("properties") or {}
     request = props.get("Request") or {}
@@ -66,9 +75,10 @@ def test_record(raw: Dict[str, Any]) -> Dict[str, Any]:
         "name": raw.get("name"),
         "test_name": props.get("Name") or raw.get("name"),
         "resource_group": resource_group_from_id(raw.get("id")),
+        "location": raw.get("location"),
         "kind": (props.get("Kind") or raw.get("kind") or "").lower() or None,
         "enabled": bool(props.get("Enabled")),
-        "url": request.get("RequestUrl"),
+        "url": request.get("RequestUrl") or classic_url(props),
         "frequency_seconds": props.get("Frequency"),
         "locations": len(props.get("Locations") or []),
         "component_id": component_of(raw.get("tags")),
@@ -82,10 +92,16 @@ def load_balancer_record(raw: Dict[str, Any]) -> Dict[str, Any]:
         "id": raw.get("id"),
         "name": raw.get("name"),
         "resource_group": resource_group_from_id(raw.get("id")),
+        "location": raw.get("location"),
         "sku": (raw.get("sku") or {}).get("name"),
         "standard": ((raw.get("sku") or {}).get("name") or "").lower() == "standard",
         "public": any((f.get("properties") or {}).get("publicIPAddress") for f in frontends),
         "frontends": len(frontends),
+        # Data-path availability is measured on load-balancing rules and health-probe status on probes: a load balancer
+        # without them (an outbound-only one, say) reports no data for that metric, which is not a gap in measurement.
+        "load_balancing_rules": len(props.get("loadBalancingRules") or []),
+        "inbound_nat_rules": len(props.get("inboundNatRules") or []),
+        "probes": len(props.get("probes") or []),
     }
 
 
@@ -129,17 +145,26 @@ def summarize(tests: List[Dict[str, Any]], balancers: List[Dict[str, Any]], sett
     enabled = [t for t in tests if t["enabled"]]
     tests_complete = tests_listed and all(t["metric_status"] == READ for t in enabled)
     standard = [b for b in balancers if b["standard"]]
-    lb_complete = balancers_listed and all(b["data_path"]["metric_status"] == READ and b["health_probe"]["metric_status"] == READ
-                                           for b in standard)
+    lb_complete = balancers_listed and all(b[k]["metric_status"] in (READ, NOT_APPLICABLE) for b in standard for k in LB_METRICS)
+    target = settings["target"]
 
     def t_known(value):
         return value if tests_complete else None
 
-    tests_measured = all(t["measurement_complete"] for t in enabled)
-    lb_measured = all(b["data_path"]["measurement_complete"] and b["health_probe"]["measurement_complete"] for b in standard)
+    def applicable(b):
+        return [b[k] for k in LB_METRICS if b[k]["metric_status"] != NOT_APPLICABLE]
+
+    # Each test or load balancer is judged against the target only once every hour of the lookback was measured. The
+    # below-target counts are over the items that could be judged, and the rest are counted as not judged, so one new
+    # or unread item never leaves the verdict on the others unknown.
+    tests_judged = [t for t in enabled if t["below_target"] is not None]
+    lbs_judged = [b for b in standard if applicable(b) and all(m["below_target"] is not None for m in applicable(b))]
 
     def t_target(value):
-        return value if tests_complete and tests_measured and settings["target"] is not None else None
+        return value if tests_listed and target is not None else None
+
+    def lb_target(value):
+        return value if balancers_listed and target is not None else None
 
     def _coverage(items):
         known = [c for c in items if c is not None]
@@ -158,18 +183,20 @@ def summarize(tests: List[Dict[str, Any]], balancers: List[Dict[str, Any]], sett
         "lowest_measurement_coverage_percentage": t_known(_coverage([t["measurement_coverage_percentage"] for t in enabled])),
         "availability_tests_without_data": t_known(sum(1 for t in enabled if t["availability_percentage"] is None)),
         "lowest_availability_percentage": t_known(_lowest([t["availability_percentage"] for t in enabled])),
-        "availability_tests_below_target": t_target(sum(1 for t in enabled if t["below_target"])),
+        "availability_tests_below_target": t_target(sum(1 for t in tests_judged if t["below_target"])),
+        "availability_tests_not_judged": t_target(len(enabled) - len(tests_judged)),
         "availability_tests_below_target_latest_hour": t_target(sum(
-            1 for t in enabled if t["latest_hour_percentage"] is not None and t["latest_hour_percentage"] < (settings["target"] or 0))),
+            1 for t in enabled if t["latest_hour_percentage"] is not None and t["latest_hour_percentage"] < (target or 0))),
         "load_balancers_standard": len(standard) if balancers_listed else None,
         "load_balancers_public": sum(1 for b in balancers if b["public"]) if balancers_listed else None,
         "load_balancers_metrics_unread": sum(1 for b in standard if ERROR in (b["data_path"]["metric_status"], b["health_probe"]["metric_status"]))
         if balancers_listed else None,
         "lowest_data_path_availability": lb_known(_lowest([b["data_path"]["availability_percentage"] for b in standard])),
         "lowest_health_probe_availability": lb_known(_lowest([b["health_probe"]["availability_percentage"] for b in standard])),
-        "load_balancers_below_target": (lb_known(sum(1 for b in standard if b["data_path"]["below_target"] or b["health_probe"]["below_target"]))
-                                        if settings["target"] is not None and lb_measured else None),
-        "load_balancers_with_missing_measurements": lb_known(sum(1 for b in standard if not (b["data_path"]["measurement_complete"] and b["health_probe"]["measurement_complete"]))),
+        "load_balancers_below_target": lb_target(sum(1 for b in lbs_judged if any(m["below_target"] for m in applicable(b)))),
+        "load_balancers_not_judged": lb_target(sum(1 for b in standard if applicable(b)) - len(lbs_judged)),
+        "load_balancers_without_measured_traffic": sum(1 for b in standard if not applicable(b)) if balancers_listed else None,
+        "load_balancers_with_missing_measurements": lb_known(sum(1 for b in standard if any(not m["measurement_complete"] for m in applicable(b)))),
         "lowest_load_balancer_measurement_coverage_percentage": lb_known(_coverage(
             [b[k]["measurement_coverage_percentage"] for b in standard for k in ("data_path", "health_probe")])),
         "lookback_days": settings["lookback_days"],
@@ -242,7 +269,8 @@ def collect(client, subscription_id: str, collector: Collector, exclusions: Opti
     excluded += out
     for b in balancers:
         for key, metric in (("data_path", DATA_PATH_METRIC), ("health_probe", HEALTH_PROBE_METRIC)):
-            if not b["standard"]:
+            measured = b["load_balancing_rules"] if key == "data_path" else b["probes"]
+            if not b["standard"] or not measured:  # Basic SKU emits neither metric; no rules or probes, nothing to measure
                 b[key] = judged([], NOT_APPLICABLE, settings["target"], hours)
                 continue
             points, status = metric_points(client, collector, b["id"], "Microsoft.Network/loadBalancers", metric, window, b["name"])

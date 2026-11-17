@@ -6,9 +6,8 @@ import importlib.util
 import json
 import sys
 from collections import namedtuple
-from urllib.parse import urlparse
-
 from pathlib import Path
+from urllib.parse import urlparse
 
 import pytest
 
@@ -27,18 +26,20 @@ COMPONENT = f"{SUB}/resourceGroups/rg1/providers/microsoft.insights/components/a
 SETTINGS = {"lookback_days": 7, "target": 99.9}
 
 
-def raw_test(name="home", enabled=True, component=COMPONENT, url="https://app.example.com/health"):
+def raw_test(name="home", enabled=True, component=COMPONENT, url="https://app.example.com/health", location="eastus"):
     tags = {f"hidden-link:{component}": "Resource"} if component else {}
     return {"id": f"{SUB}/resourceGroups/rg1/providers/Microsoft.Insights/webtests/{name}-appi1", "name": f"{name}-appi1", "tags": tags,
+            "location": location,
             "properties": {"Name": name, "Kind": "standard", "Enabled": enabled, "Frequency": 300,
                            "Locations": [{"Id": "us-va-ash-azr"}, {"Id": "us-tx-sn1-azr"}, {"Id": "us-il-ch1-azr"}],
                            "Request": {"RequestUrl": url}}}
 
 
-def raw_lb(name="lb1", sku="Standard", public=True):
+def raw_lb(name="lb1", sku="Standard", public=True, rules=1, probes=1, location="eastus"):
     fe = {"name": "fe", "properties": {"publicIPAddress": {"id": "pip"}} if public else {"privateIPAddress": "10.0.0.4"}}
     return {"id": f"{SUB}/resourceGroups/rg-aks/providers/Microsoft.Network/loadBalancers/{name}", "name": name, "sku": {"name": sku},
-            "properties": {"frontendIPConfigurations": [fe]}}
+            "location": location, "properties": {"frontendIPConfigurations": [fe], "loadBalancingRules": [{"name": f"r{i}"} for i in range(rules)],
+                                                 "probes": [{"name": f"p{i}"} for i in range(probes)]}}
 
 
 def metric(name, *hourly):
@@ -78,11 +79,11 @@ def _test(enabled=True, status=ea.READ, points=(("a", 100.0),), url="https://app
     return t
 
 
-def _lb(sku="Standard", vip=(("a", 100.0),), dip=(("a", 100.0),), status=ea.READ):
-    b = ea.load_balancer_record(raw_lb(sku=sku))
+def _lb(sku="Standard", vip=(("a", 100.0),), dip=(("a", 100.0),), status=ea.READ, rules=1, probes=1):
+    b = ea.load_balancer_record(raw_lb(sku=sku, rules=rules, probes=probes))
     standard = sku == "Standard"
-    b["data_path"] = ea.judged(list(vip), status if standard else ea.NOT_APPLICABLE, 99.9, len(vip))
-    b["health_probe"] = ea.judged(list(dip), status if standard else ea.NOT_APPLICABLE, 99.9, len(dip))
+    b["data_path"] = ea.judged(list(vip), status if standard and rules else ea.NOT_APPLICABLE, 99.9, len(vip))
+    b["health_probe"] = ea.judged(list(dip), status if standard and probes else ea.NOT_APPLICABLE, 99.9, len(dip))
     return b
 
 
@@ -97,8 +98,11 @@ def test_summary_counts_tests_and_load_balancers_against_the_target():
 
 def test_unread_results_leave_verdicts_null_not_zero():
     s = ea.summarize([_test(status=ea.ERROR, points=())], [_lb(status=ea.ERROR, vip=(), dip=())], SETTINGS)
-    assert (s["availability_tests_results_unread"], s["lowest_availability_percentage"], s["availability_tests_below_target"]) == (1, None, None)
-    assert (s["load_balancers_metrics_unread"], s["lowest_data_path_availability"], s["load_balancers_below_target"]) == (1, None, None)
+    assert (s["availability_tests_results_unread"], s["lowest_availability_percentage"]) == (1, None)
+    # An unread item is not judged; it never counts as meeting the target.
+    assert (s["availability_tests_below_target"], s["availability_tests_not_judged"]) == (0, 1)
+    assert (s["load_balancers_metrics_unread"], s["lowest_data_path_availability"]) == (1, None)
+    assert (s["load_balancers_below_target"], s["load_balancers_not_judged"]) == (0, 1)
     unlisted = ea.summarize([], [], SETTINGS, tests_listed=False, balancers_listed=False)
     assert (unlisted["availability_tests_enabled"], unlisted["endpoints_tested"], unlisted["load_balancers_standard"]) == (None, None, None)
 
@@ -128,6 +132,7 @@ class _Arm:
     def __init__(self, tests=None, metrics_status=200):
         self.tests = tests if tests is not None else [raw_test(), raw_test("off", enabled=False)]
         self.metrics_status, self.calls = metrics_status, []
+        self.lbs = [raw_lb(), raw_lb("basic", sku="Basic", public=False)]
 
     def get(self, url, params=None, headers=None, timeout=None, allow_redirects=True):
         path = urlparse(url).path
@@ -135,7 +140,7 @@ class _Arm:
         if path.endswith("/providers/Microsoft.Insights/webtests"):
             return _Resp(200, {"value": self.tests})
         if path.endswith("/providers/Microsoft.Network/loadBalancers"):
-            return _Resp(200, {"value": [raw_lb(), raw_lb("basic", sku="Basic", public=False)]})
+            return _Resp(200, {"value": self.lbs})
         if path.endswith("/providers/Microsoft.Insights/metrics"):
             if self.metrics_status != 200:
                 return _Resp(self.metrics_status, {"error": {"code": "AuthorizationFailed", "message": "no"}})
@@ -224,12 +229,13 @@ def test_a_partial_window_is_unknown_never_healthy():
     assert (few_good_hours["measurement_complete"], few_good_hours["below_target"]) == (False, None)
 
 
-def test_one_incomplete_test_makes_the_below_target_count_unknown():
-    complete = _test(points=tuple((str(h), 100.0) for h in range(24)))
+def test_one_incomplete_test_is_not_judged_and_the_others_still_are():
+    complete = _test(points=tuple((str(h), 100.0) for h in range(23)) + (("23", 50.0),))
     partial = ea.test_record(raw_test("api", url="https://api.example.com/"))
     partial.update(ea.judged([("a", 100.0)], ea.READ, 99.9, 24))
     s = ea.summarize([complete, partial], [], SETTINGS)
-    assert (s["availability_tests_with_missing_measurements"], s["lowest_measurement_coverage_percentage"], s["availability_tests_below_target"]) == (1, 4.2, None)
+    assert (s["availability_tests_with_missing_measurements"], s["lowest_measurement_coverage_percentage"]) == (1, 4.2)
+    assert (s["availability_tests_below_target"], s["availability_tests_not_judged"]) == (1, 1)
 
 
 def test_status_code_and_content_checks_are_read_from_standard_and_classic_tests():
@@ -248,3 +254,50 @@ def test_application_checks_are_counted_across_enabled_tests():
     works.update(ea.judged([("a", 100.0)], ea.READ, 99.9, 1))
     s = ea.summarize([works, _test(url="https://api.example.com/")], [], SETTINGS)
     assert (s["availability_tests_checking_application"], s["availability_tests_reachability_only"]) == (1, 1)
+
+
+# --- review fixes: location exclusions, load balancers without rules or probes, classic test URLs ---
+
+def test_location_patterns_exclude_tests_and_load_balancers(arm, tmp_path, monkeypatch):
+    monkeypatch.setenv("AZURE_RESOURCE_EXCLUSIONS", "location:westus2")
+    session = arm(tests=[raw_test(), raw_test("west", location="westus2")])
+    session.lbs = [raw_lb(), raw_lb("west-lb", location="westus2")]
+    assert ea.main() == 0
+    s = _evidence(tmp_path)["summary"]
+    assert (s["excluded_availability_tests"], s["excluded_load_balancers"], s["resource_exclusion_patterns_unmatched"]) == (1, 1, [])
+    assert (s["in_scope_availability_tests"], s["in_scope_load_balancers"]) == (1, 1)
+
+
+def test_an_outbound_only_load_balancer_does_not_leave_the_verdict_unknown(arm, tmp_path, monkeypatch):
+    monkeypatch.setenv(ea.TARGET_ENV, "99.9")
+    monkeypatch.setenv(ea.LOOKBACK_ENV, "1")
+    session = arm()
+    session.lbs = [raw_lb(), raw_lb("outbound", public=True, rules=0, probes=0)]
+    assert ea.main() == 0
+    s = _evidence(tmp_path)["summary"]
+    assert (s["load_balancers_standard"], s["load_balancers_without_measured_traffic"]) == (2, 1)
+    assert (s["load_balancers_below_target"], s["load_balancers_not_judged"], s["load_balancers_with_missing_measurements"]) == (0, 0, 0)
+    lb_calls = [path for path, _ in session.calls if "/loadBalancers/" in path]
+    assert all("/loadBalancers/lb1/" in path for path in lb_calls)  # nothing is asked of the outbound-only load balancer
+
+
+def test_a_load_balancer_without_probes_is_judged_on_its_data_path_only():
+    b = _lb(vip=(("a", 98.0),), dip=(), probes=0)
+    assert (b["data_path"]["metric_status"], b["health_probe"]["metric_status"]) == (ea.READ, ea.NOT_APPLICABLE)
+    s = ea.summarize([], [b], SETTINGS)
+    assert (s["load_balancers_below_target"], s["load_balancers_not_judged"], s["load_balancers_with_missing_measurements"]) == (1, 0, 0)
+
+
+def test_classic_ping_tests_read_their_url_from_the_webtest_xml():
+    xml = ('<WebTest Name="home"><Items><Request Method="GET" Version="1.1" Url="https://app.example.com/?a=1&amp;b=2" '
+           'ExpectedHttpStatusCode="200" /></Items></WebTest>')
+    raw = {**raw_test(), "properties": {**raw_test()["properties"], "Kind": "ping", "Request": None, "Configuration": {"WebTest": xml}}}
+    t = ea.test_record(raw)
+    assert t["url"] == "https://app.example.com/?a=1&b=2"
+    t.update(ea.judged([("a", 100.0)], ea.READ, 99.9, 1))
+    assert ea.summarize([t], [], SETTINGS)["endpoints_tested"] == 1
+
+
+def test_without_a_target_the_not_judged_counts_stay_null():
+    s = ea.summarize([_test()], [_lb()], {"lookback_days": 7, "target": None})
+    assert (s["availability_tests_not_judged"], s["load_balancers_not_judged"]) == (None, None)

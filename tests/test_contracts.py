@@ -261,6 +261,7 @@ TEXT_FORMAT_FETCHERS = (
     "azure/devops_work_items",
     "azure/diagnostic_settings",
     "azure/disk_encryption_status",
+    "azure/endpoint_availability",
     "azure/entra_access_reviews",
     "azure/entra_authentication_policy",
     "azure/entra_conditional_access_policies",

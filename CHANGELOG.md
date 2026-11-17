@@ -15,8 +15,12 @@ schemas and the `paramify` CLI — not the internal code.
 - **`azure_endpoint_availability` fetcher.** Reads Application Insights availability tests and their hourly
   results, and Standard load balancers' data-path (VipAvailability) and health-probe (DipAvailability)
   availability with measurement coverage, each judged against an availability target once one is set (none by
-  default) and only when every hour was measured. Reports whether tests check the status code and content. Unread
-  results leave verdicts null rather than 0.
+  default) and only when every hour was measured; items that cannot be judged are counted apart, so one new or
+  unread test never leaves the verdict on the others unknown. A load balancer's data path is read only when it has
+  load-balancing rules and its health probe only when it has probes, so outbound-only load balancers are counted
+  apart instead of reading as unmeasured. Reads classic ping test URLs from their XML, and honours location:
+  exclusions. Reports whether tests check the status code and content. Unread results leave verdicts null rather
+  than 0.
 - **`wiz_inventory`**, the Wiz cloud resource inventory, as a pipeline fetcher (`kind: inventory`, `id_scheme:
   wiz-resource-id`). One record per resource from `cloudResourcesV2` under `payload.data`, keyed by the Wiz resource
   id, with its cloud ID (`external_id`), account, region, type, IPs, OS, image, environment and owner, and internet
