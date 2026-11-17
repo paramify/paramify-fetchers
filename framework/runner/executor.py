@@ -1136,7 +1136,7 @@ def _merge_staged(result: InvocationResult, stage: Path, inv_dir: Path, rel: Opt
             os.replace(src, dest)
             outputs.append(src.name)
         elif src.is_dir() and not src.is_symlink() and dest.is_dir() and not dest.is_symlink():
-            _merge_dir(src, dest)
+            conflicts.extend(_merge_dir(src, dest, src.name))
         elif dest.is_file() and not src.is_dir():
             os.replace(src, dest)
             overwritten.append(src.name)
@@ -1151,19 +1151,25 @@ def _merge_staged(result: InvocationResult, stage: Path, inv_dir: Path, rel: Opt
     _fail_for_clobber(result, [named(n) for n in overwritten], clobber)
 
 
-def _merge_dir(src: Path, dest: Path) -> None:
+def _merge_dir(src: Path, dest: Path, name: str) -> List[str]:
     """Move src's contents into the existing dir dest, as a serial run would have left it.
 
     A file replaces a file of the same name. Where a file and a directory share a
     name, the earlier one stays: a serial fetcher could not have written over it.
+    Returns those names, under name (src's path in the invocation dir).
     """
-    for child in src.iterdir():
+    conflicts: List[str] = []
+    for child in sorted(src.iterdir()):
         target = dest / child.name
+        child_name = f"{name}/{child.name}"
         child_dir = child.is_dir() and not child.is_symlink()
         target_dir = target.is_dir() and not target.is_symlink()
         if child_dir and target_dir:
-            _merge_dir(child, target)
+            conflicts.extend(_merge_dir(child, target, child_name))
         elif not target.exists() and not target.is_symlink():
             os.replace(child, target)
         elif not child_dir and not target_dir:
             os.replace(child, target)
+        else:
+            conflicts.append(child_name)
+    return conflicts

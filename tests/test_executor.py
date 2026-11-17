@@ -1374,6 +1374,28 @@ def test_concurrent_target_overwriting_an_earlier_entrys_file_fails(tmp_path, mo
     assert (second.exit_code, second.outputs, second.overwritten) == (1, [], ["out_b.json"])
 
 
+def test_concurrent_target_writing_a_file_where_an_earlier_one_wrote_a_dir_fails(tmp_path, monkeypatch):
+    # A serial fetcher could not open the directory sub/out_b.json as a file, so it would fail.
+    fdir = tmp_path / "fetcher"
+    fdir.mkdir()
+    (fdir / "fetcher.py").write_text(
+        "import os\n"
+        "sub = os.path.join(os.environ['EVIDENCE_DIR'], 'sub')\n"
+        "os.makedirs(sub, exist_ok=True)\n"
+        "open(os.path.join(sub, 'out_' + os.environ['REGION'] + '.json'), 'w').write('{}')\n")
+    fetcher = make_fetcher(fdir, supports_targets=True,
+                           target_schema={"region": TargetField(name="region", type="string", env="REGION")})
+    out = tmp_path / "out"
+    (out / "sub" / "out_b.json").mkdir(parents=True)
+
+    first, second = run_entry(fetcher, _regions("a", "b", concurrency=2), out)
+
+    assert (first.exit_code, first.error) == (0, None)
+    assert second.exit_code == 1
+    assert "wrote sub/out_b.json, which an earlier entry or target wrote in this run as a different kind of file" in second.error
+    assert (out / "sub" / "out_a.json").is_file() and (out / "sub" / "out_b.json").is_dir()
+
+
 def test_concurrent_issue_report_outputs_are_named_relative_to_the_run_dir(tmp_path, monkeypatch):
     fetcher = _timed_fetcher(tmp_path, {"a": 0.0, "b": 0.0}, kind="issue_report")
     out = tmp_path / "out"

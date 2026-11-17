@@ -91,7 +91,9 @@ run:
 
 Each concurrent target writes to its own staging directory, which is then moved
 into the run directory. So a fetcher cannot read or delete another target's
-files while it runs.
+files while it runs. A fetcher's "Evidence saved to …" line names its staging
+directory, which is removed when the entry ends; look for the file in the run
+directory instead.
 
 ## 4. Set shared config once
 
