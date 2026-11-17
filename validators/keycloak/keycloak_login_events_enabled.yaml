@@ -1,0 +1,19 @@
+key: keycloak_login_events_enabled
+name: 'Keycloak: Sign-In Event Storage Enabled'
+type: AUTOMATED
+role: configuration
+statement: >
+  Keycloak's setting to store login events, including failed sign-ins, is on (login_events_enabled is
+  true). Supports KSI-MLA-LET. An enabled setting is configuration evidence only: it does not show that
+  events are produced, that they reach a SIEM, or how long they are kept. Does not check whether the
+  collection run succeeded.
+
+regex: '"login_events_enabled":\s*true\b'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-KEYCLOAK-REALM-SECURITY

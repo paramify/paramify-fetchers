@@ -1,0 +1,18 @@
+key: keycloak_realm_settings_read
+name: 'Keycloak: Realm Settings Read and Realm Enabled'
+type: AUTOMATED
+role: integrity
+statement: >
+  The realm's settings were read and the realm is enabled (realm_enabled is true). The other Keycloak
+  checks on this set read the same settings, so a null here means they are judged on nothing. Does not
+  check whether the collection run succeeded.
+
+regex: '"realm_enabled":\s*true\b'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-KEYCLOAK-REALM-SECURITY

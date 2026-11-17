@@ -1,0 +1,17 @@
+key: keycloak_remember_me_disabled
+name: 'Keycloak: Remember Me Is Off'
+type: AUTOMATED
+role: configuration
+statement: >
+  The sign-in page does not offer remember me (remember_me_enabled is false), so no session runs under
+  the longer remember-me timeouts. Does not check whether the collection run succeeded.
+
+regex: '"remember_me_enabled":\s*false\b'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-KEYCLOAK-REALM-SECURITY
