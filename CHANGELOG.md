@@ -1771,6 +1771,12 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **`aws_ecr_image_scanning` 0.4.0 runs on boto3.** One Python process replaces a shell script that started
+  the AWS CLI and several `jq` processes per repository. It reads eight repositories at a time and requests the
+  largest page each API allows, so an enhanced scan with many findings takes a tenth of the requests, and a BASIC
+  scan is read in one. The output, its file name and the IAM actions are unchanged. It needs the `aws` extra
+  (boto3), which the Docker image already installs.
+
 - **Checkov is installed in its own environment.** `requirements.txt`, the `checkov` extra and `all` no longer install
   the `checkov` package, and the Docker image puts it in its own virtualenv with only the `checkov` executable on
   `PATH`. Checkov pins exact versions of libraries other fetchers also use, such as boto3, so sharing an environment
