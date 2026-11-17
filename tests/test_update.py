@@ -10,16 +10,14 @@ mocked pieces: they would run pip and the clone's own code.
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner
 
-from framework import api
+from framework import api, update_cli
 from framework import update as up
-from framework import update_cli
 from framework.cli import app
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -306,6 +304,16 @@ def test_a_row_moved_into_a_release_file_is_not_shown_again(repo, tmp_path):
     _git(repo, "fetch", "-q", "origin")
     assert [r["title"] for r in up.curated_rows(repo, "v0.3.0-beta", before)] == ["Sprockets"]
     assert up.curated_rows(repo, before, "origin/main") == []
+
+
+def test_rows_for_a_release_head_already_contains_are_not_new(repo, tmp_path):
+    """A highlights file written after its release was tagged: a clone past
+    that tag never had the file, but it already runs that release."""
+    late = "version: 0.2.0-beta\nhighlights:\n  - {tag: breaking, title: old_flag is gone, fix: use new_flag}\n"
+    _commit(tmp_path / "upstream", {"releases/0.2.0-beta.yaml": late}, "backfill 0.2.0 highlights")
+    _git(repo, "fetch", "-q", "origin")
+    assert up.curated_rows(repo, "v0.3.0-beta", "origin/main") == []
+    assert [r["title"] for r in up.curated_rows(repo, "v0.1.0-beta", "origin/main")][-1] == "old_flag is gone"
 
 
 def test_curated_rows_survive_a_missing_or_broken_releases_dir(repo, tmp_path):

@@ -137,9 +137,6 @@ class Release:
     version: str
     key: Version
 
-    def to_json(self) -> dict:
-        return {"tag": self.tag, "version": self.version}
-
 
 def parse_release(tag: str) -> Optional[Release]:
     """A Release for a vX.Y.Z[-suffix] tag, or None for anything else
@@ -381,16 +378,21 @@ def curated_rows(root: Path, head: str, target: str) -> List[dict]:
 
     Rows are compared by tag and title across every releases/*.yaml, so a row
     that moves from unreleased.yaml into a release's file when that release is
-    cut is not shown a second time. Unreleased rows come first, then releases
+    cut is not shown a second time. A release whose tag `head` already contains
+    is skipped whole. Unreleased rows come first, then releases
     newest first; rows keep their order within a file.
     """
     schema = highlights_schema()
     have = {(h["tag"], h["title"]) for rows in _highlight_files(root, head, schema).values() for h in rows}
     files = _highlight_files(root, target, schema)
 
-    released = [r for r in (parse_release(f"v{v}") for v in files if v != UNRELEASED) if r]
+    try:  # a release HEAD already contains is not news, even if its file came later
+        contained = set(git(root, "tag", "--merged", head, "-l", "v*").split())
+    except UpdateError:
+        contained = set()
+    released = [r for r in (parse_release(f"v{v}") for v in files if v != UNRELEASED) if r and r.tag not in contained]
     order = [UNRELEASED] * (UNRELEASED in files) + [r.version for r in sorted(released, key=lambda r: r.key, reverse=True)]
-    out = []
+    out: List[dict] = []
     for version in order:
         out.extend({**h, "release": version} for h in files[version] if (h["tag"], h["title"]) not in have)
     return out

@@ -14,8 +14,8 @@ from contextlib import contextmanager
 from typing import Any, Iterator, List, Optional, Sequence, Tuple
 
 from rich.console import Console, Group, RenderableType
-from rich.padding import Padding
 from rich.live import Live
+from rich.padding import Padding
 from rich.spinner import Spinner
 from rich.text import Text
 
@@ -87,7 +87,7 @@ def step(console: Console, label: str) -> Iterator[Step]:
     """Run a block as a live step. An exception inside marks it failed and re-raises."""
     s = Step(label)
     width = min(console.width, WIDTH)
-    animate = console.is_terminal and not console.is_dumb_terminal
+    animate = console.is_terminal and not console.is_dumb_terminal and not console.record
     live = Live(s, console=console, refresh_per_second=12.5, transient=True) if animate else None
     if live:
         live.start()

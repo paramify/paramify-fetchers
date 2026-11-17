@@ -247,12 +247,12 @@ def _update(run: _Run, root: Path, *, to: Optional[str], yes: bool, allow_breaki
         run.fail(f"{target.label} needs Python {check['python_required']}; make a venv with a newer Python first")
     breaks = [m["manifest"] for m in check["manifests"] if m["status"] == "breaks"]
     if (yes or run.json) and not allow_breaking and (breaks or touching):
-        why = []
+        reasons = []
         if breaks:
-            why.append(f"{view.plural(len(breaks), 'manifest')} would break")
+            reasons.append(f"{view.plural(len(breaks), 'manifest')} would break")
         if touching:
-            why.append(f"{view.plural(len(touching), 'breaking change')} {'touches' if len(touching) == 1 else 'touch'} this clone")
-        run.fail(f"stopped: {' and '.join(why)}. Read them above, then rerun with --allow-breaking (or without --yes)")
+            reasons.append(f"{view.plural(len(touching), 'breaking change')} {'touches' if len(touching) == 1 else 'touch'} this clone")
+        run.fail(f"stopped: {' and '.join(reasons)}. Read them above, then rerun with --allow-breaking (or without --yes)")
     question = f"Update {target.label}?" if target.branch == pos["branch"] else f"Switch to {target.label}?"
     if breaks:
         question += f" {view.plural(len(breaks), 'manifest')} would break."
@@ -286,7 +286,7 @@ def _apply(run: _Run, root: Path, pos: dict, manifests: List[dict], *, label: st
 
     with run.step("reinstall") as s:
         if not reinstalling:
-            res = {"ok": True, "skipped": True, "command": None, "error": None}
+            res: Dict[str, Any] = {"ok": True, "skipped": True, "command": None, "error": None}
             s.done("not needed: pyproject.toml didn't change", "skip")
         else:
             res = {"skipped": False, **up.reinstall(root, extras)}
