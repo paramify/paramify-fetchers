@@ -1,5 +1,5 @@
 name: github_access_review
-version: 0.2.0
+version: 0.2.1
 description: >-
   Who can reach an organization's code and with what rights: owners, members,
   outside collaborators, pending invitations, teams and the repositories they

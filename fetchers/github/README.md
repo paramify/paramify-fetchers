@@ -144,6 +144,13 @@ repositories; each returns well-formed, misleading data without an error.
   the second a collection failure.
 - **A token restricted to some repositories lists only those.** The listing is
   compared with the organization's own repository count.
+- **An organization can have no invitation list.** One whose accounts an identity provider provisions (Enterprise
+  Managed Users) answers a bare 404 for `orgs/{org}/invitations`, the same answer a caller that may not read it
+  gets. `github_access_review` accepts the 404 as "none to give" only when the outside collaborator and team
+  lists were both read (they need the same `members: read`) and the token is an App installation token, or its
+  user is an organization owner. Then `pending_invitations` is `null` with `pending_invitations_available: false`
+  and the run does not fail. Whether a non-owner's personal token gets this 404 on an ordinary organization is
+  not measured, so for one the 404 stays a failure.
 - **Unreadable is not absent.** Where a token cannot read something that
   could disprove a verdict, the verdict is `null`, never `false`.
 - **GraphQL fails with a 200.** Errors arrive in an `errors` list beside
