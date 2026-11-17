@@ -1,5 +1,5 @@
 name: azure_network_flow_logs
-version: 0.2.1
+version: 0.3.0
 description: >-
   Shows which virtual networks and subnets have their traffic logged by flow logs, where the logs are kept and for how long, and whether Traffic Analytics is on.
 category: azure
@@ -91,46 +91,46 @@ evidence_set:
 
     Which resources are left out of scope?
     - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
-    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no resource, such as a mistyped name; null when the Network Watcher list or the virtual network list could not be read
+    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no resource, such as a mistyped name; null when the Network Watcher list, any watcher's flow-log list or the virtual network list could not be read
     - excluded_network_watchers — Number of Network Watchers left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern; null when the Network Watcher list could not be read
-    - excluded_flow_logs — Number of flow logs left out of scope: an id: pattern named the flow log, or a pattern matched its target (a virtual network, subnet, network interface or NSG) by the target's resource group, region or id. A pattern on its Network Watcher or the watcher's resource group never takes a flow log, since it still logs an in-scope network; null when the Network Watcher list could not be read
+    - excluded_flow_logs — Number of flow logs left out of scope: an id: pattern named the flow log, or a pattern matched its target (a virtual network, subnet, network interface or NSG) by the target's resource group, region or id. A pattern on its Network Watcher or the watcher's resource group never takes a flow log, since it still logs an in-scope network; null when the Network Watcher list or any watcher's flow-log list could not be read
     - excluded_virtual_networks — Number of virtual networks left out of scope because a pattern matched them, or all of their subnets; null when the virtual network list could not be read
     - excluded_subnets — Number of subnets in in-scope virtual networks left out of scope because a pattern matched their resource group or id (subnets carry no region); the subnets of an excluded virtual network leave with it, uncounted; null when the virtual network list could not be read
     - in_scope_network_watchers — Number of Network Watchers read and in scope; null when the Network Watcher list could not be read
-    - in_scope_flow_logs — Number of flow logs read and in scope; null when the Network Watcher list could not be read
+    - in_scope_flow_logs — Number of flow logs read and in scope; null when the Network Watcher list or any watcher's flow-log list could not be read
     - in_scope_virtual_networks — Number of virtual networks read and in scope; 0 means none was read or the patterns took out every network, which a check can catch by requiring more than 0; null when the virtual network list could not be read
     - in_scope_subnets — Number of subnets read and in scope; null when the virtual network list could not be read
 
     Is Network Watcher in place?
     - provider_registration_status — Whether the Microsoft.Network provider is registered on the subscription: registered, not_registered or unknown
-    - total_network_watchers — Number of in-scope Network Watchers; 0 when the watcher list could not be read
+    - total_network_watchers — Number of in-scope Network Watchers; null when the watcher list could not be read
     - regions_with_virtual_networks — List of regions with at least one in-scope virtual network; null when the virtual network list could not be read
-    - regions_with_virtual_networks_without_network_watcher — List of regions with in-scope virtual networks and no Network Watcher; empty when the watcher list could not be read, since an unread list never reads as missing; null when the virtual network list could not be read
-    - regions_without_network_watcher_count — Number of regions in regions_with_virtual_networks_without_network_watcher; null when the virtual network list could not be read
+    - regions_with_virtual_networks_without_network_watcher — List of regions with in-scope virtual networks and no Network Watcher; null when the Network Watcher list or the virtual network list could not be read, since an unread list never reads as missing
+    - regions_without_network_watcher_count — Number of regions in regions_with_virtual_networks_without_network_watcher; null when the Network Watcher list or the virtual network list could not be read
 
     Which flow logs exist?
-    - total_flow_logs — Number of in-scope flow logs; 0 when the watcher list could not be read
-    - enabled_flow_logs — Number of in-scope flow logs that are enabled
-    - disabled_flow_logs — Number of in-scope flow logs that are turned off
-    - flow_logs_by_target_type — Number of in-scope flow logs for each kind of target, read from the target's resource id:
+    - total_flow_logs — Number of in-scope flow logs; null when the Network Watcher list or any watcher's flow-log list could not be read
+    - enabled_flow_logs — Number of in-scope flow logs that are enabled; null when the Network Watcher list or any watcher's flow-log list could not be read
+    - disabled_flow_logs — Number of in-scope flow logs that are turned off; null when the Network Watcher list or any watcher's flow-log list could not be read
+    - flow_logs_by_target_type — Number of in-scope flow logs for each kind of target, read from the target's resource id (null when the Network Watcher list or any watcher's flow-log list could not be read):
       - virtual_network (logs a whole virtual network)
       - subnet (logs one subnet)
       - network_interface (logs one network interface)
       - network_security_group (a legacy NSG flow log)
       - unknown (a target of another kind)
-    - vnet_flow_logs — Number of in-scope flow logs that target a virtual network, subnet or network interface (virtual network flow logs, as opposed to the legacy NSG kind)
-    - legacy_nsg_flow_logs — Number of in-scope flow logs that target an NSG; Microsoft stopped allowing new ones after 30 June 2025 and retires them on 30 September 2027, in favour of virtual network flow logs
-    - enabled_flow_logs_filtered — Number of enabled flow logs that log only traffic matching a filter, so they don't cover all of it
-    - enabled_flow_logs_on_unattached_targets — Number of enabled flow logs whose target can't produce records: an NSG attached to no subnet or network interface, or a virtual network or subnet that no longer exists. Network interface targets are not checked
-    - enabled_flow_logs_target_unknown — Number of enabled flow logs whose target could not be checked: a network interface, or an NSG or virtual network list that could not be read
+    - vnet_flow_logs — Number of in-scope flow logs that target a virtual network, subnet or network interface (virtual network flow logs, as opposed to the legacy NSG kind); null when the Network Watcher list or any watcher's flow-log list could not be read
+    - legacy_nsg_flow_logs — Number of in-scope flow logs that target an NSG; Microsoft stopped allowing new ones after 30 June 2025 and retires them on 30 September 2027, in favour of virtual network flow logs; null when the Network Watcher list or any watcher's flow-log list could not be read
+    - enabled_flow_logs_filtered — Number of enabled flow logs that log only traffic matching a filter, so they don't cover all of it; null when the Network Watcher list or any watcher's flow-log list could not be read
+    - enabled_flow_logs_on_unattached_targets — Number of enabled flow logs whose target can't produce records: an NSG attached to no subnet or network interface, or a virtual network or subnet that no longer exists. Network interface targets are not checked; null when the Network Watcher list or any watcher's flow-log list could not be read
+    - enabled_flow_logs_target_unknown — Number of enabled flow logs whose target could not be checked: a network interface, or an NSG or virtual network list that could not be read; null when the Network Watcher list or any watcher's flow-log list could not be read
 
     How long are flow logs kept, and are they analysed?
-    - enabled_flow_logs_retained_indefinitely — Number of enabled flow logs with no retention policy, or a policy of 0 days, so storage keeps the records until something else deletes them
-    - minimum_retention_days — Days of the shortest finite retention among enabled flow logs; null when every enabled flow log is retained indefinitely
-    - enabled_flow_logs_retained_under_90_days — Number of enabled flow logs with a finite retention under 90 days
-    - enabled_flow_logs_retained_under_365_days — Number of enabled flow logs with a finite retention under 365 days
-    - enabled_flow_logs_with_traffic_analytics — Number of enabled flow logs that send records to a Log Analytics workspace through Traffic Analytics
-    - enabled_flow_logs_traffic_analytics_every_10_minutes — Number of enabled flow logs with Traffic Analytics on and analysing every 10 minutes rather than every 60
+    - enabled_flow_logs_retained_indefinitely — Number of enabled flow logs with no retention policy, or a policy of 0 days, so storage keeps the records until something else deletes them; null when the Network Watcher list or any watcher's flow-log list could not be read
+    - minimum_retention_days — Days of the shortest finite retention among enabled flow logs; null when every enabled flow log is retained indefinitely; null when the Network Watcher list or any watcher's flow-log list could not be read
+    - enabled_flow_logs_retained_under_90_days — Number of enabled flow logs with a finite retention under 90 days; null when the Network Watcher list or any watcher's flow-log list could not be read
+    - enabled_flow_logs_retained_under_365_days — Number of enabled flow logs with a finite retention under 365 days; null when the Network Watcher list or any watcher's flow-log list could not be read
+    - enabled_flow_logs_with_traffic_analytics — Number of enabled flow logs that send records to a Log Analytics workspace through Traffic Analytics; null when the Network Watcher list or any watcher's flow-log list could not be read
+    - enabled_flow_logs_traffic_analytics_every_10_minutes — Number of enabled flow logs with Traffic Analytics on and analysing every 10 minutes rather than every 60; null when the Network Watcher list or any watcher's flow-log list could not be read
 
     Which virtual networks are covered?
     - virtual_networks_read — True if the virtual network list was read; false if not, in which case every virtual network, subnet and region figure below is null: unknown, never "no networks" or "not covered"

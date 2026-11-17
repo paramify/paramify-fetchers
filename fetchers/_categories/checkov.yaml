@@ -30,8 +30,9 @@ requires:
     - python3
   # Listed as a package too, not just a binary: a `checkov` on PATH from some
   # other environment will not match the pin this repo installs.
+  # The checkov CLI is a tool above, installed in its own environment (pipx); only
+  # azure-identity is imported from the paramify environment.
   python_packages:
-    - checkov
     - azure-identity
 
 auth:
