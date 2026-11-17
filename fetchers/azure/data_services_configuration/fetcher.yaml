@@ -1,5 +1,5 @@
 name: azure_data_services_configuration
-version: 0.2.1
+version: 0.3.0
 description: >-
   Shows whether MongoDB vCore clusters, Data Explorer clusters and Event Hubs namespaces limit network access, avoid shared keys, restrict admin rights, use customer-managed keys and export audit logs.
 category: azure
@@ -103,20 +103,20 @@ evidence_set:
     - in_scope_event_hub_namespaces — Number of Event Hubs namespaces read and in scope; null when the namespace list could not be read; 0 for all three kinds means there are none or the patterns took out every one, which a check can catch by requiring more than 0
 
     What was checked?
-    - total_mongo_clusters — Number of in-scope MongoDB vCore (Azure DocumentDB) clusters; reads 0, not null, when the list could not be read, so read it together with in_scope_mongo_clusters
-    - total_data_explorer_clusters — Number of in-scope Azure Data Explorer clusters; reads 0, not null, when the list could not be read, so read it together with in_scope_data_explorer_clusters
-    - total_event_hub_namespaces — Number of in-scope Event Hubs namespaces; reads 0, not null, when the list could not be read, so read it together with in_scope_event_hub_namespaces
-    - total_event_hubs — Number of event hubs across all in-scope namespaces whose event hubs could be read; a namespace whose event hub list couldn't be read adds none, and no count shows it (the run fails)
+    - total_mongo_clusters — Number of in-scope MongoDB vCore (Azure DocumentDB) clusters; null when the MongoDB cluster list could not be read, as is every count built from that list
+    - total_data_explorer_clusters — Number of in-scope Azure Data Explorer clusters; null when the Data Explorer cluster list could not be read, as is every count built from that list
+    - total_event_hub_namespaces — Number of in-scope Event Hubs namespaces; null when the namespace list could not be read, as is every count built from that list, including the event hub counts
+    - total_event_hubs — Number of event hubs across all in-scope namespaces whose event hubs could be read; null when the namespace list could not be read; a namespace whose event hub list couldn't be read adds none, and no count shows it (the run fails)
     - provider_registration_status_mongo_clusters — Whether Microsoft.DocumentDB is registered on the subscription: registered, not_registered or unknown
     - provider_registration_status_data_explorer — Whether Microsoft.Kusto is registered on the subscription: registered, not_registered or unknown
     - provider_registration_status_event_hubs — Whether Microsoft.EventHub is registered on the subscription: registered, not_registered or unknown
 
     Can MongoDB clusters be reached from the internet?
-    - mongo_clusters_public_access_disabled — Number of MongoDB clusters whose public network access is Disabled; otherwise public access is judged on the distinct IPv4 addresses all firewall rules admit together (overlaps merged, the allow Azure services rule 0.0.0.0-0.0.0.0 left out), and a cluster with no rules at all (nothing public can connect) is in none of the counts below
+    - mongo_clusters_public_access_disabled — Number of MongoDB clusters whose public network access is Disabled, even when their firewall rules couldn't be read; otherwise public access is judged on the distinct IPv4 addresses all firewall rules admit together (overlaps merged, the allow Azure services rule 0.0.0.0-0.0.0.0 left out), and a cluster with no rules at all (nothing public can connect) is in none of the counts below
     - mongo_clusters_firewall_allow_all — Number of MongoDB clusters whose firewall rules together admit every IPv4 address, even when split across several ranges
     - mongo_clusters_firewall_broad — Number of MongoDB clusters whose firewall rules together admit more addresses than a /8 (16,777,216) but not every IPv4 address, or that have the allow Azure services rule, which admits every Azure-hosted client from any tenant
     - mongo_clusters_firewall_restricted — Number of MongoDB clusters whose firewall rules together admit a /8 or fewer addresses and have no allow Azure services rule
-    - mongo_clusters_public_access_unknown — Number of MongoDB clusters whose firewall rules couldn't be read
+    - mongo_clusters_public_access_unknown — Number of MongoDB clusters whose firewall rules couldn't be read and whose public network access isn't Disabled
     - mongo_clusters_with_private_endpoints — Number of MongoDB clusters with at least one private endpoint connection
 
     Are MongoDB clusters configured securely?
