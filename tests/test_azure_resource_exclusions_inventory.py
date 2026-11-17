@@ -703,7 +703,7 @@ def test_policy_list_limits_leave_the_recount_known_but_cut_deployments_null_the
 def test_policy_recount_survives_a_states_read_that_fails_partway(monkeypatch, tmp_path):
     code, evidence, _ = run_policy(monkeypatch, tmp_path, PATTERNS, fail=("states",))
     summary, results = evidence["summary"], evidence["results"]
-    assert code == 1 and summary["non_compliant_states_truncated"] is False
+    assert code == 1 and summary["non_compliant_states_truncated"] is None
     assert (summary["non_compliant_resources"], summary["non_compliant_assignments"]) == (2, 1)
     assert [a["is_compliant"] for a in results["assignment_compliance"]] == [True, False]
     assert summary["remediation_failed_deployments"] == 0
