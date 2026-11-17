@@ -95,6 +95,18 @@ def _build(module: str, client_name: str) -> object:
     raise AssertionError(f"could not construct {client_name} offline: {last}")
 
 
+def _import_first(module: str, names: str) -> object:
+    """`names` may list alternatives as `A|B`: the first one the installed SDK declares is returned. For a field one
+    major declares on a properties model and an older major declares on the resource model itself."""
+    *alternatives, last = names.split("|")
+    for name in alternatives:
+        try:
+            return _import(module, name)
+        except AttributeError:
+            continue
+    return _import(module, last)
+
+
 def _model_fields(model: type) -> set[str]:
     """Declared field names, across both Azure model generations.
 
@@ -1623,6 +1635,46 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
         "ManagedClusterAgentPoolProfile",
         ["enable_fips", "node_image_version", "security_profile"],
         "azure/aks_cluster_configuration — a renamed enable_fips reads every pool as FIPS unknown",
+    ),
+    (
+        "azure.mgmt.containerservice.models",
+        "ManagedClusterAgentPoolProfile",
+        ["enable_auto_scaling"],
+        "azure/aks_cluster_configuration — a renamed enable_auto_scaling counts no pool as autoscaling",
+    ),
+    (
+        "azure.mgmt.containerservice.models",
+        "ManagedClusterAutoUpgradeProfile",
+        ["node_os_upgrade_channel"],
+        "azure/aks_cluster_configuration — a renamed node_os_upgrade_channel reads every cluster's node OS channel as unknown",
+    ),
+    # azure-mgmt-postgresqlflexibleservers 3 is a TypeSpec SDK: data_encryption is
+    # declared on ServerProperties and flattened onto Server for attribute access,
+    # so the properties model is where a rename would show. 2.x (still allowed by
+    # the pin) has no ServerProperties and declares data_encryption on Server.
+    (
+        "azure.mgmt.postgresqlflexibleservers.models",
+        "ServerProperties|Server",
+        ["data_encryption"],
+        "azure/postgresql_configuration — a renamed data_encryption reads every server's key source as unknown",
+    ),
+    (
+        "azure.mgmt.postgresqlflexibleservers.models",
+        "DataEncryption",
+        ["type"],
+        "azure/postgresql_configuration — data encryption type (AzureKeyVault or SystemManaged)",
+    ),
+    (
+        "azure.mgmt.rdbms.mysql_flexibleservers.models",
+        "Server",
+        ["data_encryption"],
+        "azure/mysql_configuration — a renamed data_encryption reads every server's key source as unknown",
+    ),
+    (
+        "azure.mgmt.rdbms.mysql_flexibleservers.models",
+        "DataEncryption",
+        ["type"],
+        "azure/mysql_configuration — data encryption type (AzureKeyVault or SystemManaged)",
     ),
     (
         "azure.mgmt.containerservice.models",
@@ -4000,7 +4052,7 @@ def test_model_fields_present(
     module: str, model: str, fields: list[str], affects: str
 ) -> None:
     """A model field a fetcher reads must still be declared."""
-    declared = _model_fields(_import(module, model))  # type: ignore[arg-type]
+    declared = _model_fields(_import_first(module, model))  # type: ignore[arg-type]
     missing = [f for f in fields if f not in declared]
     assert not missing, (
         f"{model} no longer declares: {', '.join(missing)}\n"

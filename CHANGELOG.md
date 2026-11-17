@@ -12,6 +12,43 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`azure_endpoint_availability` fetcher.** Reads Application Insights availability tests and their hourly
+  results, and Standard load balancers' data-path (VipAvailability) and health-probe (DipAvailability)
+  availability with measurement coverage, each judged against an availability target once one is set (none by
+  default) and only when every hour was measured; items that cannot be judged are counted apart, so one new or
+  unread test never leaves the verdict on the others unknown. A load balancer's data path is read only when it has
+  load-balancing rules and its health probe only when it has probes, so outbound-only load balancers are counted
+  apart instead of reading as unmeasured. Reads classic ping test URLs from their XML, and honours location:
+  exclusions. Reports whether tests check the status code and content. Unread results leave verdicts null rather
+  than 0.
+- **Summary counts for database encryption, AKS autoscaling and node OS patching.**
+  `azure_postgresql_configuration` and `azure_mysql_configuration` 0.3.0 add `customer_managed_key_servers` and
+  `data_encryption_unknown_servers` from each server's data encryption type (AzureKeyVault or SystemManaged); a
+  server with no type is counted apart, never as platform-managed. `azure_aks_cluster_configuration` 0.6.0 adds
+  `autoscaling_agent_pools`, `node_os_auto_upgrade_clusters` (SecurityPatch or NodeImage),
+  `node_os_unmanaged_clusters` (Unmanaged, where the node OS may still install its own updates, counted apart) and
+  `node_os_upgrade_channel_unknown_clusters`, null like the other counts when the cluster list can't be read.
+- **`azure_flexible_server_backups` fetcher.** Reads Azure Database for PostgreSQL and MySQL flexible servers: each
+  server's newest completed automatic backup against a window (manual, on-demand backups reported apart, and backups
+  whose labels match no known value counted as unknown, never automatic), backup retention against an optional minimum
+  authorized period (unknown retention counted apart), geo-redundant backup, stopped servers, and servers created by point-in-time restore within an
+  optional restore-test interval. One API version that serves both the server and backup lists is used. Read replicas are counted, not judged. Unread
+  backup lists leave verdicts null rather than 0.
+- **`azure_velero_backups` fetcher.** Reads Velero backup storage locations in Azure Blob Storage, from Azure APIs
+  only: each backup's phase, schedule, completion time and expiry, missed runs of configured expected schedules,
+  schedules past the recovery point objective, each restore's result, and whether the backup
+  storage is geo-replicated and encrypted with a customer-managed key. Missed runs come from the gaps between
+  Completed backups, with 10% grace, and only over the part of the lookback the backups are kept for, so a backup
+  Velero deleted at the end of its retention is not a missed run. A listed schedule is judged against its own
+  interval. Failed backups, incomplete snapshots and restores with errors are counted in full and again as
+  current (unresolved) failures, with planned failure tests matched by name and counted apart. Blob reads go only
+  to endpoints Resource Manager returned for in-scope accounts in the target subscription, with redirects refused,
+  retry dropped connections, and parse XML with defusedxml. Unread locations leave counts null rather than 0.
+- `paramify upload --no-waf-check` turns off the check that drops a file holding `../`, `/etc/passwd`, `/bin/sh`,
+  `/bin/bash` or `<script` before the upload. Those strings were confirmed blocked on one host's WAF, but some hosts
+  exempt the upload routes, so CVE text in a findings file was dropped though the WAF would accept it. With the flag
+  the file is sent; if the WAF does refuse it (a 403 with no request id), the upload still drops only that file. The
+  plan notes that the check is off. `--plan` takes the flag too.
 - **`wiz_inventory`**, the Wiz cloud resource inventory, as a pipeline fetcher (`kind: inventory`, `id_scheme:
   wiz-resource-id`). One record per resource from `cloudResourcesV2` under `payload.data`, keyed by the Wiz resource
   id, with its cloud ID (`external_id`), account, region, type, IPs, OS, image, environment and owner, and internet
@@ -134,6 +171,84 @@ schemas and the `paramify` CLI — not the internal code.
   were compared with. Without the setting the evidence is unchanged apart from
   these four keys (false or null).
 
+- **`azure_devops_work_items` 0.3.0: approval from a person field, and types approved after the change.**
+  No new API calls: the field comes from the work item batch, when it was filled
+  from the updates already read, and which types define it from the type listing.
+  With no new setting, approval is read exactly as in 0.2.0.
+  - **`approval_field`** (`AZURE_DEVOPS_APPROVAL_FIELD`) names a person field's
+    reference name, such as `Custom.ChangeApprover`. Each item records whom it names
+    and since when (`field_approval`): from the last update that set it to that
+    person, so a change of person restarts it. The field is a name anyone with
+    edit rights can type, so the approval also records who made that update
+    (`set_by`), and the new `change_items_approval_field_set_by_someone_else`
+    lists the items where that wasn't the person named (`null` when who set one
+    is unknown). A display name is `bad_config`.
+  - **`approval_source`** (`AZURE_DEVOPS_APPROVAL_SOURCE`, `states_and_comments`
+    by default): `field` counts only a filled field as approval, `both` counts it
+    or a state or comment approval, whichever came first. Clearing the field
+    withdraws its approval; a move back or a rejection doesn't.
+  - **`approval_field_from`** (`AZURE_DEVOPS_APPROVAL_FIELD_FROM`, a date) and
+    **`approval_before_field`** (`AZURE_DEVOPS_APPROVAL_BEFORE_FIELD`,
+    `states_and_comments` by default): an item that finished before the date (by
+    its closed date, else its resolved date, else when it entered its current
+    state) is judged by states and comments, by `both`, or left out of every
+    approval figure (`exclude`); an open item follows `approval_source`. Each item records the route that judged it (`approval_route`).
+    `both` or `exclude` without a date is `bad_config`.
+  - **`emergency_types`** (`AZURE_DEVOPS_EMERGENCY_TYPES`, none by default):
+    types whose approval may come after the change, as the comparator's
+    setting of the same name. Their items still need an approval, but a
+    changeset made before it moves from `change_items_changed_before_approval`
+    to the new `emergency_items_approved_after_change`. Each item gains
+    `emergency_type`.
+  - **Summary.** The five settings, plus `change_items_approved_by_field`,
+    `change_items_left_out_of_approval` and `approval_field_types_missing` (the
+    approval types a project defines without the field, as after a misspelt
+    reference name). An approval whose time is unknown leaves the change-order
+    lists `null`, as an unread changeset does. With `approval_field_from` set,
+    each item also records `before_field_approval`, the approval its
+    `approval_before_field` route finds, for `azure_change_work_items` to judge a
+    change made before the date.
+
+- **`azure_change_work_items` 0.3.0: a record left out of approval judging isn't
+  read as unapproved.** When `azure_devops_work_items` left a record out
+  (`approval_route` `exclude`: finished before its `approval_field_from` while its
+  `approval_before_field` is `exclude`), the record's `approved` is `null`, its new
+  `approval_judged` is `false`, and a change it records reads `approved: null`,
+  neither approved nor unapproved, unless another record of it is judged and
+  unapproved. Such a change no longer adds to
+  `changes_recorded_without_approval` or `changes_without_approved_record`. The new
+  `summary.changes_recorded_approval_not_judged` counts these recorded changes
+  whose approval is unknown. Work items evidence from before
+  0.3.0 has no `approval_route`, so every record is judged as before.
+  A change made before a work items file's `approval_field_from` (read from its
+  `results.selection`, so there is no setting here to keep in step) is judged by
+  that file's `approval_before_field` route, from the record's
+  `before_field_approval`, not by the field. Each record on such a change has
+  `change_before_approval_field` `true`, and the new
+  `summary.changes_recorded_before_approval_field` counts these changes.
+
+- **`github_image_signing` 0.1.0 shows whether GitHub Actions signs and
+  verifies container images with cosign.** It reads the workflow files on
+  each default branch and records every `cosign sign` step with the kind of
+  key it uses (a key management service, keyless or other), whether the
+  command names the image by digest, whether it skips the transparency log,
+  and whether the step can be skipped or fail without failing the run
+  (an `if`, `continue-on-error`, or `|| true` in the script). It records
+  every `cosign verify` step and what it checks against, and lists the
+  verify steps that cannot fail the run. It lists the workflows that mention
+  cosign without a cosign command in the file, where signing happens
+  somewhere the file does not show, and the workflows that call a reusable
+  workflow, whose signing it does not read. For each workflow that signs, it
+  reads the runs in the window by outcome and the latest successful run,
+  leaving out pull request runs, which it counts apart. The summary lists the repositories that sign
+  without verifying. It needs Contents for the files and Actions for the
+  runs; with `include_runs: false` it reads the files only and every run
+  figure is null. It reads workflow files, not the registry, and copies no
+  script text into the evidence. KSI-SVC-VRI. Not yet run against a live
+  organization. The workflow file reader and the newest-first run walk moved
+  from `github_actions_security` and `github_workflow_runs` into the shared
+  GitHub client so that the three fetchers use one copy; their evidence is
+  unchanged.
 - **`wiz_vulnerability_findings` 0.4.0: SLA columns.** After the 43 legacy
   columns (unchanged, so existing intake presets keep mapping), the CSV adds the
   Wiz fields Paramify's remediation SLAs depend on: `Is Internet Reachable` and
@@ -356,6 +471,20 @@ schemas and the `paramify` CLI — not the internal code.
   - Needs read on the workspace's logs (Reader, or a custom role with
     `workspaces/query/read` on the four tables, plus `IdentityInfo` when `groups`
     is set). Maps to KSI-IAM-APM, KSI-SVC-SIN, KSI-IAM-SNU and KSI-MLA-LET.
+- **`azure_aks_workload_security`** (`EVD-AZURE-AKS-WORKLOAD-SECURITY`): workload security
+  read from each AKS cluster's Kubernetes API with a Microsoft Entra token, with no
+  kubectl and no stored kubeconfig. For every workload (pods grouped by the Deployment,
+  StatefulSet, DaemonSet or Job that runs them) it records each container's effective
+  security context: non-root, privilege escalation, read-only root filesystem, dropped and
+  added capabilities, privileged, seccomp profile, plus host namespaces and host path
+  volumes. For every namespace it records the Pod Security Admission levels and network
+  policy coverage, including default-deny policies and workloads no policy selects, and
+  for the cluster whether a network policy engine enforces those policies at all.
+  System namespaces (`AKS_SYSTEM_NAMESPACES`) and Windows workloads are listed but not
+  judged. Needs Azure Kubernetes Service Cluster User Role and Azure Kubernetes Service
+  RBAC Reader on the cluster, Entra integration, and a network path to the API server; a
+  list that cannot be read leaves its counts null and fails the run. No environment
+  variables, images, secrets or logs are read.
 - **`checkov_bicep` 0.3.0: the TFVC source signs in with Entra when no token is set.**
   Before, `source_type: tfvc` authenticated only with the `tfvc_token` PAT.
   - With no `tfvc_token`, the fetcher gets an Entra token for Azure DevOps from
@@ -1777,6 +1906,20 @@ schemas and the `paramify` CLI — not the internal code.
   scan is read in one. The output, its file name and the IAM actions are unchanged. It needs the `aws` extra
   (boto3), which the Docker image already installs.
 
+- `qualys_vmdr_vulnerability_findings` uses the v6 host detection and v4 KnowledgeBase endpoints in place of v2,
+  which Qualys has scheduled for end of life. Requests, parameters and the report columns are unchanged.
+
+- `qualys_vmdr_vulnerability_findings` reads QVS by change window instead of 25 CVEs per request. It walks
+  `qvs_last_modified_after`/`qvs_last_modified_before` windows newest first and keeps the CVEs it needs, so QVS
+  enrichment takes a few dozen requests regardless of how many CVEs the detections reference. Per-CVE lookups
+  could exceed the QVS hourly rate limit in large environments. Windows too large for one response are split; CVEs
+  the walk does not return are looked up individually, and a record outside its window fails the report. QVS
+  requests use the v3 endpoint.
+
+- `qualys_vmdr_vulnerability_findings` and `qualys_stig_compliance_report` failures caused by throttling name the
+  endpoint, HTTP status, Qualys code, requested wait and the numeric `X-RateLimit-*` / `X-Concurrency-Limit-*` header
+  values, so the limit that was hit is visible in the failure reason. Response bodies are still never reported.
+
 - **Checkov is installed in its own environment.** `requirements.txt`, the `checkov` extra and `all` no longer install
   the `checkov` package, and the Docker image puts it in its own virtualenv with only the `checkov` executable on
   `PATH`. Checkov pins exact versions of libraries other fetchers also use, such as boto3, so sharing an environment
@@ -2618,6 +2761,17 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- **Jira fetchers: a scoped API token sent to the site URL now gives the fix,
+  not a generic `auth_failed`.** Jira answers `401 Unauthorized; scope does not
+  match` on every call when a scoped token is used with
+  `JIRA_BASE_URL=https://<site>.atlassian.net`. The run now stops with
+  `bad_config` and names the gateway URL to use
+  (`https://api.atlassian.com/ex/jira/<cloudId>`, or the Government Cloud
+  gateway) and the site's `_edge/tenant_info` link that gives the cloudId.
+  Through the gateway, the same answer is reported as `not_authorized`, a
+  missing scope. `fetchers/jira/README.md` now lists all four Jira fetchers that
+  need no admin access. New sections say how to run without Jira admin access
+  and how to read this error.
 - **Disk, Key Vault, storage and SQL Managed Instance fetchers: an unread list
   gives null counts, not 0.** When a list the run needs is refused (403),
   throttled or times out, every total, count and percentage built from it is
@@ -2802,6 +2956,18 @@ schemas and the `paramify` CLI — not the internal code.
   `resource_exclusion_patterns_unmatched` null. When the watcher list failed,
   `total_network_watchers`, `regions_with_virtual_networks_without_network_watcher`
   and `regions_without_network_watcher_count` are null too (before: 0, [] and 0). With every list read the output is the same.
+
+- **`azure_data_services_configuration` 0.3.0: a service list that was not
+  read gives null counts, and a MongoDB cluster with public access Disabled
+  reads as disabled without its firewall rules.**
+  - Before, an unread MongoDB, Data Explorer or Event Hubs list left every
+    total and count built from it at 0, which looks like "nothing to check".
+    They are now null, so a check can't pass on an empty read. The run still
+    exits 1 as `partial_failure`.
+  - Before, a cluster whose public network access is Disabled had
+    `public_access` null when its firewall rule list failed, so
+    `mongo_clusters_public_access_unknown` counted it. It is now `disabled`.
+    Other clusters stay null. Each cluster's `firewall_rules` still reads null.
 - **`paramify doctor` and the note before `paramify run` find an upload token
   in `.env`.** So do `manifest set-stack` and the stack picker in the TUI.
   Before, only `paramify stacks` and `paramify upload` read `.env`, and the

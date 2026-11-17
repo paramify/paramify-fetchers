@@ -26,6 +26,7 @@ organization, each with its own token and API host.
 | `github_release_integrity` | Build provenance on each release asset (by digest), immutable releases, release tags locked by tag rulesets | SVC-VRI, SCR-MIT |
 | `github_deployment_controls` | Environments' reviewers, self-review, wait timers, branch policies and admin bypass; production deployments in a window with commit, creator, whether Actions made them and who approved them | CMT-RMV, CMT-VTD, CMT-LMC |
 | `github_workflow_runs` | Every workflow run in a window with its trigger, branch, commit, actor and result, and the artifacts each run kept (metadata only) | CMT-VTD, CMT-RMV |
+| `github_image_signing` | The cosign sign and verify steps in each workflow file: the kind of signing key, whether the image is named by digest, whether the step can be skipped; and how each signing workflow ran in a window | SVC-VRI |
 | `github_vulnerability_disclosure` | Private vulnerability reporting, security policy, repository security advisories with state and age | PIY-RVD |
 | `github_significant_change_notifications` | FedRAMP SCN objects from pull requests flagged as significant changes, schema-validated and checked against SCN-CSO-INF | CMT-LMC |
 | `github_audit_log` | Audit log event counts and every access, protection and control change in a window (**Enterprise Cloud only**) | MLA-LET, MLA-OSM, IAM-SUS |
@@ -61,9 +62,9 @@ a missing grant is reported as e.g. `(needs: administration=read)`.
 |---|---|---|
 | Metadata (repository) | `metadata` | all |
 | Administration (repository) | `administration` | branch_protection (also rule-suite bypasses), pull_request_checks (required checks), dependabot_alerts (security updates), code_scanning_alerts (default setup), secret_scanning (settings), non_user_credentials (deploy keys), actions_security (Actions policy, runners), release_integrity (immutable releases) |
-| Contents (repository) | `contents` | pull_request_checks (commits), dependabot_alerts (dependency graph), actions_security (workflow files), branch_protection (CODEOWNERS errors) |
+| Contents (repository) | `contents` | pull_request_checks (commits), dependabot_alerts (dependency graph), actions_security (workflow files), branch_protection (CODEOWNERS errors), image_signing (workflow files) |
 | Pull requests (repository) | `pull_requests` | pull_request_checks, significant_change_notifications |
-| Actions (repository) | `actions` | deployment_controls (environments, run approvals), workflow_runs, actions_security (OIDC subject, only in repositories with a workflow that uses OIDC) |
+| Actions (repository) | `actions` | deployment_controls (environments, run approvals), workflow_runs, actions_security (OIDC subject, only in repositories with a workflow that uses OIDC), image_signing (runs of the signing workflows; or set `include_runs: false`) |
 | Deployments (repository) | `deployments` | deployment_controls |
 | Attestations (repository) | `attestations` | release_integrity |
 | Repository security advisories (repository) | `repository_advisories` | vulnerability_disclosure. **Without it GitHub lists published advisories only, with no error**: drafts and private reports disappear and nothing says so |
@@ -88,7 +89,9 @@ fetchers at version 0.1.0. That measurement does not include
 `workflow_runs`, the run approvals in `deployment_controls` 0.2.0, or the
 runner groups and OIDC subjects in `actions_security` 0.2.0. Their rows in
 the table above are not yet measured with a minimal token. If one is wrong,
-the failure names the permission that GitHub wants.
+the failure names the permission that GitHub wants. `image_signing` 0.1.0 is
+built against GitHub's API description and covered by unit tests; it has not
+yet been run against a live organization.
 
 Two settings are visible only to an **organization owner**: the two-factor
 requirement and the list of members without two-factor. Collected by a
@@ -243,6 +246,38 @@ repositories; each returns well-formed, misleading data without an error.
 
 ## Not visible to these fetchers
 
+- **Image signing is read from workflow files, not from the registry.**
+  `image_signing` finds `cosign sign` and `cosign verify` commands in the
+  `run` scripts of the workflow files on each default branch. It does not
+  read the registry, so it cannot say which images carry a signature today.
+  cosign called from a script file, a make target, a composite action or a
+  reusable workflow in another file is not seen: the file row lists the
+  reusable workflows it calls, and the summary lists the workflows that
+  mention cosign (an installer, a make target) without a cosign command in
+  the file, and every workflow that calls a reusable workflow. A script that writes cosign commands into a file with a
+  here-document reads as running them. Other signing tools are not
+  recognized. Each cosign command is one entry: a step that runs two
+  commands counts twice, and one command in a loop that signs many images
+  counts once.
+- **A signing workflow's run is not its signing step.** `image_signing`
+  reads each run's result, not each step's. A signing step under an `if`, or
+  with `continue-on-error`, can be skipped or fail in a run that succeeds,
+  and so can a command the script follows with `|| true`, `|| :` or a
+  message; the summary lists those steps so the run figures are read with
+  that in mind, and lists verify steps of that kind as not enforced. Two
+  other ways a script hides a failure are not detected: `set +e`, and a
+  pipe from cosign in a step that does not set `shell: bash` (GitHub's
+  default shell runs without `pipefail`). Runs on every branch are counted, while the steps are those of the
+  default branch's file. Pull request runs (`pull_request`,
+  `pull_request_target`) are counted apart and left out of every other run
+  figure: a signing workflow often runs on pull requests with its sign step
+  skipped, and such a run still succeeds.
+- **A signing key is classified only from what the file says.** The key is
+  a key management service only when the `--key` value, written out or set
+  in the workflow's own `env`, starts with that service's scheme. A value
+  from a secret, a variable or a shell expression reads as `other`, cosign's
+  `env://` form reads as `environment_variable`, and no `--key` and no
+  `--sk` reads as `keyless`.
 - **Review or merge gates enforced outside GitHub** (a bot merge queue such as
   Prow, or comment-driven approval) do not appear as reviews or rules; such a
   repository reads as unreviewed and unprotected. `pull_request_checks`
@@ -273,8 +308,10 @@ repositories; each returns well-formed, misleading data without an error.
 ## Free text in the evidence
 
 The evidence holds text that people write: commit subjects, pull request
-titles, advisory summaries, change notification sections and deploy key
-titles. A web application firewall can refuse an upload that contains text
+titles, advisory summaries, change notification sections, deploy key
+titles and workflow step names. `image_signing` copies no script text.
+From a workflow's `env` it keeps one thing, a signing key's reference, and
+only when that is a plain key management service address. A web application firewall can refuse an upload that contains text
 such as `../`, `/bin/sh` or `<script`. If an upload fails with a bare 403, look
 for this type of text in the file.
 
