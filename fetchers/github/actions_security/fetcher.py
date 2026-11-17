@@ -8,12 +8,10 @@ from pathlib import Path
 import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "_shared"))
-from github_client import run  # noqa: E402
+from github_client import run, workflow_file_texts  # noqa: E402
 
 NAME = "github_actions_security"
 CONFIG = {"include_self_hosted_runners": ("GITHUB_INCLUDE_SELF_HOSTED_RUNNERS", True)}
-WORKFLOW_FIELDS = ('object(expression: "HEAD:.github/workflows") { ... on Tree { entries { name type '
-                  'object { ... on Blob { text isBinary isTruncated } } } } }')
 FULL_SHA = re.compile(r"[0-9a-f]{40}\Z")
 # Triggers that run with the base repository's secrets and a write token on an event an outsider can cause.
 PRIVILEGED_TRIGGERS = ("pull_request_target", "workflow_run")
@@ -125,23 +123,12 @@ def analyse(name, text):
 
 def workflow_files(client, org, repos):
     """{repository: [file analyses]}, or None. GitHub runs only .yml and .yaml files directly in .github/workflows."""
-    found = client.graphql_repos("GraphQL workflow files", org, [r["name"] for r in repos], WORKFLOW_FIELDS)
+    found = workflow_file_texts(client, org, repos)
     if found is None:
         return None
-    out = {}
-    for name, data in found.items():
-        entries = (data.get("object") or {}).get("entries") or []
-        rows = []
-        for e in sorted(entries, key=lambda e: e.get("name") or ""):
-            if e.get("type") != "blob" or not str(e.get("name")).endswith((".yml", ".yaml")):
-                continue
-            blob = e.get("object") or {}
-            if blob.get("text") is None or blob.get("isTruncated") or blob.get("isBinary"):
-                rows.append({"file": e["name"], "parsed": False, "error": "content not readable over GraphQL"})
-            else:
-                rows.append(analyse(e["name"], blob["text"]))
-        out[name] = rows
-    return out
+    return {name: [{"file": f, "parsed": False, "error": "content not readable over GraphQL"} if text is None
+                   else analyse(f, text) for f, text in files]
+            for name, files in found.items()}
 
 
 def selected(client, base, policy):
