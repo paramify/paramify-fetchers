@@ -12,6 +12,13 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **Summary counts for database encryption, AKS autoscaling and node OS patching.**
+  `azure_postgresql_configuration` and `azure_mysql_configuration` 0.3.0 add `customer_managed_key_servers` and
+  `data_encryption_unknown_servers` from each server's data encryption type (AzureKeyVault or SystemManaged); a
+  server with no type is counted apart, never as platform-managed. `azure_aks_cluster_configuration` 0.6.0 adds
+  `autoscaling_agent_pools`, `node_os_auto_upgrade_clusters` (SecurityPatch or NodeImage),
+  `node_os_unmanaged_clusters` (Unmanaged, where the node OS may still install its own updates, counted apart) and
+  `node_os_upgrade_channel_unknown_clusters`, null like the other counts when the cluster list can't be read.
 - **`azure_flexible_server_backups` fetcher.** Reads Azure Database for PostgreSQL and MySQL flexible servers: each
   server's newest completed automatic backup against a window (manual, on-demand backups reported apart, and backups
   whose labels match no known value counted as unknown, never automatic), backup retention against an optional minimum
