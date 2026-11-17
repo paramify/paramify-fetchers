@@ -255,6 +255,8 @@ class GitHubClient:
         self.last_message = ""  # GitHub's message for the last non-2xx; bodies of non-2xx are never returned
         # Fine-grained and classic personal tokens; an App installation token is ghs_. Some endpoints serve Apps only.
         self.personal_token = token.startswith(("github_pat_", "ghp_"))
+        # An App installation token acts with the installation's permissions alone; it has no user and no role.
+        self.installation_token = token.startswith("ghs_")
         # The target's repository filters, lower-cased, for a fetcher that reads organization-wide records which
         # name a repository (the audit log). run() fills them; both empty means no filter.
         self.repositories_filter: List[str] = []

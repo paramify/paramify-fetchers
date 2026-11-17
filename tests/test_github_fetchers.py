@@ -3673,6 +3673,20 @@ def test_audit_event_repository_scope(event, allow, exclude, kept):
 # --- access_review: an organization with no invitation list -------------------------------
 
 NO_INVITATIONS = (404, {"message": "Not Found"}, {"X-Accepted-GitHub-Permissions": "members=read"})
+APP_TOKEN = {"GITHUB_TOKEN": "ghs_test"}            # an App installation token: permissions only, no user
+USER_TOKEN = {"GITHUB_TOKEN": "github_pat_test"}    # a personal token: also bound by its user's role
+
+
+def no_invitations_routes(user=None):
+    routes = access_routes()
+    routes[f"orgs/{ORG}/invitations"] = NO_INVITATIONS
+    if user:
+        routes["user"] = {"login": user}
+    return routes
+
+
+def invitation_failed(ev):
+    return f"GET orgs/{ORG}/invitations" in [f["operation"] for f in ev["metadata"]["api_failures"]]
 
 
 def test_invitations_read_normally_are_marked_available(fake, monkeypatch, tmp_path):
@@ -3682,35 +3696,32 @@ def test_invitations_read_normally_are_marked_available(fake, monkeypatch, tmp_p
     assert ev["summary"]["pending_invitations"] == 1
 
 
-def test_a_404_on_invitations_with_teams_and_outsiders_readable_is_unavailable_not_a_failure(fake, monkeypatch, tmp_path):
-    routes = access_routes()
-    routes[f"orgs/{ORG}/invitations"] = NO_INVITATIONS
-    fake(routes)
-    code, ev, status = run_fetcher("access_review", monkeypatch, tmp_path)
+def test_an_app_token_404_on_invitations_with_teams_and_outsiders_readable_is_unavailable(fake, monkeypatch, tmp_path):
+    f = fake(no_invitations_routes())
+    code, ev, status = run_fetcher("access_review", monkeypatch, tmp_path, **APP_TOKEN)
     assert code == 0 and ev["metadata"]["partial_failure"] is False and ev["metadata"]["api_failures"] == []
     assert ev["metadata"]["pending_invitations_available"] is False
     assert ev["pending_invitations"] is None and ev["summary"]["pending_invitations"] is None  # unknown, never zero
     assert ev["summary"]["members_total"] == 2 and ev["summary"]["teams_total"] == 1  # the rest is collected
+    assert "user" not in {p for p, _ in f.calls}  # an installation token has no user to ask about
 
 
 def test_a_404_on_invitations_when_teams_are_unreadable_stays_a_failure(fake, monkeypatch, tmp_path):
     # A token without members: read gets the same 404, and cannot list teams either.
-    routes = access_routes()
-    routes[f"orgs/{ORG}/invitations"] = NO_INVITATIONS
+    routes = no_invitations_routes()
     routes[f"orgs/{ORG}/teams"] = (403, {"message": "Resource not accessible by integration"})
     fake(routes)
-    code, ev, _ = run_fetcher("access_review", monkeypatch, tmp_path)
+    code, ev, _ = run_fetcher("access_review", monkeypatch, tmp_path, **APP_TOKEN)
     operations = [f["operation"] for f in ev["metadata"]["api_failures"]]
-    assert code == 1 and f"GET orgs/{ORG}/invitations" in operations and f"GET orgs/{ORG}/teams" in operations
+    assert code == 1 and invitation_failed(ev) and f"GET orgs/{ORG}/teams" in operations
 
 
 def test_a_404_on_invitations_when_outside_collaborators_are_unreadable_stays_a_failure(fake, monkeypatch, tmp_path):
-    routes = access_routes()
-    routes[f"orgs/{ORG}/invitations"] = NO_INVITATIONS
+    routes = no_invitations_routes()
     routes[f"orgs/{ORG}/outside_collaborators"] = (403, {"message": "Resource not accessible by integration"})
     fake(routes)
-    code, ev, _ = run_fetcher("access_review", monkeypatch, tmp_path)
-    assert code == 1 and f"GET orgs/{ORG}/invitations" in [f["operation"] for f in ev["metadata"]["api_failures"]]
+    code, ev, _ = run_fetcher("access_review", monkeypatch, tmp_path, **APP_TOKEN)
+    assert code == 1 and invitation_failed(ev)
 
 
 @pytest.mark.parametrize("answer", [(403, {"message": "Resource not accessible by integration"}),
@@ -3719,18 +3730,46 @@ def test_any_other_invitations_error_stays_a_failure(fake, monkeypatch, tmp_path
     routes = access_routes()
     routes[f"orgs/{ORG}/invitations"] = answer
     fake(routes)
-    code, ev, _ = run_fetcher("access_review", monkeypatch, tmp_path)
+    code, ev, _ = run_fetcher("access_review", monkeypatch, tmp_path, **APP_TOKEN)
     assert code == 1 and ev["metadata"]["pending_invitations_available"] is None
-    assert f"GET orgs/{ORG}/invitations" in [f["operation"] for f in ev["metadata"]["api_failures"]]
-    assert ev["pending_invitations"] is None
+    assert invitation_failed(ev) and ev["pending_invitations"] is None
 
 
 def test_an_earlier_failure_is_kept_when_invitations_are_unavailable(fake, monkeypatch, tmp_path):
-    routes = access_routes()
-    routes[f"orgs/{ORG}/invitations"] = NO_INVITATIONS
+    routes = no_invitations_routes()
     routes[f"orgs/{ORG}/teams/platform/members"] = FAILING
     fake(routes)
-    code, ev, _ = run_fetcher("access_review", monkeypatch, tmp_path)
+    code, ev, _ = run_fetcher("access_review", monkeypatch, tmp_path, **APP_TOKEN)
     operations = [f["operation"] for f in ev["metadata"]["api_failures"]]
-    assert code == 1 and f"GET orgs/{ORG}/invitations" not in operations and len(operations) == 1
+    assert code == 1 and not invitation_failed(ev) and len(operations) == 1
     assert ev["metadata"]["pending_invitations_available"] is False
+
+
+def test_an_owners_personal_token_404_on_invitations_is_unavailable(fake, monkeypatch, tmp_path):
+    fake(no_invitations_routes(user="boss"))  # boss is in the role=admin list
+    code, ev, _ = run_fetcher("access_review", monkeypatch, tmp_path, **USER_TOKEN)
+    assert code == 0 and ev["metadata"]["pending_invitations_available"] is False and not invitation_failed(ev)
+
+
+@pytest.mark.parametrize("token", [USER_TOKEN, {"GITHUB_TOKEN": "some-other-kind-of-token"}])
+def test_a_non_owners_token_404_on_invitations_stays_a_failure(fake, monkeypatch, tmp_path, token):
+    # Not measured whether a non-owner gets this 404 on an ordinary organization, so it is not read as "none".
+    fake(no_invitations_routes(user="dev"))  # dev is a member, not an owner
+    code, ev, _ = run_fetcher("access_review", monkeypatch, tmp_path, **token)
+    assert code == 1 and invitation_failed(ev) and ev["metadata"]["pending_invitations_available"] is None
+
+
+def test_a_token_whose_user_cannot_be_read_stays_a_failure(fake, monkeypatch, tmp_path):
+    routes = no_invitations_routes()
+    routes["user"] = (403, {"message": "Resource not accessible by personal access token"})
+    fake(routes)
+    code, ev, _ = run_fetcher("access_review", monkeypatch, tmp_path, **USER_TOKEN)
+    assert code == 1 and invitation_failed(ev) and ev["metadata"]["pending_invitations_available"] is None
+
+
+def test_a_token_with_no_readable_user_route_stays_a_failure(fake, monkeypatch, tmp_path):
+    routes = no_invitations_routes()
+    routes["user"] = (404, {"message": "Not Found"})
+    fake(routes)
+    code, ev, _ = run_fetcher("access_review", monkeypatch, tmp_path, **USER_TOKEN)
+    assert code == 1 and invitation_failed(ev)

@@ -94,6 +94,14 @@ def organization_roles(client, login):
     return roles, True
 
 
+def token_user_is_owner(client, owners):
+    """True only when the token's own user is in the owner list that was read. Unknown is not an owner."""
+    if owners is None:
+        return False
+    found, user = client.lookup("user")
+    return bool(found and isinstance(user, dict) and user.get("login") in logins(owners))
+
+
 def collect(client, org, repos, config):
     login = org["login"]
     owners = client.paginate_required(f"orgs/{login}/members", {"role": "admin"})
@@ -105,11 +113,16 @@ def collect(client, org, repos, config):
     teams = client.paginate_required(f"orgs/{login}/teams")
     # GitHub answers a bare 404 for the invitation list of an organization that has none to give, such as one whose
     # accounts an identity provider provisions (measured on an Enterprise Managed Users organization), and the same
-    # 404 to a token without members: read. Outside collaborators and teams need that same permission, so when both
-    # were read the 404 describes the organization, not the token: unavailable, recorded, and not a failure.
+    # 404 to a caller that may not read it. Outside collaborators and teams need the same members: read permission,
+    # so when both were read the permission is not what is missing. That settles it for a GitHub App installation
+    # token, whose rights are its permissions alone (the README's measurement has one reading this fetcher's
+    # evidence in full on an ordinary organization). Any other token also carries its user's role, and whether a
+    # non-owner's token gets this 404 on an ordinary organization is not measured, so for those the 404 is accepted
+    # only when the token's user is an owner. Otherwise the 404 stays a failure, as before.
     invitations_available = None if state is not None else True
     if state == "failed" and outsiders is not None and teams is not None \
-            and [f["type"] for f in invitation_failures] == ["HTTP 404"]:
+            and [f["type"] for f in invitation_failures] == ["HTTP 404"] \
+            and (client.installation_token or token_user_is_owner(client, owners)):
         del client.failures[failures_before:failures_before + 1]
         del client.codes[failures_before:failures_before + 1]
         invitations_available = False
