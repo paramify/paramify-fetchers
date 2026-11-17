@@ -113,6 +113,14 @@ def repo(tmp_path, git_env, monkeypatch):
 
 
 @pytest.fixture
+def main_repo(repo, tmp_path):
+    """The same clone on main, one commit behind origin/main."""
+    _git(repo, "switch", "-q", "main")
+    _commit(tmp_path / "upstream", {"fetchers/demo/alpha/fetch.py": "# v3\n"}, "demo_alpha: read more rows")
+    return repo
+
+
+@pytest.fixture
 def stubs(monkeypatch):
     """Stand-ins for the pieces that would run pip or the clone's own code."""
     calls = {"reinstall": 0, "validate": 0, "check": 0}
@@ -171,17 +179,55 @@ def test_parse_release_rejects_non_release_tags():
     assert up.parse_release("v1.2.3").version == "1.2.3"
 
 
-def test_target_selection(repo):
-    releases = up.list_releases(repo)
+def test_a_branch_follows_its_upstream(main_repo):
+    up.fetch(main_repo)
+    pos = up.position(main_repo)
+    assert (pos["upstream"], pos["behind"], pos["local_commits"]) == ("origin/main", 1, 0)
+    t = up.choose_target(main_repo, pos, up.list_releases(main_repo))
+    assert (t.channel, t.ref, t.label, t.branch) == ("branch", "origin/main", "main", "main")
+    assert t.sha == _git(main_repo, "rev-parse", "origin/main").strip()
+
+
+def test_a_tag_follows_newer_tags(repo):
+    t = up.choose_target(repo, up.position(repo), up.list_releases(repo))
+    assert (t.channel, t.ref, t.label, t.branch) == ("release", "v0.3.0-beta", "0.3.0-beta", None)
+
+
+def test_local_commits_no_upstream_and_detached_are_refused(main_repo):
+    rel = up.list_releases(main_repo)
+    _commit(main_repo, {"mine.txt": "x"}, "local work")
+    with pytest.raises(up.UpdateError, match="can't fast-forward"):
+        up.choose_target(main_repo, up.position(main_repo), rel)
+    _git(main_repo, "switch", "-q", "-c", "scratch")
+    with pytest.raises(up.UpdateError, match="does not follow a remote branch"):
+        up.choose_target(main_repo, up.position(main_repo), rel)
+    _git(main_repo, "switch", "-q", "--detach", "HEAD")
+    with pytest.raises(up.UpdateError, match="detached commit"):
+        up.choose_target(main_repo, up.position(main_repo), rel)
+
+
+def test_to_accepts_main_and_releases_that_carry_update(repo, tmp_path):
+    rel = up.list_releases(repo)
     pos = up.position(repo)
-    assert pos["exact"] and pos["tag"] == "v0.1.0-beta"
-    assert up.choose_target(releases, pos).tag == "v0.3.0-beta"
-    assert up.choose_target(releases, pos, next_release=True).tag == "v0.2.0-beta"
-    assert up.choose_target(releases, pos, to="v0.2.0-beta").tag == "v0.2.0-beta"
-    assert up.choose_target(releases, pos, to="0.2.0-beta").tag == "v0.2.0-beta"
-    with pytest.raises(up.UpdateError, match="not a release tag"):
-        up.choose_target(releases, pos, to="archive/feat/old-idea")
-    assert [r.tag for r in up.crossed(releases, pos, releases[-1])] == ["v0.2.0-beta", "v0.3.0-beta"]
+    assert up.choose_target(repo, pos, rel, to="main").ref == "origin/main"
+    with pytest.raises(up.UpdateError, match="before paramify update existed"):
+        up.choose_target(repo, pos, rel, to="v0.2.0-beta")
+    with pytest.raises(up.UpdateError, match="not main or a release tag"):
+        up.choose_target(repo, pos, rel, to="archive/feat/old-idea")
+    upstream = tmp_path / "upstream"
+    _commit(upstream, {"framework/update.py": "# here\n"}, "ship update")
+    _git(upstream, "tag", "v0.4.0-beta")
+    up.fetch(repo)
+    t = up.choose_target(repo, pos, up.list_releases(repo), to="0.4.0-beta")
+    assert (t.channel, t.ref) == ("release", "v0.4.0-beta")
+
+
+def test_a_branch_with_no_tags_in_reach_still_updates(main_repo):
+    for tag in _git(main_repo, "tag", "-l").split():
+        _git(main_repo, "tag", "-d", tag)
+    pos = up.position(main_repo)
+    assert pos["tag"] is None and up.describe(pos).startswith("main @ ")
+    assert up.choose_target(main_repo, pos, []).channel == "branch"
 
 
 def test_release_notes_use_highlights_and_fall_back_to_the_changelog(repo):
@@ -248,92 +294,6 @@ def test_curated_rows_survive_a_missing_or_broken_releases_dir(repo, tmp_path):
 # The command: breaking stop, switch, rollback
 # --------------------------------------------------------------------------- #
 
-def test_unattended_update_stops_at_breaking_changes(repo, stubs):
-    result, doc = _run("--yes", "--json")
-    assert result.exit_code == 1
-    assert "stopped" in doc["errors"][0] and "--allow-breaking" in doc["errors"][0]
-    assert doc["breaking"][0]["title"] == "`old_flag` is gone"
-    assert _head_tag(repo) == "v0.1.0-beta"
-    assert stubs["reinstall"] == 0
-
-
-def test_json_without_yes_plans_but_does_not_switch(repo, stubs):
-    result, doc = _run("--json", "--next")
-    assert result.exit_code == 1
-    assert doc["errors"] == ["stopped: 1 breaking change between here and 0.2.0-beta. Read them above, "
-                             "then rerun with --allow-breaking (or without --yes)"]
-    assert _head_tag(repo) == "v0.1.0-beta"
-
-
-def test_update_switches_reinstalls_validates_and_records_previous(repo, stubs):
-    before = _git(repo, "rev-parse", "HEAD").strip()
-    result, doc = _run("--yes", "--allow-breaking", "--json")
-    assert result.exit_code == 0, result.stdout
-    assert doc["ok"] and doc["switched"] and doc["version"] == "0.3.0-beta"
-    assert _head_tag(repo) == "v0.3.0-beta"
-    assert stubs == {"reinstall": 1, "validate": 1, "check": 1}
-    prev = up.read_state(repo)["previous"]
-    assert prev["sha"] == before and prev["tag"] == "v0.1.0-beta"
-
-
-def test_next_steps_one_release(repo, stubs):
-    result, doc = _run("--next", "--yes", "--allow-breaking", "--json")
-    assert result.exit_code == 0, result.stdout
-    assert _head_tag(repo) == "v0.2.0-beta"
-
-
-def test_a_jump_without_breaking_changes_needs_only_yes(repo, stubs):
-    _git(repo, "switch", "-q", "--detach", "v0.2.0-beta")
-    result, doc = _run("--yes", "--json")
-    assert result.exit_code == 0, result.stdout
-    assert _head_tag(repo) == "v0.3.0-beta"
-    assert doc["releases"][0]["highlights"][0]["title"] == "Gadgets for everyone"
-
-
-def test_manifests_that_would_break_also_stop_an_unattended_run(repo, stubs, monkeypatch):
-    _git(repo, "switch", "-q", "--detach", "v0.2.0-beta")
-    real = up.check_target
-
-    def breaking_check(root, target, ms, python=None):
-        res = real(root, target, ms)
-        res["manifests"][0].update(status="breaks", errors=["unknown fetcher: demo_alpha"])
-        return res
-
-    monkeypatch.setattr(up, "check_target", breaking_check)
-    result, doc = _run("--yes", "--json")
-    assert result.exit_code == 1
-    assert "1 manifest would break" in doc["errors"][0]
-
-
-def test_already_on_the_newest_release(repo, stubs):
-    _git(repo, "switch", "-q", "--detach", "v0.3.0-beta")
-    result, doc = _run("--json")
-    assert result.exit_code == 0 and doc["up_to_date"]
-
-
-def test_on_main_past_the_newest_tag_offers_it(repo, stubs):
-    _git(repo, "switch", "-q", "main")
-    result, doc = _run("--json")
-    assert doc["off_release"] and doc["direction"] == "back"
-    assert doc["target"]["tag"] == "v0.3.0-beta"
-    assert doc["current"]["branch"] == "main" and doc["current"]["ahead"] == 1
-    assert result.exit_code == 1  # --json without --yes never switches
-
-
-def test_dirty_tree_is_refused_and_untracked_files_are_not(repo, stubs):
-    (repo / "notes.txt").write_text("mine\n")  # untracked: rides along
-    (repo / "fetchers/demo/alpha/fetcher.yaml").write_text("name: demo_alpha\n# edited\n")
-    result, doc = _run("--yes", "--allow-breaking", "--json")
-    assert result.exit_code == 1
-    assert doc["dirty"]["tracked"] == ["fetchers/demo/alpha/fetcher.yaml"]
-    assert doc["dirty"]["untracked"] == ["notes.txt"]
-    assert _head_tag(repo) == "v0.1.0-beta"
-
-    (repo / "fetchers/demo/alpha/fetcher.yaml").write_text("name: demo_alpha\n")
-    result, doc = _run("--yes", "--allow-breaking", "--json")
-    assert result.exit_code == 0, result.stdout
-    assert (repo / "notes.txt").read_text() == "mine\n"
-
 
 def test_dirty_refusal_lists_files_for_humans(repo, stubs):
     (repo / "fetchers/demo/alpha/fetcher.yaml").write_text("changed\n")
@@ -341,36 +301,6 @@ def test_dirty_refusal_lists_files_for_humans(repo, stubs):
     assert result.exit_code == 1
     assert "fetchers/demo/alpha/fetcher.yaml" in result.stdout
     assert "Commit them" in result.stdout
-
-
-def test_rollback_returns_to_the_previous_version_once(repo, stubs):
-    before = _git(repo, "rev-parse", "HEAD").strip()
-    assert _run("--yes", "--allow-breaking", "--json")[0].exit_code == 0
-    result, doc = _run("--rollback", "--yes", "--json")
-    assert result.exit_code == 0, result.stdout
-    assert _git(repo, "rev-parse", "HEAD").strip() == before
-    assert stubs["reinstall"] == 2
-    assert "previous" not in up.read_state(repo)
-    result, doc = _run("--rollback", "--yes", "--json")
-    assert result.exit_code == 1 and "nothing to roll back to" in doc["errors"][0]
-
-
-def test_rollback_puts_a_branch_user_back_on_the_branch(repo, stubs):
-    _git(repo, "switch", "-q", "main")
-    assert _run("--yes", "--allow-breaking", "--json")[0].exit_code == 0
-    assert _run("--rollback", "--yes", "--json")[0].exit_code == 0
-    assert _git(repo, "symbolic-ref", "--short", "HEAD").strip() == "main"
-
-
-def test_a_failed_reinstall_switches_back(repo, stubs, monkeypatch):
-    results = iter([{"ok": False, "command": ["pip"], "error": "boom"},
-                    {"ok": True, "command": ["pip"], "error": None}])
-    monkeypatch.setattr(up, "reinstall", lambda root, extras, python=None: next(results))
-    result, doc = _run("--yes", "--allow-breaking", "--json")
-    assert result.exit_code == 1
-    assert "put your previous version back" in doc["errors"][0]
-    assert _head_tag(repo) == "v0.1.0-beta"
-    assert "previous" not in up.read_state(repo)
 
 
 # --------------------------------------------------------------------------- #

@@ -50,6 +50,7 @@ from packaging.version import InvalidVersion, Version
 
 RELEASE_TAG = re.compile(r"^v(?P<version>\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)$")
 DISTRIBUTION = "paramify-fetchers"
+MAIN = "main"
 HIGHLIGHTS_DIR = "releases"
 UNRELEASED = "unreleased"
 STATE_FILE = Path(".paramify") / "state.json"
@@ -160,13 +161,17 @@ def list_releases(root: Path) -> List[Release]:
     return sorted((r for r in found if r), key=lambda r: r.key)
 
 
-def fetch_tags(root: Path, timeout: float = 90) -> None:
-    git(root, "fetch", "--tags", "--quiet", timeout=timeout)
+def fetch(root: Path, timeout: float = 90) -> None:
+    """Bring in origin's branches and release tags."""
+    git(root, "fetch", "--tags", "--quiet", "origin", timeout=timeout)
+
+
+fetch_tags = fetch
 
 
 def position(root: Path) -> dict:
-    """Where the checkout is: the nearest release tag behind HEAD, how far past
-    it, and the branch if HEAD is on one."""
+    """Where the checkout is: the branch and the remote branch it follows (with
+    how far apart they are), and the nearest release tag behind HEAD."""
     sha = git(root, "rev-parse", "HEAD").strip()
     try:
         branch: Optional[str] = git(root, "symbolic-ref", "-q", "--short", "HEAD").strip() or None
@@ -180,7 +185,18 @@ def position(root: Path) -> dict:
     except (UpdateError, ValueError):
         pass
     rel = parse_release(tag) if tag else None
+    upstream, behind, local = None, None, None
+    if branch:
+        try:
+            upstream = git(root, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}").strip() or None
+            mine, theirs = git(root, "rev-list", "--left-right", "--count", "HEAD...@{upstream}").split()
+            local, behind = int(mine), int(theirs)
+        except (UpdateError, ValueError):
+            upstream = None
     return {
+        "upstream": upstream,
+        "behind": behind,
+        "local_commits": local,
         "tag": tag,
         "version": rel.version if rel else None,
         "ahead": ahead,
@@ -218,24 +234,69 @@ def installed_version() -> Optional[str]:
         return None
 
 
-def choose_target(
-    releases: Sequence[Release], pos: dict, *, to: Optional[str] = None, next_release: bool = False,
-) -> Optional[Release]:
-    """The release to move to: --to's, the one after yours (--next), or the newest."""
+@dataclass(frozen=True)
+class Target:
+    """Where an update moves the clone: a branch's upstream, or a release tag."""
+
+    channel: str            # "branch" or "release"
+    ref: str                # what git moves to: origin/main, or v0.7.0-beta
+    sha: str
+    label: str              # how to name it to a person: main, or 0.7.0-beta
+    branch: Optional[str]   # the local branch to fast-forward; None for a release
+
+    def to_json(self) -> dict:
+        return {"channel": self.channel, "ref": self.ref, "sha": self.sha, "label": self.label,
+                "branch": self.branch}
+
+
+def _sha(root: Path, ref: str) -> str:
+    return git(root, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}").strip()
+
+
+def _release_target(root: Path, rel: Release) -> Target:
+    return Target("release", rel.tag, _sha(root, rel.tag), rel.version, None)
+
+
+def choose_target(root: Path, pos: dict, releases: Sequence[Release], to: Optional[str] = None) -> Target:
+    """The commit to move to, from --to or from what the clone is on.
+
+    A branch follows the remote branch it tracks; a clone sitting on a release
+    tag follows newer tags. Anything else is refused with what to run instead,
+    and so is a branch with commits of its own: update fast-forwards, it never
+    merges. The caller decides "nothing to do" by comparing sha with HEAD's.
+    """
+    if to == MAIN:
+        try:
+            return Target("branch", f"origin/{MAIN}", _sha(root, f"origin/{MAIN}"), MAIN, MAIN)
+        except UpdateError:
+            raise UpdateError(f"origin has no {MAIN} branch to follow") from None
     if to:
         want = to if to.startswith("v") else f"v{to}"
-        for r in releases:
-            if r.tag == want:
-                return r
-        names = ", ".join(r.tag for r in releases[-6:]) or "none"
-        raise UpdateError(f"{to} is not a release tag (recent releases: {names})")
-    if not releases:
-        return None
-    if next_release:
-        base = parse_release(pos["tag"] or "")
-        later = [r for r in releases if base is None or r.key > base.key]
-        return later[0] if later else None
-    return releases[-1]
+        rel = next((r for r in releases if r.tag == want), None)
+        if rel is None:
+            names = ", ".join(r.tag for r in releases[-6:]) or "none"
+            raise UpdateError(f"{to} is not {MAIN} or a release tag (recent releases: {names})")
+        if read_at(root, rel.tag, ["framework/update.py"])["framework/update.py"] is None:
+            raise UpdateError(
+                f"{rel.tag} was released before paramify update existed, so you could not update or "
+                f"roll back from it. To use it anyway: git switch --detach {rel.tag}"
+            )
+        return _release_target(root, rel)
+    hint = f"Run paramify update --to {MAIN}, or --to <tag> to pin a release"
+    branch, upstream = pos["branch"], pos["upstream"]
+    if branch and upstream:
+        if pos["local_commits"]:
+            n = pos["local_commits"]
+            raise UpdateError(
+                f"{branch} has {n} commit{'s' if n != 1 else ''} that {upstream} does not, so update "
+                f"can't fast-forward it. Push or move them, or pin with --to <tag>"
+            )
+        return Target("branch", upstream, _sha(root, upstream), branch, branch)
+    if branch:
+        raise UpdateError(f"{branch} does not follow a remote branch. {hint}")
+    if pos["exact"] and releases:
+        return _release_target(root, releases[-1])
+    raise UpdateError(f"this clone is on a detached commit ({pos['short']}), not a branch or a release. {hint}")
 
 
 def crossed(releases: Sequence[Release], pos: dict, target: Release) -> List[Release]:
