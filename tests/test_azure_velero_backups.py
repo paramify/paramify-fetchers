@@ -25,7 +25,7 @@ azure_rest = sys.modules["azure_rest"]
 
 NOW = datetime(2026, 11, 16, 12, 0, tzinfo=timezone.utc)
 SETTINGS = {"success_window_hours": 26, "expiry_grace_hours": 24, "container_names": ["velero"], "explicit_locations": [], "restore_test_interval_days": None,
-            "expected_schedules": None, "rpo_hours": None, "missed_run_lookback_days": 7}
+            "expected_schedules": None, "rpo_hours": None, "missed_run_lookback_days": 7, "deliberate_failure_tests": []}
 SUB = "/subscriptions/s1"
 ACCOUNT_ID = f"{SUB}/resourceGroups/rg1/providers/Microsoft.Storage/storageAccounts/backupsa"
 ENDPOINT = "https://backupsa.blob.core.windows.net/"
@@ -196,7 +196,7 @@ def azure(monkeypatch, tmp_path):
     monkeypatch.setenv("FETCHER_STATUS_FILE", str(tmp_path / "status.json"))
     for env in ("AZURE_AUTHORITY_HOST", "AZURE_TENANT_ID", "AZURE_ENVIRONMENT", "AZURE_RESOURCE_EXCLUSIONS", "AZURE_TARGET_SUBSCRIPTION_ONLY",
                 vb.CONTAINERS_ENV, vb.LOCATIONS_ENV, vb.WINDOW_ENV, vb.GRACE_ENV, vb.INTERVAL_ENV,
-                vb.EXPECTED_ENV, vb.RPO_ENV, vb.MISSED_LOOKBACK_ENV):
+                vb.EXPECTED_ENV, vb.RPO_ENV, vb.MISSED_LOOKBACK_ENV, vb.DELIBERATE_ENV):
         monkeypatch.delenv(env, raising=False)
     return serve
 
@@ -370,3 +370,112 @@ def test_real_sandbox_shows_the_daily_schedule_has_not_produced_a_backup(monkeyp
     assert (s["expected_schedules"], s["expected_schedules_without_backups"], s["expected_schedules_without_backups_names"]) == (1, 1, ["daily"])
     assert (s["missed_scheduled_runs"], s["schedules_exceeding_rpo"]) == (7, 1)
     assert results["schedules"][0]["backups"] == 0
+
+
+# --- review fixes: retention-bounded, gap-based missed runs; per-schedule windows; history; blob reads ---
+
+def _runs(schedule, done_times, ttl_hours, phase="Completed", attempted=1, completed=1, name=None):
+    out = []
+    for i, done in enumerate(done_times):
+        raw = {"metadata": {"labels": {"velero.io/schedule-name": schedule}},
+               "status": {"phase": phase, "startTimestamp": iso(done - timedelta(minutes=5)), "completionTimestamp": iso(done),
+                          "expiration": iso(done + timedelta(hours=ttl_hours)),
+                          "volumeSnapshotsAttempted": attempted, "volumeSnapshotsCompleted": completed}}
+        out.append(vb.backup_record(name or f"{schedule}-{i}", raw, NOW, 24))
+    return out
+
+
+def _expected(name, hours, **extra):
+    return {**SETTINGS, "expected_schedules": [{"name": name, "interval_hours": hours}], **extra}
+
+
+def test_backups_velero_deleted_at_the_end_of_their_retention_are_not_missed_runs():
+    # Every run succeeded; only the retained backups are in storage.
+    hourly = _runs("hourly", [NOW - timedelta(hours=h, minutes=10) for h in range(24)], ttl_hours=24)
+    [c] = vb.schedule_checks(hourly, _expected("hourly", 1), NOW)
+    assert (c["missed_runs"], c["hours_checked_for_missed_runs"]) == (0, 24.0)
+    daily = _runs("daily", [NOW - timedelta(hours=h) for h in (2, 26, 50)], ttl_hours=72)
+    [c] = vb.schedule_checks(daily, _expected("daily", 24), NOW)
+    assert (c["missed_runs"], c["periods_checked"]) == (0, 3)
+
+
+def test_a_backup_finishing_a_few_minutes_late_is_not_a_missed_run():
+    # Daily at 02:00 for 8 days, except yesterday's finished at 02:05; the fetcher runs at 02:03.
+    now = datetime(2026, 11, 16, 2, 3, tzinfo=timezone.utc)
+    times = [datetime(2026, 11, 16 - d, 2, 5 if d == 1 else 0, tzinfo=timezone.utc) for d in range(1, 9)]
+    bk = []
+    for i, done in enumerate(times):
+        raw = {"metadata": {"labels": {"velero.io/schedule-name": "daily"}},
+               "status": {"phase": "Completed", "completionTimestamp": iso(done), "expiration": iso(done + timedelta(days=30))}}
+        bk.append(vb.backup_record(f"d{i}", raw, now, 24))
+    [c] = vb.schedule_checks(bk, _expected("daily", 24), now)
+    assert c["missed_runs"] == 0
+
+
+def test_a_real_gap_still_counts_each_missed_interval():
+    daily = _runs("daily", [NOW - timedelta(hours=h) for h in (2, 98)], ttl_hours=720)
+    [c] = vb.schedule_checks(daily, _expected("daily", 24), NOW)
+    assert c["missed_runs"] == 5  # 3 runs missed between the two backups, 2 before the older one
+
+
+def test_a_listed_weekly_schedule_is_judged_against_its_own_interval():
+    weekly = _runs("weekly", [NOW - timedelta(hours=100)], ttl_hours=720)
+    s = vb.summarize([location(weekly)], _expected("weekly", 168), NOW)
+    assert (s["schedules_observed"], s["schedules_with_success_within_window"]) == (1, 1)
+    s = vb.summarize([location(weekly)], SETTINGS, NOW)  # not listed: the 26-hour default applies
+    assert s["schedules_with_success_within_window"] == 0
+    assert vb.success_window_hours(24, SETTINGS) == 26 and vb.success_window_hours(168, SETTINGS) == 184
+
+
+def test_resolved_and_deliberate_failures_stay_in_history_but_are_not_current():
+    resolved = _runs("daily", [NOW - timedelta(hours=50)], 720, phase="Failed", name="daily-failed-old")
+    current = _runs("hourly", [NOW - timedelta(hours=1)], 720, phase="PartiallyFailed", name="hourly-failed-new")
+    planned = _runs("daily", [NOW - timedelta(hours=1)], 720, phase="Failed", name="failtest-1")
+    ok = _runs("daily", [NOW - timedelta(hours=26)], 720)
+    snaps_old = _runs("weekly", [NOW - timedelta(hours=200)], 720, attempted=2, completed=1, name="weekly-old")
+    snaps_ok = _runs("weekly", [NOW - timedelta(hours=30)], 720, name="weekly-new")
+    rs = [vb.restore_record("r-bad-old", results(errors=1), iso(NOW - timedelta(days=5))),
+          vb.restore_record("r-good", results(), iso(NOW - timedelta(days=2))),
+          vb.restore_record("r-bad-new", results(errors=2), iso(NOW - timedelta(days=1))),
+          vb.restore_record("failtest-restore", results(errors=1), iso(NOW - timedelta(hours=3)))]
+    settings = {**SETTINGS, "deliberate_failure_tests": ["failtest-*"]}
+    s = vb.summarize([location(resolved + current + planned + ok + snaps_old + snaps_ok, rs)], settings, NOW)
+    assert (s["backups_failed"], s["backups_partially_failed"], s["backups_failed_unresolved"]) == (2, 1, 1)
+    assert (s["backups_volume_snapshots_incomplete"], s["backups_volume_snapshots_incomplete_unresolved"]) == (1, 0)
+    assert (s["restores_with_errors"], s["restores_with_errors_unresolved"]) == (3, 1)
+    assert (s["deliberate_failure_tests"], s["deliberate_failure_test_patterns"]) == (2, ["failtest-*"])
+
+
+def test_unresolved_counts_stay_null_when_a_location_is_unread():
+    s = vb.summarize([location(read=False, restores_read=False)], SETTINGS, NOW)
+    assert (s["backups_failed_unresolved"], s["restores_with_errors_unresolved"], s["deliberate_failure_tests"]) == (None, None, None)
+
+
+def test_blob_reads_retry_a_dropped_connection(monkeypatch):
+    import requests
+
+    class Flaky:
+        calls = 0
+
+        def get(self, url, **kw):
+            Flaky.calls += 1
+            if Flaky.calls == 1:
+                raise requests.ConnectionError("reset")
+            return _Resp(200, content=_list_xml(["backups/b1/velero-backup.json"]))
+
+    monkeypatch.setattr(vb.time, "sleep", lambda s: None)
+    reader = vb.BlobReader(namedtuple("C", "session cred")(Flaky(), _Cred()), [ENDPOINT])
+    assert [b["name"] for b in reader.list(ENDPOINT, "velero", "backups/")] == ["backups/b1/velero-backup.json"]
+    assert Flaky.calls == 2
+
+
+def test_blob_list_xml_with_an_entity_declaration_is_refused():
+    evil = b'<?xml version="1.0"?><!DOCTYPE r [<!ENTITY x "y">]><EnumerationResults><Blobs/></EnumerationResults>'
+
+    class Evil:
+        def get(self, url, **kw):
+            return _Resp(200, content=evil)
+
+    reader = vb.BlobReader(namedtuple("C", "session cred")(Evil(), _Cred()), [ENDPOINT])
+    with pytest.raises(Exception, match="(?i)entit|forbidden"):
+        reader.list(ENDPOINT, "velero", "backups/")

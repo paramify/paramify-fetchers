@@ -1,22 +1,39 @@
 #!/usr/bin/env python3
 """Velero backup storage locations in Azure Blob Storage: each location's storage settings, every backup's outcome and expiry, and every restore's result."""
 
+import fnmatch
 import gzip
 import json
 import logging
+import math
 import os
 import sys
-import xml.etree.ElementTree as ET
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import quote, urlsplit
 
+import requests
+
+# Blob list responses are XML: parse them with entities and external references refused.
+from defusedxml import ElementTree as ET
+
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR.parent / "_shared"))
 from azure_common import Collector, arm_id_key, resource_group_from_id  # noqa: E402
-from azure_rest import MAX_RETRIES, RETRY_STATUSES, ArmError, int_config, parse_time, retry_wait, run_subscription  # noqa: E402
+from azure_rest import (  # noqa: E402
+    MAX_RETRIES,
+    MAX_RETRY_WAIT,
+    MAX_TIMEOUT_RETRIES,
+    RETRY_STATUSES,
+    ArmError,
+    int_config,
+    parse_time,
+    retry_wait,
+    run_subscription,
+)
 from resource_exclusions import ResourceExclusions  # noqa: E402
 
 NAME = "azure_velero_backups"
@@ -37,11 +54,17 @@ INTERVAL_ENV = "AZURE_VELERO_RESTORE_TEST_INTERVAL_DAYS"
 EXPECTED_ENV = "AZURE_VELERO_EXPECTED_SCHEDULES"
 RPO_ENV = "AZURE_VELERO_RPO_HOURS"
 MISSED_LOOKBACK_ENV = "AZURE_VELERO_MISSED_RUN_LOOKBACK_DAYS"
+DELIBERATE_ENV = "AZURE_VELERO_DELIBERATE_FAILURE_TESTS"
 DEFAULT_MISSED_LOOKBACK_DAYS = 7
 MAX_MISSED_LOOKBACK_DAYS = 90
 DEFAULT_CONTAINERS = ("velero",)
 DEFAULT_WINDOW_HOURS = 26
 DEFAULT_GRACE_HOURS = 24
+# A gap between Completed backups counts a missed run only when it is longer than the interval plus this share of it,
+# so a backup that finishes a few minutes later than the day before is not a missed run.
+RUN_GRACE_FRACTION = 0.1
+# An expected schedule's success window is its interval plus this slack, at least MIN_WINDOW_SLACK_HOURS.
+MIN_WINDOW_SLACK_HOURS = 2
 
 GEO_REPLICATED_SKUS = frozenset({"standard_grs", "standard_ragrs", "standard_gzrs", "standard_ragzrs"})
 SCHEDULE_LABEL = "velero.io/schedule-name"
@@ -80,21 +103,61 @@ def parse_expected(value: Optional[str]) -> Tuple[Optional[List[Dict[str, Any]]]
     return expected, invalid
 
 
+def retention_hours(backups: List[Dict[str, Any]]) -> Optional[float]:
+    """The shortest retention among a schedule's backups (expiration minus completion), in hours; None when unknown."""
+    spans = [(parse_time(b["expiration"]) - parse_time(b["completed"])).total_seconds() / 3600
+             for b in backups if parse_time(b["expiration"]) and parse_time(b["completed"])]
+    spans = [s for s in spans if s > 0]
+    return min(spans) if spans else None
+
+
+def count_missed(done: List[datetime], interval_hours: int, window_start: datetime, now: datetime) -> int:
+    """Missed runs from the gaps between Completed backups, and from the newest one to now.
+
+    Each gap longer than the interval plus RUN_GRACE_FRACTION of it adds floor((gap - grace) / interval) missed runs.
+    The first gap starts at the newest Completed backup at or before window_start, or at window_start when there is
+    none. A schedule with no Completed backup at all misses every interval in the window.
+    """
+    step = interval_hours * 3600
+    window = (now - window_start).total_seconds()
+    if not done:
+        return int(window // step)
+    grace = step * RUN_GRACE_FRACTION
+    before = [t for t in done if t <= window_start]
+    points = [before[-1] if before else window_start] + [t for t in done if t > window_start] + [now]
+    return sum(max(0, math.floor(((b - a).total_seconds() - grace) / step)) for a, b in zip(points, points[1:]))
+
+
+def success_window_hours(interval_hours: Optional[int], settings: Dict[str, Any]) -> float:
+    """An expected schedule is judged against its own interval plus slack; any other schedule against success_window_hours."""
+    if interval_hours:
+        return interval_hours + max(MIN_WINDOW_SLACK_HOURS, interval_hours // 10)
+    return settings["success_window_hours"]
+
+
 def schedule_check(name: str, interval_hours: Optional[int], backups: List[Dict[str, Any]], settings: Dict[str, Any],
                    now: datetime) -> Dict[str, Any]:
-    """One schedule: its backups, newest success, missed periods over the lookback, and the recovery point objective."""
+    """One schedule: its backups, newest success, missed runs over the lookback, and the recovery point objective.
+
+    Missed runs are judged only over the part of the lookback the schedule's backups are still kept for, because Velero
+    deletes each backup when its retention ends and a deleted backup is not a missed run.
+    """
     mine = [b for b in backups if b["schedule"] == name]
     done = sorted(t for t in (parse_time(b["completed"]) for b in mine if b["phase"] == COMPLETED) if t)
     hours = round((now - done[-1]).total_seconds() / 3600, 1) if done else None
     missed = periods = None
+    retention = retention_hours(mine)
+    lookback = settings["missed_run_lookback_days"] * 24
+    checked = min(lookback, retention) if retention else lookback
     if interval_hours:
-        periods = int(settings["missed_run_lookback_days"] * 24 // interval_hours)
-        step = timedelta(hours=interval_hours)
-        missed = sum(1 for i in range(periods)
-                     if not any(now - (i + 1) * step < t <= now - i * step for t in done))
+        periods = int(checked // interval_hours)
+        missed = count_missed(done, interval_hours, now - timedelta(hours=checked), now)
     rpo = settings["rpo_hours"]
+    window = success_window_hours(interval_hours, settings)
     return {"name": name, "expected_interval_hours": interval_hours, "backups": len(mine), "backups_completed": len(done),
             "newest_success": done[-1].strftime("%Y-%m-%dT%H:%M:%SZ") if done else None, "hours_since_success": hours,
+            "success_window_hours": window, "success_within_window": hours is not None and hours <= window,
+            "retention_hours": round(retention, 1) if retention else None, "hours_checked_for_missed_runs": round(checked, 1),
             "periods_checked": periods, "missed_runs": missed,
             "exceeds_rpo": (hours is None or hours > rpo) if rpo else None}
 
@@ -160,6 +223,44 @@ def restore_record(name: str, results: Optional[Dict[str, Any]], written: Option
     return {"name": name, "results_read": True, "errors": errors, "warnings": warnings, "clean": errors == 0, "results_written": written}
 
 
+def is_deliberate(name: str, patterns: List[str]) -> bool:
+    """A backup or restore whose name matches a deliberate_failure_tests pattern is a planned failure test."""
+    return any(fnmatch.fnmatchcase(name, p) for p in patterns)
+
+
+def classify_history(backups: List[Dict[str, Any]], restores: List[Dict[str, Any]], patterns: List[str]) -> None:
+    """Mark each failure as a deliberate test, resolved by a later success, or current; records are updated in place.
+
+    A Failed or PartiallyFailed backup is resolved once its schedule (or, for a backup with no schedule, another backup
+    with no schedule) has a Completed backup that finished after it. A backup with incomplete volume snapshots is
+    resolved once a later Completed backup of the same schedule completed every snapshot it attempted. A restore with
+    errors is resolved once a later restore completed without errors. A failure without a readable time is never
+    resolved. History is kept: the totals still count every record in storage.
+    """
+    def when(b):
+        return parse_time(b["completed"]) or parse_time(b["started"])
+
+    newest_done: Dict[Optional[str], datetime] = {}
+    newest_full: Dict[Optional[str], datetime] = {}
+    for x in backups:
+        done = parse_time(x["completed"]) if x["phase"] == COMPLETED else None
+        if done:
+            newest_done[x["schedule"]] = max(done, newest_done.get(x["schedule"], done))
+            if not x["volume_snapshots_incomplete"]:
+                newest_full[x["schedule"]] = max(done, newest_full.get(x["schedule"], done))
+    for b in backups:
+        b["deliberate_test"] = is_deliberate(b["name"], patterns)
+        t = when(b)
+        later_done, later_full = newest_done.get(b["schedule"]), newest_full.get(b["schedule"])
+        b["failure_resolved"] = bool(t and later_done and later_done > t) if b["phase"] in (FAILED, PARTIALLY_FAILED) else None
+        b["snapshots_resolved"] = bool(t and later_full and later_full > t) if b["volume_snapshots_incomplete"] else None
+    newest_clean = max((c for c in (parse_time(r["results_written"]) for r in restores if r["clean"]) if c), default=None)
+    for r in restores:
+        r["deliberate_test"] = is_deliberate(r["name"], patterns)
+        t = parse_time(r["results_written"])
+        r["error_resolved"] = bool(t and newest_clean and newest_clean > t) if r["clean"] is False else None
+
+
 def summarize(locations: List[Dict[str, Any]], settings: Dict[str, Any], now: datetime, discovered: bool = True) -> Dict[str, Any]:
     """Counts are null, not 0, unless discovery finished and every location's backups were read."""
     read = [loc for loc in locations if loc["backups_read"]]
@@ -167,6 +268,8 @@ def summarize(locations: List[Dict[str, Any]], settings: Dict[str, Any], now: da
     backups = [b for loc in read for b in loc["backups"]]
     restores = [r for loc in locations if loc["restores_read"] for r in loc["restores"]]
     restores_complete = discovered and all(loc["restores_read"] for loc in locations)
+    patterns = settings.get("deliberate_failure_tests") or []
+    classify_history(backups, restores, patterns)
     latest: Dict[str, datetime] = {}
     for b in backups:
         when = parse_time(b["completed"])
@@ -174,11 +277,12 @@ def summarize(locations: List[Dict[str, Any]], settings: Dict[str, Any], now: da
             latest[b["schedule"]] = when
     schedules = sorted({b["schedule"] for b in backups if b["schedule"]})
     hours = {s: (now - latest[s]).total_seconds() / 3600 for s in latest}
-    recent = [s for s in schedules if s in hours and hours[s] <= settings["success_window_hours"]]
+    expected = settings["expected_schedules"]
+    windows = {e["name"]: success_window_hours(e["interval_hours"], settings) for e in expected or []}
+    recent = [s for s in schedules if s in hours and hours[s] <= windows.get(s, settings["success_window_hours"])]
     clean_times = [parse_time(r["results_written"]) for r in restores if r["clean"]]
     clean_times = [t for t in clean_times if t]
     checks = schedule_checks(backups, settings, now)
-    expected = settings["expected_schedules"]
 
     def known(value):
         return value if complete else None
@@ -195,6 +299,9 @@ def summarize(locations: List[Dict[str, Any]], settings: Dict[str, Any], now: da
         "backups_other_phase": known(sum(1 for b in backups if b["phase"] not in (COMPLETED, PARTIALLY_FAILED, FAILED))),
         "backups_metadata_unreadable": known(sum(loc["backups_unreadable"] for loc in read)),
         "backups_volume_snapshots_incomplete": known(sum(1 for b in backups if b["volume_snapshots_incomplete"])),
+        "backups_failed_unresolved": known(sum(1 for b in backups if b["failure_resolved"] is False and not b["deliberate_test"])),
+        "backups_volume_snapshots_incomplete_unresolved": known(sum(1 for b in backups
+                                                                    if b["snapshots_resolved"] is False and not b["deliberate_test"])),
         "expired_backups_not_deleted": known(sum(1 for b in backups if b["expired_not_deleted"])),
         "schedules_observed": known(len(schedules)),
         "schedules_with_success_within_window": known(len(recent)),
@@ -213,7 +320,12 @@ def summarize(locations: List[Dict[str, Any]], settings: Dict[str, Any], now: da
         "restores_total": len(restores) if restores_complete else None,
         "restores_without_errors": sum(1 for r in restores if r["clean"]) if restores_complete else None,
         "restores_with_errors": sum(1 for r in restores if r["clean"] is False) if restores_complete else None,
+        "restores_with_errors_unresolved": sum(1 for r in restores if r["error_resolved"] is False and not r["deliberate_test"])
+        if restores_complete else None,
         "restores_results_missing": sum(1 for r in restores if not r["results_read"]) if restores_complete else None,
+        "deliberate_failure_tests": sum(1 for b in backups if b["deliberate_test"] and (b["failure_resolved"] is not None or b["snapshots_resolved"] is not None))
+        + sum(1 for r in restores if r["deliberate_test"] and r["clean"] is False) if complete and restores_complete else None,
+        "deliberate_failure_test_patterns": patterns,
         "days_since_last_clean_restore": int((now - max(clean_times)).total_seconds() // 86400) if restores_complete and clean_times else None,
         "restores_date_unknown": sum(1 for r in restores if r["results_read"] and not parse_time(r["results_written"])) if restores_complete else None,
         "restore_test_interval_days": settings.get("restore_test_interval_days"),
@@ -243,6 +355,7 @@ def settings_from_env(collector: Optional[Collector] = None) -> Dict[str, Any]:
     if collector is not None and raw_lb and not (raw_lb.isdigit() and int(raw_lb) > 0):
         collector.record(f"config {MISSED_LOOKBACK_ENV}", ValueError(f"{MISSED_LOOKBACK_ENV}={raw_lb!r} is not a whole number above 0"))
     return {
+        "deliberate_failure_tests": _csv(os.environ.get(DELIBERATE_ENV)),
         "expected_schedules": expected,
         "rpo_hours": rpo,
         "missed_run_lookback_days": lookback,
@@ -265,7 +378,7 @@ class BlobReader:
         self._token: Any = None
 
     def token(self) -> str:
-        if self._token is None or self._token.expires_on - 120 < __import__("time").time():
+        if self._token is None or self._token.expires_on - 120 < time.time():
             self._token = self.cred.get_token(f"{STORAGE_RESOURCE}/.default")
         return self._token.token
 
@@ -275,10 +388,22 @@ class BlobReader:
         if (target.scheme != "https" or target.netloc.lower() not in self.allowed or target.username or target.password
                 or target.fragment or not target.path.startswith("/" + quote(container))):
             raise ValueError("Blob read origin is untrusted")
-        import time
+        timeouts = 0
         for attempt in range(MAX_RETRIES + 1):
-            response = self.session.get(url, params=params, timeout=60, allow_redirects=False, headers={
-                "Authorization": f"Bearer {self.token()}", "x-ms-version": BLOB_VERSION})
+            try:
+                response = self.session.get(url, params=params, timeout=60, allow_redirects=False, headers={
+                    "Authorization": f"Bearer {self.token()}", "x-ms-version": BLOB_VERSION})
+            except requests.ConnectionError:
+                if attempt == MAX_RETRIES:
+                    raise
+                time.sleep(float(min(2 ** attempt, MAX_RETRY_WAIT)))
+                continue
+            except requests.Timeout:  # reads only, so a resend is safe; bounded as in azure_rest
+                if timeouts == MAX_TIMEOUT_RETRIES or attempt == MAX_RETRIES:
+                    raise
+                timeouts += 1
+                time.sleep(float(min(2 ** attempt, MAX_RETRY_WAIT)))
+                continue
             if response.status_code not in RETRY_STATUSES or attempt == MAX_RETRIES:
                 break
             time.sleep(retry_wait(response, attempt))

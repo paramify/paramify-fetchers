@@ -313,6 +313,7 @@ TEXT_FORMAT_FETCHERS = (
     "azure/sql_managed_instance_encryption",
     "azure/sql_server_configuration",
     "azure/storage_encryption_status",
+    "azure/velero_backups",
     "azure/virtual_wan_configuration",
     "azure/vm_hardening_status",
     "azure/vnet_egress_routing",
