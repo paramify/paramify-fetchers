@@ -42,6 +42,26 @@ def error_category(status: int, code: str) -> str:
     return "partial_failure"
 
 
+
+LIMIT_HEADERS = {
+    "X-RateLimit-Limit": "limit",
+    "X-RateLimit-Window-Sec": "window",
+    "X-RateLimit-Remaining": "remaining",
+    "X-RateLimit-ToWait-Sec": "to_wait",
+    "X-Concurrency-Limit-Limit": "concurrency_limit",
+    "X-Concurrency-Limit-Running": "concurrency_running",
+}
+
+
+def limit_detail(status, code: str, headers) -> str:
+    parts = [f"HTTP {status if status is not None else 'none'}", f"code {code or 'none'}"]
+    for header, label in LIMIT_HEADERS.items():
+        raw = str(headers.get(header, "")).strip()
+        if re.fullmatch(r"-?\d{1,10}", raw):
+            parts.append(f"{label}={raw}")
+    return ", ".join(parts)
+
+
 def value(node, path: str, required: bool = False) -> str:
     result = (node.findtext(path) or "").strip()
     if required and not result:
@@ -158,6 +178,7 @@ class QualysReportClient:
             self._last_request = time.monotonic()
             retry_code = "partial_failure"
             headers = {}
+            status, code = None, ""
             try:
                 with self.session.get(
                     self.base_url + path,
@@ -220,7 +241,8 @@ class QualysReportClient:
                 retry_code = "target_unreachable"
             if attempt == self.retries:
                 raise QualysError(
-                    f"Qualys request failed after {attempt + 1} attempts at {path}",
+                    f"Qualys request failed after {attempt + 1} attempts at {path} "
+                    f"({limit_detail(status, code, headers)})",
                     retry_code,
                 )
             wait = 2**attempt
@@ -236,11 +258,17 @@ class QualysReportClient:
                 wait = max(wait, delay)
             if wait > 60:
                 raise QualysError(
-                    "Qualys retry delay exceeds 60 seconds; retry the run later",
+                    f"Qualys asked to wait {wait:.0f} seconds at {path}, more than "
+                    f"the 60 second limit; retry the run later "
+                    f"({limit_detail(status, code, headers)})",
                     retry_code,
                 )
             logging.warning(
-                "Retrying Qualys %s request in %.1f seconds", retry_code, wait
+                "Retrying Qualys %s request at %s in %.1f seconds (%s)",
+                retry_code,
+                path,
+                wait,
+                limit_detail(status, code, headers),
             )
             self.sleep(wait)
         raise AssertionError("unreachable")

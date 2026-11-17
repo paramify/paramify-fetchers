@@ -1771,6 +1771,10 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- `qualys_vmdr_vulnerability_findings` and `qualys_stig_compliance_report` failures caused by throttling name the
+  endpoint, HTTP status, Qualys code, requested wait and the numeric `X-RateLimit-*` / `X-Concurrency-Limit-*` header
+  values, so the limit that was hit is visible in the failure reason. Response bodies are still never reported.
+
 - **`collection_succeeded` now covers two Entra evidence sets.** It is listed
   against `EVD-AZURE-ENTRA-APP-CREDS` (`azure_entra_app_registrations`) and
   `EVD-AZURE-ENTRA-SERVICE-PRINCIPALS` (`azure_entra_service_principals`), so a

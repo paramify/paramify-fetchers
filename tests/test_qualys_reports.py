@@ -437,9 +437,34 @@ def test_rate_limits_retry_then_succeed():
 
 def test_long_retry_delay_fails_instead_of_retrying_early():
     c = client(Response(status=429, headers={"Retry-After": "300"}), retries=1)
-    with pytest.raises(qc.QualysError, match="60 seconds"):
+    with pytest.raises(qc.QualysError, match="60 second") as exc:
         c.request(qc.QVS, {"action": "list"})
     assert len(c.session.calls) == 1
+    assert "wait 300 seconds" in str(exc.value)
+    assert qc.QVS in str(exc.value)
+
+
+def test_long_retry_delay_reports_rate_limit_headers_but_not_body():
+    body = xml(
+        "SIMPLE_RETURN",
+        "<CODE>1965</CODE><TEXT>private-response</TEXT><ITEM_LIST><ITEM>"
+        "<KEY>SECONDS_TO_WAIT</KEY><VALUE>1800</VALUE></ITEM></ITEM_LIST>",
+    )
+    headers = {
+        "X-RateLimit-Limit": "300",
+        "X-RateLimit-Window-Sec": "3600",
+        "X-RateLimit-Remaining": "0",
+        "X-Concurrency-Limit-Limit": "not-a-number",
+    }
+    c = client(Response(body, status=409, headers=headers), retries=1)
+    with pytest.raises(qc.QualysError) as exc:
+        c.request(qc.QVS, {"action": "list"})
+    message = str(exc.value)
+    assert exc.value.code == "rate_limited"
+    assert "HTTP 409, code 1965" in message
+    assert "limit=300, window=3600, remaining=0, to_wait=1800" in message
+    assert "concurrency_limit" not in message
+    assert "private-response" not in message
 
 
 def test_entity_expansion_rejected():
