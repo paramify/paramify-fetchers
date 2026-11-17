@@ -23,6 +23,7 @@ from framework.paramify_auth import BASE_URL_ENV, READ_TOKEN_ENV, UPLOAD_TOKEN_E
 from framework.sync import render
 from framework.sync import upload as upload_mod
 from framework.sync.model import Outcome
+from framework.sync.providers.delivery import WAF_CHECK_OFF
 from framework.sync.state import RunState
 from tests.test_sync_desired import build, env, inv
 
@@ -510,6 +511,31 @@ def test_skips_and_drops_are_counted_and_reported_per_file(fake, root, tmp_path)
                                            ("c.json", "skipped_failed")]
     drop = next(e for e in events if e["event"] == "upload_file" and e["file"] == "b.json")
     assert drop["reason"].startswith("blocked by the production WAF")
+
+
+def test_no_waf_check_sends_the_file_and_notes_it(fake, root, tmp_path):
+    run = tmp_path / "run-1"
+    run.mkdir()
+    bad = env(fetcher="x")
+    bad["payload"] = {"cve": "fixed in ../lib; spawns /bin/bash; <script> in PoC"}
+    build(run, {"a.json": env(fetcher="x"), "b.json": bad}, [inv("x", ["a.json", "b.json"])])
+    events: List[Dict[str, Any]] = []
+    out = api.upload_run(run, root, on_event=events.append, waf_check=False)
+    assert (out["uploaded"], out["dropped"], out["errors"]) == (2, 0, 0)
+    assert sorted(file_events(events)) == [("a.json", "uploaded"), ("b.json", "uploaded")]
+    assert out["plan"]["notes"] == [WAF_CHECK_OFF]
+
+
+def test_no_waf_check_reaches_the_offline_plan(no_env, root, tmp_path):
+    run = tmp_path / "run-1"
+    run.mkdir()
+    bad = env(fetcher="x")
+    bad["payload"] = {"cmd": "/bin/sh -c x"}
+    build(run, {"a.json": env(fetcher="x"), "b.json": bad}, [inv("x", ["a.json", "b.json"])])
+    plan = api.plan_upload(run, root, online=False, waf_check=False)
+    assert plan.notes == [WAF_CHECK_OFF]
+    [d] = [a for a in plan.actions if a.provider == "delivery"]
+    assert d.payload["dropped"] == [] and len(d.payload["files"]) == 2
 
 
 def test_preflight_stays_offline_and_keeps_its_shape(no_env, root, tmp_path, monkeypatch):

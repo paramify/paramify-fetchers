@@ -605,6 +605,14 @@ def test_files_waf_match_dropped(tmp_path):
     assert drop["reason"].startswith("blocked by the production WAF") and "'../'" in drop["reason"]
 
 
+def test_waf_check_off_sends_a_matching_file(tmp_path):
+    bad = write_file(tmp_path, "bad.json", payload={"cmd": "cd ../etc; /bin/bash", "html": "<script>"})
+    [a] = DeliveryProvider(today=lambda: TODAY, waf_check=False).diff(
+        [entry(tmp_path, files=("a.json", bad))], {"aws_x": observed(evidence())})
+    assert a.verb == "deliver" and a.payload["dropped"] == []
+    assert [f["original_file_name"] for f in a.payload["files"]] == ["a.json", "bad.json"]
+
+
 def test_all_files_dropped_creates_no_batch(tmp_path):
     bad = write_file(tmp_path, "bad.json", payload={"html": "<script>x</script>"})
     a = plan_one(entry(tmp_path, files=(bad,)), observed(evidence(CH_P)))
