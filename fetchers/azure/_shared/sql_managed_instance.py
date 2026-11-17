@@ -29,13 +29,18 @@ def sql_client(subscription_id, cred, collector: Collector):
     return collector.guard("sql.SqlManagementClient (init)", _client)
 
 
-def list_instances(client, collector: Collector, project: Callable) -> list[dict]:
-    """Every instance, projected, with `resource_group`; one without a group is recorded and dropped."""
+def list_instances(client, collector: Collector, project: Callable, unread=()) -> list[dict]:
+    """Every instance, projected, with `resource_group`; one without a group is recorded and dropped.
+
+    A list that could not be read gives `unread` (an empty list by default; pass None to tell it from no instances).
+    """
     projected = collector.guard(
         "sql.managed_instances.list",
         lambda: [project(i) for i in client.managed_instances.list()],
-        default=[],
+        default=None,
     )
+    if projected is None:
+        return list(unread) if unread is not None else None
     instances = []
     for instance in projected:
         group = resource_group_from_id(instance.get("id"))

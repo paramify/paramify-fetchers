@@ -1,17 +1,32 @@
 # Synthetic example. Replace the profile, assessment ID and scope before use.
 # Evidence and scan reports use separate upload commands; see the fetcher READMEs.
+#
+# Every scope setting is shown. They combine with AND, so each one narrows the
+# scope further; omit any you do not need. in_use_only already implies recent
+# use, so pair it with last_in_use_days only to spell the window out. Use the
+# same scope for the evidence and the report.
 run:
   output_dir: ./evidence
   fetchers:
     - use: aws_inspector_ecr_findings
       config:
+        repositories: '["example-service"]'
         image_tags: '["latest", "deployed"]'
+        in_use_only: true
+        last_in_use_days: 30
+        pushed_within_days: 90
+        min_severity: MEDIUM
       targets:
         - profile: example-gov
           region: us-gov-west-1
     - use: aws_inspector_ecr_report
       config:
+        repositories: '["example-service"]'
         image_tags: '["latest", "deployed"]'
+        in_use_only: true
+        last_in_use_days: 30
+        pushed_within_days: 90
+        min_severity: MEDIUM
         assessment_id: 123e4567-e89b-12d3-a456-426614174000
         close_cycle: never
         allow_empty: false

@@ -57,10 +57,21 @@ WORKDIR /app
 COPY . .
 
 # tui extra → `paramify tui` works inside the container; checkov extra → the
-# checkov scanner fetchers. Toggle for faster local builds:
+# checkov scanner fetchers; aws extra → boto3 for the Inspector ECR fetchers.
+# Toggle for faster local builds:
 #   docker build --build-arg INSTALL_EXTRAS=tui ...
-ARG INSTALL_EXTRAS=tui,checkov
+ARG INSTALL_EXTRAS=tui,checkov,aws
 RUN pip install --no-cache-dir -e ".[${INSTALL_EXTRAS}]"
+
+# The checkov fetchers run the `checkov` CLI, so checkov gets its own virtualenv
+# with only its executable on PATH. It pins exact versions of libraries the
+# other fetchers also use (boto3), which would otherwise hold them back.
+RUN case ",${INSTALL_EXTRAS}," in \
+      *,checkov,*) \
+        python -m venv /opt/checkov \
+        && /opt/checkov/bin/pip install --no-cache-dir checkov \
+        && ln -s /opt/checkov/bin/checkov /usr/local/bin/checkov ;; \
+    esac
 
 # Collected evidence lands here; mount a volume to persist it to the host.
 ENV EVIDENCE_DIR=/app/evidence
