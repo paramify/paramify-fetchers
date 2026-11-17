@@ -9,7 +9,6 @@ mocked pieces: they would run pip and the clone's own code.
 
 from __future__ import annotations
 
-import importlib.util
 import json
 import os
 import subprocess
@@ -21,7 +20,6 @@ from typer.testing import CliRunner
 from framework import api
 from framework import update as up
 from framework import update_cli
-from framework import update_view as view
 from framework.cli import app
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -123,31 +121,38 @@ def main_repo(repo, tmp_path):
 @pytest.fixture
 def stubs(monkeypatch):
     """Stand-ins for the pieces that would run pip or the clone's own code."""
-    calls = {"reinstall": 0, "validate": 0, "check": 0}
+    calls = {"reinstall": 0, "validate": 0}
     manifests = [{"path": "/x/manifests/prod.yaml", "label": "manifests/prod.yaml",
                   "uses": ["demo_alpha"], "errors_now": []}]
 
-    def check_target(root, target, ms, python=None):
-        calls["check"] += 1
-        return {"ok": True, "python_required": None, "python": "3.12.0",
-                "manifests": [{"manifest": "manifests/prod.yaml", "path": "/x", "status": "ok",
-                               "errors": [], "reason": None}],
-                "linked_local_fetchers": [],
-                "fetchers": {"yours": [], "others": [], "added": [], "removed": []}}
+    def run_validate(tree, manifest, python=None):
+        calls["validate"] += 1
+        return {"ok": True, "errors": [], "notes": []}
 
     def reinstall(root, extras, python=None):
         calls["reinstall"] += 1
         return {"ok": True, "command": ["pip"], "error": None}
 
-    def validate_all(root, ms, python=None):
-        calls["validate"] += 1
-        return {"ok": True, "manifests": []}
-
     monkeypatch.setattr(up, "user_manifests", lambda root: manifests)
-    monkeypatch.setattr(up, "check_target", check_target)
+    monkeypatch.setattr(up, "run_validate", run_validate)
     monkeypatch.setattr(up, "reinstall", reinstall)
-    monkeypatch.setattr(up, "validate_all", validate_all)
     return calls
+
+
+def _rows(upstream: Path, rows: str, message: str = "notes") -> None:
+    """Commit releases/unreleased.yaml on upstream with these highlight rows."""
+    _commit(upstream, {"releases/unreleased.yaml": "version: unreleased\nhighlights:\n" + rows}, message)
+
+
+BREAKS_GAMMA = "  - {tag: breaking, title: gamma renames a field, fix: read the new field, fetchers: [demo_gamma]}\n"
+BREAKS_ALPHA = "  - {tag: breaking, title: alpha renames a field, fix: read the new field, fetchers: [demo_alpha]}\n"
+BREAKS_ALL = "  - {tag: breaking, title: Python 3.13 is the minimum, fix: make a new venv}\n"
+BREAKS_CUSTOM = "  - {tag: breaking, title: the contract changed, fix: add the block, custom_fetchers: true}\n"
+NEW_ROW = "  - {tag: new, title: Sprockets for all, try: paramify catalog}\n"
+
+
+def _sha(repo: Path, ref: str = "HEAD") -> str:
+    return _git(repo, "rev-parse", ref).strip()
 
 
 def _run(*args: str):
@@ -230,19 +235,6 @@ def test_a_branch_with_no_tags_in_reach_still_updates(main_repo):
     assert up.choose_target(main_repo, pos, []).channel == "branch"
 
 
-def test_release_notes_use_highlights_and_fall_back_to_the_changelog(repo):
-    releases = up.list_releases(repo)
-    pos = up.position(repo)
-    notes = up.release_notes(repo, releases[-1], up.crossed(releases, pos, releases[-1]))
-    by = {n["version"]: n for n in notes}
-    assert [n["version"] for n in notes] == ["0.3.0-beta", "0.2.0-beta"]  # newest first
-    assert by["0.3.0-beta"]["has_highlights"]
-    assert [h["tag"] for h in by["0.3.0-beta"]["highlights"]] == ["new", "fetcher", "tui"]
-    assert not by["0.2.0-beta"]["has_highlights"]
-    assert by["0.2.0-beta"]["changelog_breaking"] == ["`old_flag` is gone"]
-    assert by["0.2.0-beta"]["changelog_url"].endswith("#020-beta---2026-02-01")
-
-
 def test_fetcher_reason_uses_only_subjects_that_name_the_fetcher():
     subjects = [
         "Bump azure_alert_rules to 0.3.1 above main's 0.3.0",
@@ -296,14 +288,6 @@ def test_span_counts_commits_and_days(main_repo):
     assert up.span(main_repo, "origin/main", "HEAD") == {"commits": 0, "days": 0}
 
 
-def test_changelog_parsing_joins_continuation_lines():
-    parsed = up.parse_changelog(CHANGELOG["0.2.0-beta"])
-    entry = parsed["0.2.0-beta"]["sections"]["Breaking"][0]
-    assert entry.endswith("which does the same.")
-    assert up.entry_title(entry) == "`old_flag` is gone"
-    assert up.entry_title("Plain entry. With more.") == "Plain entry"
-
-
 def test_curated_rows_are_those_the_target_adds(repo):
     rows = up.curated_rows(repo, "v0.1.0-beta", "v0.3.0-beta")
     assert [r["title"] for r in rows] == ["Gadgets for everyone", "demo_alpha reads more", "A nicer screen"]
@@ -335,14 +319,6 @@ def test_curated_rows_survive_a_missing_or_broken_releases_dir(repo, tmp_path):
 # --------------------------------------------------------------------------- #
 # The command: breaking stop, switch, rollback
 # --------------------------------------------------------------------------- #
-
-
-def test_dirty_refusal_lists_files_for_humans(repo, stubs):
-    (repo / "fetchers/demo/alpha/fetcher.yaml").write_text("changed\n")
-    result = runner.invoke(app, ["update"])
-    assert result.exit_code == 1
-    assert "fetchers/demo/alpha/fetcher.yaml" in result.stdout
-    assert "Commit them" in result.stdout
 
 
 # --------------------------------------------------------------------------- #
@@ -411,19 +387,199 @@ def test_reinstall_only_when_pyproject_changed(main_repo, tmp_path):
     assert up.needs_reinstall(main_repo, old, _git(main_repo, "rev-parse", "origin/main").strip()) is True
 
 
-def test_check_exit_codes(repo):
+def test_update_on_main_fast_forwards_and_skips_the_reinstall(main_repo, stubs):
+    result, doc = _run("--yes", "--json")
+    assert result.exit_code == 0, result.stdout
+    assert (doc["channel"], doc["target"]["label"], doc["span"]["commits"]) == ("branch", "main", 1)
+    assert doc["switched"] and doc["reinstall"]["skipped"] and stubs["reinstall"] == 0
+    assert doc["fetchers"]["yours"][0]["reason"] == "read more rows"
+    assert _git(main_repo, "status", "-sb").startswith("## main...origin/main\n")
+    assert up.read_state(main_repo)["previous"]["branch"] == "main"
+
+
+def test_update_on_a_tag_moves_to_the_newest_release(repo, stubs):
+    result, doc = _run("--yes", "--json")
+    assert result.exit_code == 0, result.stdout
+    assert (doc["channel"], doc["target"]["label"], doc["version"]) == ("release", "0.3.0-beta", "0.3.0-beta")
+    assert [h["title"] for h in doc["highlights"]] == ["Gadgets for everyone", "demo_alpha reads more", "A nicer screen"]
+    assert _head_tag(repo) == "v0.3.0-beta"
+    assert up.read_state(repo)["previous"]["tag"] == "v0.1.0-beta"
+
+
+def test_nothing_to_do_when_the_branch_is_current(main_repo, stubs):
+    assert _run("--yes", "--json")[0].exit_code == 0
+    result, doc = _run("--yes", "--json")
+    assert result.exit_code == 0 and doc["up_to_date"] and not doc.get("switched")
+    assert "Nothing to do" in runner.invoke(app, ["update"]).stdout
+
+
+def test_json_without_yes_plans_but_does_not_switch(main_repo, stubs):
+    before = _sha(main_repo)
+    result, doc = _run("--json")
+    assert result.exit_code == 1 and "pass --yes" in doc["errors"][0]
+    assert _sha(main_repo) == before and not doc.get("switched")
+    assert {"channel", "target", "span", "fetchers", "breaking", "highlights", "check"} <= set(doc)
+
+
+def test_unattended_stops_only_for_breaking_rows_that_touch_you(main_repo, stubs, tmp_path):
+    upstream = tmp_path / "upstream"
+    _rows(upstream, BREAKS_GAMMA)
+    result, doc = _run("--yes", "--json")
+    assert result.exit_code == 0, result.stdout
+    assert [(b["title"], b["touches"]) for b in doc["breaking"]] == [("gamma renames a field", False)]
+    _rows(upstream, BREAKS_GAMMA + BREAKS_ALPHA)
+    before = _sha(main_repo)
+    result, doc = _run("--yes", "--json")
+    assert result.exit_code == 1 and "1 breaking change touches" in doc["errors"][0]
+    assert doc["breaking"][0]["manifests"] == [{"manifest": "manifests/prod.yaml", "fetchers": ["demo_alpha"]}]
+    assert _sha(main_repo) == before
+    result, doc = _run("--yes", "--allow-breaking", "--json")
+    assert result.exit_code == 0 and _sha(main_repo) == _sha(main_repo, "origin/main")
+
+
+def test_unattended_stops_for_an_unscoped_breaking_row(main_repo, stubs, tmp_path):
+    upstream = tmp_path / "upstream"
+    _rows(upstream, BREAKS_CUSTOM)          # this clone has no fetchers of its own
+    assert _run("--yes", "--json")[0].exit_code == 0
+    _rows(upstream, BREAKS_CUSTOM + BREAKS_ALL)
+    result, doc = _run("--yes", "--json")
+    assert result.exit_code == 1 and doc["breaking"][0]["why"] == "everyone"
+
+
+def test_manifests_that_would_break_also_stop_an_unattended_run(main_repo, stubs, monkeypatch):
+    before = _sha(main_repo)
+    monkeypatch.setattr(up, "run_validate", lambda tree, m, python=None: {"ok": False, "errors": ["bad"], "notes": []})
+    result, doc = _run("--yes", "--json")
+    assert result.exit_code == 1 and "1 manifest would break" in doc["errors"][0]
+    assert _sha(main_repo) == before
+
+
+def test_overlapping_local_changes_are_refused_and_listed(main_repo, stubs):
+    (main_repo / "framework/later.py").write_text("# rides along\n")
+    (main_repo / "fetchers/demo/alpha/fetch.py").write_text("# mine\n")
+    result, doc = _run("--yes", "--json")
+    assert result.exit_code == 1 and doc["blocking"]["tracked"] == ["fetchers/demo/alpha/fetch.py"]
+    human = runner.invoke(app, ["update", "--yes"])
+    assert human.exit_code == 1 and "fetchers/demo/alpha/fetch.py" in human.stdout
+    assert "framework/later.py" not in human.stdout
+
+
+def test_local_changes_the_update_does_not_touch_ride_along(main_repo, stubs):
+    (main_repo / "framework/later.py").write_text("# rides along\n")
+    result, doc = _run("--yes", "--json")
+    assert result.exit_code == 0, result.stdout
+    assert (main_repo / "framework/later.py").read_text() == "# rides along\n"
+
+
+def test_rollback_keeps_a_branch_user_on_the_branch(main_repo, stubs):
+    before = _sha(main_repo)
+    assert _run("--yes", "--json")[0].exit_code == 0
+    result, doc = _run("--rollback", "--yes", "--json")
+    assert result.exit_code == 0, result.stdout
+    pos = up.position(main_repo)
+    assert (pos["branch"], pos["sha"], pos["behind"]) == ("main", before, 1)
+    assert "previous" not in up.read_state(main_repo)
+    result, doc = _run("--rollback", "--yes", "--json")
+    assert result.exit_code == 1 and "nothing to roll back to" in doc["errors"][0]
+
+
+def test_rollback_returns_to_the_previous_release_once(repo, stubs):
+    assert _run("--yes", "--json")[0].exit_code == 0
+    result, doc = _run("--rollback", "--yes", "--json")
+    assert result.exit_code == 0 and _head_tag(repo) == "v0.1.0-beta"
+
+
+def test_a_failed_reinstall_puts_the_old_commit_back(main_repo, stubs, monkeypatch, tmp_path):
+    _commit(tmp_path / "upstream", {"pyproject.toml": "[project]\nname='x'\n"}, "deps")
+    before = _sha(main_repo)
+    results = iter([{"ok": False, "command": ["pip"], "error": "boom"},
+                    {"ok": True, "command": ["pip"], "error": None}])
+    monkeypatch.setattr(up, "reinstall", lambda root, extras, python=None: next(results))
+    result, doc = _run("--yes", "--json")
+    assert result.exit_code == 1 and "put your previous version back" in doc["errors"][0]
+    pos = up.position(main_repo)
+    assert (pos["branch"], pos["sha"]) == ("main", before)
+    assert "previous" not in up.read_state(main_repo)
+
+
+def test_check_exit_codes(main_repo):
     result, doc = _run("--check", "--json")
-    assert result.exit_code == 1 and doc["update_available"] and doc["latest"] == "0.3.0-beta"
-    _git(repo, "switch", "-q", "--detach", "v0.3.0-beta")
-    result, doc = _run("--check", "--json")
-    assert result.exit_code == 0 and not doc["update_available"]
+    assert result.exit_code == 1 and doc["update_available"] and doc["waiting"] == "1 new commit on main"
+    _git(main_repo, "merge", "-q", "--ff-only", "origin/main")
     result = runner.invoke(app, ["update", "--check"])
     assert result.exit_code == 0 and "Up to date" in result.stdout
+    _git(main_repo, "switch", "-q", "--detach", "HEAD")
+    result, doc = _run("--check", "--json")
+    assert result.exit_code == 2 and doc["update_available"] is None and "detached commit" in doc["errors"][0]
+
+
+def test_check_on_a_release_reports_a_newer_one(repo):
+    result, doc = _run("--check", "--json")
+    assert result.exit_code == 1 and doc["waiting"] == "0.3.0-beta is out"
+    _git(repo, "switch", "-q", "--detach", "v0.3.0-beta")
+    assert _run("--check", "--json")[0].exit_code == 0
+
+
+def test_offline_update_uses_what_the_clone_last_fetched(main_repo, stubs, monkeypatch):
+    up.fetch(main_repo)
+
+    def offline(root, timeout=90):
+        raise up.UpdateError("could not resolve host")
+
+    monkeypatch.setattr(up, "fetch", offline)
+    result, doc = _run("--yes", "--json")
+    assert result.exit_code == 0 and doc["fetched"] is False and doc["switched"]
+    monkeypatch.undo()
 
 
 def test_flags_are_exclusive(repo):
-    result = runner.invoke(app, ["update", "--check", "--rollback"])
-    assert result.exit_code == 2
+    assert runner.invoke(app, ["update", "--check", "--rollback"]).exit_code == 2
+    assert runner.invoke(app, ["update", "--to", "main", "--check"]).exit_code == 2
+    assert runner.invoke(app, ["update", "--next"]).exit_code == 2      # removed
+
+
+def test_to_pins_a_release_and_to_main_returns(main_repo, stubs, tmp_path):
+    upstream = tmp_path / "upstream"
+    _commit(upstream, {"framework/update.py": "# here\n"}, "ship update")
+    _git(upstream, "tag", "v0.4.0-beta")
+    _commit(upstream, {"framework/more.py": "# on\n"}, "main moves on again")
+    result, doc = _run("--to", "v0.4.0-beta", "--yes", "--json")
+    assert result.exit_code == 0 and doc["channel"] == "release" and _head_tag(main_repo) == "v0.4.0-beta"
+    result, doc = _run("--to", "main", "--yes", "--json")
+    assert result.exit_code == 0 and doc["channel"] == "branch"
+    pos = up.position(main_repo)
+    assert (pos["branch"], pos["behind"]) == ("main", 0)
+    result, doc = _run("--to", "v0.2.0-beta", "--yes", "--json")
+    assert result.exit_code == 1 and "before paramify update existed" in doc["errors"][0]
+
+
+def test_notice_names_what_is_waiting(main_repo):
+    up.fetch(main_repo)
+    info = up.check_for_update(main_repo, fetch=False)
+    assert (info["channel"], info["update_available"], info["waiting"]) == ("branch", True, "1 new commit on main")
+    _git(main_repo, "switch", "-q", "--detach", "v0.1.0-beta")
+    info = up.check_for_update(main_repo, fetch=False)
+    assert (info["channel"], info["waiting"]) == ("release", "0.3.0-beta is out")
+
+
+def test_plan_renders_plainly_and_within_100_columns(main_repo, stubs, monkeypatch, tmp_path):
+    monkeypatch.setenv("NO_COLOR", "1")
+    monkeypatch.setenv("COLUMNS", "160")
+    upstream = tmp_path / "upstream"
+    _rows(upstream, BREAKS_ALPHA + BREAKS_GAMMA + NEW_ROW)
+    _commit(upstream, {"fetchers/demo/alpha/fetch.py": "# v4\n"}, "demo_alpha: " + "a very long reason " * 8)
+    result = runner.invoke(app, ["update"])
+    out = result.stdout
+    assert result.exit_code == 1 and "pass --yes" in out
+    assert all(line.startswith("  ") for line in out.splitlines() if line), out   # cut, never wrapped
+    assert "a very long reason a very long reason" in out and "…" in out
+    for text in ("main", "3 commits", "Your fetchers", "demo_alpha", "Breaking",
+                 "alpha renames a field", "fix: read the new field", "manifests/prod.yaml",
+                 "New", "Sprockets for all", "1 other breaking change"):
+        assert text in out, text
+    assert "gamma renames a field" not in out
+    assert max(len(line) for line in out.splitlines()) <= 100
+    assert "\x1b[" not in out
 
 
 # --------------------------------------------------------------------------- #
@@ -457,6 +613,27 @@ def test_dockerfile_marks_the_image():
 # --------------------------------------------------------------------------- #
 # The pre-switch check
 # --------------------------------------------------------------------------- #
+
+def test_check_summary_does_not_call_an_already_failing_manifest_a_pass():
+    from framework import update_view as view
+    rows = [{"status": "ok"}, {"status": "still_failing"}]
+    assert view.check_summary({"manifests": rows}) == ("warn", "nothing new breaks · 1 of 2 manifests already failing")
+    assert view.check_summary({"manifests": rows[:1]}) == ("ok", "1 manifest passes on the new code")
+    assert view.check_summary({"manifests": [{"status": "breaks"}]})[0] == "fail"
+
+
+def test_fetcher_lines_show_new_fetchers_and_line_up():
+    from framework import update_view as view
+    changes = {"yours": [
+        {"name": "a_fetcher_name_longer_than_thirty_ch", "change": "changed", "manifests": ["m"],
+         "from": "0.1.0", "to": "0.2.0", "reason": "why", "more": 0},
+        {"name": "short", "change": "added", "manifests": ["m"], "from": None, "to": "0.3.1", "reason": None, "more": 2},
+    ], "others": [], "added": [], "removed": []}
+    lines = [t.plain for t in view.your_fetchers(changes, 5, [])]
+    assert lines[0].split() == ["Your", "fetchers", "2", "of", "5", "changed"]
+    assert lines[1].index("0.1.0 → 0.2.0") == lines[2].index("new 0.3.1")
+    assert lines[2].rstrip().endswith("2 commits")
+
 
 def test_check_target_classifies_manifests_and_removes_its_worktree(repo, monkeypatch, tmp_path):
     seen_trees = []
@@ -568,45 +745,3 @@ def test_install_command_uses_uv_when_the_venv_has_no_pip(monkeypatch, tmp_path)
     assert up.install_command(tmp_path, None, python="py")[-2:] == ["-e", f"{tmp_path}[all]"]
 
 
-def test_view_palette_matches_the_tui_palette():
-    spec = importlib.util.spec_from_file_location("_palette", REPO_ROOT / "framework/tui/palette.py")
-    palette = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(palette)
-    for name in ("BG", "FG", "SUBTLE", "BLUE", "PURPLE", "CYAN", "GREEN", "YELLOW", "RED", "ORANGE",
-                 "OK_TEXT", "OK_MUTED", "WARN_TEXT", "WARN_MUTED", "FAIL_TEXT", "FAIL_MUTED"):
-        assert getattr(view, name) == getattr(palette, name), name
-
-
-def test_every_highlight_tag_has_a_pill():
-    assert set(view.TAGS) == set(up.HIGHLIGHT_TAGS)
-    schema_tags = set(up.highlights_schema()["$defs"]["highlight"]["properties"]["tag"]["enum"])
-    assert schema_tags == set(up.HIGHLIGHT_TAGS)
-
-
-@pytest.mark.parametrize("env", [{"NO_COLOR": "1"}, {"PARAMIFY_THEME": "light"}, {}])
-def test_plan_renders_in_every_mode(env, monkeypatch):
-    for k, v in env.items():
-        monkeypatch.setenv(k, v)
-    console = view.make_console(width=80, record=True, force_terminal=not env.get("NO_COLOR"),
-                                color_system=None if env.get("NO_COLOR") else "truecolor",
-                                file=open(os.devnull, "w"))
-    look = view.Look(console)
-    plan = {
-        "current": {"label": "0.1.0-beta"}, "target": {"version": "0.3.0-beta", "date": "2026-03-01"},
-        "direction": "forward", "used_fetchers": ["demo_alpha"],
-        "releases": [{"version": "0.3.0-beta", "date": "2026-03-01", "has_highlights": True,
-                      "highlights": [{"tag": "new", "title": "Gadgets", "detail": "more"},
-                                     {"tag": "fetcher", "title": "Alpha", "fetchers": ["demo_alpha"]}],
-                      "breaking": [], "changelog_breaking": [], "changelog_url": "https://x"}],
-        "breaking": [{"release": "0.3.0-beta", "title": "Old flag gone", "fix": "Use the new one",
-                      "source": "highlights", "scoped": False,
-                      "manifests": [{"manifest": "m.yaml", "fetchers": ["demo_alpha"]}]}],
-    }
-    for r in (view.header(look, plan), view.whats_new(look, plan), view.breaking(look, plan),
-              view.done_panel(look, "0.3.0-beta", [("paramify catalog", "Gadgets")], container=True)):
-        console.print(r)
-    text = console.export_text()
-    assert "0.3.0-beta" in text and "Use the new one" in text and "affects m.yaml" in text
-    assert "◆ yours" in text and "docker compose" in text
-    if env.get("NO_COLOR"):
-        assert "[new]" in text

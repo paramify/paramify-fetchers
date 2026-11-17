@@ -63,10 +63,10 @@ Validate / run / launch:
   paramify issues close <assessment-id> [--yes] [--json]
   paramify tui [--manifest PATH] [--at ROOT]   # interactive terminal UI
 
-Upgrade (release tags only; see docs/versioning_guide.md):
-  paramify update [--to vX.Y.Z-beta | --next] [--yes] [--allow-breaking] [--json]
-  paramify update --check [--json]             # exit 0 up to date, 1 update available, 2 can't tell
-  paramify update --rollback [--yes] [--json]  # back to the version before the last update
+Upgrade (see docs/versioning_guide.md):
+  paramify update [--to main|vX.Y.Z-beta] [--yes] [--allow-breaking] [--json]
+  paramify update --check [--json]             # exit 0 up to date, 1 update waiting, 2 can't tell
+  paramify update --rollback [--yes] [--json]  # back to where you were before the last update
 
 Secrets are referenced as ${env:VAR} — set-secret / add-target take the ENV VAR
 NAME, never the secret value. The runner resolves refs from its own environment.
@@ -202,7 +202,7 @@ def _root(ctx: typer.Context) -> None:
         ctx.color = False
     elif os.environ.get("FORCE_COLOR"):
         ctx.color = True
-    # The once-a-day "a newer release is out" line, printed after the command
+    # The once-a-day "an update is waiting" line, printed after the command
     # finishes. update_cli.maybe_notice decides whether it is due and stays
     # silent under --json, in pipes, and inside the container.
     ctx.call_on_close(lambda: maybe_update_notice(ctx.invoked_subcommand))

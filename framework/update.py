@@ -1,8 +1,10 @@
-"""`paramify update`: move a clone from one release tag to another, safely.
+"""`paramify update`: bring a clone up to date, safely.
 
-This automates docs/versioning_guide.md: fetch the tags, read what changed
-between the version you run and the target, check your manifests against the
-target before touching your checkout, then switch, reinstall and validate.
+A clone follows whatever it is on. A branch (normally main) is fast-forwarded
+to the remote branch it tracks; a clone sitting on a release tag moves to the
+newest release. `--to` switches between the two. Either way the steps are the
+same: say what changes for this clone, check the user's manifests against the
+target before touching the checkout, then move, reinstall if needed, validate.
 
 Everything here returns JSON-able dicts. The CLI renders them (framework/
 update_view.py) or prints them under --json; nothing in this module writes to
@@ -10,14 +12,14 @@ the terminal.
 
 Three rules shape the code:
 
-* Releases are tags named vX.Y.Z[-suffix]. `main` and archive/* are never
-  targets, so a user can't land on unreleased work by running this.
-* Nothing changes the user's checkout until they confirm. The pre-switch check
-  runs the target's own `paramify validate` in a throwaway `git worktree`, which
-  is removed whatever happens.
-* Every git and pip call is a subprocess, and on this kind of laptop each one
-  costs real time, so the code batches reads (one `git cat-file --batch` for
-  every file it needs from the target) rather than calling git per file.
+* Update fast-forwards or refuses. It never merges, and it never moves a clone
+  to older code unless the user named that target.
+* Nothing changes the user's checkout until they confirm. The pre-check runs
+  the target's own `paramify validate` in a throwaway `git worktree`, which is
+  removed whatever happens.
+* Every git and pip call is a subprocess, and on some laptops each one costs
+  real time, so the code batches reads (one `git cat-file --batch` for the
+  files it needs from a commit, one `git log` for every fetcher's history).
 """
 
 from __future__ import annotations
@@ -59,10 +61,6 @@ CONTAINER_ENV = "PARAMIFY_CONTAINER"
 CHECK_INTERVAL = 24 * 60 * 60
 PUBLIC_REPO = "https://github.com/paramify/paramify-fetchers"
 COMPOSE_BUILD = "docker compose -f deploy/docker-compose.yml build"
-
-# Pills shown before a highlight's title. Order is display order within a
-# release: what is new first, fixes last.
-HIGHLIGHT_TAGS = ("new", "fetcher", "cli", "tui", "improved", "security", "fix", "deprecated", "breaking")
 
 
 class UpdateError(RuntimeError):
@@ -164,9 +162,6 @@ def list_releases(root: Path) -> List[Release]:
 def fetch(root: Path, timeout: float = 90) -> None:
     """Bring in origin's branches and release tags."""
     git(root, "fetch", "--tags", "--quiet", "origin", timeout=timeout)
-
-
-fetch_tags = fetch
 
 
 def position(root: Path) -> dict:
@@ -309,66 +304,9 @@ def choose_target(root: Path, pos: dict, releases: Sequence[Release], to: Option
     raise UpdateError(f"this clone is on a detached commit ({pos['short']}), not a branch or a release. {hint}")
 
 
-def crossed(releases: Sequence[Release], pos: dict, target: Release) -> List[Release]:
-    """Releases between yours (exclusive) and the target (inclusive), oldest first.
-
-    Empty when the target is yours or older: nothing new is crossed going back.
-    """
-    base = parse_release(pos["tag"] or "")
-    return [r for r in releases if (base is None or r.key > base.key) and r.key <= target.key]
-
-
 # --------------------------------------------------------------------------- #
-# CHANGELOG and highlights
+# Curated rows
 # --------------------------------------------------------------------------- #
-
-_SECTION = re.compile(r"^## \[(?P<version>[^\]]+)\](?:\s*-\s*(?P<date>\S+))?\s*$")
-_SUBSECTION = re.compile(r"^### (?P<name>.+?)\s*$")
-
-
-def parse_changelog(text: str) -> Dict[str, dict]:
-    """{version: {date, heading, sections: {Breaking: [entry, ...], ...}}}.
-
-    An entry is one top-level `- ` bullet with its continuation lines joined.
-    """
-    out: Dict[str, dict] = {}
-    cur: Optional[dict] = None
-    bucket: Optional[List[str]] = None
-    for line in text.splitlines():
-        m = _SECTION.match(line)
-        if m:
-            cur = out.setdefault(m["version"], {"date": m["date"], "heading": line[3:], "sections": {}})
-            bucket = None
-            continue
-        if cur is None:
-            continue
-        m = _SUBSECTION.match(line)
-        if m:
-            bucket = cur["sections"].setdefault(m["name"], [])
-            continue
-        if bucket is None:
-            continue
-        if line.startswith("- "):
-            bucket.append(line[2:].strip())
-        elif line.startswith(" ") and line.strip() and bucket:
-            bucket[-1] += " " + line.strip()
-    return out
-
-
-def entry_title(entry: str, limit: int = 90) -> str:
-    """A one-line title for a CHANGELOG entry: its bold lead if it has one,
-    else its first sentence, cut to `limit` characters."""
-    m = re.match(r"\*\*(.+?)\*\*", entry)
-    text = m[1] if m else re.split(r"(?<=[.:])\s", entry, maxsplit=1)[0]
-    text = text.strip().rstrip(".:")
-    return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
-
-
-def changelog_anchor(heading: str) -> str:
-    """GitHub's anchor for a `## [0.6.0-beta] - 2026-10-23` heading."""
-    slug = re.sub(r"[^\w\- ]", "", heading.lower())
-    return slug.replace(" ", "-")
-
 
 def repo_web_url(root: Path) -> str:
     """The GitHub page of origin, for changelog links; the public repo when
@@ -379,6 +317,12 @@ def repo_web_url(root: Path) -> str:
         return PUBLIC_REPO
     m = re.match(r"^(?:https://github\.com/|git@[^:]*github[^:]*:|ssh://git@github\.com/)(.+?)(?:\.git)?/?$", url)
     return f"https://github.com/{m[1]}" if m else PUBLIC_REPO
+
+
+def changelog_url(root: Path, target: "Target") -> str:
+    """The CHANGELOG as it is at the target, on GitHub."""
+    at = target.ref if target.channel == "release" else target.sha[:10]
+    return f"{repo_web_url(root)}/blob/{at}/CHANGELOG.md"
 
 
 def highlights_schema() -> dict:
@@ -452,45 +396,6 @@ def curated_rows(root: Path, head: str, target: str) -> List[dict]:
     return out
 
 
-def release_notes(root: Path, target: Release, releases: Sequence[Release]) -> List[dict]:
-    """What each crossed release says, newest first.
-
-    Reads the target's CHANGELOG and every releases/<version>.yaml as they are
-    at the target tag, in one git call. A highlights file written after its
-    release was tagged lives only in later trees (and on main), so the working
-    tree is the fallback for one the target doesn't carry.
-    """
-    paths = ["CHANGELOG.md"] + [f"{HIGHLIGHTS_DIR}/{r.version}.yaml" for r in releases]
-    files = read_at(root, target.tag, paths)
-    changelog = parse_changelog(files.get("CHANGELOG.md") or "")
-    schema = highlights_schema()
-    web = repo_web_url(root)
-    notes = []
-    for r in reversed(releases):
-        rel_path = f"{HIGHLIGHTS_DIR}/{r.version}.yaml"
-        text = files.get(rel_path)
-        if text is None and (Path(root) / rel_path).is_file():
-            text = (Path(root) / rel_path).read_text()
-        doc = _load_highlights(text, schema)
-        section = changelog.get(r.version) or {}
-        heading = section.get("heading")
-        url = f"{web}/blob/{target.tag}/CHANGELOG.md" + (f"#{changelog_anchor(heading)}" if heading else "")
-        rows: List[dict] = (doc or {}).get("highlights") or []
-        notes.append({
-            "tag": r.tag,
-            "version": r.version,
-            "date": (doc or {}).get("date") or section.get("date"),
-            "has_highlights": doc is not None,
-            "highlights": sorted(
-                (h for h in rows if h["tag"] != "breaking"), key=lambda h: HIGHLIGHT_TAGS.index(h["tag"])
-            ),
-            "breaking": [h for h in rows if h["tag"] == "breaking"],
-            "changelog_breaking": [entry_title(e) for e in section.get("sections", {}).get("Breaking", [])],
-            "changelog_url": url,
-        })
-    return notes
-
-
 # --------------------------------------------------------------------------- #
 # The user's manifests
 # --------------------------------------------------------------------------- #
@@ -532,29 +437,6 @@ def _label(path: Path, root: Path) -> str:
 
 def match_fetchers(patterns: Sequence[str], names: Sequence[str]) -> List[str]:
     return sorted({n for n in names for p in patterns if fnmatch.fnmatchcase(n, p)})
-
-
-def pair_breaking(notes: Sequence[dict], manifests: Sequence[dict]) -> List[dict]:
-    """Every breaking change crossed, with the manifests it touches.
-
-    Uses the highlights' breaking rows when the release has them, else the
-    CHANGELOG's Breaking titles, which have no fix line but are still the truth.
-    """
-    out = []
-    for n in notes:
-        if n["breaking"]:
-            for b in n["breaking"]:
-                hit = [
-                    {"manifest": m["label"], "fetchers": match_fetchers(b["fetchers"], m["uses"])}
-                    for m in manifests if b.get("fetchers") and match_fetchers(b["fetchers"], m["uses"])
-                ]
-                out.append({"release": n["version"], "title": b["title"], "fix": b["fix"],
-                            "source": "highlights", "scoped": bool(b.get("fetchers")), "manifests": hit})
-        else:
-            for title in n["changelog_breaking"]:
-                out.append({"release": n["version"], "title": title, "fix": None,
-                            "source": "changelog", "scoped": False, "manifests": []})
-    return out
 
 
 # --------------------------------------------------------------------------- #
@@ -878,13 +760,6 @@ def check_target(root: Path, target: Target, manifests: Sequence[dict], python: 
 # Switch, reinstall, validate
 # --------------------------------------------------------------------------- #
 
-def switch(root: Path, ref: str, *, branch: bool = False) -> None:
-    if branch:
-        git(root, "switch", "--quiet", ref)
-    else:
-        git(root, "switch", "--quiet", "--detach", ref)
-
-
 def _on_branch(root: Path, branch: str) -> bool:
     try:
         return git(root, "symbolic-ref", "-q", "--short", "HEAD").strip() == branch
@@ -1053,25 +928,44 @@ def describe(pos: dict) -> str:
 # The update-available check (shared with the TUI)
 # --------------------------------------------------------------------------- #
 
+def update_status(root: Path) -> dict:
+    """Is there something for `paramify update` to move to? From local refs only.
+
+    Raises UpdateError when the clone is in a state update would refuse (a
+    branch with commits of its own, a detached commit), since then it can't say.
+    """
+    pos = position(root)
+    target = choose_target(root, pos, list_releases(root))
+    available = target.sha != pos["sha"]
+    if not available:
+        waiting = None
+    elif target.channel == "branch":
+        n = pos["behind"] or 0
+        waiting = f"{n} new commit{'s' if n != 1 else ''} on {target.label}"
+    else:
+        waiting = f"{target.label} is out"
+    return {"channel": target.channel, "current": describe(pos), "latest": target.label,
+            "update_available": available, "waiting": waiting}
+
+
 def _background_fetch(root: Path) -> None:
-    """Start `git fetch --tags` and don't wait for it. The tags it brings in are
-    compared on the next check, so a slow or absent network never delays the
-    command the user actually ran."""
+    """Start `git fetch` and don't wait for it. What it brings in is compared on
+    the next check, so a slow or absent network never delays the command the
+    user actually ran."""
     subprocess.Popen(
-        ["git", "fetch", "--tags", "--quiet"], cwd=root, env=_git_env(),
+        ["git", "fetch", "--tags", "--quiet", "origin"], cwd=root, env=_git_env(),
         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         start_new_session=True,
     )
 
 
 def check_for_update(root: Path, *, now: Optional[float] = None, fetch: bool = True) -> Optional[dict]:
-    """Is a newer release tag than the one you run available?
+    """update_status for a quiet notice: never slow, never an error.
 
-    Fetches tags from origin at most once a day (the time is kept in
-    .paramify/state.json) and compares local tags, so it costs two quick git
-    calls and never waits on the network. Returns None, quietly, when
-    PARAMIFY_NO_UPDATE_CHECK is set, when there is no git clone (the deploy
-    image), or when anything goes wrong.
+    Fetches from origin at most once a day, in the background (the time is kept
+    in .paramify/state.json), and compares what the clone already has. Returns
+    None when PARAMIFY_NO_UPDATE_CHECK is set, when there is no git clone (the
+    deploy image), when update could not tell, or when anything goes wrong.
     """
     if os.environ.get(NO_CHECK_ENV, "").strip() not in ("", "0") or is_container(root):
         return None
@@ -1086,22 +980,11 @@ def check_for_update(root: Path, *, now: Optional[float] = None, fetch: bool = T
             except OSError:
                 pass
             cache["fetched_at"] = now
-        releases = list_releases(root)
-        pos = position(root)
-        latest = releases[-1] if releases else None
-        base = parse_release(pos["tag"] or "")
-        available = bool(latest and (base is None or latest.key > base.key))
-        cache.update(latest=latest.tag if latest else None, checked_at=now)
+        info = update_status(root)
+        cache.update(latest=info["latest"], checked_at=now)
         state["update_check"] = cache
         write_state(root, state)
-        return {
-            "current": describe(pos),
-            "current_tag": pos["tag"],
-            "latest": latest.version if latest else None,
-            "latest_tag": latest.tag if latest else None,
-            "update_available": available,
-            "on_release": bool(pos["exact"]),
-        }
+        return info
     except Exception:  # noqa: BLE001 (a notice must never break a command)
         return None
 
