@@ -579,8 +579,15 @@ def _explain(resp: requests.Response, message: str) -> str:
 
 # --- repositories ------------------------------------------------------------
 
-def list_repos(client: GitHubClient, org: dict, allowlist: List[str], include_archived: bool) -> Optional[List[dict]]:
-    """The organization's repositories, filtered by allowlist and archive state, checked against the org's counts."""
+def list_repos(client: GitHubClient, org: dict, allowlist: List[str], include_archived: bool,
+               exclude: Optional[List[str]] = None, excluded: Optional[Dict[str, Any]] = None) -> Optional[List[dict]]:
+    """The organization's repositories, filtered by allowlist, exclusions and archive state, checked against the org's counts.
+
+    `exclude` names repositories to leave out, matched without regard to case as GitHub does. They are taken out after
+    the count check and before the archive filter, so an archived repository still counts as matched. When `excluded`
+    is given it is filled with what happened: `repositories_excluded` (the names taken out) and
+    `exclude_repositories_unmatched` (names that matched no repository, such as a typo).
+    """
     login = org["login"]
     repos: Optional[List[dict]]
     if allowlist:
@@ -603,6 +610,14 @@ def list_repos(client: GitHubClient, org: dict, allowlist: List[str], include_ar
         # public_repos is visible to anyone; total_private_repos only to members who can see them.
         expected = (org.get("public_repos") or 0) + (org.get("total_private_repos") or 0)
         client.expect("repositories", len(repos), expected if org.get("public_repos") is not None else None)
+    if exclude:
+        wanted = {name.lower(): name for name in exclude}
+        taken = sorted((r["name"] for r in repos if r["name"].lower() in wanted), key=str.lower)
+        found = {name.lower() for name in taken}
+        repos = [r for r in repos if r["name"].lower() not in wanted]
+        if excluded is not None:
+            excluded["repositories_excluded"] = taken
+            excluded["exclude_repositories_unmatched"] = sorted(n for k, n in wanted.items() if k not in found)
     if not include_archived:
         repos = [r for r in repos if not r.get("archived")]
     return sorted(repos, key=lambda r: r["name"].lower())
@@ -683,15 +698,19 @@ def run(name: str, collect: Callable[[GitHubClient, dict, List[dict], Dict[str, 
         # include_archived is false by default; it narrows only when someone set it.
         archived_set = bool(os.environ.get("GITHUB_INCLUDE_ARCHIVED", "").strip())
         filters_ignored = [key for key, narrows in (("repositories", bool(target["repositories"])),
+                                                    ("exclude_repositories", bool(target["exclude_repositories"])),
                                                     ("include_archived", archived_set and not target["include_archived"]))
                            if narrows]
-        target = {**target, "repositories": [], "include_archived": True}
+        target = {**target, "repositories": [], "exclude_repositories": [], "include_archived": True}
     client = GitHubClient(target["api_url"], target["token"])
     result: Dict[str, Any] = {}
     org: Dict[str, Any] = {}
+    # Filled by list_repos; null until the repository list is read, so an unread list never looks like "none excluded".
+    excluded: Dict[str, Any] = {"repositories_excluded": None, "exclude_repositories_unmatched": None}
     try:
         org = client.get(f"orgs/{target['org']}") or {}
-        repos = list_repos(client, org, target["repositories"], target["include_archived"]) if org else None
+        repos = list_repos(client, org, target["repositories"], target["include_archived"],
+                           target["exclude_repositories"], excluded) if org else None
         if repos is not None:
             result = collect(client, org, repos, settings) or {}
     except Exception as exc:  # noqa: BLE001 - an unexpected response must still leave evidence and a reason
@@ -706,6 +725,8 @@ def run(name: str, collect: Callable[[GitHubClient, dict, List[dict], Dict[str, 
             "api_url": target["api_url"],
             "plan": (org.get("plan") or {}).get("name"),
             "repositories_filter": target["repositories"] or None,
+            "exclude_repositories": target["exclude_repositories"] or None,
+            **(excluded if target["exclude_repositories"] else {}),
             "include_archived": target["include_archived"],
             **({"filters_ignored": filters_ignored} if inventory else {}),
             **settings,
@@ -748,11 +769,17 @@ def _target_from_env() -> Dict[str, Any]:
     include_archived = as_bool(os.environ.get("GITHUB_INCLUDE_ARCHIVED") or "false")
     if include_archived is None:
         raise ValueError("GITHUB_INCLUDE_ARCHIVED must be true or false")
+    repositories = split_list(os.environ.get("GITHUB_REPOSITORIES"))
+    exclude = split_list(os.environ.get("GITHUB_EXCLUDE_REPOSITORIES"))
+    if repositories and exclude:
+        # Two filters that disagree about what is in scope: say so rather than guess which one wins.
+        raise ValueError("set GITHUB_REPOSITORIES or GITHUB_EXCLUDE_REPOSITORIES, not both")
     return {
         "org": os.environ["GITHUB_ORG"].strip(),
         "api_url": api_url.rstrip("/"),
         "token": os.environ["GITHUB_TOKEN"].strip(),
-        "repositories": split_list(os.environ.get("GITHUB_REPOSITORIES")),
+        "repositories": repositories,
+        "exclude_repositories": exclude,
         "include_archived": include_archived,
     }
 

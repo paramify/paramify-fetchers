@@ -1,5 +1,5 @@
 name: github_repository_inventory
-version: 0.2.0
+version: 0.3.0
 description: >-
   Every repository in a GitHub organization as one Inventory record: its
   visibility, archive and fork state, default branch, language, which code
@@ -35,6 +35,14 @@ target_schema:
     description: >-
       Ignored by the inventory, which always lists every repository the token
       can see. Set, it is named in metadata.filters_ignored.
+  exclude_repositories:
+    type: string
+    required: false
+    env: GITHUB_EXCLUDE_REPOSITORIES
+    description: >-
+      Comma-separated repository names to leave out, matched without regard
+      to case. Cannot be combined with repositories. The evidence lists the
+      names it left out and any that matched no repository.
   include_archived:
     type: boolean
     required: false

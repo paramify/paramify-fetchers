@@ -1,5 +1,5 @@
 name: github_deployment_controls
-version: 0.2.0
+version: 0.3.0
 description: >-
   Deployment controls and history: each environment's required reviewers,
   self-review prevention, wait timer, branch policy, custom protection rules
@@ -32,6 +32,14 @@ target_schema:
     description: >-
       Comma-separated repository names to collect. Unset collects every
       repository the token can see; a name the token cannot see fails the run.
+  exclude_repositories:
+    type: string
+    required: false
+    env: GITHUB_EXCLUDE_REPOSITORIES
+    description: >-
+      Comma-separated repository names to leave out, matched without regard
+      to case. Cannot be combined with repositories. The evidence lists the
+      names it left out and any that matched no repository.
   include_archived:
     type: boolean
     required: false
