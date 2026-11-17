@@ -1,8 +1,15 @@
-# Pinning a release and upgrading safely
+# Updating safely, on main or a pinned release
 
-Run a release tag, not `main`. `paramify update` moves you to a newer one: it
-shows what changed, checks your manifests against the new version before it
-touches your checkout, then switches, reinstalls and validates.
+`paramify update` brings your clone up to date. It tells you which of the
+fetchers you use change, checks your manifests against the new code before it
+touches your checkout, then moves, reinstalls if it needs to, and validates.
+
+There are two ways to run, and update follows whichever your clone is on:
+
+| You run | `paramify update` moves you to |
+|---|---|
+| `main` (what `git clone` gives you) | the newest `main`, by fast-forward |
+| A pinned release, such as `v0.7.0-beta` | the newest release |
 
 **You need:** [a clone installed from source](../README.md#install). Private
 copy? [Merge each release](private_mirror_guide.md#3-merge-each-paramify-release)
@@ -10,58 +17,72 @@ instead. Container? [Update the clone, then rebuild](#in-a-container).
 
 ---
 
-## Upgrade with `paramify update`
+## Update with `paramify update`
 
 ```bash
 paramify update
 ```
 
-![paramify update moving from 0.5.1-beta to 0.6.0-beta: the version jump, five highlights, the breaking changes with their fixes and the manifests they affect, a pre-switch check that finds one manifest would break, the fetchers you use that changed, then switch, reinstall and validate, and a closing card with commands to try](img/update/update.svg)
+![paramify update on main: the commits it will cross, a check that the manifest still passes, the three fetchers in use that change with their versions, the breaking changes that touch this clone with their fixes, what is new, then the move, the reinstall and the validation](img/update/update.svg)
 
 In order, it:
 
-1. Fetches the tags and picks the newest release. Releases are `vX.Y.Z-beta`
-   tags; it never offers `main` or an `archive/*` tag.
-2. Shows that release's highlights (`releases/<version>.yaml`), or a link to
-   its CHANGELOG section if it has none. Every breaking change you cross is
-   listed with its fix and the manifests it affects. Changes that only touch
-   fetchers your manifests don't use fold into one line.
-3. Checks the new version out in a temporary `git worktree`, runs that
-   version's own `paramify validate` on each of your manifests, and removes
-   the worktree. A manifest that fails there and passes today **would break**.
-4. Lists which fetchers you use changed, and counts the rest.
-5. Asks before it changes anything (`[y/N]`).
-6. Runs `git switch --detach <tag>`, reinstalls with the same Python and the
-   extras you have installed (`.[all]` if it can't tell), and validates each
-   manifest again.
+1. Fetches from origin and works out the target from what your clone is on.
+2. Checks the target out in a temporary `git worktree`, runs the target's own
+   `paramify validate` on each of your manifests, and removes the worktree. A
+   manifest that fails there and passes today **would break**.
+3. Shows what changes for you:
+   - **Your fetchers:** each fetcher your manifests use that changed, with its
+     version before and after and, when a commit says so, why.
+   - **Breaking:** the breaking changes that touch this clone, each with its
+     fix and the manifests it affects.
+   - **New:** up to five highlights.
+   - One line counting everything else, and a link to the full changelog.
+4. Asks before it changes anything (`[y/N]`).
+5. Fast-forwards your branch, or switches to the release tag.
+6. Reinstalls with the same Python and the extras you have, but only when
+   `pyproject.toml` changed. Most updates on `main` skip this and take seconds.
+7. Validates each manifest again.
 
 | Command | Does |
 |---|---|
-| `paramify update` | Move to the newest release. |
-| `paramify update --next` | Move one release forward, to read each release's breaking changes in turn. |
-| `paramify update --to v0.6.0-beta` | Move to that release, older or newer. |
-| `paramify update --check` | Only report. Exit 0 up to date, 1 an update is available, 2 can't tell. |
-| `paramify update --rollback` | Go back to the version you ran before the last update, and reinstall. |
-| `--yes` | Don't ask. With breaking changes or a manifest that would break, it still stops unless you add `--allow-breaking`. |
-| `--json` | The whole plan and result as JSON. Without `--yes` it plans and exits 1 without switching. |
+| `paramify update` | Bring the clone up to date with what it follows. |
+| `paramify update --to v0.7.0-beta` | Pin that release, older or newer. |
+| `paramify update --to main` | Stop pinning and follow `main` again. |
+| `paramify update --check` | Only report. Exit 0 up to date, 1 an update is waiting, 2 can't tell. |
+| `paramify update --rollback` | Go back to where you were before the last update. |
+| `--yes` | Don't ask. It still stops when the update would break this clone, unless you add `--allow-breaking`. |
+| `--json` | The whole plan and result as JSON. Without `--yes` it plans and exits 1 without moving. |
 
-![paramify update --check printing 0.5.1-beta, an arrow, 0.6.0-beta, and "run paramify update"](img/update/check.svg)
+**What stops a `--yes` run.** A manifest that would break, or a breaking change
+that touches this clone: one that names a fetcher your manifests use, one
+about fetchers you wrote yourself (when you have some), or one that is about
+everyone, such as a new minimum Python. Breaking changes for fetchers you
+don't use are counted, not listed, and don't stop anything.
 
-**It won't switch over local changes.** If git tracks a file you changed,
-update lists it and stops: commit it, or move it to a branch. Untracked files,
-such as your own fetcher directories and `manifests/`, stay where they are.
+**Pinning needs a release that has `paramify update` in it.** Releases up to
+0.6.0-beta were cut before this command existed, so `--to` refuses them: you
+could not update or roll back from there. It prints the `git switch` command
+if you want one anyway.
 
-![paramify update refusing to switch because framework/cli.py has changes, and noting that one untracked path stays where it is](img/update/dirty.svg)
+**Your local changes ride along.** Update stops only for a file you changed
+that the update changes too, or a file of yours sitting where the update adds
+one. It lists them. Your own fetcher directories and `manifests/` stay where
+they are.
 
-**Changed your mind?** `paramify update --rollback` returns to the version
-recorded in `.paramify/state.json` (which git ignores), and reinstalls.
+**It never merges.** If your branch has commits its remote branch lacks,
+update says so and stops. Push or move them first.
 
-![paramify update --rollback going from 0.6.0-beta back to 0.5.1-beta: switch, reinstall, validate](img/update/rollback.svg)
+**Changed your mind?** `paramify update --rollback` returns to the commit
+recorded in `.paramify/state.json` (which git ignores). On `main` you stay on
+`main`, one update behind, and the next `paramify update` moves you forward
+again.
 
-**A newer release shows up on its own.** After a command, `paramify` prints
-one dim line when a newer release tag exists: at most once a day, never with
-`--json`, never into a pipe. It fetches tags in the background, so it never
-waits on the network. Set `PARAMIFY_NO_UPDATE_CHECK=1` to turn it off.
+**You hear about updates on their own.** After a command, `paramify` prints
+one dim line when something is waiting ("12 new commits on main"): at most
+once a day, never with `--json`, never into a pipe. It fetches in the
+background, so it never waits on the network. Set `PARAMIFY_NO_UPDATE_CHECK=1`
+to turn it off.
 
 ### In a container
 
@@ -73,14 +94,13 @@ paramify update                                     # in your clone, on the host
 docker compose -f deploy/docker-compose.yml build   # rebuild the image
 ```
 
-![paramify update inside the container: no git history here; update the clone on the host, then rebuild the image](img/update/container.svg)
-
 ---
 
 ## Upgrade by hand
 
-`paramify update` first ships after 0.6.0-beta, so moving off 0.6.0-beta or
-older is done by hand once. These steps are also the fallback if update can't
+`paramify update` first ships after 0.6.0-beta. A clone that doesn't have it
+yet gets it with one `git pull` on `main`, or by hand as below when it is
+pinned to an older release. These steps are also the fallback if update can't
 run.
 
 ![Flow: fetch tags and name your version, read every changelog entry you cross and pick a target, then switch, reinstall, and validate each manifest](img/versioning/flow.svg)
@@ -148,10 +168,12 @@ Set what it names as the entry says
 
 | Symptom | Fix |
 |---|---|
-| `git describe` prints `v0.5.1-beta-291-g59a2387` | You're on `main`, 291 commits past it. `paramify update` offers the newest tag. |
-| A run breaks after upgrading | `paramify update --rollback`, or switch back to your old tag and reinstall. |
-| update says it stopped at breaking changes | You ran it with `--yes` or `--json`. Read them, then add `--allow-breaking`. |
-| update says a manifest would break | It names the error. Fix the manifest first, or switch and fix it after. |
+| `git describe` prints `v0.5.1-beta-291-g59a2387` | You're on `main`, 291 commits past that release. That's fine: `paramify update` follows `main`. |
+| A run breaks after updating | `paramify update --rollback`. |
+| update says your branch has commits its remote doesn't | It only fast-forwards. Push them, or move them to another branch. |
+| update says the clone is on a detached commit | `paramify update --to main`, or `--to <tag>` to pin a release. |
+| update says it stopped | You ran it with `--yes` or `--json` and something touches this clone. Read it, then add `--allow-breaking`. |
+| update says a manifest would break | It names the error. Fix the manifest first, or update and fix it after. |
 
 **More detail:** [how releases are cut](releasing_guide.md) ·
 [release highlights](../releases/README.md) · [CHANGELOG](../CHANGELOG.md)

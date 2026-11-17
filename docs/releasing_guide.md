@@ -31,9 +31,12 @@ repoint the bottom links, and bump `pyproject.toml`. **Every release so far is
 a pre-release** (`v0.5.1-beta`). If this one is too, write `X.Y.Z-beta`
 everywhere but `pyproject.toml`, and add `--prerelease` in step 5.
 
-Then write `releases/X.Y.Z-beta.yaml`, the short card `paramify update` shows
-users: 3 to 5 highlights and one breaking row per Breaking entry, each with
-its fix. The format is in [`releases/README.md`](../releases/README.md).
+Then turn the rows collected on `main` into this release's highlights:
+`git mv releases/unreleased.yaml releases/X.Y.Z-beta.yaml`, set its `version`,
+trim it to 3 to 5 highlights (keep every breaking row), and start a new
+`releases/unreleased.yaml` with `highlights: []`. `paramify update` shows
+these rows to users. The steps and format are in
+[`releases/README.md`](../releases/README.md#when-you-cut-a-release).
 
 ![git diff: a 0.6.0 heading under a fresh Unreleased heading, the Unreleased link moved to v0.6.0 plus a new 0.6.0 link, and the pyproject version bumped](img/releasing/02-diff.png)
 
