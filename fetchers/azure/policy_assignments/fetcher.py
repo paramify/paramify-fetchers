@@ -1155,6 +1155,8 @@ def main() -> int:
     assignments = listed or []
     exemptions, excluded = exemption_results(projected_exemptions, listed, exclusions, datetime.now(timezone.utc))
     apply_exemption_counts(assignments, exemptions)
+    if exemptions is None:
+        exclusions.mark_unread()
     exclusions.warn_unmatched(logger)
     boundary = boundary_summary(exclusions, excluded, exemptions)
 

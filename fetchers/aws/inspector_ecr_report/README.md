@@ -21,6 +21,13 @@ Use identical scope settings for evidence and reports. The example selects
 `latest` or `deployed` tags only as an example of an operator-defined boundary;
 omit the filter to include all images. Confirm it matches your assessment scope.
 
+The report takes the same scope settings as the evidence fetcher, including
+`in_use_only`, `last_in_use_days`, `pushed_within_days` and `min_severity` (see
+[its README](../inspector_ecr_findings/README.md#scope-and-collection)). Use the
+same values in both. A narrower scope also narrows what the assessment sees: with
+`close_cycle: after_run`, issues for images or severities that fall out of scope
+are closed, which does not mean they were remediated.
+
 ```bash
 paramify validate manifests/aws_inspector.yaml
 paramify run manifests/aws_inspector.yaml
@@ -36,7 +43,7 @@ The API key needs Pipelines and Pipeline Jobs permissions. This ships a mapping
 specification, not a preinstalled tenant preset. Verify the first import's created
 and updated issue counts before using it for production assessment cycles.
 
-## CSV contract (fetcher 0.1.0)
+## CSV contract (fetcher 0.1.0 and 0.2.0)
 
 One row represents one finding on one ECR image. Multiple packages stay together
 in that row. Multiple findings with the same CVE remain distinct. JSON-valued
