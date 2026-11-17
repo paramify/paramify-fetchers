@@ -366,18 +366,19 @@ def names_same(a: Optional[Dict[str, Any]], b: Optional[Dict[str, Any]]) -> bool
 
 
 def field_approval(updates: Optional[List[Dict[str, Any]]], ref: str, value: Any) -> Optional[Dict[str, Any]]:
-    """The person the approval field names now, approving from the last update that set it to that person; when is
-    unknown if the updates weren't read."""
+    """The person the approval field names now, approving from the last update that set it to that person; when, and
+    who made that update (set_by), are unknown if the updates weren't read. The field is a name anyone with edit rights
+    can type, so set_by is what says whether the named person filled it in."""
     by = person(value)
     if not by:
         return None
-    at = None
+    at = set_by = None
     for update in updates or []:
         change = field_value(update.get("fields"), ref)
         if isinstance(change, dict) and names_same(person(change.get("newValue")), by) and \
                 not names_same(person(change.get("oldValue")), by):
-            at = update_time(update)
-    return {"at": iso(at), "by": by, "source": "field", "state": None}
+            at, set_by = update_time(update), person(update.get("revisedBy"))
+    return {"at": iso(at), "by": by, "set_by": set_by, "source": "field", "state": None}
 
 
 def finished_at(item: Dict[str, Any]) -> Optional[datetime]:
@@ -668,6 +669,7 @@ def summarize(items: List[Dict[str, Any]], projects: List[Dict[str, Any]], liste
     checked = [i for i in linked if i["changed_before_approval"] is not None]
     every = history and len(checked) == len(linked)
     field_missing = [p.get("approval_field_types_missing") for p in projects]
+    field_approved = [i for i in change if (i["approval"] or {}).get("source") == FIELD]
     return {
         "lookback_days": days,
         "work_item_types": selection.types,
@@ -702,6 +704,9 @@ def summarize(items: List[Dict[str, Any]], projects: List[Dict[str, Any]], liste
         "finished_change_items_without_approval": known(ids_of(i for i in judged_finished if not i["approval"]),
                                                         history),
         "change_items_approved_by_requester": known(ids_of(i for i in change if i["approved_by_requester"]), history),
+        "change_items_approval_field_set_by_someone_else": known(
+            ids_of(i for i in field_approved if not names_same(i["approval"]["set_by"], i["approval"]["by"])),
+            history and all(i["approval"]["set_by"] for i in field_approved)),
         "change_items_with_linked_changes": known(sum(1 for i in change if has_change(i))),
         "finished_change_items_without_linked_change": known(ids_of(i for i in finished if not has_change(i))),
         "change_items_linked_changes_checked": known(len(checked), history),

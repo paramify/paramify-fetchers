@@ -537,12 +537,13 @@ def left_out(wid, type_="Task", **kw):
     return item(wid, type_=type_, approval=None, approval_read=True, approval_route="exclude", **kw)
 
 
-def test_a_record_left_out_of_approval_judging_is_not_read_as_unapproved(tmp_path, monkeypatch):
+def test_a_record_left_out_of_approval_judging_reads_neither_approved_nor_unapproved(tmp_path, monkeypatch):
     results, summary = compare(tmp_path, monkeypatch, [change("c", "2026-10-02T12:00:00Z")], [left_out(1)])
     record = results["c"]["work_items"][0]
     assert (record["approved"], record["approval_required"], record["approval_judged"]) == (None, True, False)
-    assert (results["c"]["approved"], results["c"]["approval_required"]) == (True, True)
-    assert results["c"]["approved_after_change"] is False
+    # No approval was read, so the change's approval is unknown, not true.
+    assert (results["c"]["approved"], results["c"]["approval_required"]) == (None, True)
+    assert results["c"]["approved_after_change"] is None
     assert summary["changes_recorded_approval_not_judged"] == 1
     assert summary["changes_recorded_without_approval"] == 0 and summary["changes_without_approved_record"] == 0
     assert summary["changes_without_approved_record_by_origin"] == {"direct": 0, "manual_deployment": 0}
@@ -551,17 +552,18 @@ def test_a_record_left_out_of_approval_judging_is_not_read_as_unapproved(tmp_pat
 @pytest.mark.parametrize(("other", "approved_", "not_judged"), [
     # A judged record that needs an approval and has none still leaves the change unapproved.
     (lambda: item(2), False, 0),
-    # A judged, approved record approves it as before; it was judged, so it isn't counted as not judged.
-    (lambda: item(2, approval=approved()), True, 0),
-    # A record of a type that needs no approval: approved, and the only record needing one wasn't judged.
-    (lambda: item(2, type_="Bug"), True, 1),
+    # A judged, approved record next to one that wasn't judged: which records the change is unknown, so is approval.
+    (lambda: item(2, approval=approved()), None, 1),
+    # A record of a type that needs no approval: the only record needing one wasn't judged, so approval is unknown.
+    (lambda: item(2, type_="Bug"), None, 1),
 ])
 def test_a_left_out_record_next_to_another(tmp_path, monkeypatch, other, approved_, not_judged):
     results, summary = compare(tmp_path, monkeypatch, [change("c", "2026-10-02T12:00:00Z")], [left_out(1), other()],
                                types=("Task", "Bug"), env={"CHANGE_RECORD_APPROVAL_TYPES": "Task"})
     assert results["c"]["status"] == "ambiguous" and results["c"]["approved"] is approved_
     assert summary["changes_recorded_approval_not_judged"] == not_judged
-    assert summary["changes_recorded_without_approval"] == (0 if approved_ else 1)
+    assert summary["changes_recorded_without_approval"] == (0 if approved_ is None else 1)
+    assert summary["changes_without_approved_record"] == (0 if approved_ is None else 1)
 
 
 @pytest.mark.parametrize("route", ["field", "both", "states_and_comments", None])
@@ -594,7 +596,9 @@ def test_a_change_made_before_approval_field_from_is_judged_by_the_older_route(
     early = results["early"]["work_items"][0]
     assert (early["approved"], early["approval_judged"], early["change_before_approval_field"]) == (
         early_approved, early_judged, True)
-    assert results["early"]["approved"] is True and early["approved_at"] == (older or {}).get("at")
+    # Left out (exclude): no approval was read, so the change's approval is unknown rather than true.
+    assert results["early"]["approved"] is (True if early_judged else None)
+    assert early["approved_at"] == (older or {}).get("at")
     # On or after the date, the field judges it, and the field is empty.
     for cid in ("at", "late"):
         w = results[cid]["work_items"][0]

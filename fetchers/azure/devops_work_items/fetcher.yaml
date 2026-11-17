@@ -130,7 +130,9 @@ config_schema:
       the person it names, from the last update that set it to that person,
       so a change of person restarts it; clearing it withdraws the approval,
       while a move back or a rejection doesn't. The field shows whom it names,
-      not who filled it in. Empty, as by default, reads no field. A name that
+      not who filled it in; the approval records who made the update that set
+      it (set_by), and change_items_approval_field_set_by_someone_else lists
+      the items where that wasn't the person named. Empty, as by default, reads no field. A name that
       isn't a reference name (a dotted name without spaces) is bad_config.
   approval_source:
     type: string
@@ -259,6 +261,7 @@ evidence_set:
     - finished_change_items_approved_percentage — Percentage of finished change items needing an approval (refused ones left out) that are approved = finished_change_items_needing_approval_approved / finished_change_items_needing_approval × 100 (a whole number, 0–100); 0 when finished_change_items_needing_approval is 0; null if the project list, a project's items or a change item's history or comments couldn't be read. A finished item whose approval was withdrawn and not given again counts in the denominator only
     - finished_change_items_without_approval — List of finished change items (by id) never approved, or whose approval was withdrawn and not given again, of every change type and including refused ones (but not change_items_left_out_of_approval), so it doesn't line up with finished_change_items_approved_percentage, which counts only the approval types and leaves refused items out; null if the project list, a project's items or a change item's history or comments couldn't be read
     - change_items_approved_by_requester — List of change items (by id) whose approval in effect (the first since any withdrawal) was given by the person who created the item; null if the project list, a project's items or a change item's history or comments couldn't be read
+    - change_items_approval_field_set_by_someone_else — List of change items (by id) whose approval in effect is a filled approval_field that someone other than the person it names set (set_by on the approval), such as a requester typing in an approver's name; the field is a name anyone with edit rights can type, so these are approvals the named person may not have given; empty when no approval in effect comes from the field; null if the project list, a project's items or a change item's history or comments couldn't be read, or if who set a field approval is unknown
     - change_items_with_linked_changes — Number of change items linked to a TFVC changeset, Git commit or pull request; null if the project list or a project's items couldn't be read
     - finished_change_items_without_linked_change — List of finished change items (by id) linked to no changeset, commit or pull request; null if the project list or a project's items couldn't be read
     - change_items_linked_changes_checked — Number of approved change items with linked changes that the three checks below cover: every linked change is a TFVC changeset that was read, and the approval's time is known. An item linked to a Git commit or pull request isn't covered, as their dates and authors aren't read; null if the project list, a project's items or a change item's history or comments couldn't be read

@@ -141,7 +141,11 @@ schemas and the `paramify` CLI — not the internal code.
   - **`approval_field`** (`AZURE_DEVOPS_APPROVAL_FIELD`) names a person field's
     reference name, such as `Custom.ChangeApprover`. Each item records whom it names
     and since when (`field_approval`): from the last update that set it to that
-    person, so a change of person restarts it. A display name is `bad_config`.
+    person, so a change of person restarts it. The field is a name anyone with
+    edit rights can type, so the approval also records who made that update
+    (`set_by`), and the new `change_items_approval_field_set_by_someone_else`
+    lists the items where that wasn't the person named (`null` when who set one
+    is unknown). A display name is `bad_config`.
   - **`approval_source`** (`AZURE_DEVOPS_APPROVAL_SOURCE`, `states_and_comments`
     by default): `field` counts only a filled field as approval, `both` counts it
     or a state or comment approval, whichever came first. Clearing the field
@@ -172,11 +176,12 @@ schemas and the `paramify` CLI — not the internal code.
   read as unapproved.** When `azure_devops_work_items` left a record out
   (`approval_route` `exclude`: finished before its `approval_field_from` while its
   `approval_before_field` is `exclude`), the record's `approved` is `null`, its new
-  `approval_judged` is `false`, and it counts as approved, as a record of a type
-  that needs no approval does. It no longer adds to
+  `approval_judged` is `false`, and a change it records reads `approved: null`,
+  neither approved nor unapproved, unless another record of it is judged and
+  unapproved. Such a change no longer adds to
   `changes_recorded_without_approval` or `changes_without_approved_record`. The new
-  `summary.changes_recorded_approval_not_judged` counts recorded changes whose
-  every record needing an approval was left out. Work items evidence from before
+  `summary.changes_recorded_approval_not_judged` counts these recorded changes
+  whose approval is unknown. Work items evidence from before
   0.3.0 has no `approval_route`, so every record is judged as before.
   A change made before a work items file's `approval_field_from` (read from its
   `results.selection`, so there is no setting here to keep in step) is judged by

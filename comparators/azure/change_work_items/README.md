@@ -48,10 +48,12 @@ is approved, as `azure_devops_work_items` reads approval: the approval in effect
 approval field, as its `approval_source` counts them, not withdrawn since); a
 record whose approval couldn't be read is not approved. A record that fetcher
 left out of approval judging (finished before its `approval_field_from` while its
-`approval_before_field` is `exclude`) isn't read as unapproved: each work item
-says so with `approval_judged` false, it counts as approved, and a change whose
-every record needing an approval was left out is counted in
-`changes_recorded_approval_not_judged`.
+`approval_before_field` is `exclude`) has no approval read: each work item
+says so with `approval_judged` false, and a change it records reads
+`approved: null`, neither approved nor unapproved (unless another record of it
+is judged and unapproved). Such changes are counted in
+`changes_recorded_approval_not_judged` and kept out of
+`changes_recorded_without_approval` and `changes_without_approved_record`.
 Where that fetcher's selection sets `approval_field_from`, a change made
 before that date is judged by its `approval_before_field` route (the approval
 it records as `before_field_approval`), not by the field; each record on such

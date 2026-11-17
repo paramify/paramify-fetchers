@@ -270,9 +270,7 @@ def check_with(cfg):
                 found = [judged_as(i, at) for i in items
                          if caller.lower() in i["logins"] and at and i["from"] <= at <= i["to"]]
                 status = "unmatched" if not found else "matched" if len(found) == 1 else "ambiguous"
-            # Several candidates count as approved only when every one of them is, needs no approval, or wasn't judged.
-            approved = all(w["approved"] or not w["approval_required"] or not w["approval_judged"]
-                           for w in found) if found else None
+            approved = record_approved(found) if found else None
             required = any(w["approval_required"] for w in found) if found else None
             results.append({
                 "change_id": c.get("change_id"), "timestamp": c.get("timestamp"),
@@ -309,6 +307,15 @@ def needs_record(r):
     return r["status"] not in ("excluded", "application")
 
 
+def record_approved(found):
+    """Whether a change's records approve it: every one approved or of a type needing none. Unknown (None) when one
+    that needs an approval was left out of approval judging and none judged is unapproved: no approval was read."""
+    needing = [w for w in found if w["approval_required"]]
+    if any(w["approval_judged"] and not w["approved"] for w in needing):
+        return False
+    return None if any(not w["approval_judged"] for w in needing) else True
+
+
 def approved_record(r):
     return r["status"] in RECORDED and bool(r["approved"])
 
@@ -318,6 +325,8 @@ def summarize(results, items, types, unselected, cover_from, origins):
     needing = [r for r in results if needs_record(r)]
     recorded = count["matched"] + count["ambiguous"]
     approved = sum(1 for r in needing if approved_record(r))
+    # Recorded changes whose approval wasn't judged: neither approved nor unapproved, so kept out of both counts.
+    not_judged = sum(1 for r in needing if r["status"] in RECORDED and r["approved"] is None)
     earliest = min((when(r["timestamp"]) for r in needing if when(r["timestamp"])), default=None)
 
     def by_origin(keep):
@@ -339,21 +348,20 @@ def summarize(results, items, types, unselected, cover_from, origins):
         "changes_without_caller": count["no_caller"],
         "changes_recorded": recorded,
         "changes_without_record": count["unmatched"] + count["no_caller"],
-        "changes_recorded_without_approval": recorded - approved,
+        "changes_recorded_without_approval": recorded - approved - not_judged,
         "changes_recorded_approval_not_required": sum(
             1 for r in needing if r["status"] in RECORDED and r["approval_required"] is False),
-        "changes_recorded_approval_not_judged": sum(
-            1 for r in needing if r["status"] in RECORDED and r["approval_required"]
-            and not any(w["approval_judged"] for w in r["work_items"] if w["approval_required"])),
+        "changes_recorded_approval_not_judged": not_judged,
         "changes_recorded_before_approval_field": sum(
             1 for r in needing if r["status"] in RECORDED
             and any(w.get("change_before_approval_field") for w in r["work_items"])),
-        "changes_without_approved_record": len(needing) - approved,
+        "changes_without_approved_record": len(needing) - approved - not_judged,
         "changes_approved_after_change": sum(1 for r in needing if r["approved_after_change"]),
         "percent_recorded": recorded * 100 // len(needing) if needing else 0,
         "changes_needing_record_by_origin": by_origin(lambda r: True),
         "changes_without_record_by_origin": by_origin(lambda r: r["status"] in WITHOUT_RECORD),
-        "changes_without_approved_record_by_origin": by_origin(lambda r: not approved_record(r)),
+        "changes_without_approved_record_by_origin": by_origin(
+            lambda r: not approved_record(r) and not (r["status"] in RECORDED and r["approved"] is None)),
         "changes_without_record_by_caller": by_caller(r for r in results if r["status"] in WITHOUT_RECORD),
         "changes_by_application_by_caller": by_caller(r for r in results if r["status"] == "application"),
         "changes_excluded_by_caller": by_caller(r for r in results if r["status"] == "excluded"),

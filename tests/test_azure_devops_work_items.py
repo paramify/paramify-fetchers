@@ -832,7 +832,9 @@ def test_the_approval_field_counts_by_approval_source(tmp_path, monkeypatch, sou
     by_field = work_item(evidence, 104)
     # Who it names now, from the first update that filled it; the rest of the identity isn't written.
     assert by_field["field_approval"] == {"at": iso_ago(days=8), "by": {"display_name": "Frank Approver",
-                                          "login": "frank@example.com"}, "source": "field", "state": None}
+                                          "login": "frank@example.com"},
+                                          "set_by": {"display_name": "Bob", "login": "bob@example.com"},
+                                          "source": "field", "state": None}
     assert "aad.ZmFrZQ" not in text and GUID not in text
     # Emptied, filled again, then given another person: the approval runs from when it got the person it names now.
     assert work_item(evidence, 105)["field_approval"]["at"] == iso_ago(days=5)
@@ -886,6 +888,29 @@ def test_a_self_filled_field_approves_only_from_when_the_approver_was_named(tmp_
     assert w["changed_before_approval"] is True and w["approved_by_requester"] is False
     assert 104 in evidence["summary"]["change_items_changed_before_approval"]
     assert work_item(evidence, 105)["field_approval"]["at"] == iso_ago(days=4)
+    # Frank filled in his own name on 104; 105's field was set by bob, not by Grace whom it names.
+    assert w["field_approval"]["set_by"]["login"] == "frank@example.com"
+    assert evidence["summary"]["change_items_approval_field_set_by_someone_else"] == [105]
+
+
+def test_a_field_someone_else_filled_in_is_listed_and_unknown_setters_leave_the_list_unknown(tmp_path, monkeypatch):
+    monkeypatch.setenv(mod.APPROVAL_FIELD_ENV, FIELD)
+    monkeypatch.setenv(mod.APPROVAL_SOURCE_ENV, "field")
+    # 104: the requester types the approver's name in, so the item reads as approved by Frank but not by the
+    # requester; only set_by shows who filled it.
+    fake = with_items(FakeADO(), {104: item(104, "Change Request", "Closed", **{FIELD: FRANK})},
+                      updates={104: [filled(1, ago(days=5), FRANK, by="alice@example.com")]})
+    code, evidence, _, _, _ = run(tmp_path, with_field_types(fake))
+    w = work_item(evidence, 104)
+    assert code == 0 and w["approved_by_requester"] is False
+    assert (w["approval"]["by"]["login"], w["approval"]["set_by"]["login"]) == ("frank@example.com", "alice@example.com")
+    assert evidence["summary"]["change_items_approval_field_set_by_someone_else"] == [104]
+    # The field is filled, but no update read shows who filled it: the list is unknown, not empty.
+    fake = with_items(FakeADO(), {104: item(104, "Change Request", "Closed", **{FIELD: FRANK})},
+                      updates={104: [update(1, "Proposed", "Closed", ago(days=1))]})
+    _, evidence, _, _, _ = run(tmp_path, with_field_types(fake))
+    assert work_item(evidence, 104)["approval"]["set_by"] is None
+    assert evidence["summary"]["change_items_approval_field_set_by_someone_else"] is None
 
 
 def test_with_both_the_earlier_approval_is_in_effect(tmp_path, monkeypatch):
@@ -899,7 +924,8 @@ def test_with_both_the_earlier_approval_is_in_effect(tmp_path, monkeypatch):
     assert work_item(evidence, 104)["approval"]["source"] == "state"
     # The reference name matches without regard to case.
     assert work_item(evidence, 105)["approval"] == {"at": iso_ago(days=9), "by": {
-        "display_name": "Frank Approver", "login": "frank@example.com"}, "source": "field", "state": None}
+        "display_name": "Frank Approver", "login": "frank@example.com"},
+        "set_by": {"display_name": "Bob", "login": "bob@example.com"}, "source": "field", "state": None}
 
 
 def test_with_both_an_approval_of_unknown_time_comes_after_one_of_known_time(tmp_path, monkeypatch):
