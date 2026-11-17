@@ -259,13 +259,16 @@ def split_custom_roles(roles: list[dict], exclusions: ResourceExclusions) -> tup
     return kept, excluded
 
 
-def summarize(custom_roles: list[dict], total_definitions: int, excluded_custom_roles: int = 0) -> dict:
+def summarize(custom_roles: list[dict] | None, total_definitions: int, excluded_custom_roles: int = 0) -> dict:
     """Escalation-capable custom roles are the headline.
 
     `total_role_definitions` and `builtin_role_definitions` are reported alongside so
     `custom_role_definitions: 0` is legible: a non-zero built-in count proves the list
-    call worked rather than returning nothing.
+    call worked rather than returning nothing. `custom_roles` None means the list could not be
+    read: every count is null, never 0.
     """
+    if custom_roles is None:
+        return dict.fromkeys(summarize([], 0))
     escalating = [r for r in custom_roles if r["can_escalate_privileges"]]
     return {
         "total_role_definitions": total_definitions,
@@ -427,7 +430,7 @@ def main() -> int:
             "excluded": excluded,
         },
         summary={
-            **summarize(custom_roles, total_definitions, len(excluded)),
+            **summarize(custom_roles if listed else None, total_definitions, len(excluded)),
             "provider_registration_status": registration,
             **counts,
         },

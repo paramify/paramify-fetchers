@@ -30,8 +30,11 @@ dependencies = [
 # (select_on_focus, blurred cursor styles) differs enough that the TUI is not the
 # same app on 1.x.
 tui = ["textual>=8,<9"]
-# azure-identity: checkov_bicep's TFVC source signs in to Azure DevOps with Entra when no PAT is set.
-checkov = ["checkov", "azure-identity>=1.25.3,<2"]
+# What the checkov fetchers import besides the `checkov` CLI, which is not listed: it pins exact
+# versions of libraries other fetchers use (boto3), so install it in its own environment
+# (`pipx install checkov`; the Docker image does this). azure-identity: checkov_bicep's TFVC source
+# signs in to Azure DevOps with Entra when no PAT is set.
+checkov = ["azure-identity>=1.25.3,<2"]
 # python-dotenv 1.2.0 is the first to honour PYTHON_DOTENV_DISABLED, which the TUI and
 # CLI regression tests set so a developer's .env never reaches the commands they run.
 # cryptography: tests/test_azure_entra_authentication_policy.py builds test
@@ -128,9 +131,13 @@ gcp = [
 oci = ["oci"]
 # Qualys returns XML that names an external DTD; the fetchers parse it with defusedxml.
 qualys = ["defusedxml"]
-# Convenience: every front-end + dev tooling in one install. azure-identity comes with checkov, for
-# checkov_bicep's Entra sign-in to TFVC; the azure-mgmt SDKs stay out (see the azure extra).
-all = ["textual>=8,<9", "checkov", "azure-identity>=1.25.3,<2", "pytest", "ruff", "mypy", "defusedxml"]
+# The Inspector ECR fetchers call AWS through boto3; the other AWS fetchers use the aws CLI.
+# 1.38.20 is the first botocore whose Inspector model has the image usage filters.
+aws = ["boto3>=1.38.20", "botocore>=1.38.20"]
+# Convenience: every front-end + dev tooling in one install. azure-identity is for checkov_bicep's
+# Entra sign-in to TFVC; the checkov CLI itself is installed separately (see the checkov extra), and
+# the azure-mgmt SDKs stay out (see the azure extra).
+all = ["textual>=8,<9", "azure-identity>=1.25.3,<2", "pytest", "ruff", "mypy", "defusedxml"]
 
 # The single entry point. `paramify` steers every front-end: the headless
 # commands, plus `paramify tui`. (Renaming later is a one-line change here; add

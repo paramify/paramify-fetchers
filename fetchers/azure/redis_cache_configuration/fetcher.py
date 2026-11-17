@@ -253,7 +253,17 @@ EXCEPTIONS = {
 }
 
 
-def summarize(caches: list[dict]) -> dict:
+def summarize(caches: list[dict] | None) -> dict:
+    """`caches` None means the list could not be read: every count is null, never 0.
+
+    A count built from a per-cache read is null while any cache's read failed.
+    """
+    if caches is None:
+        return dict.fromkeys(summarize([]))
+
+    def unless_unread(field, value):
+        return None if any(c[field] is None for c in caches) else value
+
     total = len(caches)
     tls_only = sum(1 for c in caches if c["tls_only"])
     by_sku: dict[str, int] = {}
@@ -269,17 +279,22 @@ def summarize(caches: list[dict]) -> dict:
         "auth_not_required_caches": sum(1 for c in caches if not c["auth_required"]),
         "access_keys_disabled_caches": sum(1 for c in caches if c["entra_only"]),
         "entra_auth_enabled_caches": sum(1 for c in caches if c["entra_auth_enabled"]),
-        "access_policy_assignments": sum(len(c["access_policy_assignments"] or []) for c in caches),
+        "access_policy_assignments": unless_unread(
+            "access_policy_assignments", sum(len(c["access_policy_assignments"] or []) for c in caches)),
         "public_network_access_disabled_caches": sum(1 for c in caches if c["public_network_access_disabled"]),
         "public_network_access_unset_caches": sum(1 for c in caches if c.get("public_network_access") is None),
         "private_only_caches": sum(1 for c in caches if c["private_only"]),
         "vnet_injected_caches": sum(1 for c in caches if c["vnet_injected"]),
-        "firewall_allows_all_ips_caches": sum(1 for c in caches if c["firewall_allows_all_ips"] is True),
-        "audit_logging_enabled_caches": sum(1 for c in caches if c["audit_logging_enabled"] is True),
-        "maintenance_window_caches": sum(1 for c in caches if c["maintenance_window_configured"] is True),
+        "firewall_allows_all_ips_caches": unless_unread(
+            "firewall_allows_all_ips", sum(1 for c in caches if c["firewall_allows_all_ips"] is True)),
+        "audit_logging_enabled_caches": unless_unread(
+            "audit_logging_enabled", sum(1 for c in caches if c["audit_logging_enabled"] is True)),
+        "maintenance_window_caches": unless_unread(
+            "maintenance_window_configured", sum(1 for c in caches if c["maintenance_window_configured"] is True)),
         "replicated_caches": sum(1 for c in caches if c["replicated"]),
         "zone_redundant_caches": sum(1 for c in caches if c["zone_redundant"]),
-        "geo_replicated_caches": sum(1 for c in caches if c["geo_replicated"] is True),
+        "geo_replicated_caches": unless_unread(
+            "geo_replicated", sum(1 for c in caches if c["geo_replicated"] is True)),
         "persistence_enabled_caches": sum(1 for c in caches if c["persistence_enabled"]),
         "caches_by_sku": dict(sorted(by_sku.items())),
         "caches_by_redis_version": dict(sorted(
@@ -401,7 +416,7 @@ def main() -> int:
         collector=collector,
         results={"redis_caches": caches, "provider_registration_status": registration, "excluded": excluded},
         summary={
-            **summarize(caches),
+            **summarize(caches if listed else None),
             "provider_registration_status": registration,
             **exclusions.summary(excluded, ("redis_cache",), {"redis_caches": len(caches) if listed else None}),
         },
