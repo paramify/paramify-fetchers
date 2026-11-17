@@ -558,6 +558,16 @@ def test_rollback_returns_to_the_previous_release_once(repo, stubs):
     assert result.exit_code == 0 and _head_tag(repo) == "v0.1.0-beta"
 
 
+def test_the_reinstall_line_names_what_was_installed(main_repo, stubs, monkeypatch, tmp_path):
+    _commit(tmp_path / "upstream", {"pyproject.toml": "[project]\nname='x'\n"}, "deps")
+    monkeypatch.setattr(up, "detect_extras", lambda: [])
+    out = runner.invoke(app, ["update", "--yes"]).stdout
+    assert "✓ the base install" in out and ".[]" not in out
+    _git(main_repo, "reset", "-q", "--hard", "HEAD~1")
+    monkeypatch.setattr(up, "detect_extras", lambda: ["dev", "tui"])
+    assert "✓ .[dev,tui]" in runner.invoke(app, ["update", "--yes"]).stdout
+
+
 def test_a_failed_reinstall_puts_the_old_commit_back(main_repo, stubs, monkeypatch, tmp_path):
     _commit(tmp_path / "upstream", {"pyproject.toml": "[project]\nname='x'\n"}, "deps")
     before = _sha(main_repo)

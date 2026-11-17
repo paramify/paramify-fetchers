@@ -291,7 +291,8 @@ def _apply(run: _Run, root: Path, pos: dict, manifests: List[dict], *, label: st
         else:
             res = {"skipped": False, **up.reinstall(root, extras)}
             if res["ok"]:
-                s.done(f".[{','.join(['all'] if extras is None else extras)}]")
+                chosen = ["all"] if extras is None else extras
+                s.done(f".[{','.join(chosen)}]" if chosen else "the base install")
             else:
                 s.fail("pip failed")
                 for err in (res.get("error") or "").splitlines()[-4:]:
