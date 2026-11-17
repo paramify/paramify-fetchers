@@ -12,6 +12,11 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- `paramify upload --no-waf-check` turns off the check that drops a file holding `../`, `/etc/passwd`, `/bin/sh`,
+  `/bin/bash` or `<script` before the upload. Those strings were confirmed blocked on one host's WAF, but some hosts
+  exempt the upload routes, so CVE text in a findings file was dropped though the WAF would accept it. With the flag
+  the file is sent; if the WAF does refuse it (a 403 with no request id), the upload still drops only that file. The
+  plan notes that the check is off. `--plan` takes the flag too.
 - **`wiz_inventory`**, the Wiz cloud resource inventory, as a pipeline fetcher (`kind: inventory`, `id_scheme:
   wiz-resource-id`). One record per resource from `cloudResourcesV2` under `payload.data`, keyed by the Wiz resource
   id, with its cloud ID (`external_id`), account, region, type, IPs, OS, image, environment and owner, and internet
