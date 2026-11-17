@@ -33,6 +33,8 @@ SI_PREVIEW_API = "2025-10-01-preview"
 LAW_API = "2023-09-01"
 DIAG_API = "2021-05-01-preview"
 HTTP_TIMEOUT = 60
+# Seconds to open a connection to a server outside ARM that may be out of reach (get_url).
+CONNECT_TIMEOUT = 10
 QUERY_TIMEOUT = 600
 # Throttling and transient server errors, retried as azure-core's policy does for the SDK fetchers.
 RETRY_STATUSES = frozenset({408, 429, 500, 502, 503, 504})
@@ -138,8 +140,12 @@ class AzureRestClient:
                           allow_subscription_root=method == "get")
         return True
 
-    def _send(self, method: str, url: str, resource: str, headers: Optional[Dict[str, str]] = None, **kwargs: Any):
-        """One request, retried on throttling, transient 5xx and dropped connections, and a GET on a timeout."""
+    def _send(self, method: str, url: str, resource: str, headers: Optional[Dict[str, str]] = None,
+              retry_connect: bool = True, **kwargs: Any):
+        """One request, retried on throttling, transient 5xx and dropped connections, and a GET on a timeout.
+
+        retry_connect False raises on the first connection failure (a connect timeout included): for a server that
+        may be out of reach, where every retry waits out the whole timeout again. 429 and 5xx are still retried."""
         import requests  # lazy
 
         guarded = self._validate_read_url(url, resource, method)
@@ -151,7 +157,7 @@ class AzureRestClient:
             try:
                 response = getattr(self.session, method)(url, headers=sent, **kwargs)
             except requests.ConnectionError:
-                if attempt == MAX_RETRIES:
+                if not retry_connect or attempt == MAX_RETRIES:
                     raise
                 time.sleep(float(min(2 ** attempt, MAX_RETRY_WAIT)))
                 continue
@@ -196,6 +202,17 @@ class AzureRestClient:
             body = self._get(link)
             items.extend(body.get("value") or [])
         return items
+
+    def get_url(self, url: str, resource: str, params: Optional[Dict[str, str]] = None, verify: Any = None):
+        """A GET to a service outside ARM that takes an Entra token for `resource`, such as an AKS cluster's Kubernetes
+        API; `verify` is the CA bundle path for a server whose certificate a private CA signed. The raw response.
+
+        Such a server may be out of reach (a private cluster, or authorized IP ranges that leave out the runner), so a
+        connection failure is not retried and the connect timeout is short; 429 and 5xx answers are still retried."""
+        kwargs: Dict[str, Any] = {"params": params, "timeout": (CONNECT_TIMEOUT, HTTP_TIMEOUT)}
+        if verify is not None:
+            kwargs["verify"] = verify
+        return self._send("get", url, resource, retry_connect=False, **kwargs)
 
     def post(self, path: str, api_version: str) -> Dict[str, Any]:
         """An ARM read action that takes no body, such as fetchEventDetails."""
