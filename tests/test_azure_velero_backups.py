@@ -479,3 +479,29 @@ def test_blob_list_xml_with_an_entity_declaration_is_refused():
     reader = vb.BlobReader(namedtuple("C", "session cred")(Evil(), _Cred()), [ENDPOINT])
     with pytest.raises(Exception, match="(?i)entit|forbidden"):
         reader.list(ENDPOINT, "velero", "backups/")
+
+
+def test_a_gap_that_crosses_the_window_start_counts_only_runs_due_inside_it():
+    # Daily backups with the default 30-day retention and a 7-day lookback.
+    now = datetime(2026, 11, 16, 3, 0, tzinfo=timezone.utc)
+    window_start = now - timedelta(days=7)
+
+    def day(d):
+        return now - timedelta(days=d, hours=1)  # each backup finished at 02:00, d days ago
+
+    # Backups stopped from day -20 to day -7 and succeeded every day since day -6: nothing due in the window was missed.
+    recovered = [day(d) for d in range(30, 20, -1)] + [day(d) for d in range(6, 0, -1)]
+    assert vb.count_missed(sorted(recovered), 24, window_start, now) == 0
+    # An outage from day -10 to day -3: only the four runs due inside the window count, not the seven of the whole gap.
+    outage = [day(d) for d in range(30, 10, -1)] + [day(d) for d in (2, 1)]
+    assert vb.count_missed(sorted(outage), 24, window_start, now) == 4
+
+
+def test_a_failed_backup_without_a_schedule_stays_unresolved():
+    failed = vb.backup_record("manual-failed", backup("manual-failed", phase="Failed", schedule=None, done_hours_ago=10), NOW, 24)
+    later = vb.backup_record("manual-ok", backup("manual-ok", schedule=None, done_hours_ago=2), NOW, 24)
+    s = vb.summarize([location([failed, later])], SETTINGS, NOW)
+    assert (s["backups_failed"], s["backups_failed_unresolved"]) == (1, 1)
+    scheduled_failed = vb.backup_record("d-failed", backup("d-failed", phase="Failed", done_hours_ago=10), NOW, 24)
+    scheduled_ok = vb.backup_record("d-ok", backup("d-ok", done_hours_ago=2), NOW, 24)
+    assert vb.summarize([location([scheduled_failed, scheduled_ok])], SETTINGS, NOW)["backups_failed_unresolved"] == 0

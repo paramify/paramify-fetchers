@@ -116,7 +116,9 @@ def count_missed(done: List[datetime], interval_hours: int, window_start: dateti
 
     Each gap longer than the interval plus RUN_GRACE_FRACTION of it adds floor((gap - grace) / interval) missed runs.
     The first gap starts at the newest Completed backup at or before window_start, or at window_start when there is
-    none. A schedule with no Completed backup at all misses every interval in the window.
+    none, so a run due just inside the window is not lost; runs that fell due before window_start in that gap are
+    subtracted, so an outage that ended before the lookback does not count. A schedule with no Completed backup at
+    all misses every interval in the window.
     """
     step = interval_hours * 3600
     window = (now - window_start).total_seconds()
@@ -125,7 +127,13 @@ def count_missed(done: List[datetime], interval_hours: int, window_start: dateti
     grace = step * RUN_GRACE_FRACTION
     before = [t for t in done if t <= window_start]
     points = [before[-1] if before else window_start] + [t for t in done if t > window_start] + [now]
-    return sum(max(0, math.floor(((b - a).total_seconds() - grace) / step)) for a, b in zip(points, points[1:]))
+    missed = 0
+    for i, (a, b) in enumerate(zip(points, points[1:])):
+        runs = math.floor(((b - a).total_seconds() - grace) / step)
+        if i == 0 and before:
+            runs -= math.floor((window_start - a).total_seconds() / step)  # due before the window started
+        missed += max(0, runs)
+    return missed
 
 
 def success_window_hours(interval_hours: Optional[int], settings: Dict[str, Any]) -> float:
@@ -231,8 +239,9 @@ def is_deliberate(name: str, patterns: List[str]) -> bool:
 def classify_history(backups: List[Dict[str, Any]], restores: List[Dict[str, Any]], patterns: List[str]) -> None:
     """Mark each failure as a deliberate test, resolved by a later success, or current; records are updated in place.
 
-    A Failed or PartiallyFailed backup is resolved once its schedule (or, for a backup with no schedule, another backup
-    with no schedule) has a Completed backup that finished after it. A backup with incomplete volume snapshots is
+    A Failed or PartiallyFailed backup is resolved once its schedule has a Completed backup that finished after it; a
+    backup with no schedule is never resolved, since a later manual backup may cover other namespaces. A scheduled
+    backup with incomplete volume snapshots is
     resolved once a later Completed backup of the same schedule completed every snapshot it attempted. A restore with
     errors is resolved once a later restore completed without errors. A failure without a readable time is never
     resolved. History is kept: the totals still count every record in storage.
@@ -252,8 +261,10 @@ def classify_history(backups: List[Dict[str, Any]], restores: List[Dict[str, Any
         b["deliberate_test"] = is_deliberate(b["name"], patterns)
         t = when(b)
         later_done, later_full = newest_done.get(b["schedule"]), newest_full.get(b["schedule"])
-        b["failure_resolved"] = bool(t and later_done and later_done > t) if b["phase"] in (FAILED, PARTIALLY_FAILED) else None
-        b["snapshots_resolved"] = bool(t and later_full and later_full > t) if b["volume_snapshots_incomplete"] else None
+        # A backup with no schedule label is never resolved: a later manual backup may cover other namespaces entirely.
+        scheduled = b["schedule"] is not None
+        b["failure_resolved"] = bool(scheduled and t and later_done and later_done > t) if b["phase"] in (FAILED, PARTIALLY_FAILED) else None
+        b["snapshots_resolved"] = bool(scheduled and t and later_full and later_full > t) if b["volume_snapshots_incomplete"] else None
     newest_clean = max((c for c in (parse_time(r["results_written"]) for r in restores if r["clean"]) if c), default=None)
     for r in restores:
         r["deliberate_test"] = is_deliberate(r["name"], patterns)
