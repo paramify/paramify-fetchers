@@ -2636,7 +2636,13 @@ schemas and the `paramify` CLI — not the internal code.
     not read, `suppressed` and `reaches_human` are null per alert, and
     `alerts_suppressed`, `alerts_possibly_suppressed`, `alerts_reaching_human`,
     the change coverage fields and `monitored_operation_coverage_reaching_human`
-    are null. Before they read as if no rule suppressed anything.
+    are null. Before they read as if no rule suppressed anything. An enabled
+    alert with no deliverable action group of its own is unknown too, since a
+    processing rule may add one: `routes_to_enabled_receiver` and
+    `routes_to_person` read null, not false, so `reaches_human` is null and the
+    alert counts in `alerts_routing_unknown` and `alerts_reaching_human_unknown`.
+    `processing_rule_matches` and `suppressed_by_processing_rules` are null, not
+    `[]`.
   - `azure_diagnostic_settings` 0.2.0: when the settings are not read,
     `activity_log_exported`, the counts, the coverage map and the required
     category verdicts are null. Before, `activity_log_exported` read false.

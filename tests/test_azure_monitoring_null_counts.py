@@ -216,6 +216,25 @@ def test_unread_processing_rule_list_leaves_suppression_unknown(monkeypatch, tmp
     assert summary["monitored_operations_covered"] == 1
 
 
+def test_unread_processing_rule_list_leaves_an_alert_without_an_own_group_unknown(monkeypatch, tmp_path):
+    alert = ala.alert_record({
+        "id": f"{RG}/providers/microsoft.insights/activityLogAlerts/a1", "name": "a1", "location": "global",
+        "enabled": True, "scopes": ["/subscriptions/s1"], "action_groups": [],
+        "condition": {"all_of": [{"field": "operationName", "equals": "Microsoft.Network/networkSecurityGroups/write"}]},
+    })
+    monkeypatch.setattr(ala, "collect_activity_log_alerts", lambda sub, cred, collector: [dict(alert)])
+    monkeypatch.setattr(ala, "arm_rest_client", lambda cred: object())
+    monkeypatch.setattr(ala, "collect_action_groups", lambda rest, sub: {"groups": []})
+    monkeypatch.setattr(ala, "collect_processing_rules", _refuse)
+    code, summary = _run(monkeypatch, tmp_path, ala, "azure_activity_log_alerts_s1.json")
+    evidence = json.loads((tmp_path / "azure_activity_log_alerts_s1.json").read_text())
+    (record,) = evidence["results"]["activity_log_alerts"]
+    assert code == 1
+    assert record["routes_to_enabled_receiver"] is None and record["reaches_human"] is None
+    assert summary["alerts_routing_unknown"] == 1 and summary["alerts_reaching_human_unknown"] == 1
+    assert summary["alerts_routing_to_enabled_receiver"] == 0
+
+
 def test_unread_alert_list_keeps_the_fixed_totals():
     summary = ala.summarize(None)
     assert (summary["monitored_operations_total"], summary["change_operations_total"]) == (12, 4)
