@@ -303,14 +303,18 @@ def _apply(run: _Run, root: Path, pos: dict, manifests: List[dict], *, label: st
     with run.step("validate manifests") as s:
         val = up.validate_all(root, manifests)
         run.doc["validate"] = val
+        before = {m["label"] for m in manifests if m["errors_now"]}
         bad = [r for r in val["manifests"] if r["ok"] is False]
+        new_bad = [r for r in bad if r["manifest"] not in before]
         if not manifests:
             s.done("no manifests", "skip")
-        elif bad:
-            s.fail(f"{len(bad)} of {view.plural(len(manifests), 'manifest')} fail")
-            for r in bad:
+        elif new_bad:
+            s.fail(f"{len(new_bad)} of {view.plural(len(manifests), 'manifest')} fail")
+            for r in new_bad:
                 for detail in view.manifest_errors(r["manifest"], "fails", "red", r["errors"]):
                     s.add(detail)
+        elif bad:
+            s.warn(f"{len(bad)} {'was' if len(bad) == 1 else 'were'} already failing; nothing new")
         else:
             s.done(f"{view.plural(len(manifests), 'manifest')} valid")
 
@@ -318,7 +322,7 @@ def _apply(run: _Run, root: Path, pos: dict, manifests: List[dict], *, label: st
     if run.json:
         _emit(run.doc, 0)
     run.section(view.done(label, tries, rollback=not rolling_back, container=(root / "deploy").is_dir()))
-    if bad:
+    if new_bad and not rolling_back:
         run.show(view.note("Fix what validate names above, or go back with ", "paramify update --rollback"))
     raise typer.Exit(0)
 
@@ -356,7 +360,7 @@ def _rollback(run: _Run, root: Path, yes: bool) -> NoReturn:
     if not run.json:
         run.console.print()
     _apply(run, root, pos, manifests, label=label, new_sha=prev["sha"], tries=[],
-           go=lambda: up.restore(root, prev), verb=f"go back to {label}", rolling_back=True)
+           go=lambda: up.restore(root, prev), verb="go back", rolling_back=True)
 
 
 # --------------------------------------------------------------------------- #

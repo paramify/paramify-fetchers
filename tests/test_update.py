@@ -454,6 +454,18 @@ def test_manifests_that_would_break_also_stop_an_unattended_run(main_repo, stubs
     assert _sha(main_repo) == before
 
 
+def test_a_manifest_that_already_failed_is_not_blamed_on_the_update(main_repo, monkeypatch):
+    manifests = [{"path": "/x/m.yaml", "label": "manifests/old.yaml", "uses": [], "errors_now": ["missing secret"]}]
+    monkeypatch.setattr(up, "user_manifests", lambda root: manifests)
+    monkeypatch.setattr(up, "run_validate", lambda t, m, python=None: {"ok": False, "errors": ["missing secret"], "notes": []})
+    result = runner.invoke(app, ["update", "--yes"])
+    assert result.exit_code == 0, result.stdout
+    assert "1 was already failing" in result.stdout and "--rollback\n  Fix" not in result.stdout
+    assert "Fix what validate names" not in result.stdout
+    result = runner.invoke(app, ["update", "--rollback", "--yes"])
+    assert result.exit_code == 0 and "paramify update --rollback" not in result.stdout
+
+
 def test_overlapping_local_changes_are_refused_and_listed(main_repo, stubs):
     (main_repo / "framework/later.py").write_text("# rides along\n")
     (main_repo / "fetchers/demo/alpha/fetch.py").write_text("# mine\n")
