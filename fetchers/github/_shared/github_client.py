@@ -608,6 +608,54 @@ def list_repos(client: GitHubClient, org: dict, allowlist: List[str], include_ar
     return sorted(repos, key=lambda r: r["name"].lower())
 
 
+# --- reads shared by several fetchers -----------------------------------------
+
+WORKFLOW_FILES = ('object(expression: "HEAD:.github/workflows") { ... on Tree { entries { name type '
+                  'object { ... on Blob { text isBinary isTruncated } } } } }')
+
+
+def workflow_file_texts(client: GitHubClient, org: str, repos: List[dict]) -> Optional[Dict[str, List[Tuple[str, Optional[str]]]]]:
+    """{repository: [(file name, text)]} for the workflow files on each default branch, or None on failure.
+
+    GitHub runs only .yml and .yaml files directly in .github/workflows. text is None where GraphQL returned no
+    readable content (a binary or truncated file): its content is unknown, not empty.
+    """
+    found = client.graphql_repos("GraphQL workflow files", org, [r["name"] for r in repos], WORKFLOW_FILES)
+    if found is None:
+        return None
+    out: Dict[str, List[Tuple[str, Optional[str]]]] = {}
+    for name, data in found.items():
+        entries = (data.get("object") or {}).get("entries") or []
+        rows: List[Tuple[str, Optional[str]]] = []
+        for e in sorted(entries, key=lambda e: e.get("name") or ""):
+            if e.get("type") != "blob" or not str(e.get("name")).endswith((".yml", ".yaml")):
+                continue
+            blob = e.get("object") or {}
+            unreadable = blob.get("text") is None or blob.get("isTruncated") or blob.get("isBinary")
+            rows.append((e["name"], None if unreadable else blob["text"]))
+        out[name] = rows
+    return out
+
+
+def newest_since(client: GitHubClient, path: str, key: str, since: float, cap: int, what: str,
+                 env: str) -> Optional[List[dict]]:
+    """Items of a newest-first list created since `since`. None on failure or when more than `cap` are in the window.
+
+    Walked page by page rather than filtered with `created=`: a filtered list stops at 1,000 results and then reports
+    an empty page and total_count 0 (measured), which would read as a quiet window.
+    """
+    seen: List[dict] = []
+    found = client.paginate_required(path, key=key,
+                                     until=lambda x: seen.append(x) or (to_epoch(x.get("created_at")) or since) < since
+                                     or len(seen) > cap)
+    if found is None:
+        return None
+    if len(seen) > cap and (to_epoch(seen[-1].get("created_at")) or since) >= since:
+        client.fail(f"GET {path}", "Truncated", f"more than {cap} {what} in the window; raise {env}", "partial_failure")
+        return None
+    return found
+
+
 # --- the entry point ---------------------------------------------------------
 
 def run(name: str, collect: Callable[[GitHubClient, dict, List[dict], Dict[str, Any]], Optional[dict]],

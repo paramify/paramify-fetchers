@@ -144,6 +144,21 @@ class JiraClient:
             return None
 
         message = error_message(resp)
+        if resp.status_code == 401 and SCOPE_MISMATCH in message.lower():
+            # A scoped API token. Sent to a site URL every call fails this way, so
+            # the run stops with the fix; through the gateway it is one missing scope.
+            if not self.authenticated and not is_gateway_url(self.base_url):
+                self.fail(operation, "HTTP401", scoped_token_on_site_message(self.base_url), "bad_config")
+                raise Abort
+            self.fail(
+                operation, "HTTP401",
+                f"{message[:200]} - the scoped token lacks a scope this call needs; "
+                "see the scope table in fetchers/jira/README.md",
+                "not_authorized",
+            )
+            if not self.authenticated:
+                raise Abort
+            return None
         if resp.status_code == 401:
             # Jira also answers 401 for a missing project permission (measured on
             # /project/{key}/role), so only a 401 before any success is a bad credential.
@@ -630,6 +645,27 @@ def validate_base_url(raw: str):
         "https://<site>.jira.com or https://<site>.atlassian-us-gov-mod.net) or the "
         "API gateway for a scoped token (https://api.atlassian.com/ex/jira/<cloudId>); "
         f"got host {host or '(none)'!r}"
+    )
+
+
+# Atlassian's 401 body for a scoped token that does not fit the request:
+# {"code":401,"message":"Unauthorized; scope does not match"}.
+SCOPE_MISMATCH = "scope does not match"
+
+
+def is_gateway_url(base_url: str) -> bool:
+    return (urlsplit(base_url).hostname or "") in _GATEWAY_HOSTS
+
+
+def scoped_token_on_site_message(base_url: str) -> str:
+    """The fix for a scoped API token sent to a site URL (base_url is already validated)."""
+    host = urlsplit(base_url).hostname or ""
+    gateway = "api.atlassian-us-gov-mod.com" if host.endswith(".atlassian-us-gov-mod.net") else "api.atlassian.com"
+    return (
+        "Jira answered 'scope does not match': JIRA_API_TOKEN is a scoped API token, and Jira "
+        "accepts a scoped token only through the API gateway, never at the site URL. Set "
+        f"JIRA_BASE_URL=https://{gateway}/ex/jira/<cloudId>, taking cloudId from "
+        f"{base_url}/_edge/tenant_info"
     )
 
 
