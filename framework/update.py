@@ -267,9 +267,19 @@ def choose_target(root: Path, pos: dict, releases: Sequence[Release], to: Option
     """
     if to == MAIN:
         try:
-            return Target("branch", f"origin/{MAIN}", _sha(root, f"origin/{MAIN}"), MAIN, MAIN)
+            target = Target("branch", f"origin/{MAIN}", _sha(root, f"origin/{MAIN}"), MAIN, MAIN)
         except UpdateError:
             raise UpdateError(f"origin has no {MAIN} branch to follow") from None
+        try:
+            mine = int(git(root, "rev-list", "--count", f"origin/{MAIN}..refs/heads/{MAIN}").strip())
+        except (UpdateError, ValueError):
+            mine = 0  # no local main yet: update creates it
+        if mine:
+            raise UpdateError(
+                f"{MAIN} has {mine} commit{'s' if mine != 1 else ''} that origin/{MAIN} does not, so update "
+                f"can't fast-forward it. Push or move them first"
+            )
+        return target
     if to:
         want = to if to.startswith("v") else f"v{to}"
         rel = next((r for r in releases if r.tag == want), None)
@@ -573,6 +583,27 @@ def worktree_status(root: Path) -> dict:
     return {"tracked": tracked, "untracked": untracked}
 
 
+def blocking_changes(root: Path, target_sha: str) -> dict:
+    """Local files that would stop git from moving to the target.
+
+    A changed tracked file blocks only when the update changes it too, and an
+    untracked path only when the target tracks a file there. Everything else
+    rides along, as git allows.
+    """
+    status = worktree_status(root)
+    tracked: List[str] = []
+    if status["tracked"]:
+        moving = set(git(root, "diff", "--name-only", "HEAD", target_sha).splitlines())
+        tracked = [p for p in status["tracked"] if p in moving]
+    untracked: List[str] = []
+    if status["untracked"]:
+        theirs = git(root, "ls-tree", "-r", "--name-only", target_sha).splitlines()
+        for u in status["untracked"]:
+            if any(t.startswith(u) for t in theirs) if u.endswith("/") else u in theirs:
+                untracked.append(u)
+    return {"tracked": tracked, "untracked": untracked}
+
+
 # --------------------------------------------------------------------------- #
 # The pre-switch check
 # --------------------------------------------------------------------------- #
@@ -852,6 +883,47 @@ def switch(root: Path, ref: str, *, branch: bool = False) -> None:
         git(root, "switch", "--quiet", ref)
     else:
         git(root, "switch", "--quiet", "--detach", ref)
+
+
+def _on_branch(root: Path, branch: str) -> bool:
+    try:
+        return git(root, "symbolic-ref", "-q", "--short", "HEAD").strip() == branch
+    except UpdateError:
+        return False
+
+
+def move(root: Path, target: Target) -> None:
+    """Fast-forward the branch to its upstream, or detach at the release tag."""
+    if target.branch is None:
+        git(root, "switch", "--quiet", "--detach", target.ref)
+        return
+    if not _on_branch(root, target.branch):
+        try:
+            git(root, "rev-parse", "--verify", "--quiet", f"refs/heads/{target.branch}")
+            git(root, "switch", "--quiet", target.branch)
+        except UpdateError:
+            git(root, "switch", "--quiet", "-c", target.branch, "--track", target.ref)
+    git(root, "merge", "--ff-only", "--quiet", target.sha)
+
+
+def restore(root: Path, prev: dict) -> None:
+    """Put the clone back where `prev` says it was. A branch is reset to its
+    old commit and stays checked out, so the next update moves it forward again."""
+    if prev.get("branch"):
+        if not _on_branch(root, prev["branch"]):
+            git(root, "switch", "--quiet", prev["branch"])
+        git(root, "reset", "--keep", "--quiet", prev["sha"])
+    else:
+        git(root, "switch", "--quiet", "--detach", prev["sha"])
+
+
+def needs_reinstall(root: Path, old_sha: str, new_sha: str) -> bool:
+    """The install is editable, so only a changed pyproject.toml (dependencies,
+    extras, entry points) needs pip to run again."""
+    try:
+        return bool(git(root, "diff", "--name-only", old_sha, new_sha, "--", "pyproject.toml").strip())
+    except UpdateError:
+        return True
 
 
 def detect_extras() -> Optional[List[str]]:

@@ -349,6 +349,68 @@ def test_dirty_refusal_lists_files_for_humans(repo, stubs):
 # --check
 # --------------------------------------------------------------------------- #
 
+def test_only_overlapping_local_changes_block(main_repo, tmp_path):
+    up.fetch(main_repo)
+    sha = _git(main_repo, "rev-parse", "origin/main").strip()
+    (main_repo / "framework/later.py").write_text("# my edit\n")          # not touched by the update
+    assert up.blocking_changes(main_repo, sha) == {"tracked": [], "untracked": []}
+    (main_repo / "fetchers/demo/alpha/fetch.py").write_text("# mine\n")   # changed by the update
+    assert up.blocking_changes(main_repo, sha)["tracked"] == ["fetchers/demo/alpha/fetch.py"]
+
+
+def test_an_untracked_file_the_target_tracks_blocks(main_repo, tmp_path):
+    _commit(tmp_path / "upstream", {"notes.txt": "upstream\n"}, "add notes")
+    up.fetch(main_repo)
+    (main_repo / "notes.txt").write_text("mine\n")
+    sha = _git(main_repo, "rev-parse", "origin/main").strip()
+    assert up.blocking_changes(main_repo, sha)["untracked"] == ["notes.txt"]
+
+
+def test_move_fast_forwards_a_branch_and_restore_puts_it_back(main_repo):
+    up.fetch(main_repo)
+    pos = up.position(main_repo)
+    t = up.choose_target(main_repo, pos, up.list_releases(main_repo))
+    up.move(main_repo, t)
+    after = up.position(main_repo)
+    assert (after["branch"], after["sha"], after["behind"]) == ("main", t.sha, 0)
+    up.restore(main_repo, {"branch": "main", "sha": pos["sha"]})
+    back = up.position(main_repo)
+    assert (back["branch"], back["sha"], back["behind"]) == ("main", pos["sha"], 1)
+
+
+def test_move_detaches_at_a_release_and_restore_returns(repo):
+    pos = up.position(repo)
+    up.move(repo, up.choose_target(repo, pos, up.list_releases(repo)))
+    assert _head_tag(repo) == "v0.3.0-beta" and up.position(repo)["branch"] is None
+    up.restore(repo, {"branch": None, "sha": pos["sha"]})
+    assert _head_tag(repo) == "v0.1.0-beta"
+
+
+def test_to_main_creates_the_branch_when_the_clone_has_none(repo):
+    _git(repo, "branch", "-D", "main")
+    t = up.choose_target(repo, up.position(repo), up.list_releases(repo), to="main")
+    up.move(repo, t)
+    pos = up.position(repo)
+    assert (pos["branch"], pos["upstream"], pos["sha"]) == ("main", "origin/main", t.sha)
+
+
+def test_to_main_refuses_a_main_with_commits_of_its_own(main_repo):
+    _commit(main_repo, {"mine.txt": "x"}, "local work")
+    _git(main_repo, "switch", "-q", "--detach", "v0.3.0-beta")
+    with pytest.raises(up.UpdateError, match="can't fast-forward"):
+        up.choose_target(main_repo, up.position(main_repo), up.list_releases(main_repo), to="main")
+
+
+def test_reinstall_only_when_pyproject_changed(main_repo, tmp_path):
+    old = _git(main_repo, "rev-parse", "HEAD").strip()
+    up.fetch(main_repo)
+    mid = _git(main_repo, "rev-parse", "origin/main").strip()
+    assert up.needs_reinstall(main_repo, old, mid) is False
+    _commit(tmp_path / "upstream", {"pyproject.toml": "[project]\nname='x'\n"}, "deps")
+    up.fetch(main_repo)
+    assert up.needs_reinstall(main_repo, old, _git(main_repo, "rev-parse", "origin/main").strip()) is True
+
+
 def test_check_exit_codes(repo):
     result, doc = _run("--check", "--json")
     assert result.exit_code == 1 and doc["update_available"] and doc["latest"] == "0.3.0-beta"
