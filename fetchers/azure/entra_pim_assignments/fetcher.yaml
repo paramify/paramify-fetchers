@@ -1,7 +1,7 @@
 name: azure_entra_pim_assignments
-version: 0.1.0
+version: 0.2.0
 description: >-
-  Shows who can activate each Entra ID admin role on demand, who holds one permanently, and whether activating a privileged role needs MFA, a reason, approval and a time limit.
+  Shows who can activate each Entra ID admin role, whether they're approved, who holds one permanently, and whether activation needs MFA, a reason, approval and a time limit.
 category: azure
 
 supports_targets: true
@@ -38,6 +38,21 @@ target_schema:
     env: AZURE_ENVIRONMENT
     description: Deployment environment label (e.g. prod) written into the evidence metadata.
 
+config_schema:
+  approved_principal_ids:
+    type: string
+    required: false
+    env: AZURE_ENTRA_APPROVED_PRINCIPAL_IDS
+    description: >
+      Object ids of the users, groups and service principals approved to hold a
+      privileged directory role, separated by commas, spaces or newlines (case
+      doesn't matter); the same setting as azure_entra_privileged_roles', so one
+      list serves both. A group's id approves the group, not its members; a
+      service principal's is its object id, not its app id. Unset, or with no
+      entry (blank or separators only): no list, and
+      unapproved_eligible_privileged_principals reads null. An entry that isn't
+      an object id fails the run.
+
 secrets: []          # DefaultAzureCredential only — see _categories/azure.yaml
 
 # Microsoft Graph application permission (admin consent): RoleManagement.Read.Directory
@@ -72,7 +87,7 @@ evidence_set:
     - Microsoft Graph GET /roleManagement/directory/roleAssignmentScheduleInstances, expanding the principal — who holds each role now, and whether it was assigned or activated
     - Microsoft Graph GET /policies/roleManagementPolicyAssignments, filtered to directory roles at tenant scope and expanding each policy's rules — each role's activation and assignment rules
 
-    Output: azure_entra_pim_assignments_<tenant>.json — every eligible and active directory role assignment with its user, group or app and how long it lasts, and the activation rules of each privileged role (one of the admin roles azure_entra_privileged_roles flags, such as Global Administrator or Privileged Role Administrator) and of each role with an assignment.
+    Output: azure_entra_pim_assignments_<tenant>.json — every eligible and active directory role assignment with its user, group or app and how long it lasts, and the activation rules of each privileged role (one of the admin roles azure_entra_privileged_roles flags, such as Global Administrator or Privileged Role Administrator) and of each role with an assignment, plus, when an approved list is set, its object ids and each user, group or app eligible for a privileged role that isn't on it.
 
     Summary fields:
 
@@ -83,7 +98,7 @@ evidence_set:
     - privileged_roles_without_policy — List of privileged role names held by someone (eligible or active, at any scope, directly or through a group) whose tenant-wide PIM policy didn't come back; when it isn't empty, the activation and assignment rule lists below and max_privileged_activation_hours read null, so a missing policy never reads as clean
 
     Who can activate a privileged role on demand?
-    - eligible_assignments — Number of eligible assignments (a user, group or app that can activate a role when needed) across all directory roles. This and every assignment count below takes direct assignments only (memberType Direct), so a role held through a group counts once, as the group's; an assignment counts as privileged only when the privileged role is held tenant-wide, not scoped to an administrative unit, a single object or an app. A direct privileged assignment that comes back with no scope at all could be tenant-wide, so it makes the privileged counts of its kind null (eligible ones the five below; active ones the seven in the next section), and privileged_assignments_scoped_below_tenant null
+    - eligible_assignments — Number of eligible assignments (a user, group or app that can activate a role when needed) across all directory roles. This and every assignment count below takes direct assignments only (memberType Direct), so a role held through a group counts once, as the group's; an assignment counts as privileged only when the privileged role is held tenant-wide, not scoped to an administrative unit, a single object or an app. A direct privileged assignment that comes back with no scope at all could be tenant-wide, so it makes the privileged counts of its kind null (eligible ones the five below and unapproved_eligible_privileged_principals; active ones the seven in the next section), and privileged_assignments_scoped_below_tenant null
     - eligible_privileged_assignments — Number of eligible assignments to privileged roles
     - permanently_eligible_privileged_assignments — Number of eligible assignments to privileged roles with no end date
     - principals_eligible_for_privileged_roles — Number of distinct users, groups and apps eligible for at least one privileged role
@@ -111,3 +126,7 @@ evidence_set:
     - max_privileged_activation_hours — Hours: the longest maximum activation time set on any privileged role; null if privileged_roles_without_policy isn't empty, a privileged role's policy didn't give a maximum activation time, or no privileged role's policy was read
     - privileged_roles_allowing_permanent_active_assignment — List of privileged role names whose policy lets an admin assign the role permanently as active, with no end date; null if privileged_roles_without_policy isn't empty or a privileged role's policy didn't say whether an active assignment needs an end date
     - privileged_roles_allowing_permanent_eligible_assignment — List of privileged role names whose policy lets an admin make someone permanently eligible, with no end date; null if privileged_roles_without_policy isn't empty or a privileged role's policy didn't say whether an eligible assignment needs an end date
+
+    Is every user, group and app eligible for a privileged role on an approved list?
+    - approved_principals_configured — True if the approved_principal_ids setting holds at least one entry; false if it is unset, blank or separators only
+    - unapproved_eligible_privileged_principals — Number of distinct users, groups and apps eligible for at least one privileged role tenant-wide whose object id isn't in approved_principal_ids (direct eligible assignments only: a group is matched by its own id and its members aren't read; active holders are checked by azure_entra_privileged_roles); null if no list is set, an entry isn't an object id, or a direct privileged eligible assignment came back with no scope

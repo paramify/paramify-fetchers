@@ -141,16 +141,23 @@ def cluster_record(cluster: dict, databases) -> dict:
     }
 
 
-def summarize(clusters: list[dict]) -> dict:
-    """Counts per posture property; databases are counted across every cluster."""
+def summarize(clusters: list[dict] | None) -> dict:
+    """Counts per posture property; databases are counted across every cluster.
+
+    `clusters` None means the list could not be read: every count is null, never 0. A count built
+    from the databases is null while any cluster's database list could not be read.
+    """
+    if clusters is None:
+        return dict.fromkeys(summarize([]))
+    all_read = all(c["databases_read"] for c in clusters)
     total = len(clusters)
     dbs = [d for c in clusters for d in c["databases"]]
     tls_only = sum(1 for c in clusters if c["tls_only"] is True)
     return {
         "total_clusters": total,
-        "total_databases": len(dbs),
-        "tls_only_clusters": tls_only,
-        "tls_only_percentage": coverage_percentage(tls_only, total),
+        "total_databases": len(dbs) if all_read else None,
+        "tls_only_clusters": tls_only if all_read else None,
+        "tls_only_percentage": coverage_percentage(tls_only, total) if all_read else None,
         "recommended_minimum_tls_clusters": sum(
             1 for c in clusters if c["minimum_tls_version_recommended"]
         ),
@@ -163,14 +170,14 @@ def summarize(clusters: list[dict]) -> dict:
         "public_network_access_unset_clusters": sum(
             1 for c in clusters if c.get("public_network_access") is None
         ),
-        "encrypted_protocol_databases": sum(1 for d in dbs if d["client_protocol_encrypted"]),
-        "plaintext_protocol_databases": sum(1 for d in dbs if not d["client_protocol_encrypted"]),
-        "access_keys_disabled_databases": sum(
-            1 for d in dbs if d["access_keys_authentication_disabled"]
-        ),
-        "access_keys_enabled_databases": sum(
-            1 for d in dbs if not d["access_keys_authentication_disabled"]
-        ),
+        "encrypted_protocol_databases": (
+            sum(1 for d in dbs if d["client_protocol_encrypted"]) if all_read else None),
+        "plaintext_protocol_databases": (
+            sum(1 for d in dbs if not d["client_protocol_encrypted"]) if all_read else None),
+        "access_keys_disabled_databases": (
+            sum(1 for d in dbs if d["access_keys_authentication_disabled"]) if all_read else None),
+        "access_keys_enabled_databases": (
+            sum(1 for d in dbs if not d["access_keys_authentication_disabled"]) if all_read else None),
     }
 
 
@@ -267,7 +274,7 @@ def main() -> int:
         collector=collector,
         results={"redis_clusters": clusters, "provider_registration_status": registration, "excluded": excluded},
         summary={
-            **summarize(clusters),
+            **summarize(clusters if listed else None),
             "provider_registration_status": registration,
             **exclusions.summary(excluded, ("redis_cluster",), {"redis_clusters": len(clusters) if listed else None}),
         },
