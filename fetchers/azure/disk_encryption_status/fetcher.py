@@ -209,12 +209,16 @@ def _cmk_coverage(disks: list[dict], prefix: str = "") -> dict:
     }
 
 
-def summarize(disks: list[dict]) -> dict:
+def summarize(disks: list[dict] | None) -> dict:
     """CMK coverage is the headline, computed three ways: all / attached / unattached.
+
+    `None` means the disk list was not read: every count and percentage is then null, not 0.
 
     Managed disks are encrypted at rest unconditionally, so a generic "encrypted"
     percentage would be a constant 100 and prove nothing.
     """
+    if disks is None:
+        return {k: None for k in summarize([])}
     attached = [d for d in disks if d["attached"]]
     unattached = [d for d in disks if not d["attached"]]
     return {
@@ -318,6 +322,7 @@ def main() -> int:
     if not listed:
         exclusions.mark_unread()
     exclusions.warn_unmatched(logger)
+    summary = summarize(disks)
     disks = disks or []
 
     evidence = build_payload(
@@ -330,7 +335,7 @@ def main() -> int:
             "excluded": excluded,
         },
         summary={
-            **summarize(disks),
+            **summary,
             "provider_registration_status": registration,
             **exclusions.summary(excluded, KINDS, {"disks": len(disks) if listed else None}),
         },
