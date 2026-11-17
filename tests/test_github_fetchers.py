@@ -3596,3 +3596,75 @@ def test_branch_names_can_be_left_out_and_on_default_branch_still_holds(fake, mo
     assert ev["summary"]["default_branch_runs"] == 1 and ev["summary"]["default_branch_runs_failed"] == 0
     assert ev["metadata"]["include_branch_names"] is False
     assert ev["repositories"][0]["default_branch"] == "main"  # the repository's default branch is kept
+
+
+# --- audit_log: the repository filters apply to the events ---------------------------------
+
+def _audit_scope_events():
+    return [audit_event("repo.access", 1, repo=f"{ORG}/app"),
+            audit_event("protected_branch.policy_override", 2, repo=f"{ORG}/Out-Of-Scope"),
+            audit_event("repo.create", 3, repository=f"{ORG}/out-of-scope"),          # the newer field name
+            audit_event("org.add_member", 4, user="newbie"),                           # names no repository
+            audit_event("workflows.completed_workflow_run", 5, repo=f"{ORG}/out-of-scope")]
+
+
+def _audit_scope_routes():
+    routes = audit_routes(_audit_scope_events())
+    routes[f"orgs/{ORG}/repos"] = [repo("app"), repo("out-of-scope")]
+    routes[f"orgs/{ORG}"]["public_repos"] = 2
+    routes[f"repos/{ORG}/app"] = routes[f"repos/{ORG}/App"] = repo("app")  # GitHub resolves names in any case
+    return routes
+
+
+def test_audit_log_without_a_filter_keeps_every_event(fake, monkeypatch, tmp_path):
+    for env in ("GITHUB_REPOSITORIES", "GITHUB_EXCLUDE_REPOSITORIES"):
+        monkeypatch.delenv(env, raising=False)
+    fake(_audit_scope_routes())
+    code, ev, _ = run_fetcher("audit_log", monkeypatch, tmp_path)
+    m = ev["metadata"]
+    assert code == 0 and ev["summary"]["events_total"] == 5 and m["events_read"] == 5
+    assert m["repository_filter_applied"] is False and m["events_outside_repository_filter"] == 0
+
+
+def test_audit_log_leaves_out_an_excluded_repositorys_events(fake, monkeypatch, tmp_path):
+    fake(_audit_scope_routes())
+    code, ev, _ = run_fetcher("audit_log", monkeypatch, tmp_path, GITHUB_EXCLUDE_REPOSITORIES="OUT-of-scope")
+    m, s = ev["metadata"], ev["summary"]
+    assert code == 0 and m["repositories_excluded"] == ["out-of-scope"]
+    assert m["repository_filter_applied"] is True and m["events_read"] == 5
+    assert m["events_outside_repository_filter"] == 3 and s["events_total"] == 2
+    assert "out-of-scope" not in json.dumps(ev["security_events"]).lower()
+    assert s["by_family"] == {"org": 1, "repo": 1}  # the organization-wide event is kept
+    assert "workflows.completed_workflow_run" not in s["by_action"]
+
+
+def test_audit_log_with_an_allow_list_keeps_listed_repositories_and_organization_events(fake, monkeypatch, tmp_path):
+    fake(_audit_scope_routes())
+    code, ev, _ = run_fetcher("audit_log", monkeypatch, tmp_path, GITHUB_REPOSITORIES="App")
+    m, s = ev["metadata"], ev["summary"]
+    assert code == 0 and m["repository_filter_applied"] is True
+    assert m["events_outside_repository_filter"] == 3 and s["events_total"] == 2
+    assert sorted(e["action"] for e in ev["security_events"]) == ["org.add_member", "repo.access"]
+
+
+def test_audit_log_truncation_is_judged_on_the_events_read_not_the_events_kept(fake, monkeypatch, tmp_path):
+    fake(_audit_scope_routes())
+    code, ev, status = run_fetcher("audit_log", monkeypatch, tmp_path, GITHUB_EXCLUDE_REPOSITORIES="out-of-scope",
+                                   GITHUB_AUDIT_MAX_EVENTS="4")
+    assert code == 1 and status["code"] == "partial_failure" and ev["metadata"]["truncated"] is True
+    assert ev["metadata"]["events_read"] == 4
+
+
+@pytest.mark.parametrize("event,allow,exclude,kept", [
+    ({"repo": "acme/app"}, set(), {"app"}, False),
+    ({"repo": "acme/App"}, set(), {"app"}, False),
+    ({"repo": "acme/app"}, {"app"}, set(), True),
+    ({"repo": "acme/other"}, {"app"}, set(), False),
+    ({"repository": "acme/other"}, set(), {"app"}, True),
+    ({}, {"app"}, set(), True),
+    ({"repo": None}, set(), {"app"}, True),
+    ({"repo": 7}, set(), {"app"}, True),          # not a name: kept rather than guessed at
+    ({"repo": "app"}, set(), {"app"}, False),     # no owner prefix
+])
+def test_audit_event_repository_scope(event, allow, exclude, kept):
+    assert MODS["audit_log"].in_repository_scope(event, allow, exclude) is kept

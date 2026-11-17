@@ -255,6 +255,10 @@ class GitHubClient:
         self.last_message = ""  # GitHub's message for the last non-2xx; bodies of non-2xx are never returned
         # Fine-grained and classic personal tokens; an App installation token is ghs_. Some endpoints serve Apps only.
         self.personal_token = token.startswith(("github_pat_", "ghp_"))
+        # The target's repository filters, lower-cased, for a fetcher that reads organization-wide records which
+        # name a repository (the audit log). run() fills them; both empty means no filter.
+        self.repositories_filter: List[str] = []
+        self.exclude_repositories: List[str] = []
 
     def fail(self, operation: str, type_: str, message: str, code: str) -> None:
         self.failures.append({"operation": operation, "type": type_, "message": message})
@@ -703,6 +707,8 @@ def run(name: str, collect: Callable[[GitHubClient, dict, List[dict], Dict[str, 
                            if narrows]
         target = {**target, "repositories": [], "exclude_repositories": [], "include_archived": True}
     client = GitHubClient(target["api_url"], target["token"])
+    client.repositories_filter = [name.lower() for name in target["repositories"]]
+    client.exclude_repositories = [name.lower() for name in target["exclude_repositories"]]
     result: Dict[str, Any] = {}
     org: Dict[str, Any] = {}
     # Filled by list_repos; null until the repository list is read, so an unread list never looks like "none excluded".

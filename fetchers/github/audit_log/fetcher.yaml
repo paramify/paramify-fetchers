@@ -30,16 +30,19 @@ target_schema:
     required: false
     env: GITHUB_REPOSITORIES
     description: >-
-      Comma-separated repository names to collect. Unset collects every
-      repository the token can see; a name the token cannot see fails the run.
+      Comma-separated repository names to collect; a name the token cannot
+      see fails the run. When set, only events that name one of these
+      repositories, and organization-wide events, are kept; the rest are
+      counted in events_outside_repository_filter.
   exclude_repositories:
     type: string
     required: false
     env: GITHUB_EXCLUDE_REPOSITORIES
     description: >-
       Comma-separated repository names to leave out, matched without regard
-      to case. Cannot be combined with repositories. The evidence lists the
-      names it left out and any that matched no repository.
+      to case. Cannot be combined with repositories. Events that name an
+      excluded repository are left out and counted; organization-wide
+      events are kept.
   include_archived:
     type: boolean
     required: false

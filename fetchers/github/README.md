@@ -38,7 +38,7 @@ organization, each with its own token and API host.
 | `org` | `GITHUB_ORG` | yes | Organization login, as in `github.com/<org>` |
 | `api_url` | `GITHUB_API_URL` | no | `https://api.github.com` (default), `https://api.<sub>.ghe.com` (GHE.com), `https://<host>/api/v3` (GitHub Enterprise Server) |
 | `repositories` | `GITHUB_REPOSITORIES` | no | Comma-separated names; unset collects every repository the token can see. The inventory ignores it |
-| `exclude_repositories` | `GITHUB_EXCLUDE_REPOSITORIES` | no | Comma-separated names to leave out, matched without regard to case; cannot be combined with `repositories`. The evidence lists `repositories_excluded` and `exclude_repositories_unmatched` (names that matched nothing, such as a typo). The inventory ignores it |
+| `exclude_repositories` | `GITHUB_EXCLUDE_REPOSITORIES` | no | Comma-separated names to leave out, matched without regard to case; cannot be combined with `repositories`. The evidence lists `repositories_excluded` and `exclude_repositories_unmatched` (names that matched nothing, such as a typo). The inventory ignores it; the audit log leaves out the events that name an excluded repository (and, with `repositories`, the events of every repository not listed), counts them in `events_outside_repository_filter`, and keeps organization-wide events |
 | `include_archived` | `GITHUB_INCLUDE_ARCHIVED` | no | Default `false`. The inventory ignores it and always includes archived repositories, because they are still assets |
 | secret `token` | `GITHUB_TOKEN` | yes | Per target |
 
