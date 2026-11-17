@@ -163,7 +163,9 @@ It fails on:
 
 [`azure/alert_rules`](../fetchers/azure/alert_rules/fetcher.yaml) is a full
 example. `tests/test_contracts.py` checks:
-- the layout, for the fetchers listed in `TEXT_FORMAT_FETCHERS`;
+- the layout, for every fetcher except those on `TEXT_FORMAT_PENDING` (older
+  fetchers that still fail it; the list only shrinks, and a new fetcher is
+  never added to it);
 - that a test calls `assert_summary_documented` for every fetcher whose
   instructions list summary fields. Fetchers that listed them before the check
   existed wait in `SUMMARY_DOCS_PENDING`, which is meant only to shrink. Its
@@ -171,8 +173,8 @@ example. `tests/test_contracts.py` checks:
   raising the count, which shows in review. A new fetcher calls the fixture
   instead.
 
-Until a platform is converted, its instructions only need to open with the
-`Script:` path.
+A fetcher on `TEXT_FORMAT_PENDING` only needs instructions that open with the
+`Script:` path, until its text is rewritten and it leaves the list.
 
 ## 3. Write `fetcher.py` and smoke-test it
 

@@ -233,6 +233,7 @@ batches.
 | `--owner USERNAME` | Where a stack has one channel per owner, uses this owner's channel. It replaces the owner the run recorded. |
 | `--with-validators` | Syncs validators for the evidence sets of the run before the batches go out. If the sync fails, the upload sends no batch. With `--dry-run`, it only names the sync it would do. |
 | `--no-tags` | Skips the default custom tags for this upload. |
+| `--no-waf-check` | Sends files that hold a string the production WAF has blocked (`../`, `/bin/sh`, `<script`) instead of dropping them before the upload. If the WAF does block one, the upload drops that file and sends the rest. The plan notes that the check is off. |
 | `--config`, `-f`, `-o` | Choose the uploader config, the manifest, and the output directory. |
 | `--json` | Prints the summary: the legacy counts, plus `dropped`, `plan`, `entries`, `outcomes`, `batches` and, with `--with-validators`, `validators`. |
 

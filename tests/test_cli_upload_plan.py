@@ -21,6 +21,7 @@ from framework import api, paramify_auth
 from framework.cli import app
 from framework.paramify.client import ApiError, ErrorKind
 from framework.sync import upload as upload_mod
+from framework.sync.model import Plan
 from tests.test_api_upload_engine import fake, no_env, root, submits, two_files  # noqa: F401  (fixtures)
 
 runner = CliRunner()
@@ -188,10 +189,25 @@ def test_stack_and_validators_reach_upload_run(no_env, tmp_path, monkeypatch):  
     monkeypatch.setattr(api, "upload_run", fake_upload)
     monkeypatch.setattr(api, "sync_validators", lambda *a, **k: pytest.fail("synced after the upload"))
     res = cli("upload", str(two_files(tmp_path)), "--dry-run", "--stack", "Prod", "--owner", "alice",
-              "--with-validators", "--no-tags")
+              "--with-validators", "--no-tags", "--no-waf-check")
     assert res.exit_code == 0, res.output
     assert seen["stack"] == "Prod" and seen["with_validators"] is True and seen["custom_tags"] is False
+    assert seen["waf_check"] is False
     assert seen["owner"] == "alice"
+
+
+def test_no_waf_check_reaches_the_plan(no_env, tmp_path, monkeypatch):  # noqa: F811
+    seen: Dict[str, Any] = {}
+
+    def fake_plan(run_dir, _root, config_path, **kw):
+        seen.update(kw)
+        return Plan()
+
+    monkeypatch.setenv(paramify_auth.UPLOAD_TOKEN_ENV, "tok")
+    monkeypatch.setattr(api, "plan_upload", fake_plan)
+    res = cli("upload", str(two_files(tmp_path)), "--plan", "--no-waf-check")
+    assert res.exit_code == 0, res.output
+    assert seen["waf_check"] is False
 
 
 def test_stack_override_is_applied(fake, tmp_path):  # noqa: F811
