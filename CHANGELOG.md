@@ -12,6 +12,12 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`alertmanager_alert_delivery` fetcher and `alertmanager` category.** Reads Prometheus Alertmanager's v2 API and
+  metrics endpoint, GET only: the route tree and receivers (names and integration types only, never receiver
+  settings), active, silenced and inhibited alerts, silences, and notification attempts and failures since the process
+  started, per receiver when Alertmanager runs with receiver-name-in-metrics, otherwise per integration type. Reports
+  receivers and routes that deliver nowhere. A delivered notification means the integration accepted it, not that a
+  person received it. Unread endpoints leave their fields null rather than 0.
 - **`azure_endpoint_availability` fetcher.** Reads Application Insights availability tests and their hourly
   results, and Standard load balancers' data-path (VipAvailability) and health-probe (DipAvailability)
   availability with measurement coverage, each judged against an availability target once one is set (none by
