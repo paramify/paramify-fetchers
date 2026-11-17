@@ -3083,6 +3083,40 @@ def test_the_installer_and_reusable_workflows_are_noted_because_their_signing_is
     assert row["reusable_workflows_called"] == ["acme/platform/.github/workflows/sign.yml@main"]
 
 
+def test_workflows_that_call_a_reusable_workflow_are_listed_in_the_summary(fake, monkeypatch, tmp_path):
+    caller = yaml.safe_dump({"on": "push", "jobs": {"sign": {"uses": "acme/platform/.github/workflows/sign.yml@main"}}})
+    fake(signing_routes({"app": {"release.yml": caller, "ci.yml": PLAIN}, "site": {"ci.yml": PLAIN}}))
+    code, ev, _ = run_fetcher("image_signing", monkeypatch, tmp_path)
+    s = ev["summary"]
+    # The shared workflow may sign, but nothing here shows it: the repository is not counted as signing.
+    assert code == 0 and s["repositories_signing"] == []
+    assert s["workflows_calling_reusable_workflows"] == ["app:.github/workflows/release.yml"]
+    assert s["workflows_mentioning_cosign_without_a_cosign_command"] == []
+
+
+def test_pull_request_runs_of_a_signing_workflow_are_not_counted_as_signing(fake, monkeypatch, tmp_path):
+    """GitHub's docker-publish starter runs on pull requests too, with the sign step skipped and the run a success."""
+    publish = yaml.safe_dump({"on": {"push": {"branches": ["main"]}, "pull_request": {"branches": ["main"]}},
+                              "jobs": {"build": {"runs-on": "ubuntu-latest", "steps": [
+                                  {"uses": "sigstore/cosign-installer@v3"},
+                                  script(f"cosign sign --yes {IMAGE}@${{{{ steps.build.outputs.digest }}}}",
+                                         **{"if": "github.event_name != 'pull_request'"})]}}})
+    pr = wf_run(3, 1, "docker-publish.yml", fork=True)
+    target = {**wf_run(2, 2, "docker-publish.yml"), "event": "pull_request_target"}
+    failed_push = wf_run(1, 3, "docker-publish.yml", conclusion="failure")
+    fake(signing_routes({"app": {"docker-publish.yml": publish}},
+                        runs={("app", "docker-publish.yml"): [pr, target, failed_push]}))
+    code, ev, _ = run_fetcher("image_signing", monkeypatch, tmp_path)
+    s = ev["summary"]
+    assert code == 0
+    assert (s["signing_workflow_runs"], s["signing_workflow_runs_successful"],
+            s["signing_workflow_pull_request_runs"]) == (1, 0, 2)
+    assert s["signing_workflows_without_successful_run"] == ["app:.github/workflows/docker-publish.yml"]
+    assert s["latest_successful_signing_run"] is None
+    [w] = ev["repositories"][0]["workflows"]
+    assert w["runs"]["by_outcome"] == {"failure": 1} and w["runs"]["latest_outcome"] == "failure"
+
+
 @pytest.mark.parametrize("text,error", [("jobs: [unclosed", None), ("- a list\n- not a workflow", "not a mapping"),
                                         ("", "not a mapping")])
 def test_a_file_github_cannot_run_is_reported_not_guessed_at(text, error):
@@ -3161,10 +3195,12 @@ def test_image_signing_verdicts(fake, monkeypatch, tmp_path, assert_summary_docu
         "verification_steps": 1,
         "verification_steps_not_enforced": [],
         "repositories_signing_without_verification": ["site"],
+        "workflows_calling_reusable_workflows": [],
         "workflows_mentioning_cosign_without_a_cosign_command": [],
         "runs_read": True,
         "signing_workflow_runs": 5,                     # run 1 is outside the window
         "signing_workflow_runs_successful": 2,
+        "signing_workflow_pull_request_runs": 0,
         "signing_workflows_without_successful_run": ["site:.github/workflows/release.yml"],
         "latest_successful_signing_run": newest["created_at"],
         "not_collected": [],
@@ -3178,7 +3214,7 @@ def test_image_signing_verdicts(fake, monkeypatch, tmp_path, assert_summary_docu
         "conditional": False, "continue_on_error": False, "failure_discarded": False, "key": "azure_key_vault",
         "key_reference": KMS_KEY,
         "skips_transparency_log": True}]
-    assert promote["runs"] == {"read": True, "total": 4, "successful": 2,
+    assert promote["runs"] == {"read": True, "pull_request_runs": 0, "total": 4, "successful": 2,
                                "by_outcome": {"failure": 1, "in_progress": 1, "success": 2},
                                "latest_run_at": runs[("app", "image-promote.yml")][0]["created_at"],
                                "latest_outcome": "in_progress", "latest_success_at": newest["created_at"]}

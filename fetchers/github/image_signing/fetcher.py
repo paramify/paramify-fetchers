@@ -37,6 +37,9 @@ SCHEME = re.compile(r"(" + "|".join(KEY_SCHEMES) + r")://")
 KMS_REFERENCE = re.compile(r"(?:" + "|".join(KEY_SCHEMES) + r")://[\w./:@-]+")
 VARIABLE = re.compile(r"\$\{?(\w+)\}?\Z|\$\{\{\s*env\.(\w+)\s*\}\}\Z")
 DIGEST = re.compile(r"@sha256:[0-9a-f]{6,}|@\$")
+# Runs of these events are not counted as signing runs: a signing workflow often also runs on pull requests with its
+# sign step skipped (as GitHub's docker-publish starter does), and such a run still ends in success.
+PULL_REQUEST_EVENTS = ("pull_request", "pull_request_target")
 
 
 def segments(script):
@@ -190,8 +193,8 @@ def step_rows(job_id, job, env):
 def analyse(name, text):
     """One workflow file as evidence. An unparseable file is reported, not guessed at: GitHub will not run it either."""
     row = {"file": name, "path": f".github/workflows/{name}", "parsed": False, "installs_cosign": False,
-           "mentions_cosign": False, "signing_steps": [], "verification_steps": [], "other_cosign_steps": [], "reusable_workflows_called": [],
-           "runs": None}
+           "mentions_cosign": False, "signing_steps": [], "verification_steps": [], "other_cosign_steps": [],
+           "reusable_workflows_called": [], "runs": None}
     try:
         doc = yaml.safe_load(text)
     except yaml.YAMLError as exc:
@@ -216,15 +219,20 @@ def analyse(name, text):
 
 
 def run_history(client, base, file, since, cap):
-    """How one workflow ran in the window. read is False when the runs could not be read: unknown, not none."""
-    runs = newest_since(client, f"{base}/actions/workflows/{quote(file, safe='')}/runs", "workflow_runs", since, cap,
-                        "runs of a signing workflow", "GITHUB_IMAGE_SIGNING_MAX_RUNS")
-    if runs is None:
+    """How one workflow ran in the window. read is False when the runs could not be read: unknown, not none.
+
+    Pull request runs are counted apart and left out of every other figure (see PULL_REQUEST_EVENTS).
+    """
+    listed = newest_since(client, f"{base}/actions/workflows/{quote(file, safe='')}/runs", "workflow_runs", since, cap,
+                          "runs of a signing workflow", "GITHUB_IMAGE_SIGNING_MAX_RUNS")
+    if listed is None:
         return {"read": False}
+    runs = [r for r in listed if r.get("event") not in PULL_REQUEST_EVENTS]
     outcomes = [r.get("conclusion") or r.get("status") or "unknown" for r in runs]
     passed = [r for r in runs if r.get("conclusion") == "success"]
     return {
         "read": True,
+        "pull_request_runs": len(listed) - len(runs),
         "total": len(runs),
         "successful": len(passed),
         "by_outcome": {o: outcomes.count(o) for o in sorted(set(outcomes))},
@@ -302,9 +310,14 @@ def collect(client, org, repos, config):
             "workflows_mentioning_cosign_without_a_cosign_command": sorted(
                 at(repo, w) for repo, w in flows
                 if w["mentions_cosign"] and not (w["signing_steps"] or w["verification_steps"] or w["other_cosign_steps"])),
+            # Their steps live in another file, possibly another repository, so what they sign is not read here.
+            "workflows_calling_reusable_workflows": sorted(at(repo, w) for repo, w in flows
+                                                           if w["reusable_workflows_called"]),
             "runs_read": runs_read,
             "signing_workflow_runs": sum(h["total"] for _, h in histories) if runs_read else None,
             "signing_workflow_runs_successful": sum(h["successful"] for _, h in histories) if runs_read else None,
+            "signing_workflow_pull_request_runs": (sum(h["pull_request_runs"] for _, h in histories)
+                                                   if runs_read else None),
             "signing_workflows_without_successful_run": (sorted(k for k, h in histories if not h["successful"])
                                                          if runs_read else None),
             "latest_successful_signing_run": latest[-1] if latest else None,

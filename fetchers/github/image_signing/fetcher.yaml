@@ -112,6 +112,7 @@ evidence_set:
     - signing_steps_conditional — List of sign steps (repository/file:job:step) that run only when a condition holds
     - signing_steps_continue_on_error — List of sign steps whose failure does not fail the job
     - signing_steps_discarding_failure — List of sign steps whose script carries on whatever cosign returned
+    - workflows_calling_reusable_workflows — List of workflow files that call a reusable workflow (jobs.<id>.uses); what the called workflow signs is not read, so a repository that signs only there reads as not signing
     - workflows_mentioning_cosign_without_a_cosign_command — List of workflow files that mention cosign but run it some way this fetcher does not read, such as a script
 
     Are signatures verified?
@@ -122,7 +123,8 @@ evidence_set:
 
     How did the signing workflows run?
     - runs_read — True when every signing workflow's runs were read; false when any could not be; null when include_runs is false
-    - signing_workflow_runs — Number of signing workflow runs in the window; null unless runs_read is true
+    - signing_workflow_runs — Number of signing workflow runs in the window, pull request runs left out; null unless runs_read is true
     - signing_workflow_runs_successful — Number of those runs that succeeded; null unless runs_read is true
-    - signing_workflows_without_successful_run — List of signing workflows with no successful run in the window; null unless runs_read is true
-    - latest_successful_signing_run — Time of the newest successful signing workflow run; null when none or unread
+    - signing_workflow_pull_request_runs — Number of pull_request and pull_request_target runs of signing workflows, left out of the other run figures because a sign step is usually skipped on them while the run still succeeds; null unless runs_read is true
+    - signing_workflows_without_successful_run — List of signing workflows with no successful run in the window, pull request runs left out; null unless runs_read is true
+    - latest_successful_signing_run — Time of the newest successful signing workflow run, pull request runs left out; null when none or unread

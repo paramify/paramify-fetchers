@@ -254,7 +254,7 @@ repositories; each returns well-formed, misleading data without an error.
   reusable workflow in another file is not seen: the file row lists the
   reusable workflows it calls, and the summary lists the workflows that
   mention cosign (an installer, a make target) without a cosign command in
-  the file. A script that writes cosign commands into a file with a
+  the file, and every workflow that calls a reusable workflow. A script that writes cosign commands into a file with a
   here-document reads as running them. Other signing tools are not
   recognized. Each cosign command is one entry: a step that runs two
   commands counts twice, and one command in a loop that signs many images
@@ -268,7 +268,10 @@ repositories; each returns well-formed, misleading data without an error.
   other ways a script hides a failure are not detected: `set +e`, and a
   pipe from cosign in a step that does not set `shell: bash` (GitHub's
   default shell runs without `pipefail`). Runs on every branch are counted, while the steps are those of the
-  default branch's file.
+  default branch's file. Pull request runs (`pull_request`,
+  `pull_request_target`) are counted apart and left out of every other run
+  figure: a signing workflow often runs on pull requests with its sign step
+  skipped, and such a run still succeeds.
 - **A signing key is classified only from what the file says.** The key is
   a key management service only when the `--key` value, written out or set
   in the workflow's own `env`, starts with that service's scheme. A value

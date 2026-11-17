@@ -200,9 +200,10 @@ schemas and the `paramify` CLI — not the internal code.
   every `cosign verify` step and what it checks against, and lists the
   verify steps that cannot fail the run. It lists the workflows that mention
   cosign without a cosign command in the file, where signing happens
-  somewhere the file does not show. For each
-  workflow that signs, it reads the runs in the window by outcome and the
-  latest successful run. The summary lists the repositories that sign
+  somewhere the file does not show, and the workflows that call a reusable
+  workflow, whose signing it does not read. For each workflow that signs, it
+  reads the runs in the window by outcome and the latest successful run,
+  leaving out pull request runs, which it counts apart. The summary lists the repositories that sign
   without verifying. It needs Contents for the files and Actions for the
   runs; with `include_runs: false` it reads the files only and every run
   figure is null. It reads workflow files, not the registry, and copies no
