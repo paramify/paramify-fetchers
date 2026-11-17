@@ -7,6 +7,10 @@ Response bodies of `GET flexibleServers/{server}/backups`, copied from Microsoft
   (one automatic and one on-demand backup).
 - `mysql-backups-2023-12-30.json`: `Microsoft.DBforMySQL/FlexibleServers/stable/2023-12-30/examples/BackupsListByServer.json`
   (automatic backups only).
+- `mysql-backup-on-demand-2023-12-30.json`: the response body of
+  `Microsoft.DBforMySQL/FlexibleServers/stable/2023-12-30/examples/BackupPut.json` (one on-demand backup).
 
-They hold no tenant data. The MySQL list has no on-demand backup, and the published MySQL on-demand example reports
-`source: Automatic`, so how a real MySQL on-demand backup is labelled is still to be confirmed against a live response.
+They hold no tenant data. The published MySQL on-demand example labels its backup `FULL` / `Automatic`, the same as a
+scheduled backup; only its name, `customer_<time>_<id>_<user name>`, sets it apart (automatic backups are named
+`daily_...`). The fetcher therefore counts a MySQL backup whose name starts with `customer_` as manual, whatever its
+labels. A live response should still confirm this.

@@ -86,9 +86,17 @@ BACKUP_KINDS = {
 }
 
 
+# MySQL labels an on-demand backup FULL / Automatic, the same as a scheduled one (Microsoft's BackupPut.json example,
+# 2023-12-30); only the name, customer_<time>_<id>_<user name>, sets it apart. Scheduled backups are named daily_...
+MYSQL_ON_DEMAND_PREFIX = "customer_"
+
+
 def backup_kind(engine: str, backup: Dict[str, Any]) -> str:
-    """automatic, manual or unknown, from the exact backupType and source the engine reports."""
+    """automatic, manual or unknown, from the exact backupType and source the engine reports. A MySQL backup named
+    customer_... is manual whatever its labels, so a recent on-demand backup never stands in for automatic ones."""
     props = backup.get("properties") or {}
+    if engine == "mysql" and str(backup.get("name") or "").lower().startswith(MYSQL_ON_DEMAND_PREFIX):
+        return MANUAL
 
     def norm(value):
         return str(value).strip().lower() if value not in (None, "") else None

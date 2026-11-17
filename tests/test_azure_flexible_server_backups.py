@@ -291,3 +291,21 @@ def test_a_restored_server_without_a_creation_date_is_unknown_not_recent():
     undated["created"] = None
     s = db.summarize([db.with_backups(undated, [backup(3)], SETTINGS, NOW)], {**SETTINGS, "restore_lookback_days": 365}, NOW)
     assert (s["restored_servers_within_lookback"], s["restored_servers_date_unknown"]) == (0, 1)
+
+
+def test_a_mysql_on_demand_backup_is_manual_although_labelled_automatic():
+    # Microsoft's published MySQL on-demand example: FULL / Automatic, told apart only by its customer_ name.
+    on_demand = json.loads((FIXTURES / "mysql-backup-on-demand-2023-12-30.json").read_text())
+    assert (on_demand["properties"]["backupType"], on_demand["properties"]["source"]) == ("FULL", "Automatic")
+    assert db.backup_kind("mysql", on_demand) == db.MANUAL
+    assert set(_kinds("mysql", "mysql-backups-2023-12-30.json")) == {db.AUTOMATIC}
+
+
+def test_a_recent_mysql_on_demand_backup_does_not_hide_stale_automatic_backups():
+    automatic = json.loads((FIXTURES / "mysql-backups-2023-12-30.json").read_text())["value"]
+    on_demand = json.loads((FIXTURES / "mysql-backup-on-demand-2023-12-30.json").read_text())
+    now = max(db.parse_time(b["properties"]["completedTime"]) for b in automatic) + timedelta(days=5)
+    recent = {**on_demand, "properties": {**on_demand["properties"], "completedTime": (now - timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%SZ")}}
+    server = db.server_record("mysql", raw_server("my1", "mysql"))
+    s = db.with_backups(server, automatic + [recent], SETTINGS, now)
+    assert (s["backup_within_window"], s["manual_backup_within_window"], s["manual_backups"]) == (False, True, 1)
