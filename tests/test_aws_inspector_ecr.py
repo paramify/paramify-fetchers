@@ -152,7 +152,9 @@ class _Client:
                 key += ':' + params['nextToken']
             response = json.load(open(os.environ['FAKE_RESPONSES']))[key]
             if isinstance(response, dict) and '_by_repository' in response:
-                response = response['_by_repository'][params['repositoryName']]
+                repo = params.get('repositoryName') or (
+                    params['filterCriteria']['ecrImageRepositoryName'][0]['value'])
+                response = response['_by_repository'][repo]
             if isinstance(response, dict) and '_error' in response:
                 raise RuntimeError(response['_error'])
             return dict(response, ResponseMetadata={'HTTPStatusCode': 200})
@@ -246,6 +248,7 @@ def test_all_pages_and_severities_keep_distinct_findings(tmp_path):
         "awsAccountId": [{"comparison": "EQUALS", "value": ACCOUNT}],
         "resourceType": [{"comparison": "EQUALS", "value": "AWS_ECR_CONTAINER_IMAGE"}],
         "findingStatus": [{"comparison": "EQUALS", "value": "ACTIVE"}],
+        "ecrImageRepositoryName": [{"comparison": "EQUALS", "value": "example"}],
         "ecrImageHash": [{"comparison": "EQUALS", "value": DIGEST}],
     }
     # One request per page, each asking for the largest page the API allows.
@@ -1152,6 +1155,77 @@ def test_findings_are_queried_ten_digests_at_a_time(tmp_path):
     sent = [[v["value"] for v in q["params"]["filterCriteria"]["ecrImageHash"]] for q in queries]
     assert sent == [digests[:10], digests[10:]]
     assert len(json.loads(files[0].read_text())["results"]["findings"]) == 1
+
+
+def test_a_digest_shared_with_an_untagged_repository_is_queried_per_repository(tmp_path):
+    # The same image is tagged in one repository and untagged in another. Only
+    # the tagged copy is in scope, so its digest is queried in that repository.
+    data = responses()
+    dev_arn = REPO.replace("/example", "/dev")
+    data["ecr describe-repositories"]["repositories"].append(
+        {"repositoryName": "dev", "repositoryArn": dev_arn, "registryId": ACCOUNT}
+    )
+    data["ecr describe-images"] = {
+        "_by_repository": {
+            "example": {"imageDetails": [{"imageDigest": DIGEST, "imageTags": ["deployed"]}]},
+            "dev": {"imageDetails": [{"imageDigest": DIGEST}]},
+        }
+    }
+    dev_finding = finding(2)
+    dev_finding["resources"][0]["details"]["awsEcrContainerImage"].update(
+        repositoryName="dev", imageTags=[]
+    )
+    data["inspector2 list-findings"] = {
+        "_by_repository": {
+            "example": {"findings": [finding()]},
+            "dev": {"findings": [dev_finding]},
+        }
+    }
+    result, files, calls = run_fetcher(tmp_path, data, AWS_INSPECTOR_IMAGE_TAGS='["deployed"]')
+    assert result.returncode == 0, result.stderr
+    queries = [c for c in calls if c["args"][:2] == ["inspector2", "list-findings"]]
+    assert [q["params"]["filterCriteria"]["ecrImageRepositoryName"] for q in queries] == [
+        [{"comparison": "EQUALS", "value": "example"}]
+    ]
+    rows = list(csv.DictReader(io.StringIO(files[0].read_text())))
+    assert [(r["Repository"], r["Image Digest"]) for r in rows] == [("example", DIGEST)]
+
+
+def test_a_failed_finding_query_keeps_earlier_queries_in_order(tmp_path):
+    # Queries run in parallel but are handled in repository order: the first
+    # failure ends collection, findings before it are kept, and none after it.
+    data = responses()
+    images, findings = {}, {}
+    for index, name in enumerate(["dev", "example", "prod"], start=1):
+        digest = "sha256:" + str(index) * 64
+        if name != "example":
+            data["ecr describe-repositories"]["repositories"].append(
+                {
+                    "repositoryName": name,
+                    "repositoryArn": REPO.replace("/example", f"/{name}"),
+                    "registryId": ACCOUNT,
+                }
+            )
+        images[name] = {"imageDetails": [{"imageDigest": digest, "imageTags": ["deployed"]}]}
+        record = finding(index)
+        record["resources"][0]["details"]["awsEcrContainerImage"].update(
+            repositoryName=name, imageHash=digest
+        )
+        findings[name] = {"findings": [record]}
+    findings["example"] = {"_error": "ThrottlingException: Rate exceeded"}
+    data["ecr describe-images"] = {"_by_repository": images}
+    data["inspector2 list-findings"] = {"_by_repository": findings}
+
+    result, files, _ = run_fetcher(
+        tmp_path, data, "inspector_ecr_findings", AWS_INSPECTOR_IMAGE_TAGS='["deployed"]'
+    )
+    assert result.returncode == 1
+    evidence = json.loads(files[0].read_text())
+    (failure,) = evidence["metadata"]["api_failures"]
+    assert (failure["operation"], failure["code"]) == ("inspector2 list-findings", "rate_limited")
+    assert [f["findingArn"].rsplit("/", 1)[1] for f in evidence["results"]["findings"]] == ["1"]
+    result, files, _ = run_fetcher(tmp_path / "report", data, AWS_INSPECTOR_IMAGE_TAGS='["deployed"]')
+    assert result.returncode == 1 and not files
 
 
 @pytest.mark.parametrize("kind", ["error", "failures", "unreadable"])

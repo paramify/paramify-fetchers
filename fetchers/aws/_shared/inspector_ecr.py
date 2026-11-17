@@ -17,10 +17,11 @@ import os
 import re
 import sys
 import tempfile
-from collections import Counter
+from collections import Counter, deque
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from datetime import date, datetime, timedelta, timezone
+from itertools import islice
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -47,6 +48,7 @@ PAGE_SIZES = {
     ("inspector2", "list-findings"): 100,
 }
 IMAGE_WORKERS = 8
+FINDING_QUERIES_AHEAD = 2 * IMAGE_WORKERS
 INDEX_BATCH = 100
 HASHES_PER_QUERY = 10
 IMAGE_FIELDS = (
@@ -389,6 +391,25 @@ def index_images(manifest):
         yield entry["digest"]
 
 
+def in_order(pool, fn, items, ahead):
+    """fn(item) for each item on the pool, yielded in item order.
+
+    At most `ahead` calls are submitted but not yet consumed, so results held in
+    memory stay bounded. Calls not yet started are cancelled if the consumer stops.
+    """
+    items = iter(items)
+    pending = deque(pool.submit(fn, item) for item in islice(items, ahead))
+    try:
+        while pending:
+            result = pending.popleft().result()
+            for item in islice(items, 1):
+                pending.append(pool.submit(fn, item))
+            yield result
+    finally:
+        for future in pending:
+            future.cancel()
+
+
 def collect(aws, scope, *, allow_partial=False, now=None):
     started = utc_now()
     now = now or datetime.now(timezone.utc)
@@ -574,12 +595,23 @@ def collect(aws, scope, *, allow_partial=False, now=None):
     # With image_tags, the selected images are named by digest: an image that
     # inherits its index's tags is untagged in Inspector, so a tag filter misses
     # it. Coverage has no digest filter and is matched to the inventory below.
+    # Each query also names the repository: a digest is content-addressed, so
+    # the same image in another repository would otherwise come back too.
     if image_tags:
-        hashes = sorted({i["imageDigest"] for i in inventory})
-        finding_filters = [
-            {**finding_filter, "ecrImageHash": equal(hashes[start : start + HASHES_PER_QUERY])}
-            for start in range(0, len(hashes), HASHES_PER_QUERY)
-        ]
+        by_repository = {}
+        for image in inventory:
+            by_repository.setdefault(image["repository"], set()).add(image["imageDigest"])
+        finding_filters = []
+        for name, digests in sorted(by_repository.items()):
+            hashes = sorted(digests)
+            finding_filters.extend(
+                {
+                    **finding_filter,
+                    "ecrImageRepositoryName": equal([name]),
+                    "ecrImageHash": equal(hashes[start : start + HASHES_PER_QUERY]),
+                }
+                for start in range(0, len(hashes), HASHES_PER_QUERY)
+            )
     else:
         finding_filters = [finding_filter]
 
@@ -600,56 +632,76 @@ def collect(aws, scope, *, allow_partial=False, now=None):
                 ):
                     raise CollectionError("Inspector returned invalid coverage identity/status")
                 coverage.append(resource)
-        with attempt("inspector2 list-findings"):
-            for finding in (
-                record
-                for query in finding_filters
-                for record in aws.pages(
-                    "inspector2", "list-findings", "findings", filterCriteria=query
+
+        def list_findings(query):
+            """Every page of one query; earlier pages survive a failure."""
+            records, error = [], None
+            try:
+                records.extend(
+                    aws.pages("inspector2", "list-findings", "findings", filterCriteria=query)
                 )
-            ):
-                if finding.get("awsAccountId") != account or finding.get("status") != "ACTIVE":
-                    raise CollectionError(
-                        "Inspector returned a finding outside the requested account/status scope"
-                    )
-                if not nonempty_strings(
-                    finding.get("findingArn"),
-                    finding.get("packageVulnerabilityDetails", {}).get("vulnerabilityId"),
-                ):
-                    raise CollectionError(
-                        "Inspector returned a finding without its identity/vulnerability ID"
-                    )
-                resources = finding.get("resources")
-                if not resources:
-                    raise CollectionError("Inspector returned a finding without affected resources")
-                for resource in resources:
-                    detail = resource.get("details", {}).get("awsEcrContainerImage", {})
-                    if (
-                        resource.get("type") != RESOURCE_TYPE
-                        or resource.get("region") != aws.region
-                        or not nonempty_strings(
-                            detail.get("repositoryName"), detail.get("imageHash")
+            except Exception as exc:
+                error = exc
+            return records, error
+
+        def queried_findings(pool):
+            # Handled in query order, so evidence and failures stay deterministic
+            # and report mode raises the first failure in that order.
+            for records, error in in_order(pool, list_findings, finding_filters, FINDING_QUERIES_AHEAD):
+                yield from records
+                if error is not None:
+                    raise error
+
+        with attempt("inspector2 list-findings"), ThreadPoolExecutor(
+            max_workers=max(1, min(IMAGE_WORKERS, len(finding_filters)))
+        ) as pool:
+            # Created here, before the workers share it: clients are thread-safe, sessions are not.
+            aws.client("inspector2")
+            # closing() cancels unstarted queries as soon as a failure stops the loop.
+            with closing(queried_findings(pool)) as found:
+                for finding in found:
+                    if finding.get("awsAccountId") != account or finding.get("status") != "ACTIVE":
+                        raise CollectionError(
+                            "Inspector returned a finding outside the requested account/status scope"
                         )
-                        or (repositories and detail["repositoryName"] not in repositories)
-                        or (
-                            image_tags
-                            and (detail["repositoryName"], detail["imageHash"]) not in inventory_keys
-                        )
+                    if not nonempty_strings(
+                        finding.get("findingArn"),
+                        finding.get("packageVulnerabilityDetails", {}).get("vulnerabilityId"),
                     ):
                         raise CollectionError(
-                            "Inspector returned incomplete or out-of-scope ECR resource details"
+                            "Inspector returned a finding without its identity/vulnerability ID"
                         )
-                # Duplicate pages may overlap while Inspector updates its live dataset.
-                # A digest stands in for the full record, which is not kept.
-                digest = canonical_digest(finding)
-                previous = finding_digests.get(finding["findingArn"])
-                if previous is not None and previous != digest:
-                    raise CollectionError(
-                        "Inspector finding changed between pages; retry for a consistent report"
-                    )
-                if previous is None:
-                    finding_digests[finding["findingArn"]] = digest
-                    findings[finding["findingArn"]] = compact_finding(finding, vulnerabilities)
+                    resources = finding.get("resources")
+                    if not resources:
+                        raise CollectionError("Inspector returned a finding without affected resources")
+                    for resource in resources:
+                        detail = resource.get("details", {}).get("awsEcrContainerImage", {})
+                        if (
+                            resource.get("type") != RESOURCE_TYPE
+                            or resource.get("region") != aws.region
+                            or not nonempty_strings(
+                                detail.get("repositoryName"), detail.get("imageHash")
+                            )
+                            or (repositories and detail["repositoryName"] not in repositories)
+                            or (
+                                image_tags
+                                and (detail["repositoryName"], detail["imageHash"]) not in inventory_keys
+                            )
+                        ):
+                            raise CollectionError(
+                                "Inspector returned incomplete or out-of-scope ECR resource details"
+                            )
+                    # Duplicate pages may overlap while Inspector updates its live dataset.
+                    # A digest stands in for the full record, which is not kept.
+                    digest = canonical_digest(finding)
+                    previous = finding_digests.get(finding["findingArn"])
+                    if previous is not None and previous != digest:
+                        raise CollectionError(
+                            "Inspector finding changed between pages; retry for a consistent report"
+                        )
+                    if previous is None:
+                        finding_digests[finding["findingArn"]] = digest
+                        findings[finding["findingArn"]] = compact_finding(finding, vulnerabilities)
 
     by_resource = {c.get("resourceId"): c for c in coverage}
     if scope["in_use_only"] or scope["last_in_use_days"]:
