@@ -36,7 +36,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from importlib import metadata
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional, Sequence
+from typing import Any, Dict, Iterator, List, Optional, Sequence, Tuple
 
 import yaml
 from packaging.requirements import Requirement
@@ -675,27 +675,63 @@ def _python_supported(tree: Path) -> Optional[str]:
     return None if ok else spec
 
 
-def _fetcher_dirs(base: Path) -> Dict[str, str]:
-    """{fetcher dir relative to the repo: fetcher name} for one tree."""
+def _fetcher_dirs(base: Path) -> Dict[str, Tuple[str, Optional[str]]]:
+    """{fetcher dir relative to the repo: (name, version)} for one tree."""
     out = {}
     for f in (base / "fetchers").rglob("fetcher.yaml"):
         rel = f.parent.relative_to(base).as_posix()
         if any(part.startswith("_") for part in rel.split("/")[1:]):
             continue  # _template*, _lib: scaffolding, not fetchers anyone runs
         try:
-            name = (yaml.safe_load(f.read_text()) or {}).get("name")
+            doc = yaml.safe_load(f.read_text()) or {}
         except (OSError, yaml.YAMLError):
-            name = None
-        out[rel] = name or f.parent.name
+            doc = {}
+        version = doc.get("version") if isinstance(doc, dict) else None
+        name = doc.get("name") if isinstance(doc, dict) else None
+        out[rel] = (name or f.parent.name, str(version) if version is not None else None)
     return out
 
 
-def fetcher_changes(root: Path, tree: Path, target: Release, manifests: Sequence[dict]) -> dict:
-    """Which fetchers differ between HEAD and the target, split by whether
-    the user's manifests use them."""
+def fetcher_reason(name: str, subjects: Sequence[str]) -> Optional[str]:
+    """Why a fetcher changed, from the newest commit subject that names it.
+
+    Only `name: ...`, `name 1.2.0: ...` and `fix(name): ...` count. The newest
+    commit on a fetcher is often a version bump, a docs pass or a type fix, and
+    showing one of those as the reason would be worse than showing none.
+    """
+    n = re.escape(name)
+    pattern = re.compile(rf"^(?:[a-z]+\({n}\)!?:\s*|{n}(?:\s+\d+\.\d+\.\d+)?:\s*)(?P<rest>\S.*)$")
+    for subject in subjects:
+        m = pattern.match(subject.strip())
+        if m:
+            return m["rest"].strip()
+    return None
+
+
+def _subjects_by_dir(root: Path, target_ref: str, dirs: Sequence[str]) -> Dict[str, List[str]]:
+    """{fetcher dir: commit subjects that touched it in HEAD..target, newest first},
+    from one `git log`. Empty when the target is not ahead of HEAD."""
+    try:
+        git(root, "merge-base", "--is-ancestor", "HEAD", target_ref)
+        log = git(root, "log", "--no-merges", "--format=%x00%s", "--name-only", f"HEAD..{target_ref}", "--", "fetchers/")
+    except UpdateError:
+        return {}
+    out: Dict[str, List[str]] = {}
+    for chunk in log.split("\0")[1:]:
+        subject, _, files = chunk.partition("\n")
+        touched = {d for path in files.split() for d in dirs if path.startswith(d + "/")}
+        for d in touched:
+            out.setdefault(d, []).append(subject)
+    return out
+
+
+def fetcher_changes(root: Path, tree: Path, target_ref: str, manifests: Sequence[dict]) -> dict:
+    """Which fetchers differ between HEAD and the target, split by whether the
+    user's manifests use them. Theirs carry the version on each side and, when
+    a commit names the fetcher, why it changed."""
     before, after = _fetcher_dirs(root), _fetcher_dirs(tree)
     try:
-        changed_paths = git(root, "diff", "--name-only", "HEAD", target.tag, "--", "fetchers/").splitlines()
+        changed_paths = git(root, "diff", "--name-only", "HEAD", target_ref, "--", "fetchers/").splitlines()
     except UpdateError:
         changed_paths = []
     dirs = sorted(set(before) | set(after), key=len, reverse=True)
@@ -705,13 +741,23 @@ def fetcher_changes(root: Path, tree: Path, target: Release, manifests: Sequence
             if p.startswith(d + "/"):
                 changed.add(d)
                 break
-    used = {u: [m["label"] for m in manifests if u in m["uses"]] for m in manifests for u in m["uses"]}
+    used: Dict[str, List[str]] = {}
+    for m in manifests:
+        for u in m["uses"]:
+            used.setdefault(u, []).append(m["label"])
+    subjects = _subjects_by_dir(root, target_ref, sorted(changed)) if changed else {}
     yours, others, added, removed = [], [], [], []
     for d in sorted(changed):
-        name = after.get(d) or before.get(d)
+        name = (after.get(d) or before[d])[0]
         state = "added" if d not in before else "removed" if d not in after else "changed"
         if name in used:
-            yours.append({"name": name, "change": state, "manifests": used[name]})
+            log = subjects.get(d, [])
+            reason = fetcher_reason(name, log)
+            yours.append({
+                "name": name, "change": state, "manifests": used[name],
+                "from": before[d][1] if d in before else None, "to": after[d][1] if d in after else None,
+                "reason": reason, "more": len(log) - (1 if reason else 0),
+            })
         elif state == "added":
             added.append(name)
         elif state == "removed":
@@ -721,14 +767,58 @@ def fetcher_changes(root: Path, tree: Path, target: Release, manifests: Sequence
     return {"yours": yours, "others": sorted(others), "added": sorted(added), "removed": sorted(removed)}
 
 
-def check_target(root: Path, target: Release, manifests: Sequence[dict], python: str = sys.executable) -> dict:
-    """Validate every manifest with the target's own code, before switching.
+def span(root: Path, head: str, target_ref: str) -> dict:
+    """How far the target is ahead: commits, and whole days between the two
+    commit dates. Zeros when the target is not ahead."""
+    try:
+        commits = int(git(root, "rev-list", "--count", f"{head}..{target_ref}").strip())
+        if not commits:
+            return {"commits": 0, "days": 0}
+        old, new = (int(git(root, "log", "-1", "--format=%ct", r).strip()) for r in (head, target_ref))
+    except (UpdateError, ValueError):
+        return {"commits": 0, "days": 0}
+    return {"commits": commits, "days": max(0, (new - old) // 86400)}
+
+
+def touches(row: dict, manifests: Sequence[dict], has_local_fetchers: bool) -> bool:
+    """Does this breaking row affect the clone being updated?
+
+    A row that lists fetchers touches clones whose manifests use one. A row
+    marked custom_fetchers touches clones with fetchers of their own. A row
+    with neither is about everyone (a Python version, a CLI flag).
+    """
+    if row.get("fetchers"):
+        return any(match_fetchers(row["fetchers"], m["uses"]) for m in manifests)
+    if row.get("custom_fetchers"):
+        return has_local_fetchers
+    return True
+
+
+def breaking_for(rows: Sequence[dict], manifests: Sequence[dict], has_local_fetchers: bool) -> List[dict]:
+    """Every breaking row crossed, with whether and why it touches this clone."""
+    out = []
+    for row in rows:
+        if row.get("tag") != "breaking":
+            continue
+        hit = touches(row, manifests, has_local_fetchers)
+        why = None if not hit else "fetchers" if row.get("fetchers") else "custom" if row.get("custom_fetchers") else "everyone"
+        named = [
+            {"manifest": m["label"], "fetchers": match_fetchers(row["fetchers"], m["uses"])}
+            for m in manifests if row.get("fetchers") and match_fetchers(row["fetchers"], m["uses"])
+        ]
+        out.append({"title": row["title"], "fix": row.get("fix"), "release": row.get("release"),
+                    "touches": hit, "why": why, "manifests": named})
+    return out
+
+
+def check_target(root: Path, target: Target, manifests: Sequence[dict], python: str = sys.executable) -> dict:
+    """Validate every manifest with the target's own code, before moving.
 
     A manifest that validates today and fails on the target `breaks`; one that
     fails on both is `still_failing`, so the update isn't blamed for it.
     """
     results = []
-    with temp_worktree(root, target.tag) as tree:
+    with temp_worktree(root, target.sha) as tree:
         linked = _mirror_local_fetchers(root, tree)
         too_old = _python_supported(tree)
         for m in manifests:
@@ -741,13 +831,14 @@ def check_target(root: Path, target: Release, manifests: Sequence[dict], python:
                 status = "still_failing" if m["errors_now"] else "breaks"
             results.append({"manifest": m["label"], "path": m["path"], "status": status,
                             "errors": res["errors"], "reason": res.get("reason")})
-        changes = fetcher_changes(root, tree, target, manifests)
+        changes = fetcher_changes(root, tree, target.sha, manifests)
     return {
         "ok": not too_old and not any(r["status"] == "breaks" for r in results),
         "python_required": too_old,
         "python": ".".join(map(str, sys.version_info[:3])),
         "manifests": results,
         "linked_local_fetchers": linked,
+        "has_local_fetchers": bool(linked),
         "fetchers": changes,
     }
 

@@ -243,15 +243,57 @@ def test_release_notes_use_highlights_and_fall_back_to_the_changelog(repo):
     assert by["0.2.0-beta"]["changelog_url"].endswith("#020-beta---2026-02-01")
 
 
-def test_breaking_rows_name_the_manifests_they_touch():
-    notes = [{"version": "1.0.0", "changelog_breaking": [], "breaking": [
-        {"tag": "breaking", "title": "aws changed", "fix": "do x", "fetchers": ["aws_*"]},
-        {"tag": "breaking", "title": "python", "fix": "do y"},
-    ]}]
-    manifests = [{"label": "m/a.yaml", "uses": ["aws_iam", "okta_x"]}, {"label": "m/b.yaml", "uses": ["okta_x"]}]
-    rows = up.pair_breaking(notes, manifests)
-    assert rows[0]["manifests"] == [{"manifest": "m/a.yaml", "fetchers": ["aws_iam"]}]
-    assert rows[0]["scoped"] and not rows[1]["scoped"] and rows[1]["manifests"] == []
+def test_fetcher_reason_uses_only_subjects_that_name_the_fetcher():
+    subjects = [
+        "Bump azure_alert_rules to 0.3.1 above main's 0.3.0",
+        "docs(azure): regenerate the readme",
+        "fix(azure_alert_rules): suppression fields are null when rules weren't read",
+        "azure_alert_rules 0.3.0: read processing rules",
+    ]
+    assert up.fetcher_reason("azure_alert_rules", subjects) == "suppression fields are null when rules weren't read"
+    assert up.fetcher_reason("azure_alert_rules", subjects[3:]) == "read processing rules"
+    assert up.fetcher_reason("azure_alert_rules", subjects[:2]) is None
+    assert up.fetcher_reason("azure_alert", subjects) is None       # a prefix of the name is not the name
+
+
+def test_fetcher_changes_carry_versions_reasons_and_counts(main_repo, tmp_path):
+    upstream = tmp_path / "upstream"
+    _commit(upstream, {"fetchers/demo/alpha/fetcher.yaml": "name: demo_alpha\nversion: 0.2.0\n"},
+            "Bump demo_alpha to 0.2.0")
+    up.fetch(main_repo)
+    manifests = [{"path": "/x", "label": "manifests/prod.yaml", "uses": ["demo_alpha"], "errors_now": []}]
+    with up.temp_worktree(main_repo, "origin/main") as tree:
+        got = up.fetcher_changes(main_repo, tree, "origin/main", manifests)
+    assert got["yours"] == [{"name": "demo_alpha", "change": "changed", "manifests": ["manifests/prod.yaml"],
+                             "from": None, "to": "0.2.0", "reason": "read more rows", "more": 1}]
+
+
+def test_fetcher_changes_going_back_give_no_reasons(main_repo):
+    manifests = [{"path": "/x", "label": "m.yaml", "uses": ["demo_alpha"], "errors_now": []}]
+    with up.temp_worktree(main_repo, "v0.1.0-beta") as tree:
+        got = up.fetcher_changes(main_repo, tree, "v0.1.0-beta", manifests)
+    assert [(y["name"], y["reason"], y["more"]) for y in got["yours"]] == [("demo_alpha", None, 0)]
+    assert got["removed"] == ["demo_gamma"]
+
+
+def test_which_breaking_rows_touch_this_clone():
+    manifests = [{"label": "manifests/prod.yaml", "uses": ["okta_users", "aws_iam_users"]}]
+    scoped = {"tag": "breaking", "title": "t", "fix": "f", "fetchers": ["okta_*"]}
+    other = {"tag": "breaking", "title": "t", "fix": "f", "fetchers": ["wiz_*"]}
+    everyone = {"tag": "breaking", "title": "t", "fix": "f"}
+    custom = {"tag": "breaking", "title": "t", "fix": "f", "custom_fetchers": True}
+    assert up.touches(scoped, manifests, False) and up.touches(everyone, manifests, False)
+    assert not up.touches(other, manifests, False)
+    assert up.touches(custom, manifests, True) and not up.touches(custom, manifests, False)
+    rows = up.breaking_for([{**scoped, "release": "unreleased"}, {**other, "release": "unreleased"}], manifests, False)
+    assert [(r["touches"], r["why"]) for r in rows] == [(True, "fetchers"), (False, None)]
+    assert rows[0]["manifests"] == [{"manifest": "manifests/prod.yaml", "fetchers": ["okta_users"]}]
+
+
+def test_span_counts_commits_and_days(main_repo):
+    up.fetch(main_repo)
+    assert up.span(main_repo, "HEAD", "origin/main")["commits"] == 1
+    assert up.span(main_repo, "origin/main", "HEAD") == {"commits": 0, "days": 0}
 
 
 def test_changelog_parsing_joins_continuation_lines():
@@ -373,11 +415,13 @@ def test_check_target_classifies_manifests_and_removes_its_worktree(repo, monkey
         {"path": "/m/new.yaml", "label": "new.yaml", "uses": ["demo_beta", "my_own"], "errors_now": []},
         {"path": "/m/old.yaml", "label": "old.yaml", "uses": [], "errors_now": ["already bad"]},
     ]
-    target = up.parse_release("v0.3.0-beta")
+    target = up.choose_target(repo, up.position(repo), up.list_releases(repo))
     res = up.check_target(repo, target, manifests)
     assert [m["status"] for m in res["manifests"]] == ["ok", "breaks", "still_failing"]
     assert not res["ok"]
-    assert res["fetchers"]["yours"] == [{"name": "demo_alpha", "change": "changed", "manifests": ["ok.yaml"]}]
+    assert res["fetchers"]["yours"] == [{"name": "demo_alpha", "change": "changed", "manifests": ["ok.yaml"],
+                                         "from": None, "to": None, "reason": None, "more": 1}]
+    assert res["has_local_fetchers"] is True
     assert res["fetchers"]["added"] == ["demo_gamma"]
     assert res["linked_local_fetchers"] == ["fetchers/custom"]
     assert not seen_trees[0].exists()
