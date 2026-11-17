@@ -20,6 +20,7 @@ Run: ``pytest tests/test_contracts.py`` (needs an editable install:
 from __future__ import annotations
 
 import ast
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -220,8 +221,7 @@ def test_instructions_open_with_the_entry_path() -> None:
 
 # --------------------------------------------------------------------------- #
 # Description and instructions text (docs/authoring_fetcher_guide.md). Paramify shows
-# both as plain text, so the layout is checked here for each converted fetcher;
-# add a category (or category/short_name) once its fetchers are converted.
+# both as plain text, so the layout is checked here for every fetcher not on TEXT_FORMAT_PENDING.
 # --------------------------------------------------------------------------- #
 
 TEXT_FORMAT_FETCHERS = (
@@ -323,6 +323,247 @@ TEXT_FORMAT_FETCHERS = (
     "oci",
     "qualys",
     "sophos",
+# Every fetcher is checked except these, which still fail _text_format_problems. Shrink-only: a batch deletes
+# only its own lines and keeps every "# <platform>" comment, and a new fetcher is never added here. Parallel
+# batches take runs that don't touch; if a merge conflicts, keep both deletions. The frozen
+# tests/text_format_baseline.txt is the ceiling this list can't outgrow; never edit it.
+TEXT_FORMAT_PENDING = (
+    # aws
+    "aws/access_analyzer_findings",
+    "aws/acm_certificate_status",
+    "aws/apigateway_tls_enforcement",
+    "aws/athena_encryption_status",
+    "aws/auto_scaling_high_availability",
+    "aws/backup_recovery_high_availability",
+    "aws/backup_validation",
+    "aws/block_storage_encryption_status",
+    "aws/cloudformation_drift",
+    "aws/cloudfront_distribution_security",
+    "aws/cloudtrail_configuration",
+    "aws/cloudwatch_high_availability",
+    "aws/codeartifact_encryption_status",
+    "aws/codebuild_pipeline_config",
+    "aws/codepipeline_config",
+    "aws/component_ssl_enforcement_status",
+    "aws/config_conformance_packs",
+    "aws/config_inventory",
+    "aws/config_monitoring",
+    "aws/database_high_availability",
+    "aws/detect_new_aws_resource",
+    "aws/discovery_beta",
+    "aws/dlm_lifecycle_policies",
+    "aws/dms_encryption_status",
+    "aws/documentdb_encryption_status",
+    "aws/dynamodb_encryption_status",
+    "aws/dynamodb_pitr_status",
+    "aws/ebs_snapshot_status",
+    "aws/ec2_public_exposure",
+    "aws/ecr_image_scanning",
+    "aws/efs_encryption_status",
+    "aws/efs_high_availability",
+    "aws/eks_high_availability",
+    "aws/eks_least_privilege",
+    "aws/elasticache_encryption_status",
+    "aws/emr_encryption_status",
+    "aws/firehose_encryption_status",
+    "aws/fsx_encryption_status",
+    "aws/glacier_encryption_status",
+    "aws/global_accelerator_ha",
+    "aws/glue_encryption_status",
+    "aws/guard_duty",
+    "aws/guard_duty_findings",
+    "aws/iam_identity_center",
+    "aws/iam_mfa_status",
+    "aws/iam_password_policy",
+    "aws/iam_policies",
+    "aws/iam_roles",
+    "aws/iam_users_groups",
+    "aws/inspector_ecr_findings",
+    "aws/inspector_vulnerability_scanning",
+    "aws/kafka_encryption_status",
+    "aws/kinesis_encryption_status",
+    "aws/kms_key_rotation",
+    "aws/load_balancer_encryption_status",
+    "aws/load_balancer_high_availability",
+    "aws/macie_data_discovery",
+    "aws/memorydb_encryption_status",
+    "aws/neptune_encryption_status",
+    "aws/network_acls",
+    "aws/network_firewall_rules",
+    "aws/network_resilience_high_availability",
+    "aws/opensearch_encryption_status",
+    "aws/organizations_scp",
+    "aws/rds_encryption_status",
+    "aws/rds_tls_configuration",
+    "aws/redshift_encryption_status",
+    "aws/resource_inventory",
+    "aws/route53_high_availability",
+    "aws/s3_encryption_status",
+    "aws/sagemaker_encryption_status",
+    "aws/secrets_manager_rotation",
+    "aws/security_groups",
+    "aws/securityhub_status",
+    "aws/shield_dos_protection",
+    "aws/sns_encryption_status",
+    "aws/sqs_encryption_status",
+    "aws/ssm_patch_compliance",
+    "aws/transfer_tls_enforcement",
+    "aws/vpc_flow_logs",
+    "aws/vpc_network_segmentation",
+    "aws/waf_all_rules",
+    "aws/waf_dos_rules",
+    # betterstack
+    "betterstack/public_status_page",
+    # checkov
+    "checkov/bicep",
+    "checkov/kubernetes",
+    "checkov/terraform",
+    # cornerstone
+    "cornerstone/incident_response_training",
+    "cornerstone/role_based_training",
+    "cornerstone/secure_development_training",
+    "cornerstone/security_awareness_training",
+    # crowdstrike
+    "crowdstrike/detections",
+    "crowdstrike/filevantage",
+    "crowdstrike/firewall_policies",
+    "crowdstrike/hosts",
+    "crowdstrike/prevention_policies",
+    "crowdstrike/spotlight_vulnerabilities",
+    "crowdstrike/zero_trust_assessment",
+    # datadog
+    "datadog/agent_hosts",
+    "datadog/apm_services",
+    "datadog/containers",
+    "datadog/incident_timelines",
+    "datadog/incidents_list",
+    "datadog/infra_agent_checks",
+    "datadog/log_archives",
+    "datadog/log_indexes",
+    "datadog/log_pipelines",
+    "datadog/monitors_list",
+    "datadog/siem_configuration",
+    "datadog/siem_detection_rules",
+    "datadog/siem_signals",
+    # demo
+    "demo/hello",
+    "demo/policy_check",
+    # fedramp_marketplace
+    "fedramp_marketplace/vendor_certification_status",
+    "fedramp_marketplace/workspace_vendor_certification_status",
+    # gcp
+    "gcp/api_keys_inventory",
+    "gcp/bigquery_dataset_configuration",
+    "gcp/cloud_logging_configuration",
+    "gcp/cloud_sql_backup_configuration",
+    "gcp/cloud_sql_encryption_status",
+    "gcp/cloud_sql_network_configuration",
+    "gcp/cloud_storage_encryption_status",
+    "gcp/compute_instance_configuration",
+    "gcp/dns_configuration",
+    "gcp/firewall_rules",
+    "gcp/gke_cluster_configuration",
+    "gcp/iam_custom_roles",
+    "gcp/iam_policy_bindings",
+    "gcp/iam_service_accounts",
+    "gcp/kms_key_configuration",
+    "gcp/load_balancer_tls_configuration",
+    "gcp/persistent_disk_encryption_status",
+    "gcp/secret_manager_configuration",
+    "gcp/vpc_network_configuration",
+    # github
+    "github/access_review",
+    "github/actions_security",
+    "github/audit_log",
+    "github/branch_protection",
+    "github/code_scanning_alerts",
+    "github/dependabot_alerts",
+    "github/deployment_controls",
+    "github/non_user_credentials",
+    "github/org_security_settings",
+    "github/pull_request_checks",
+    "github/release_integrity",
+    "github/repository_inventory",
+    "github/secret_scanning",
+    "github/significant_change_notifications",
+    "github/vulnerability_disclosure",
+    "github/workflow_runs",
+    # gitlab
+    "gitlab/ci_cd_pipeline_config",
+    "gitlab/merge_request_summary",
+    "gitlab/project_summary",
+    "gitlab/significant_change_notifications",
+    # jira
+    "jira/access_roles",
+    "jira/audit_records",
+    "jira/change_requests",
+    "jira/incident_postmortems",
+    "jira/remediation_items",
+    "jira/site_inventory",
+    # k8s
+    "k8s/eks_microservice_segmentation",
+    "k8s/eks_pod_inventory",
+    "k8s/kubectl_security",
+    # knowbe4
+    "knowbe4/developer_specific_training",
+    "knowbe4/discovery_beta",
+    "knowbe4/high_risk_training",
+    "knowbe4/module_based_summary",
+    "knowbe4/security_awareness_training",
+    # okta
+    "okta/authenticators",
+    "okta/automated_account_management",
+    "okta/just_in_time_authorization",
+    "okta/least_privilege",
+    "okta/non_user_accounts_authentication",
+    "okta/passwordless_authentication",
+    "okta/phishing_resistant_mfa",
+    "okta/suspicious_activity_management",
+    # paramify
+    "paramify/accepted_vulnerabilities",
+    "paramify/historical_ver_activity",
+    "paramify/vulnerability_detail_report",
+    # rippling
+    "rippling/all_employees",
+    "rippling/current_employees",
+    "rippling/devices",
+    # sentinelone
+    "sentinelone/activities",
+    "sentinelone/agents",
+    "sentinelone/cloud_detection_rules",
+    "sentinelone/user_config",
+    "sentinelone/xdr_assets",
+    # servicenow
+    "servicenow/cases",
+    "servicenow/changes",
+    # splunk
+    "splunk/alert_delivery",
+    "splunk/alert_rules",
+    "splunk/data_inputs",
+    "splunk/index_activity",
+    "splunk/index_retention",
+    "splunk/log_source_freshness",
+    "splunk/role_index_access",
+    # web
+    "web/page_text",
+    "web/vulnerability_disclosure",
+    # wiz
+    "wiz/attack_surface_findings",
+    "wiz/cloud_configuration_posture",
+    "wiz/code_findings",
+    "wiz/container_vulnerabilities",
+    "wiz/file_integrity_monitoring",
+    "wiz/host_configuration_posture",
+    "wiz/infrastructure_vulnerabilities",
+    "wiz/issues_report",
+    "wiz/posture_issues",
+    "wiz/scan_coverage",
+    "wiz/stig_compliance_report",
+    "wiz/tenant_security_settings",
+    "wiz/threat_detections",
+    "wiz/vulnerability_findings",
+    # zendesk
+    "zendesk/help_center_section",
 )
 # Fetchers whose instructions listed summary fields before their tests checked them; each leaves once its tests
 # call assert_summary_documented, and SUMMARY_DOCS_PENDING_MAX drops with it. A new fetcher calls the fixture instead.
@@ -366,12 +607,8 @@ BREAKDOWN_LINE = re.compile(r"^  - \S+ \(\S.*\)$")
 COMMAND_LINE = re.compile(r"^- \S.* — \S")
 
 
-def _matches(yaml_path: Path, prefix: str) -> bool:
-    rel = _short(yaml_path)
-    return rel == prefix or rel.startswith(prefix + "/")
-
-
-CONVERTED_YAMLS = [y for y in FETCHER_YAMLS if any(_matches(y, p) for p in TEXT_FORMAT_FETCHERS)]
+CHECKED_YAMLS = [y for y in FETCHER_YAMLS if _short(y) not in TEXT_FORMAT_PENDING]
+PENDING_YAMLS = [y for y in FETCHER_YAMLS if _short(y) in TEXT_FORMAT_PENDING]
 
 
 def _description_problems(label: str, desc: str, name: str) -> list[str]:
@@ -446,18 +683,31 @@ def _text_format_problems(yaml_path: Path, spec: dict) -> list[str]:
     return problems
 
 
-def test_text_format_fetchers_exist() -> None:
-    """Every TEXT_FORMAT_FETCHERS entry names real fetchers, so a typo can't switch the check off."""
-    assert TEXT_FORMAT_FETCHERS
-    missing = [p for p in TEXT_FORMAT_FETCHERS if not any(_matches(y, p) for y in FETCHER_YAMLS)]
-    assert not missing, f"no fetcher matches {missing}"
+BASELINE_SHA256 = "92d09c675c741fc09b56bb09fc95c4838103d2e74c3aa46417aebbbea02442b1"
 
 
-@pytest.mark.parametrize("yaml_path", CONVERTED_YAMLS, ids=_rel_ids(CONVERTED_YAMLS))
-def test_converted_fetcher_text_follows_the_format(yaml_path: Path) -> None:
+def test_text_format_pending_names_real_fetchers_within_the_baseline() -> None:
+    """Pending entries are real fetchers and only ever shrink from the frozen baseline."""
+    baseline_file = Path(__file__).parent / "text_format_baseline.txt"
+    assert hashlib.sha256(baseline_file.read_bytes()).hexdigest() == BASELINE_SHA256, "text_format_baseline.txt is frozen"
+    baseline = set(baseline_file.read_text().split())
+    assert len(set(TEXT_FORMAT_PENDING)) == len(TEXT_FORMAT_PENDING), "TEXT_FORMAT_PENDING lists a fetcher twice"
+    assert not set(TEXT_FORMAT_PENDING) - baseline, f"not in the baseline, fix the text instead: {sorted(set(TEXT_FORMAT_PENDING) - baseline)}"
+    missing = set(TEXT_FORMAT_PENDING) - {_short(y) for y in FETCHER_YAMLS}
+    assert not missing, f"no fetcher matches {sorted(missing)}"
+
+
+@pytest.mark.parametrize("yaml_path", CHECKED_YAMLS, ids=_rel_ids(CHECKED_YAMLS))
+def test_fetcher_text_follows_the_format(yaml_path: Path) -> None:
     spec = yaml.safe_load(yaml_path.read_text())
     problems = _text_format_problems(yaml_path, spec)
     assert not problems, f"{_short(yaml_path)}:\n  " + "\n  ".join(problems)
+
+
+def test_pending_fetchers_still_fail_the_format() -> None:
+    """A pending fetcher whose text now passes must leave TEXT_FORMAT_PENDING."""
+    fixed = [_short(y) for y in PENDING_YAMLS if not _text_format_problems(y, yaml.safe_load(y.read_text()))]
+    assert not fixed, f"remove from TEXT_FORMAT_PENDING, their text now passes: {fixed}"
 
 
 def _oversized(spec: dict) -> int | None:

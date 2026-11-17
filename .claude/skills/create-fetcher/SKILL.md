@@ -140,7 +140,11 @@ Read these before building (skim, don't summarize back):
   `docs/authoring_fetcher_guide.md` ("The `description` and `instructions` text"): a
   one-sentence description, then plain-text instructions in a `|` block with
   Script (`<category>/<short_name>/<entry>`), Access, Commands Executed, Output
-  and Summary fields. Paramify shows them as typed, so no markdown.
+  and Summary fields. Paramify shows them as typed, so no markdown. Hard limits:
+  the description is one sentence of at most 30 words ending in a period, with
+  no fetcher name; a summary field line is at most 800 characters; the
+  instructions at most 20,000. `tests/test_contracts.py` checks every new
+  fetcher's text.
 - `category` — from the tool name.
 
 **Ask the user (batch into ONE `AskUserQuestion`, ≤3 questions):**
