@@ -42,7 +42,7 @@ def raw_server(name, engine="postgresql", role="Primary", source=None, retention
 
 
 def backup(hours_ago, now=NOW):
-    return {"name": f"b{hours_ago}", "properties": {"backupType": "FULL", "completedTime": iso(now - timedelta(hours=hours_ago))}}
+    return {"name": f"b{hours_ago}", "properties": {"backupType": "FULL", "source": "Automatic", "completedTime": iso(now - timedelta(hours=hours_ago))}}
 
 
 def test_server_record_reads_backup_settings_and_tells_replicas_from_restores():
@@ -69,7 +69,7 @@ def _servers():
     a = db.with_backups(db.server_record("postgresql", raw_server("pg1", retention=35)), [backup(5)], SETTINGS, NOW)
     b = db.with_backups(db.server_record("mysql", raw_server("my1", "mysql", retention=7, geo="Disabled")), [backup(50)], SETTINGS, NOW)
     r = {**db.server_record("mysql", raw_server("r1", "mysql", role="Replica", source="/x")), "backups_read": False,
-         "automatic_backups": None, "manual_backups": None, "latest_automatic_backup": None, "latest_manual_backup": None,
+         "automatic_backups": None, "manual_backups": None, "unknown_type_backups": None, "unknown_backup_labels": None, "latest_automatic_backup": None, "latest_manual_backup": None,
          "hours_since_latest_automatic_backup": None, "backup_within_window": None, "manual_backup_within_window": None}
     p = db.with_backups(db.server_record("postgresql", raw_server("pitr", source="/src", role="None", created=iso(NOW - timedelta(days=20)))),
                         [backup(3)], SETTINGS, NOW)
@@ -237,15 +237,45 @@ def test_restored_servers_are_counted_only_once_an_interval_is_adopted():
     assert db.summarize(_servers(), {**SETTINGS, "restore_lookback_days": 10}, NOW)["restored_servers_within_lookback"] == 0
 
 
-def manual_backup(hours_ago, engine="postgresql", now=NOW):
-    props = {"completedTime": iso(now - timedelta(hours=hours_ago))}
-    props.update({"backupType": "Customer_On_Demand"} if engine == "postgresql" else {"backupType": "FULL", "source": "On-Demand"})
-    return {"name": f"m{hours_ago}", "properties": props}
+FIXTURES = REPO_ROOT / "tests" / "fixtures" / "flexible_server_backups"
 
 
-def test_manual_backups_are_told_apart_by_type_or_source():
-    assert db.is_manual(manual_backup(1)) and db.is_manual(manual_backup(1, "mysql"))
-    assert not db.is_manual(backup(1)) and not db.is_manual({"properties": {"backupType": "FULL", "source": "Automatic"}})
+def manual_backup(hours_ago, now=NOW):
+    """A PostgreSQL on-demand backup, labelled as Microsoft's published example labels it."""
+    return {"name": f"m{hours_ago}", "properties": {"backupType": "Customer On-Demand", "source": "Customer Initiated",
+                                                   "completedTime": iso(now - timedelta(hours=hours_ago))}}
+
+
+def _kinds(engine, fixture):
+    return [db.backup_kind(engine, b) for b in json.loads((FIXTURES / fixture).read_text())["value"]]
+
+
+def test_postgresql_backups_are_classified_from_microsofts_published_list():
+    assert _kinds("postgresql", "postgresql-backups-2024-08-01.json") == [db.AUTOMATIC, db.MANUAL]
+
+
+def test_mysql_automatic_backups_are_classified_from_microsofts_published_list():
+    assert set(_kinds("mysql", "mysql-backups-2023-12-30.json")) == {db.AUTOMATIC}
+
+
+def test_labels_are_matched_exactly_and_anything_else_is_unknown_never_automatic():
+    def kind(engine, backup_type, source=None):
+        return db.backup_kind(engine, {"properties": {"backupType": backup_type, "source": source}})
+    assert kind("postgresql", "FULL", "automatic") == db.AUTOMATIC  # case does not matter
+    assert kind("postgresql", "Full") == db.AUTOMATIC  # source absent on older API versions
+    # The old substring rules would have read these as automatic or manual; now they are unknown.
+    for engine, backup_type, source in (("postgresql", "Customer_On_Demand", None), ("postgresql", "Incremental", "Automatic"),
+                                        ("mysql", "FULL", "On-Demand"), ("mysql", "FULL", None), ("mysql", None, "Automatic"),
+                                        ("mysql", "FULL", "Customer Initiated")):
+        assert kind(engine, backup_type, source) == db.UNKNOWN, (engine, backup_type, source)
+
+
+def test_an_unrecognized_backup_cannot_stand_in_for_broken_automation():
+    odd = {"name": "odd", "properties": {"backupType": "FULL", "source": "On-Demand", "completedTime": iso(NOW - timedelta(hours=1))}}
+    s = db.with_backups(db.server_record("mysql", raw_server("my1", "mysql")), [backup(80), odd], SETTINGS, NOW)
+    assert (s["automatic_backups"], s["unknown_type_backups"], s["unknown_backup_labels"], s["backup_within_window"]) == (1, 1, ["FULL / On-Demand"], False)
+    summary = db.summarize([s], SETTINGS, NOW)
+    assert (summary["servers_with_automatic_backup_within_window"], summary["servers_with_unknown_backup_types"]) == (0, 1)
 
 
 def test_a_recent_manual_backup_does_not_hide_broken_automation():

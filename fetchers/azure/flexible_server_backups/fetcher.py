@@ -73,11 +73,26 @@ def server_record(engine: str, raw: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def is_manual(backup: Dict[str, Any]) -> bool:
-    """On-demand backups name themselves in backupType (PostgreSQL: Customer_On_Demand) or source (MySQL: On-Demand)."""
+# How each engine labels a backup in GET flexibleServers/{server}/backups (properties.backupType, properties.source),
+# compared exactly and without regard to case. PostgreSQL's backupType is a defined enum: Full is a scheduled
+# automatic backup and "Customer On-Demand" (source "Customer Initiated") one a person took. MySQL's backupType and
+# source are free text: only FULL from Automatic is confirmed as automatic, and no on-demand value is confirmed yet.
+# Anything else is unknown, never automatic, so an unrecognized backup can never stand in for broken automation.
+AUTOMATIC, MANUAL, UNKNOWN = "automatic", "manual", "unknown"
+BACKUP_KINDS = {
+    "postgresql": {("full", None): AUTOMATIC, ("full", "automatic"): AUTOMATIC,
+                   ("customer on-demand", None): MANUAL, ("customer on-demand", "customer initiated"): MANUAL},
+    "mysql": {("full", "automatic"): AUTOMATIC},
+}
+
+
+def backup_kind(engine: str, backup: Dict[str, Any]) -> str:
+    """automatic, manual or unknown, from the exact backupType and source the engine reports."""
     props = backup.get("properties") or {}
-    text = f"{props.get('backupType') or ''} {props.get('source') or ''}".lower().replace("-", "").replace("_", "")
-    return any(word in text for word in ("ondemand", "customer", "manual", "user"))
+
+    def norm(value):
+        return str(value).strip().lower() if value not in (None, "") else None
+    return BACKUP_KINDS.get(engine, {}).get((norm(props.get("backupType")), norm(props.get("source"))), UNKNOWN)
 
 
 def _newest(backups: List[Dict[str, Any]]) -> Optional[datetime]:
@@ -92,14 +107,19 @@ def _iso(dt: Optional[datetime]) -> Optional[str]:
 def with_backups(server: Dict[str, Any], backups: Optional[List[Dict[str, Any]]], settings: Dict[str, Any], now: datetime) -> Dict[str, Any]:
     """Automatic and manual backups apart; only the newest automatic backup is judged against the window. Null when unread."""
     if backups is None:
-        return {**server, "backups_read": False, "automatic_backups": None, "manual_backups": None, "latest_automatic_backup": None,
+        return {**server, "backups_read": False, "automatic_backups": None, "manual_backups": None, "unknown_type_backups": None,
+                "unknown_backup_labels": None, "latest_automatic_backup": None,
                 "latest_manual_backup": None, "hours_since_latest_automatic_backup": None, "backup_within_window": None,
                 "manual_backup_within_window": None}
-    manual = [b for b in backups if is_manual(b)]
-    automatic = [b for b in backups if not is_manual(b)]
+    kinds = [(b, backup_kind(server["engine"], b)) for b in backups]
+    automatic = [b for b, k in kinds if k == AUTOMATIC]
+    manual = [b for b, k in kinds if k == MANUAL]
+    unknown = [b for b, k in kinds if k == UNKNOWN]
+    labels = sorted({f"{(b.get('properties') or {}).get('backupType')} / {(b.get('properties') or {}).get('source')}" for b in unknown})
     auto, man = _newest(automatic), _newest(manual)
     hours = round((now - auto).total_seconds() / 3600, 1) if auto else None
     return {**server, "backups_read": True, "automatic_backups": len(automatic), "manual_backups": len(manual),
+            "unknown_type_backups": len(unknown), "unknown_backup_labels": labels,
             "latest_automatic_backup": _iso(auto), "latest_manual_backup": _iso(man), "hours_since_latest_automatic_backup": hours,
             "backup_within_window": hours is not None and hours <= settings["window_hours"],
             "manual_backup_within_window": bool(man) and (now - man).total_seconds() / 3600 <= settings["window_hours"]}
@@ -127,6 +147,7 @@ def summarize(servers: List[Dict[str, Any]], settings: Dict[str, Any], now: date
         "servers_without_automatic_backup_within_window": known(sorted(s["name"] for s in primaries if not s["backup_within_window"])),
         "servers_relying_on_manual_backup": known(sum(1 for s in primaries if not s["backup_within_window"] and s["manual_backup_within_window"])),
         "servers_with_manual_backups": known(sum(1 for s in primaries if s["manual_backups"])),
+        "servers_with_unknown_backup_types": known(sum(1 for s in primaries if s["unknown_type_backups"])),
         "max_hours_since_automatic_backup": known(max((s["hours_since_latest_automatic_backup"] for s in primaries), default=None)
                                                   if all(s["hours_since_latest_automatic_backup"] is not None for s in primaries) else None),
         "servers_geo_redundant_backup": sum(1 for s in primaries if s["geo_redundant_backup"]) if listed else None,
@@ -199,6 +220,7 @@ def collect(client, subscription_id: str, collector: Collector, exclusions: Opti
             if s["replica"]:
                 # Read replicas take no backups of their own; they are counted, not judged.
                 servers.append({**s, "backups_read": False, "automatic_backups": None, "manual_backups": None,
+                                "unknown_type_backups": None, "unknown_backup_labels": None,
                                 "latest_automatic_backup": None, "latest_manual_backup": None,
                                 "hours_since_latest_automatic_backup": None, "backup_within_window": None,
                                 "manual_backup_within_window": None})

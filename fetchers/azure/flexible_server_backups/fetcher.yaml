@@ -85,7 +85,7 @@ evidence_set:
     - subscriptions.list() — picks a subscription when none is set
     - GET providers/Microsoft.DBforPostgreSQL and providers/Microsoft.DBforMySQL — whether each provider is registered, and the newest API version this cloud lists for both flexibleServers and flexibleServers/backups, since one version serves both calls
     - GET Microsoft.DBforPostgreSQL/flexibleServers and Microsoft.DBforMySQL/flexibleServers — every flexible server with its backup retention, geo-redundant backup, earliest restore point, replication role and restore source
-    - GET flexibleServers/{server}/backups (per server that is not a read replica) — the server's completed backups, told apart as automatic or manual (on-demand) by their type and source
+    - GET flexibleServers/{server}/backups (per server that is not a read replica) — the server's completed backups, each classed as automatic, manual (on-demand) or unknown by the exact backupType and source the engine reports: PostgreSQL Full is automatic and Customer On-Demand manual; MySQL FULL from Automatic is automatic; any other label is unknown, never automatic
 
     Output: azure_flexible_server_backups_<subscription>.json — each PostgreSQL and MySQL flexible server with its backup settings, its newest completed backup judged against the window, and whether it was created by a point-in-time restore.
 
@@ -110,6 +110,7 @@ evidence_set:
     - servers_without_automatic_backup_within_window — List of backup server names without an automatic backup within the window
     - servers_relying_on_manual_backup — Number of backup servers with no automatic backup within the window but a manual one within it, where a manual backup would otherwise hide broken automation
     - servers_with_manual_backups — Number of backup servers with at least one manual, on-demand backup
+    - servers_with_unknown_backup_types — Number of backup servers with at least one backup whose backupType and source match no known label; such a backup is never counted as automatic, so it cannot hide broken automation (each server lists the labels under unknown_backup_labels)
     - max_hours_since_automatic_backup — Hours since the newest completed automatic backup of the backup server that has gone longest without one; null if any backup server has no completed automatic backup or could not be read
     - backup_window_hours — Hours a server's newest completed backup may be old and still count as a backup within the window
 

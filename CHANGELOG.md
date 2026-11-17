@@ -13,7 +13,8 @@ schemas and the `paramify` CLI — not the internal code.
 ### Added
 
 - **`azure_flexible_server_backups` fetcher.** Reads Azure Database for PostgreSQL and MySQL flexible servers: each
-  server's newest completed automatic backup against a window (manual, on-demand backups reported apart), backup retention against an optional minimum
+  server's newest completed automatic backup against a window (manual, on-demand backups reported apart, and backups
+  whose labels match no known value counted as unknown, never automatic), backup retention against an optional minimum
   authorized period (unknown retention counted apart), geo-redundant backup, stopped servers, and servers created by point-in-time restore within an
   optional restore-test interval. One API version that serves both the server and backup lists is used. Read replicas are counted, not judged. Unread
   backup lists leave verdicts null rather than 0.
