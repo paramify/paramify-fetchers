@@ -14,7 +14,7 @@ import threading
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Dict, Tuple
+from typing import Any, Dict, List, Tuple
 
 import pytest
 
@@ -56,11 +56,13 @@ PAGES: Dict[int, str] = {
     1006: edit(ACTIVE, 1006, heading=("<h3>Certificate #1006</h3>", "")),
     1007: "<html><body><h3>Certificate #1007</h3><p>Something went wrong",
     1009: "<html><body><h2>Search results</h2><p>No modules match.</p></body></html>",
+    1010: "<html><body><h3>Certificate #7001</h3><p>Something went wrong",  # heading names another number
     1008: edit(ACTIVE, 1008, sunset=("9/30/2029", "11/13/2026")),  # sunset today still counts
     5000: ACTIVE,  # serves another certificate's page
 }
 
-Routes = Dict[str, Tuple[int, str]]
+Routes = Dict[str, Tuple[Any, ...]]
+MAINTENANCE = "<html><head><title>Scheduled maintenance</title></head><body><h1>We'll be back soon</h1></body></html>"
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -71,12 +73,14 @@ class _Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802
         _Handler.hits[self.path] = _Handler.hits.get(self.path, 0) + 1
         _Handler.user_agents.append(self.headers.get("User-Agent"))
-        status, body = self.routes.get(self.path, (404, "<title>Page Not Found | CSRC</title>"))
+        status, body, *extra = self.routes.get(self.path, (404, "<title>Page Not Found | CSRC</title>"))
         if isinstance(status, list):  # a sequence of statuses, one per request
             status = status.pop(0) if len(status) > 1 else status[0]
         data = body.encode()
         self.send_response(status)
         self.send_header("Content-Type", "text/html; charset=utf-8")
+        for name, value in (extra[0] if extra else {}).items():
+            self.send_header(name, value)
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)
@@ -150,14 +154,16 @@ def test_historical_and_revoked_pages_parse():
     (1004, "parse_error"),
     (1006, "parse_error"),
     (1007, "parse_error"), # names the certificate, but no Details rows
-    (1009, "not_found"),   # an unrelated page
+    (1009, "parse_error"), # a 200 page that is not a certificate page: nothing was checked
+    (1010, "not_found"),   # the heading names 7001
     (5000, "not_found"),   # the page is for 7001
     (9999, "not_found"),   # HTTP 404, as NIST answers an unknown number
 ])
 def test_verdicts(site, number, reason):
     record = check(site, number)
     assert record["reason"] == reason, record["reason_detail"]
-    assert record["validated"] is (reason is None)
+    # A certificate the run could not check has no known validation state.
+    assert record["validated"] is (None if reason in cmvp.COLLECTION_FAILURES else reason is None)
 
 
 def test_validated_record(site):
@@ -174,17 +180,72 @@ def test_server_errors_are_retried_then_fail_as_fetch_error(site):
     assert check(site, 7001)["validated"] is True
     _Handler.routes[path(7001)] = ([500], "")
     record = check(site, 7001)
-    assert (record["reason"], record["http_status"]) == ("fetch_error", None)
+    assert (record["reason"], record["http_status"], record["validated"]) == ("fetch_error", 500, None)
     assert _Handler.hits[path(7001)] == 3 + cmvp.RETRIES + 1
 
 
+@pytest.fixture
+def sleeps(monkeypatch) -> List[float]:
+    waits: List[float] = []
+    monkeypatch.setattr(cmvp.time, "sleep", waits.append)
+    return waits
+
+
+@pytest.mark.parametrize("retry_after,wait", [("7", 7.0), ("3600", 60.0), ("soon", 0)])
+def test_rate_limit_is_retried_after_retry_after(site, sleeps, retry_after, wait):
+    _Handler.routes[path(7001)] = ([429, 200], ACTIVE, {"Retry-After": retry_after})
+    assert check(site, 7001)["validated"] is True
+    assert _Handler.hits[path(7001)] == 2
+    assert sleeps == [wait]
+
+
+def test_rate_limit_that_persists_reports_rate_limited(site, sleeps, monkeypatch, tmp_path):
+    status_file = tmp_path / "status.json"
+    _Handler.routes[path(7002)] = ([429], "", {"Retry-After": "1"})
+    monkeypatch.setenv("EVIDENCE_DIR", str(tmp_path))
+    monkeypatch.setenv("FETCHER_STATUS_FILE", str(status_file))
+    monkeypatch.setenv("NIST_CMVP_BASE_URL", site)
+    monkeypatch.setenv("NIST_CMVP_CERTIFICATES", "7001, 7002")
+    assert cmvp.main() == 1
+    record = json.loads((tmp_path / "nist_cmvp_module_validation_status.json").read_text())["certificates"][1]
+    assert (record["reason"], record["http_status"], record["validated"]) == ("fetch_error", 429, None)
+    assert _Handler.hits[path(7002)] == cmvp.RETRIES + 1
+    assert json.loads(status_file.read_text())["code"] == "rate_limited"
+
+
+def test_a_page_that_is_not_a_certificate_page_fails_the_run(site, monkeypatch, tmp_path):
+    """A maintenance or block page served with HTTP 200 is not evidence that NIST has no such certificate."""
+    status_file = tmp_path / "status.json"
+    _Handler.routes = {path(4816): (200, MAINTENANCE), path(4282): (200, MAINTENANCE)}
+    monkeypatch.setenv("EVIDENCE_DIR", str(tmp_path))
+    monkeypatch.setenv("FETCHER_STATUS_FILE", str(status_file))
+    monkeypatch.setenv("NIST_CMVP_BASE_URL", site)
+    monkeypatch.setenv("NIST_CMVP_CERTIFICATES", "4816, 4282")
+    assert cmvp.main() == 1
+    evidence = json.loads((tmp_path / "nist_cmvp_module_validation_status.json").read_text())
+    assert [r["reason"] for r in evidence["certificates"]] == ["parse_error", "parse_error"]
+    assert evidence["metadata"]["partial_failure"] is True
+    assert evidence["summary"]["not_validated_by_reason"]["not_found"] is None
+    # The host answered, so this is not target_unreachable.
+    assert json.loads(status_file.read_text())["code"] == "partial_failure"
+
+
 def test_one_failed_certificate_does_not_stop_the_others(site):
-    _Handler.routes[path(7002)] = ([500], "")
+    _Handler.routes[path(7002)] = ([503], "")
     evidence, failures = cmvp.collect([("LIB-A", 7001), (None, 7002), (None, 7003)], site, NOW)
     assert [r["reason"] for r in evidence["certificates"]] == [None, "fetch_error", "revoked"]
+    assert [r["validated"] for r in evidence["certificates"]] == [True, None, False]
     assert evidence["certificates"][0]["label"] == "LIB-A"
     assert len(failures) == 1
     assert evidence["metadata"]["api_failures"][0]["type"] == "fetch_error"
+    # 7002 was never read, so no verdict count can be stated; a validator then finds no number.
+    summary = evidence["summary"]
+    assert (summary["certificates_total"], summary["certificates_validated"], summary["certificates_not_validated"]) == (
+        3, None, None)
+    assert summary["not_validated_by_reason"] == {
+        "historical": None, "revoked": None, "sunset_passed": None, "status_unknown": None,
+        "not_found": None, "parse_error": 0, "fetch_error": 1,
+    }
 
 
 def test_main_writes_summary_and_reports_partial_failure(site, monkeypatch, tmp_path, assert_summary_documented):
@@ -196,10 +257,12 @@ def test_main_writes_summary_and_reports_partial_failure(site, monkeypatch, tmp_
     assert cmvp.main() == 1
     evidence = json.loads((tmp_path / "nist_cmvp_module_validation_status.json").read_text())
     summary = evidence["summary"]
-    assert (summary["certificates_total"], summary["certificates_validated"], summary["certificates_not_validated"]) == (6, 1, 5)
+    # 1004 could not be read, so only the collection-failure counts are stated.
+    assert (summary["certificates_total"], summary["certificates_validated"], summary["certificates_not_validated"]) == (
+        6, None, None)
     assert summary["not_validated_by_reason"] == {
-        "historical": 1, "revoked": 1, "sunset_passed": 1, "status_unknown": 0,
-        "not_found": 1, "parse_error": 1, "fetch_error": 0,
+        "historical": None, "revoked": None, "sunset_passed": None, "status_unknown": None,
+        "not_found": None, "parse_error": 1, "fetch_error": 0,
     }
     assert json.loads(status_file.read_text())["code"] == "partial_failure"
     assert_summary_documented("nist_cmvp/module_validation_status", summary)
@@ -208,9 +271,17 @@ def test_main_writes_summary_and_reports_partial_failure(site, monkeypatch, tmp_
 def test_main_exits_zero_when_every_page_was_read(site, monkeypatch, tmp_path):
     monkeypatch.setenv("EVIDENCE_DIR", str(tmp_path))
     monkeypatch.setenv("NIST_CMVP_BASE_URL", site)
-    monkeypatch.setenv("NIST_CMVP_CERTIFICATES", "7002, 9999")  # not validated is a verdict, not a failure
+    monkeypatch.setenv("NIST_CMVP_CERTIFICATES", "LIB-A=7001, #7002, 7003, 1001, 1003, 9999")  # verdicts, not failures
     assert cmvp.main() == 0
-    assert "metadata" not in json.loads((tmp_path / "nist_cmvp_module_validation_status.json").read_text())
+    evidence = json.loads((tmp_path / "nist_cmvp_module_validation_status.json").read_text())
+    assert "metadata" not in evidence
+    summary = evidence["summary"]
+    assert (summary["certificates_total"], summary["certificates_validated"], summary["certificates_not_validated"]) == (
+        6, 1, 5)
+    assert summary["not_validated_by_reason"] == {
+        "historical": 1, "revoked": 1, "sunset_passed": 1, "status_unknown": 1,
+        "not_found": 1, "parse_error": 0, "fetch_error": 0,
+    }
 
 
 def test_unreachable_base_url_still_writes_json(monkeypatch, tmp_path):

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import re
 import sys
@@ -32,12 +33,15 @@ USER_AGENT = f"paramify-fetchers {NAME}/{VERSION}"
 REQUEST_TIMEOUT = 30
 RETRIES = 2
 RETRY_BACKOFF_SECONDS = 2.0
+# Wait at most this long for a Retry-After header on HTTP 429.
+MAX_RETRY_AFTER_SECONDS = 60.0
 
 REASONS = (
     "historical", "revoked", "sunset_passed", "status_unknown", "not_found", "parse_error", "fetch_error",
 )
 # Reasons that mean the run could not check a certificate, rather than a verdict on it.
 COLLECTION_FAILURES = ("parse_error", "fetch_error")
+VERDICTS = tuple(r for r in REASONS if r not in COLLECTION_FAILURES)
 ACCEPTED_STANDARD = re.compile(r"^FIPS\s*140-[23]$", re.IGNORECASE)
 US_DATE = re.compile(r"^(\d{1,2})/(\d{1,2})/(\d{4})$")
 CERT_HEADING = re.compile(r"^Certificate\s*#\s*(\d+)$", re.IGNORECASE)
@@ -211,7 +215,10 @@ def verdict(number: int, page: Dict[str, Any], today: date) -> Tuple[Optional[st
     if not page["has_details"]:
         if page["page_certificate_number"] == number:
             return "parse_error", "the page names the certificate but has no Details rows"
-        return "not_found", "the page has no Details section for a certificate"
+        if page["page_certificate_number"] is None:
+            # NIST answers an unknown number with HTTP 404. A 200 page with neither part
+            # is something else (maintenance, block page, redesign), so nothing was checked.
+            return "parse_error", "the page is not a certificate page: no 'Certificate #' heading and no Details rows"
     if page["page_certificate_number"] is None:
         return "parse_error", "the page does not name its certificate number"
     if page["page_certificate_number"] != number:
@@ -254,24 +261,41 @@ def parse_certificates(raw: str) -> List[Tuple[Optional[str], int]]:
     return entries
 
 
+def _retry_after(response: requests.Response) -> Optional[float]:
+    """Seconds from a numeric Retry-After header, capped; None when absent or not a number."""
+    try:
+        delay = float(response.headers.get("Retry-After", ""))
+    except ValueError:
+        return None
+    return max(0.0, min(delay, MAX_RETRY_AFTER_SECONDS)) if math.isfinite(delay) else None
+
+
 def fetch_page(session: requests.Session, url: str) -> Tuple[Optional[int], Optional[str], Optional[str]]:
-    """(http_status, body, error). Retries timeouts, connection errors and 5xx; one request at a time."""
-    error = None
+    """(http_status, body, error). Retries timeouts, connection errors, 429 and 5xx; one request at a time.
+
+    http_status is the last attempt's HTTP answer, or None when that attempt got none.
+    """
+    error: Optional[str] = None
+    status: Optional[int] = None
+    wait: Optional[float] = None
     for attempt in range(RETRIES + 1):
         if attempt:
-            time.sleep(RETRY_BACKOFF_SECONDS * attempt)
+            time.sleep(RETRY_BACKOFF_SECONDS * attempt if wait is None else wait)
+        status, wait = None, None
         try:
             response = session.get(url, timeout=REQUEST_TIMEOUT)
         except requests.exceptions.RequestException as exc:
             error = f"GET {url} failed: {type(exc).__name__}: {exc}"
             continue
-        if response.status_code >= 500:
-            error = f"GET {url} returned HTTP {response.status_code}"
+        status = response.status_code
+        if status == 429 or status >= 500:
+            error = f"GET {url} returned HTTP {status}"
+            wait = _retry_after(response) if status == 429 else None
             continue
-        if response.status_code in (200, 404, 410):
-            return response.status_code, response.text, None
-        return response.status_code, None, f"GET {url} returned HTTP {response.status_code}"
-    return None, None, error
+        if status in (200, 404, 410):
+            return status, response.text, None
+        return status, None, f"GET {url} returned HTTP {status}"
+    return status, None, error
 
 
 def check_certificate(
@@ -295,7 +319,8 @@ def check_certificate(
             reason, detail = "parse_error", f"{type(exc).__name__}: {exc}"
     history = page.get("validation_history") or []
     record.update({
-        "validated": reason is None,
+        # None when the run could not check the certificate: its state is unknown, not "not validated".
+        "validated": None if reason in COLLECTION_FAILURES else reason is None,
         "reason": reason,
         "reason_detail": detail,
         "module_name": page.get("module_name"),
@@ -316,12 +341,18 @@ def check_certificate(
 
 
 def summarize(records: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Counts. When any certificate could not be checked, every verdict count is None, so a
+    validator reading one finds no number and fails instead of passing on a partial read."""
+    counts = {reason: sum(1 for r in records if r["reason"] == reason) for reason in REASONS}
+    complete = not any(counts[reason] for reason in COLLECTION_FAILURES)
     validated = sum(1 for r in records if r["validated"])
     return {
         "certificates_total": len(records),
-        "certificates_validated": validated,
-        "certificates_not_validated": len(records) - validated,
-        "not_validated_by_reason": {reason: sum(1 for r in records if r["reason"] == reason) for reason in REASONS},
+        "certificates_validated": validated if complete else None,
+        "certificates_not_validated": len(records) - validated if complete else None,
+        "not_validated_by_reason": {
+            reason: count if complete or reason not in VERDICTS else None for reason, count in counts.items()
+        },
     }
 
 
@@ -366,7 +397,7 @@ def main() -> int:
     try:
         entries = parse_certificates(os.environ.get("NIST_CMVP_CERTIFICATES", ""))
     except ConfigError as exc:
-        evidence = {
+        evidence: Dict[str, Any] = {
             "collected_at": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
             "base_url": base_url,
             "certificates": [],
@@ -381,7 +412,13 @@ def main() -> int:
     output_path.write_text(json.dumps(evidence, indent=2))
     logger.info("Evidence saved to %s", output_path)
     if failures:
-        code = "target_unreachable" if len(failures) == len(entries) else "partial_failure"
+        failed = [r for r in evidence["certificates"] if r["reason"] in COLLECTION_FAILURES]
+        if any(r["http_status"] == 429 for r in failed):
+            code = "rate_limited"
+        elif len(failed) == len(entries) and all(r["reason"] == "fetch_error" for r in failed):
+            code = "target_unreachable"  # the host never gave a usable answer
+        else:
+            code = "partial_failure"
         report_failure(f"{len(failures)} of {len(entries)} certificates could not be checked: " + "; ".join(failures), code)
         return 1
     return 0
