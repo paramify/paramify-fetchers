@@ -296,7 +296,7 @@ def choose_target(root: Path, pos: dict, releases: Sequence[Release], to: Option
         return Target("branch", upstream, _sha(root, upstream), branch, branch)
     if branch:
         raise UpdateError(f"{branch} does not follow a remote branch. {hint}")
-    if pos["exact"] and releases:
+    if pos["exact"] and releases and parse_release(pos["tag"] or ""):
         return _release_target(root, releases[-1])
     raise UpdateError(f"this clone is on a detached commit ({pos['short']}), not a branch or a release. {hint}")
 
@@ -343,33 +343,29 @@ def _normalize_highlights(doc: dict) -> dict:
     return doc
 
 
-def _load_highlights(text: Optional[str], schema: dict) -> Optional[dict]:
-    if not text:
-        return None
-    try:
-        doc = yaml.safe_load(text)
-    except yaml.YAMLError:
-        return None
-    if isinstance(doc, dict):
-        doc = _normalize_highlights(doc)
-    # A broken file falls back to "see the changelog" rather than failing the
-    # update: highlights are a nicety, the CHANGELOG is the record.
-    return doc if isinstance(doc, dict) and not highlights_errors(doc, schema) else None
+def _highlight_files(root: Path, ref: str) -> Dict[str, List[dict]]:
+    """{version: rows} for every readable releases/*.yaml at `ref`.
 
-
-def _highlight_files(root: Path, ref: str, schema: dict) -> Dict[str, List[dict]]:
-    """{version: rows} for every readable releases/*.yaml at `ref`. A missing
-    directory, an unparsable file or one the schema rejects contributes nothing."""
+    Read loosely on purpose: a row needs only a tag and a title. The schema is
+    enforced where the files are written (tests/test_release_highlights.py),
+    not here, because a newer release may add a field this code doesn't know,
+    and dropping its file would hide its breaking rows from an older clone. A
+    missing directory or a file that isn't YAML contributes nothing.
+    """
     try:
         listing = git(root, "ls-tree", "--name-only", ref, f"{HIGHLIGHTS_DIR}/").splitlines()
     except UpdateError:
         return {}
-    paths = [p for p in listing if p.endswith(".yaml")]
     out: Dict[str, List[dict]] = {}
-    for path, text in read_at(root, ref, paths).items():
-        doc = _load_highlights(text, schema)
-        if doc:
-            out[Path(path).stem] = doc.get("highlights") or []
+    for path, text in read_at(root, ref, [p for p in listing if p.endswith(".yaml")]).items():
+        try:
+            doc = yaml.safe_load(text or "")
+        except yaml.YAMLError:
+            continue
+        rows = doc.get("highlights") if isinstance(doc, dict) else None
+        if isinstance(rows, list):
+            out[Path(path).stem] = [h for h in rows if isinstance(h, dict)
+                                    and isinstance(h.get("tag"), str) and isinstance(h.get("title"), str)]
     return out
 
 
@@ -382,9 +378,8 @@ def curated_rows(root: Path, head: str, target: str) -> List[dict]:
     is skipped whole. Unreleased rows come first, then releases
     newest first; rows keep their order within a file.
     """
-    schema = highlights_schema()
-    have = {(h["tag"], h["title"]) for rows in _highlight_files(root, head, schema).values() for h in rows}
-    files = _highlight_files(root, target, schema)
+    have = {(h["tag"], h["title"]) for rows in _highlight_files(root, head).values() for h in rows}
+    files = _highlight_files(root, target)
 
     try:  # a release HEAD already contains is not news, even if its file came later
         contained = set(git(root, "tag", "--merged", head, "-l", "v*").split())
@@ -900,23 +895,36 @@ def write_state(root: Path, state: dict) -> None:
     os.replace(tmp, p)
 
 
-def remember_previous(root: Path, pos: dict) -> None:
+def remember_previous(root: Path, pos: dict, after_sha: str) -> Optional[dict]:
+    """Record where the clone is and where the update will leave it. Returns
+    the record this replaces, for set_previous if the move then fails."""
     state = read_state(root)
+    old = state.get("previous")
     state["previous"] = {
         "ref": pos["branch"] or pos["sha"],
         "branch": pos["branch"],
         "sha": pos["sha"],
+        "after": after_sha,
         "tag": pos["tag"] if pos["exact"] else None,
         "describe": describe(pos),
         "at": int(time.time()),
     }
     write_state(root, state)
+    return old
+
+
+def set_previous(root: Path, prev: Optional[dict]) -> None:
+    """Put a rollback record back, or drop it with None."""
+    state = read_state(root)
+    if prev:
+        state["previous"] = prev
+    else:
+        state.pop("previous", None)
+    write_state(root, state)
 
 
 def forget_previous(root: Path) -> None:
-    state = read_state(root)
-    state.pop("previous", None)
-    write_state(root, state)
+    set_previous(root, None)
 
 
 def describe(pos: dict) -> str:

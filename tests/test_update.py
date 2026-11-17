@@ -209,6 +209,14 @@ def test_local_commits_no_upstream_and_detached_are_refused(main_repo):
         up.choose_target(main_repo, up.position(main_repo), rel)
 
 
+def test_a_tag_that_is_not_a_release_is_not_a_place_to_update_from(main_repo):
+    up.fetch(main_repo)
+    _git(main_repo, "tag", "v2026.11", "origin/main")       # newer than every release, but not vX.Y.Z
+    _git(main_repo, "switch", "-q", "--detach", "v2026.11")
+    with pytest.raises(up.UpdateError, match="detached commit"):
+        up.choose_target(main_repo, up.position(main_repo), up.list_releases(main_repo))
+
+
 def test_to_accepts_main_and_releases_that_carry_update(repo, tmp_path):
     rel = up.list_releases(repo)
     pos = up.position(repo)
@@ -314,6 +322,16 @@ def test_rows_for_a_release_head_already_contains_are_not_new(repo, tmp_path):
     _git(repo, "fetch", "-q", "origin")
     assert up.curated_rows(repo, "v0.3.0-beta", "origin/main") == []
     assert [r["title"] for r in up.curated_rows(repo, "v0.1.0-beta", "origin/main")][-1] == "old_flag is gone"
+
+
+def test_a_row_with_a_field_this_code_does_not_know_is_still_read(repo, tmp_path):
+    """A newer release may add a row field. Dropping its whole file would hide
+    its breaking rows from an older clone and let an unattended run sail on."""
+    rows = "  - {tag: breaking, title: a future break, fix: do the thing, some_future_field: [1, 2]}\n"
+    _rows(tmp_path / "upstream", rows)
+    _git(repo, "fetch", "-q", "origin")
+    got = up.curated_rows(repo, "v0.3.0-beta", "origin/main")
+    assert [(r["tag"], r["title"], r["fix"]) for r in got] == [("breaking", "a future break", "do the thing")]
 
 
 def test_curated_rows_survive_a_missing_or_broken_releases_dir(repo, tmp_path):
@@ -503,6 +521,37 @@ def test_rollback_keeps_a_branch_user_on_the_branch(main_repo, stubs):
     assert result.exit_code == 1 and "nothing to roll back to" in doc["errors"][0]
 
 
+def test_rollback_refuses_when_the_clone_moved_since_the_update(main_repo, stubs):
+    assert _run("--yes", "--json")[0].exit_code == 0
+    _commit(main_repo, {"mine.txt": "x"}, "work after the update")
+    mine = _sha(main_repo)
+    result, doc = _run("--rollback", "--yes", "--json")
+    assert result.exit_code == 1 and "has moved since the update" in doc["errors"][0]
+    assert _sha(main_repo) == mine and "previous" in up.read_state(main_repo)
+
+
+def test_a_failed_reinstall_during_rollback_keeps_the_record(main_repo, stubs, monkeypatch, tmp_path):
+    _commit(tmp_path / "upstream", {"pyproject.toml": "[project]\nname='x'\n"}, "deps")
+    assert _run("--yes", "--json")[0].exit_code == 0
+    updated = _sha(main_repo)
+    results = iter([{"ok": False, "command": ["pip"], "error": "boom"},
+                    {"ok": True, "command": ["pip"], "error": None}])
+    monkeypatch.setattr(up, "reinstall", lambda root, extras, python=None: next(results))
+    result, doc = _run("--rollback", "--yes", "--json")
+    assert result.exit_code == 1 and "rollback" in doc["errors"][0] and "previous version back" not in doc["errors"][0]
+    assert (doc["switched"], doc["reverted"]) == (False, True)
+    assert _sha(main_repo) == updated and "previous" in up.read_state(main_repo)
+
+
+def test_a_manifest_that_newly_fails_after_the_move_is_not_a_success(main_repo, stubs, monkeypatch):
+    verdicts = iter([{"ok": None, "errors": [], "notes": [], "reason": "needs a new package"},
+                     {"ok": False, "errors": ["bad"], "notes": []}])
+    monkeypatch.setattr(up, "run_validate", lambda tree, m, python=None: next(verdicts))
+    result, doc = _run("--yes", "--json")
+    assert result.exit_code == 1 and not doc["ok"] and doc["switched"]
+    assert "1 manifest fails on the new code" in doc["errors"][0] and "--rollback" in doc["errors"][0]
+
+
 def test_rollback_returns_to_the_previous_release_once(repo, stubs):
     assert _run("--yes", "--json")[0].exit_code == 0
     result, doc = _run("--rollback", "--yes", "--json")
@@ -517,6 +566,7 @@ def test_a_failed_reinstall_puts_the_old_commit_back(main_repo, stubs, monkeypat
     monkeypatch.setattr(up, "reinstall", lambda root, extras, python=None: next(results))
     result, doc = _run("--yes", "--json")
     assert result.exit_code == 1 and "put your previous version back" in doc["errors"][0]
+    assert (doc["switched"], doc["reverted"]) == (False, True)
     pos = up.position(main_repo)
     assert (pos["branch"], pos["sha"]) == ("main", before)
     assert "previous" not in up.read_state(main_repo)

@@ -76,7 +76,14 @@ update says so and stops. Push or move them first.
 **Changed your mind?** `paramify update --rollback` returns to the commit
 recorded in `.paramify/state.json` (which git ignores). On `main` you stay on
 `main`, one update behind, and the next `paramify update` moves you forward
-again.
+again. Rollback refuses if the clone has moved since the update (you committed
+or switched), because going back would discard that work.
+
+**Exit codes for scripts.** 0 means the clone is up to date and every manifest
+that passed before still passes. 1 means it refused, failed, or moved but a
+manifest now fails on the new code (the JSON has `switched: true` and
+`ok: false`). If the reinstall fails, update puts the old code back and
+reports `reverted: true`.
 
 **You hear about updates on their own.** After a command, `paramify` prints
 one dim line when something is waiting ("12 new commits on main"): at most

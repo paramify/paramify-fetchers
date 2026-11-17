@@ -271,17 +271,17 @@ def _apply(run: _Run, root: Path, pos: dict, manifests: List[dict], *, label: st
     reinstalling = up.needs_reinstall(root, pos["sha"], new_sha)
     run.doc["environment"] = {**env, "extras": extras}
 
+    # Recorded before the move, so a move cut short can still be rolled back.
+    replaced = None if rolling_back else up.remember_previous(root, pos, new_sha)
     with run.step(verb) as s:
         try:
             go()
         except up.UpdateError as e:
+            if not rolling_back:
+                up.set_previous(root, replaced)
             s.fail(str(e))
             run.fail(f"git refused the move: {e}")
         s.done(new_sha[:7])
-    if rolling_back:
-        up.forget_previous(root)
-    else:
-        up.remember_previous(root, pos)
     run.doc["switched"] = True
 
     with run.step("reinstall") as s:
@@ -298,7 +298,9 @@ def _apply(run: _Run, root: Path, pos: dict, manifests: List[dict], *, label: st
                     s.add(view.line((err, "dim"), indent=6))
         run.doc["reinstall"] = res
     if not res["ok"]:
-        _revert(run, root, pos, extras)
+        _revert(run, root, pos, extras, rolling_back)
+    if rolling_back:
+        up.forget_previous(root)  # only now: a rollback that failed can be tried again
 
     with run.step("validate manifests") as s:
         val = up.validate_all(root, manifests)
@@ -318,26 +320,41 @@ def _apply(run: _Run, root: Path, pos: dict, manifests: List[dict], *, label: st
         else:
             s.done(f"{view.plural(len(manifests), 'manifest')} valid")
 
-    run.doc.update(ok=True, version=label)
+    run.doc["version"] = label
+    run.section(view.done(label, tries, rollback=not rolling_back, container=(root / "deploy").is_dir()))
+    if new_bad:
+        # The move happened, but a script must not read this as a clean update.
+        n = len(new_bad)
+        back = "" if rolling_back else ", or go back with paramify update --rollback"
+        run.fail(f"you're on {label}, but {view.plural(n, 'manifest')} fail{'s' if n == 1 else ''} on the new code. "
+                 f"Fix what validate names{back}")
+    run.doc["ok"] = True
     if run.json:
         _emit(run.doc, 0)
-    run.section(view.done(label, tries, rollback=not rolling_back, container=(root / "deploy").is_dir()))
-    if new_bad and not rolling_back:
-        run.show(view.note("Fix what validate names above, or go back with ", "paramify update --rollback"))
     raise typer.Exit(0)
 
 
-def _revert(run: _Run, root: Path, pos: dict, extras: Optional[List[str]]) -> NoReturn:
-    """The reinstall failed: put the old code back so `paramify` still starts."""
-    with run.step("put the old code back") as s:
+def _revert(run: _Run, root: Path, pos: dict, extras: Optional[List[str]], rolling_back: bool) -> NoReturn:
+    """The reinstall failed: put the code back where it was so `paramify` still starts."""
+    where, problem = up.describe(pos), ""
+    with run.step("put the code back") as s:
         try:
             up.restore(root, pos)
-            up.forget_previous(root)
+            if not rolling_back:
+                up.forget_previous(root)
             again = up.reinstall(root, extras)
-            s.done(f"back on {up.describe(pos)}" + ("" if again["ok"] else ", but its reinstall failed too"),
+            s.done(f"back on {where}" + ("" if again["ok"] else ", but its reinstall failed too"),
                    "ok" if again["ok"] else "warn")
         except up.UpdateError as e:
-            s.fail(str(e))
+            problem = str(e)
+            s.fail(problem)
+    run.doc.update(switched=bool(problem), reverted=not problem)
+    if problem:
+        run.fail(f"the reinstall failed, and the code could not be put back ({problem}). "
+                 f"The pip error is above; check git status before running anything else")
+    if rolling_back:
+        run.fail(f"the reinstall failed, so rollback left you on {where}; the pip error is above. "
+                 f"Fix it and run paramify update --rollback again")
     run.fail("the reinstall failed, so update put your previous version back; the pip error is above")
 
 
@@ -349,8 +366,12 @@ def _rollback(run: _Run, root: Path, yes: bool) -> NoReturn:
     prev = up.read_state(root).get("previous")
     if not prev:
         run.fail("nothing to roll back to: no update has been recorded here (or it was already rolled back)")
-    _refuse_if_blocked(run, root, prev["sha"])
     pos = up.position(root)
+    if prev.get("after") and pos["sha"] != prev["after"]:
+        run.fail(f"this clone has moved since the update (it is at {pos['short']}; the update left it at "
+                 f"{prev['after'][:7]}), so rolling back would discard that work. To go back anyway: "
+                 f"git switch --detach {prev['sha'][:7]}")
+    _refuse_if_blocked(run, root, prev["sha"])
     manifests = up.user_manifests(root)
     label = prev.get("describe") or prev["sha"][:7]
     current = {**pos, "label": up.describe(pos)}
