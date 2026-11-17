@@ -2828,6 +2828,18 @@ schemas and the `paramify` CLI — not the internal code.
   `resource_exclusion_patterns_unmatched` null. When the watcher list failed,
   `total_network_watchers`, `regions_with_virtual_networks_without_network_watcher`
   and `regions_without_network_watcher_count` are null too (before: 0, [] and 0). With every list read the output is the same.
+
+- **`azure_data_services_configuration` 0.3.0: a service list that was not
+  read gives null counts, and a MongoDB cluster with public access Disabled
+  reads as disabled without its firewall rules.**
+  - Before, an unread MongoDB, Data Explorer or Event Hubs list left every
+    total and count built from it at 0, which looks like "nothing to check".
+    They are now null, so a check can't pass on an empty read. The run still
+    exits 1 as `partial_failure`.
+  - Before, a cluster whose public network access is Disabled had
+    `public_access` null when its firewall rule list failed, so
+    `mongo_clusters_public_access_unknown` counted it. It is now `disabled`.
+    Other clusters stay null. Each cluster's `firewall_rules` still reads null.
 - **`paramify doctor` and the note before `paramify run` find an upload token
   in `.env`.** So do `manifest set-stack` and the stack picker in the TUI.
   Before, only `paramify stacks` and `paramify upload` read `.env`, and the
