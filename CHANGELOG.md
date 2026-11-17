@@ -12,6 +12,11 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`azure_endpoint_availability` fetcher.** Reads Application Insights availability tests and their hourly
+  results, and Standard load balancers' data-path (VipAvailability) and health-probe (DipAvailability)
+  availability with measurement coverage, each judged against an availability target once one is set (none by
+  default) and only when every hour was measured. Reports whether tests check the status code and content. Unread
+  results leave verdicts null rather than 0.
 - **`wiz_inventory`**, the Wiz cloud resource inventory, as a pipeline fetcher (`kind: inventory`, `id_scheme:
   wiz-resource-id`). One record per resource from `cloudResourcesV2` under `payload.data`, keyed by the Wiz resource
   id, with its cloud ID (`external_id`), account, region, type, IPs, OS, image, environment and owner, and internet
