@@ -3451,3 +3451,220 @@ def test_two_commands_in_one_quoted_string_keep_their_own_flags():
     [sign], [verify] = row["signing_steps"], row["verification_steps"]
     assert (sign["key"], sign["key_reference"], sign["names_digest"]) == ("keyless", None, False)
     assert (verify["checks"], verify["names_digest"]) == ("key", True)
+
+
+# --- exclude_repositories, optional titles, messages and branch names -------------------------
+
+def test_excluded_repositories_are_left_out_without_regard_to_case(fake):
+    client = client_for(fake, org_routes([repo("app"), repo("Compliance-Repo"), repo("site")]))
+    seen = {}
+    repos = gc.list_repos(client, client.get(f"orgs/{ORG}"), [], False, ["compliance-repo", "typo-repo"], seen)
+    assert [r["name"] for r in repos] == ["app", "site"]
+    assert seen == {"repositories_excluded": ["Compliance-Repo"], "exclude_repositories_unmatched": ["typo-repo"]}
+    assert client.codes == []  # an unmatched name is reported, not a failure
+
+
+def test_an_excluded_archived_repository_counts_as_matched(fake):
+    client = client_for(fake, org_routes([repo("app"), repo("old", archived=True)]))
+    seen = {}
+    repos = gc.list_repos(client, client.get(f"orgs/{ORG}"), [], False, ["old"], seen)
+    assert [r["name"] for r in repos] == ["app"]
+    assert seen["repositories_excluded"] == ["old"] and seen["exclude_repositories_unmatched"] == []
+
+
+def test_exclusion_is_recorded_in_the_evidence(fake, monkeypatch, tmp_path):
+    fake(runs_routes())
+    code, ev, _ = run_fetcher("workflow_runs", monkeypatch, tmp_path, GITHUB_EXCLUDE_REPOSITORIES="SITE, nope")
+    assert code == 0
+    assert [r["repository"] for r in ev["repositories"]] == ["app"]
+    m = ev["metadata"]
+    assert m["exclude_repositories"] == ["SITE", "nope"]
+    assert m["repositories_excluded"] == ["site"] and m["exclude_repositories_unmatched"] == ["nope"]
+
+
+def test_without_an_exclusion_the_metadata_carries_no_exclusion_counts(fake, monkeypatch, tmp_path):
+    monkeypatch.delenv("GITHUB_EXCLUDE_REPOSITORIES", raising=False)
+    fake(runs_routes())
+    _, ev, _ = run_fetcher("workflow_runs", monkeypatch, tmp_path)
+    assert ev["metadata"]["exclude_repositories"] is None
+    assert "repositories_excluded" not in ev["metadata"] and "exclude_repositories_unmatched" not in ev["metadata"]
+
+
+def test_an_unread_repository_list_leaves_the_exclusion_unknown_not_empty(fake, monkeypatch, tmp_path):
+    routes = runs_routes()
+    routes[f"orgs/{ORG}/repos"] = (500, {"message": "boom"})
+    fake(routes)
+    code, ev, _ = run_fetcher("workflow_runs", monkeypatch, tmp_path, GITHUB_EXCLUDE_REPOSITORIES="site")
+    assert code == 1 and ev["metadata"]["partial_failure"] is True
+    assert ev["metadata"]["repositories_excluded"] is None
+    assert ev["metadata"]["exclude_repositories_unmatched"] is None
+
+
+def test_repositories_and_exclude_repositories_together_fail_as_bad_config(fake, monkeypatch, tmp_path):
+    fake(runs_routes())
+    monkeypatch.setenv("GITHUB_ORG", ORG)
+    monkeypatch.setenv("GITHUB_TOKEN", "test-token")
+    monkeypatch.setenv("GITHUB_API_URL", API)
+    monkeypatch.setenv("EVIDENCE_DIR", str(tmp_path))
+    monkeypatch.setenv("FETCHER_STATUS_FILE", str(tmp_path / "status.json"))
+    monkeypatch.setenv("GITHUB_REPOSITORIES", "app")
+    monkeypatch.setenv("GITHUB_EXCLUDE_REPOSITORIES", "site")
+    m = MODS["workflow_runs"]
+    assert gc.run(m.NAME, m.collect, m.CONFIG) == 1
+    status = json.loads((tmp_path / "status.json").read_text())
+    assert "not both" in json.dumps(status) and "bad_config" in json.dumps(status)
+
+
+def test_inventory_ignores_the_exclusion_and_names_it(fake, monkeypatch, tmp_path):
+    repos = [repo("app", id=1), repo("site", id=3)]
+    fake(inv_routes(repos=repos, values=[]))
+    code, ev, _ = run_fetcher("repository_inventory", monkeypatch, tmp_path, GITHUB_EXCLUDE_REPOSITORIES="site")
+    assert code == 0 and sorted(r["name"] for r in ev["data"]) == ["app", "site"]
+    assert "exclude_repositories" in ev["metadata"]["filters_ignored"]
+    assert ev["metadata"]["exclude_repositories"] is None
+
+
+def _pr_case():
+    pulls = [pr(1, 2)]
+    reviews = {1: [review("lead", "APPROVED", 3)]}
+    runs = {1: [check("ci", "success", 3)]}
+    commits = [{"sha": "m1"}, {"sha": "d1", "commit": {"message": "hotfix for X\nbody", "committer": {"date": ago(1)}},
+                               "author": {"login": "admin"}}]
+    return pr_routes(pulls, reviews, runs, commits=commits, associated={"d1": []})
+
+
+def test_pr_titles_and_push_messages_are_included_by_default(fake, monkeypatch, tmp_path):
+    for env in ("GITHUB_PR_INCLUDE_TITLES", "GITHUB_PR_INCLUDE_COMMIT_MESSAGES"):
+        monkeypatch.delenv(env, raising=False)
+    fake(_pr_case())
+    code, ev, _ = run_fetcher("pull_request_checks", monkeypatch, tmp_path)
+    r = ev["repositories"][0]
+    assert code == 0 and "title" in r["pull_requests"][0] and r["direct_pushes"][0]["message"] == "hotfix for X"
+    assert ev["metadata"]["include_titles"] is True and ev["metadata"]["include_commit_messages"] is True
+
+
+@pytest.mark.parametrize("titles,messages", [("false", "true"), ("true", "false"), ("false", "false")])
+def test_pr_titles_and_push_messages_can_be_left_out_independently(fake, monkeypatch, tmp_path, titles, messages):
+    fake(_pr_case())
+    code, ev, _ = run_fetcher("pull_request_checks", monkeypatch, tmp_path,
+                              GITHUB_PR_INCLUDE_TITLES=titles, GITHUB_PR_INCLUDE_COMMIT_MESSAGES=messages)
+    assert code == 0
+    r = ev["repositories"][0]
+    p, push = r["pull_requests"][0], r["direct_pushes"][0]
+    assert ("title" in p) is (titles == "true")
+    assert ("message" in push) is (messages == "true")
+    assert "hotfix for X" not in json.dumps(ev) if messages == "false" else True
+    # The findings do not depend on either field.
+    assert push["sha"] == "d1" and p["number"] == 1 and r["merged_without_approval"] == []
+    assert ev["summary"]["direct_pushes"] == 1 and ev["summary"]["merged_pull_requests"] == 1
+    assert ev["metadata"]["include_titles"] is (titles == "true")
+    assert ev["metadata"]["include_commit_messages"] is (messages == "true")
+
+
+def test_a_bad_true_false_value_fails_as_bad_config(fake, monkeypatch, tmp_path):
+    fake(_pr_case())
+    monkeypatch.setenv("GITHUB_PR_INCLUDE_TITLES", "maybe")
+    monkeypatch.setenv("GITHUB_ORG", ORG)
+    monkeypatch.setenv("GITHUB_TOKEN", "test-token")
+    monkeypatch.setenv("GITHUB_API_URL", API)
+    monkeypatch.setenv("EVIDENCE_DIR", str(tmp_path))
+    monkeypatch.setenv("FETCHER_STATUS_FILE", str(tmp_path / "status.json"))
+    m = MODS["pull_request_checks"]
+    assert gc.run(m.NAME, m.collect, m.CONFIG) == 1
+    assert "bad_config" in (tmp_path / "status.json").read_text()
+
+
+def test_branch_names_are_included_by_default(fake, monkeypatch, tmp_path):
+    monkeypatch.delenv("GITHUB_WORKFLOW_RUNS_INCLUDE_BRANCH_NAMES", raising=False)
+    fake(runs_routes({"app": [wf_run(2, 1), wf_run(1, 1, branch="feature-secret-name")]}))
+    _, ev, _ = run_fetcher("workflow_runs", monkeypatch, tmp_path)
+    by = {r["id"]: r for r in ev["repositories"][0]["runs"]}
+    assert by[1]["head_branch"] == "feature-secret-name" and ev["metadata"]["include_branch_names"] is True
+
+
+def test_branch_names_can_be_left_out_and_on_default_branch_still_holds(fake, monkeypatch, tmp_path):
+    runs = {"app": [wf_run(3, 1), wf_run(2, 1, branch="feature-secret-name", conclusion="failure"),
+                    wf_run(1, 1, conclusion="failure", fork=True)]}
+    fake(runs_routes(runs))
+    code, ev, _ = run_fetcher("workflow_runs", monkeypatch, tmp_path, GITHUB_WORKFLOW_RUNS_INCLUDE_BRANCH_NAMES="false")
+    assert code == 0
+    by = {r["id"]: r for r in ev["repositories"][0]["runs"]}
+    assert all("head_branch" not in x for x in by.values())
+    assert "feature-secret-name" not in json.dumps(ev)
+    assert by[3]["on_default_branch"] is True and by[2]["on_default_branch"] is False
+    assert by[1]["on_default_branch"] is False  # a fork's main is still not the default branch
+    assert ev["summary"]["default_branch_runs"] == 1 and ev["summary"]["default_branch_runs_failed"] == 0
+    assert ev["metadata"]["include_branch_names"] is False
+    assert ev["repositories"][0]["default_branch"] == "main"  # the repository's default branch is kept
+
+
+# --- audit_log: the repository filters apply to the events ---------------------------------
+
+def _audit_scope_events():
+    return [audit_event("repo.access", 1, repo=f"{ORG}/app"),
+            audit_event("protected_branch.policy_override", 2, repo=f"{ORG}/Out-Of-Scope"),
+            audit_event("repo.create", 3, repository=f"{ORG}/out-of-scope"),          # the newer field name
+            audit_event("org.add_member", 4, user="newbie"),                           # names no repository
+            audit_event("workflows.completed_workflow_run", 5, repo=f"{ORG}/out-of-scope")]
+
+
+def _audit_scope_routes():
+    routes = audit_routes(_audit_scope_events())
+    routes[f"orgs/{ORG}/repos"] = [repo("app"), repo("out-of-scope")]
+    routes[f"orgs/{ORG}"]["public_repos"] = 2
+    routes[f"repos/{ORG}/app"] = routes[f"repos/{ORG}/App"] = repo("app")  # GitHub resolves names in any case
+    return routes
+
+
+def test_audit_log_without_a_filter_keeps_every_event(fake, monkeypatch, tmp_path):
+    for env in ("GITHUB_REPOSITORIES", "GITHUB_EXCLUDE_REPOSITORIES"):
+        monkeypatch.delenv(env, raising=False)
+    fake(_audit_scope_routes())
+    code, ev, _ = run_fetcher("audit_log", monkeypatch, tmp_path)
+    m = ev["metadata"]
+    assert code == 0 and ev["summary"]["events_total"] == 5 and m["events_read"] == 5
+    assert m["repository_filter_applied"] is False and m["events_outside_repository_filter"] == 0
+
+
+def test_audit_log_leaves_out_an_excluded_repositorys_events(fake, monkeypatch, tmp_path):
+    fake(_audit_scope_routes())
+    code, ev, _ = run_fetcher("audit_log", monkeypatch, tmp_path, GITHUB_EXCLUDE_REPOSITORIES="OUT-of-scope")
+    m, s = ev["metadata"], ev["summary"]
+    assert code == 0 and m["repositories_excluded"] == ["out-of-scope"]
+    assert m["repository_filter_applied"] is True and m["events_read"] == 5
+    assert m["events_outside_repository_filter"] == 3 and s["events_total"] == 2
+    assert "out-of-scope" not in json.dumps(ev["security_events"]).lower()
+    assert s["by_family"] == {"org": 1, "repo": 1}  # the organization-wide event is kept
+    assert "workflows.completed_workflow_run" not in s["by_action"]
+
+
+def test_audit_log_with_an_allow_list_keeps_listed_repositories_and_organization_events(fake, monkeypatch, tmp_path):
+    fake(_audit_scope_routes())
+    code, ev, _ = run_fetcher("audit_log", monkeypatch, tmp_path, GITHUB_REPOSITORIES="App")
+    m, s = ev["metadata"], ev["summary"]
+    assert code == 0 and m["repository_filter_applied"] is True
+    assert m["events_outside_repository_filter"] == 3 and s["events_total"] == 2
+    assert sorted(e["action"] for e in ev["security_events"]) == ["org.add_member", "repo.access"]
+
+
+def test_audit_log_truncation_is_judged_on_the_events_read_not_the_events_kept(fake, monkeypatch, tmp_path):
+    fake(_audit_scope_routes())
+    code, ev, status = run_fetcher("audit_log", monkeypatch, tmp_path, GITHUB_EXCLUDE_REPOSITORIES="out-of-scope",
+                                   GITHUB_AUDIT_MAX_EVENTS="4")
+    assert code == 1 and status["code"] == "partial_failure" and ev["metadata"]["truncated"] is True
+    assert ev["metadata"]["events_read"] == 4
+
+
+@pytest.mark.parametrize("event,allow,exclude,kept", [
+    ({"repo": "acme/app"}, set(), {"app"}, False),
+    ({"repo": "acme/App"}, set(), {"app"}, False),
+    ({"repo": "acme/app"}, {"app"}, set(), True),
+    ({"repo": "acme/other"}, {"app"}, set(), False),
+    ({"repository": "acme/other"}, set(), {"app"}, True),
+    ({}, {"app"}, set(), True),
+    ({"repo": None}, set(), {"app"}, True),
+    ({"repo": 7}, set(), {"app"}, True),          # not a name: kept rather than guessed at
+    ({"repo": "app"}, set(), {"app"}, False),     # no owner prefix
+])
+def test_audit_event_repository_scope(event, allow, exclude, kept):
+    assert MODS["audit_log"].in_repository_scope(event, allow, exclude) is kept
