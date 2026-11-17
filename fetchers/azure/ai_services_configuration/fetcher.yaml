@@ -81,7 +81,7 @@ evidence_set:
     - GET /subscriptions/{id}/providers/Microsoft.Search/searchServices (ARM REST) — every AI Search service with its network, key and encryption settings
     - diagnostic_settings.list() (per account and search service) — whether audit logs are exported
 
-    Output: azure_ai_services_configuration_<subscription>.json — each AI services account, search service, model deployment, content filter policy, project and connection with the verdicts below. Resources the resource_exclusions patterns take out are listed under excluded instead.
+    Output: azure_ai_services_configuration_<subscription>.json — each AI services account, search service, model deployment, content filter policy, project and connection with the verdicts below. Resources the resource_exclusions patterns take out are listed under excluded instead. A per-account list (diagnostic settings, deployments, content filter policies, projects or connections) that could not be read is null on that account and sets metadata.partial_failure; the summary counts built from such lists then cover only the accounts whose list was read.
 
     Summary fields:
 
@@ -142,7 +142,7 @@ evidence_set:
     - deployments_content_filter_missing — Number of deployments that name a policy that is not on the account; null when the account list could not be read
     - deployments_content_filter_unknown — Number of deployments whose account's policies could not be listed; null when the account list could not be read
     - deployments_jailbreak_protection — Number of deployments whose policy blocks jailbreak attempts (Prompt Shields); null when the account list could not be read
-    - deployments_indirect_attack_protection — Number of deployments whose policy blocks indirect attacks hidden in documents or tool output (Prompt Shields); null when the account list could not be read
+    - deployments_indirect_attack_protection — Number of deployments whose policy blocks indirect attacks hidden in documents or tool output (Prompt Shields); Microsoft's default policy blocks jailbreaks but does not enable indirect-attack detection; null when the account list could not be read
     - deployments_asynchronous_filtering — Number of deployments whose policy lets output stream before filtering completes; null when the account list could not be read
 
     Are custom content filter policies weaker than Microsoft's default?
