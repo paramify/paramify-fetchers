@@ -34,7 +34,7 @@ SUPPRESS_ALL = {"id": f"{RG}/providers/Microsoft.AlertsManagement/actionRules/ap
 SUPPRESSION_FIELDS = rules_fetcher.SUPPRESSION_FIELDS
 
 
-def _run(monkeypatch, tmp_path, processing, refuse_processing=False):
+def _run(monkeypatch, tmp_path, processing, refuse_processing=False, rule=RULE):
     group = {"id": GROUP, "name": "ag1", "enabled": True, "deliverable": True, "notifies_people": True,
              "receivers": [], "receiver_kinds": ["email"]}
     m = rules_fetcher
@@ -50,7 +50,7 @@ def _run(monkeypatch, tmp_path, processing, refuse_processing=False):
     monkeypatch.setattr(m, "credential", lambda: object())
     monkeypatch.setattr(m, "provider_registration_status", lambda *a: "registered")
     monkeypatch.setattr(m, "arm_rest_client", lambda cred: object())
-    monkeypatch.setattr(m, "list_all", lambda rest, path, api: {"items": [RULE] if path.endswith("metricAlerts") else [], "pages": 1})
+    monkeypatch.setattr(m, "list_all", lambda rest, path, api: {"items": [rule] if path.endswith("metricAlerts") else [], "pages": 1})
     monkeypatch.setattr(m, "collect_action_groups", lambda rest, sub: {"groups": [group]})
     monkeypatch.setattr(m, "collect_processing_rules", processing_rules)
     monkeypatch.setenv("EVIDENCE_DIR", str(tmp_path))
@@ -94,3 +94,30 @@ def test_route_with_unread_processing_rules_is_unknown_only_for_enabled_rules(en
                                                               "receivers": []}}, None)
     assert r["suppressed"] is expected
     assert r["reaches_human"] is (None if enabled else False)
+
+
+def test_unread_processing_rules_leave_a_rule_without_an_own_group_unknown(monkeypatch, tmp_path):
+    no_group = {**RULE, "properties": {**RULE["properties"], "actions": []}}
+    code, rules, summary = _run(monkeypatch, tmp_path, [], refuse_processing=True, rule=no_group)
+    assert code == 1
+    assert (rules[0]["routes_to_enabled_receiver"], rules[0]["routes_to_person"], rules[0]["reaches_human"]) == (
+        None, None, None)
+    assert rules[0]["processing_rule_matches"] is None and rules[0]["suppressed_by_processing_rules"] is None
+    assert summary["enabled_rules_without_action_groups"] is None
+    assert summary["enabled_rules_routing_unknown"] == 1 and summary["enabled_rules_routing_to_enabled_receiver"] == 0
+
+
+def test_read_empty_processing_rule_list_still_counts_a_rule_without_a_group(monkeypatch, tmp_path):
+    no_group = {**RULE, "properties": {**RULE["properties"], "actions": []}}
+    code, rules, summary = _run(monkeypatch, tmp_path, [], rule=no_group)
+    assert code == 0 and rules[0]["reaches_human"] is False
+    assert summary["enabled_rules_without_action_groups"] == 1 and summary["enabled_rules_routing_unknown"] == 0
+
+
+def test_route_with_unread_processing_rules_and_no_own_group_is_unknown():
+    r = routing.route(True, [], [RG], {}, None)
+    assert (r["routes_to_enabled_receiver"], r["routes_to_person"], r["reaches_human"]) == (None, None, None)
+    assert r["processing_rule_matches"] is None and r["suppressed_by_processing_rules"] is None
+    r = routing.route(True, [], [RG], {}, [])
+    assert (r["routes_to_enabled_receiver"], r["reaches_human"]) == (False, False)
+    assert r["processing_rule_matches"] == [] and r["suppressed_by_processing_rules"] == []

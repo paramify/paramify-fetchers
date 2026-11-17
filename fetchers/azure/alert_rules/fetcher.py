@@ -143,6 +143,7 @@ SUPPRESSION_FIELDS = (
     "enabled_rules_suppressed", "enabled_rules_possibly_suppressed", "enabled_rules_reaching_human",
     "enabled_rules_reaching_human_unknown", "enabled_rules_not_reaching_human", "reaching_human_percentage",
     "all_enabled_rules_reach_human", "suppressing_processing_rules_active", "processing_rules",
+    "enabled_rules_without_action_groups",
 )
 
 

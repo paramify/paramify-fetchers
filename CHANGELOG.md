@@ -2636,7 +2636,13 @@ schemas and the `paramify` CLI — not the internal code.
   `reaching_human_percentage`, `all_enabled_rules_reach_human`,
   `suppressing_processing_rules_active`, `processing_rules`,
   `in_scope_processing_rules` and `excluded_processing_rules` are null. A list that was read and is
-  empty still gives 0 and false.
+  empty still gives 0 and false. An enabled rule with no deliverable action
+  group of its own is unknown too, since a processing rule may add one:
+  `routes_to_enabled_receiver` and `routes_to_person` read null, not false, so
+  `reaches_human` is null and the rule counts in
+  `enabled_rules_routing_unknown`. `processing_rule_matches` and
+  `suppressed_by_processing_rules` are null, not `[]`, and
+  `enabled_rules_without_action_groups` is null.
 
 - **Disk, Key Vault, storage and SQL Managed Instance fetchers: an unread list
   gives null counts, not 0.** When a list the run needs is refused (403),
