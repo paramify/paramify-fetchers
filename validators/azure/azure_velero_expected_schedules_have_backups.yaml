@@ -1,0 +1,20 @@
+key: azure_velero_expected_schedules_have_backups
+name: 'Azure Velero: Every Expected Schedule Has a Backup'
+type: AUTOMATED
+role: configuration
+statement: >
+  No expected schedule is missing from backup storage (expected_schedules_without_backups is 0).
+  Passes while expected_schedules is not set or a location is unread; those cases fail 'Expected
+  Backup Schedules Are Configured' and 'Every Backup Storage Location Read' instead, so an unset value
+  never reads as a broken backup. Supports KSI-RPL-ABO. Does not check whether the collection run
+  succeeded.
+
+regex: '"expected_schedules_without_backups":\s*(?:0|null)\b'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-VELERO-BACKUPS
