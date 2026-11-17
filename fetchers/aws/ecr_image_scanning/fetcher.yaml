@@ -35,4 +35,17 @@ ksis:
 evidence_set:
   reference_id: EVD-ECR-IMAGE-SCANNING
   name: ECR Image Scanning Configuration
-  instructions: 'Script: aws/ecr_image_scanning/fetcher.py. Read-only AWS APIs: STS GetCallerIdentity; ECR GetRegistryScanningConfiguration, DescribeRepositories, BatchGetRepositoryScanningConfiguration, DescribeImages, DescribeImageScanFindings.'
+  instructions: |
+    Script: aws/ecr_image_scanning/fetcher.py
+
+    Access: sts:GetCallerIdentity, ecr:GetRegistryScanningConfiguration, ecr:DescribeRepositories, ecr:BatchGetRepositoryScanningConfiguration, ecr:DescribeImages and ecr:DescribeImageScanFindings. With enhanced scanning, also inspector2:ListCoverage and inspector2:ListFindings; without them, AWS denies the scan findings read.
+
+    Commands Executed:
+    - STS GetCallerIdentity — record the account collected from
+    - ECR GetRegistryScanningConfiguration — read the registry scan type and its rules
+    - ECR DescribeRepositories — list every repository
+    - ECR BatchGetRepositoryScanningConfiguration — read each repository's effective scan frequency and the filters that apply to it
+    - ECR DescribeImages (per repository) — find the most recently pushed image
+    - ECR DescribeImageScanFindings (per repository) — read that image's scan status and count its findings by severity
+
+    Output: aws_ecr_image_scanning_<profile>_<region>.json — the registry scan type and rules, and one record per repository with its scan frequency, applied scan filters, scan-on-push flag and its latest image's scan status, timestamps and severity counts. scan_collection_status says why a repository has no scan result; any failed call fails the run.
