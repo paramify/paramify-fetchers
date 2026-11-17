@@ -41,7 +41,10 @@ schemas and the `paramify` CLI — not the internal code.
   Completed backups, with 10% grace, and only over the part of the lookback the backups are kept for, so a backup
   Velero deleted at the end of its retention is not a missed run. A listed schedule is judged against its own
   interval. Failed backups, incomplete snapshots and restores with errors are counted in full and again as
-  current (unresolved) failures, with planned failure tests matched by name and counted apart. Blob reads go only
+  current (unresolved) failures. A failed scheduled backup resolves through a later success of its schedule,
+  and any failure through its own retry (`<name><retry_suffix>`) when a retry suffix is set; a failed restore resolves
+  only through its own retry, since storage doesn't record which backup a restore used. No failure is excluded by
+  name or label, and labelled validation backups are counted, still judged. Blob reads go only
   to endpoints Resource Manager returned for in-scope accounts in the target subscription, with redirects refused,
   retry dropped connections, and parse XML with defusedxml. Unread locations leave counts null rather than 0.
 - `paramify upload --no-waf-check` turns off the check that drops a file holding `../`, `/etc/passwd`, `/bin/sh`,

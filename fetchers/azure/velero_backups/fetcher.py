@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Velero backup storage locations in Azure Blob Storage: each location's storage settings, every backup's outcome and expiry, and every restore's result."""
 
-import fnmatch
 import gzip
 import json
 import logging
@@ -54,7 +53,8 @@ INTERVAL_ENV = "AZURE_VELERO_RESTORE_TEST_INTERVAL_DAYS"
 EXPECTED_ENV = "AZURE_VELERO_EXPECTED_SCHEDULES"
 RPO_ENV = "AZURE_VELERO_RPO_HOURS"
 MISSED_LOOKBACK_ENV = "AZURE_VELERO_MISSED_RUN_LOOKBACK_DAYS"
-DELIBERATE_ENV = "AZURE_VELERO_DELIBERATE_FAILURE_TESTS"
+RETRY_SUFFIX_ENV = "AZURE_VELERO_RETRY_SUFFIX"
+VALIDATION_LABEL_ENV = "AZURE_VELERO_VALIDATION_LABEL"
 DEFAULT_MISSED_LOOKBACK_DAYS = 7
 MAX_MISSED_LOOKBACK_DAYS = 90
 DEFAULT_CONTAINERS = ("velero",)
@@ -203,6 +203,7 @@ def backup_record(name: str, raw: Dict[str, Any], now: datetime, grace_hours: in
     return {
         "name": name,
         "schedule": labels.get(SCHEDULE_LABEL) or None,
+        "labels": dict(labels),
         "phase": status.get("phase"),
         "started": status.get("startTimestamp"),
         "completed": status.get("completionTimestamp"),
@@ -231,19 +232,24 @@ def restore_record(name: str, results: Optional[Dict[str, Any]], written: Option
     return {"name": name, "results_read": True, "errors": errors, "warnings": warnings, "clean": errors == 0, "results_written": written}
 
 
-def is_deliberate(name: str, patterns: List[str]) -> bool:
-    """A backup or restore whose name matches a deliberate_failure_tests pattern is a planned failure test."""
-    return any(fnmatch.fnmatchcase(name, p) for p in patterns)
+def parse_label(value: Optional[str]) -> Optional[Tuple[str, str]]:
+    """`key=value`; None when unset or not in that form."""
+    key, sep, val = (value or "").strip().partition("=")
+    return (key.strip(), val.strip()) if sep and key.strip() and val.strip() else None
 
 
-def classify_history(backups: List[Dict[str, Any]], restores: List[Dict[str, Any]], patterns: List[str]) -> None:
-    """Mark each failure as a deliberate test, resolved by a later success, or current; records are updated in place.
+def classify_history(backups: List[Dict[str, Any]], restores: List[Dict[str, Any]], retry_suffix: Optional[str]) -> None:
+    """Mark each failure as resolved by a later success, or current; records are updated in place.
+
+    No failure is excluded by its name or labels. When retry_suffix is set, a failure is also resolved by its own retry:
+    a backup named <name><retry_suffix> that completed later (every attempted snapshot, for a snapshot shortfall), or a
+    restore named <name><retry_suffix> that finished later without errors. A failed retry, or none, leaves it current.
 
     A Failed or PartiallyFailed backup is resolved once its schedule has a Completed backup that finished after it; a
     backup with no schedule is never resolved, since a later manual backup may cover other namespaces. A scheduled
     backup with incomplete volume snapshots is
     resolved once a later Completed backup of the same schedule completed every snapshot it attempted. A restore with
-    errors is resolved once a later restore completed without errors. A failure without a readable time is never
+    errors is resolved only by its own retry, since storage doesn't record which backup a restore used. A failure without a readable time is never
     resolved. History is kept: the totals still count every record in storage.
     """
     def when(b):
@@ -257,19 +263,35 @@ def classify_history(backups: List[Dict[str, Any]], restores: List[Dict[str, Any
             newest_done[x["schedule"]] = max(done, newest_done.get(x["schedule"], done))
             if not x["volume_snapshots_incomplete"]:
                 newest_full[x["schedule"]] = max(done, newest_full.get(x["schedule"], done))
+    retried_done: Dict[str, datetime] = {}
+    retried_full: Dict[str, datetime] = {}
+    if retry_suffix:
+        for x in backups:
+            done = parse_time(x["completed"]) if x["phase"] == COMPLETED else None
+            if done and x["name"].endswith(retry_suffix):
+                retried_done[x["name"][:-len(retry_suffix)]] = done
+                if not x["volume_snapshots_incomplete"]:
+                    retried_full[x["name"][:-len(retry_suffix)]] = done
     for b in backups:
-        b["deliberate_test"] = is_deliberate(b["name"], patterns)
         t = when(b)
         later_done, later_full = newest_done.get(b["schedule"]), newest_full.get(b["schedule"])
         # A backup with no schedule label is never resolved: a later manual backup may cover other namespaces entirely.
         scheduled = b["schedule"] is not None
-        b["failure_resolved"] = bool(scheduled and t and later_done and later_done > t) if b["phase"] in (FAILED, PARTIALLY_FAILED) else None
-        b["snapshots_resolved"] = bool(scheduled and t and later_full and later_full > t) if b["volume_snapshots_incomplete"] else None
-    newest_clean = max((c for c in (parse_time(r["results_written"]) for r in restores if r["clean"]) if c), default=None)
+        by_retry = bool(t and retried_done.get(b["name"]) and retried_done[b["name"]] > t)
+        by_full_retry = bool(t and retried_full.get(b["name"]) and retried_full[b["name"]] > t)
+        failed = b["phase"] in (FAILED, PARTIALLY_FAILED)
+        b["failure_resolved"] = bool(scheduled and t and later_done and later_done > t) or by_retry if failed else None
+        b["snapshots_resolved"] = (bool(scheduled and t and later_full and later_full > t) or by_full_retry
+                                   if b["volume_snapshots_incomplete"] else None)
+        b["resolved_by_retry"] = (failed and by_retry) or (bool(b["volume_snapshots_incomplete"]) and by_full_retry)
+    clean_retry = {r["name"][:-len(retry_suffix)]: parse_time(r["results_written"]) for r in restores
+                   if retry_suffix and r["clean"] and r["name"].endswith(retry_suffix) and parse_time(r["results_written"])}
     for r in restores:
-        r["deliberate_test"] = is_deliberate(r["name"], patterns)
         t = parse_time(r["results_written"])
-        r["error_resolved"] = bool(t and newest_clean and newest_clean > t) if r["clean"] is False else None
+        by_retry = bool(t and clean_retry.get(r["name"]) and clean_retry[r["name"]] > t)
+        # Backup storage doesn't record which backup a restore used, so only the restore's own retry can resolve it.
+        r["error_resolved"] = by_retry if r["clean"] is False else None
+        r["resolved_by_retry"] = r["clean"] is False and by_retry
 
 
 def summarize(locations: List[Dict[str, Any]], settings: Dict[str, Any], now: datetime, discovered: bool = True) -> Dict[str, Any]:
@@ -279,8 +301,9 @@ def summarize(locations: List[Dict[str, Any]], settings: Dict[str, Any], now: da
     backups = [b for loc in read for b in loc["backups"]]
     restores = [r for loc in locations if loc["restores_read"] for r in loc["restores"]]
     restores_complete = discovered and all(loc["restores_read"] for loc in locations)
-    patterns = settings.get("deliberate_failure_tests") or []
-    classify_history(backups, restores, patterns)
+    classify_history(backups, restores, settings.get("retry_suffix"))
+    label = settings.get("validation_label")
+    validation = [b for b in backups if label and b.get("labels", {}).get(label[0]) == label[1]]
     latest: Dict[str, datetime] = {}
     for b in backups:
         when = parse_time(b["completed"])
@@ -310,9 +333,9 @@ def summarize(locations: List[Dict[str, Any]], settings: Dict[str, Any], now: da
         "backups_other_phase": known(sum(1 for b in backups if b["phase"] not in (COMPLETED, PARTIALLY_FAILED, FAILED))),
         "backups_metadata_unreadable": known(sum(loc["backups_unreadable"] for loc in read)),
         "backups_volume_snapshots_incomplete": known(sum(1 for b in backups if b["volume_snapshots_incomplete"])),
-        "backups_failed_unresolved": known(sum(1 for b in backups if b["failure_resolved"] is False and not b["deliberate_test"])),
+        "backups_failed_unresolved": known(sum(1 for b in backups if b["failure_resolved"] is False)),
         "backups_volume_snapshots_incomplete_unresolved": known(sum(1 for b in backups
-                                                                    if b["snapshots_resolved"] is False and not b["deliberate_test"])),
+                                                                    if b["snapshots_resolved"] is False)),
         "expired_backups_not_deleted": known(sum(1 for b in backups if b["expired_not_deleted"])),
         "schedules_observed": known(len(schedules)),
         "schedules_with_success_within_window": known(len(recent)),
@@ -331,12 +354,15 @@ def summarize(locations: List[Dict[str, Any]], settings: Dict[str, Any], now: da
         "restores_total": len(restores) if restores_complete else None,
         "restores_without_errors": sum(1 for r in restores if r["clean"]) if restores_complete else None,
         "restores_with_errors": sum(1 for r in restores if r["clean"] is False) if restores_complete else None,
-        "restores_with_errors_unresolved": sum(1 for r in restores if r["error_resolved"] is False and not r["deliberate_test"])
+        "restores_with_errors_unresolved": sum(1 for r in restores if r["error_resolved"] is False)
         if restores_complete else None,
         "restores_results_missing": sum(1 for r in restores if not r["results_read"]) if restores_complete else None,
-        "deliberate_failure_tests": sum(1 for b in backups if b["deliberate_test"] and (b["failure_resolved"] is not None or b["snapshots_resolved"] is not None))
-        + sum(1 for r in restores if r["deliberate_test"] and r["clean"] is False) if complete and restores_complete else None,
-        "deliberate_failure_test_patterns": patterns,
+        "failures_resolved_by_retry": (sum(1 for b in backups if b["resolved_by_retry"]) + sum(1 for r in restores if r["resolved_by_retry"])
+                                       if complete and restores_complete and settings.get("retry_suffix") else None),
+        "retry_suffix": settings.get("retry_suffix"),
+        "validation_backups": known(len(validation)) if label else None,
+        "validation_backups_failed": known(sum(1 for b in validation if b["phase"] in (FAILED, PARTIALLY_FAILED))) if label else None,
+        "validation_label": f"{label[0]}={label[1]}" if label else None,
         "days_since_last_clean_restore": int((now - max(clean_times)).total_seconds() // 86400) if restores_complete and clean_times else None,
         "restores_date_unknown": sum(1 for r in restores if r["results_read"] and not parse_time(r["results_written"])) if restores_complete else None,
         "restore_test_interval_days": settings.get("restore_test_interval_days"),
@@ -365,8 +391,12 @@ def settings_from_env(collector: Optional[Collector] = None) -> Dict[str, Any]:
     lookback = min(int(raw_lb), MAX_MISSED_LOOKBACK_DAYS) if raw_lb.isdigit() and int(raw_lb) > 0 else DEFAULT_MISSED_LOOKBACK_DAYS
     if collector is not None and raw_lb and not (raw_lb.isdigit() and int(raw_lb) > 0):
         collector.record(f"config {MISSED_LOOKBACK_ENV}", ValueError(f"{MISSED_LOOKBACK_ENV}={raw_lb!r} is not a whole number above 0"))
+    raw_label = (os.environ.get(VALIDATION_LABEL_ENV) or "").strip()
+    if collector is not None and raw_label and parse_label(raw_label) is None:
+        collector.record(f"config {VALIDATION_LABEL_ENV}", ValueError(f"{VALIDATION_LABEL_ENV}={raw_label!r} must be key=value; left unset"))
     return {
-        "deliberate_failure_tests": _csv(os.environ.get(DELIBERATE_ENV)),
+        "retry_suffix": (os.environ.get(RETRY_SUFFIX_ENV) or "").strip() or None,
+        "validation_label": parse_label(os.environ.get(VALIDATION_LABEL_ENV)),
         "expected_schedules": expected,
         "rpo_hours": rpo,
         "missed_run_lookback_days": lookback,

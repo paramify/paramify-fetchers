@@ -25,7 +25,8 @@ azure_rest = sys.modules["azure_rest"]
 
 NOW = datetime(2026, 11, 16, 12, 0, tzinfo=timezone.utc)
 SETTINGS = {"success_window_hours": 26, "expiry_grace_hours": 24, "container_names": ["velero"], "explicit_locations": [], "restore_test_interval_days": None,
-            "expected_schedules": None, "rpo_hours": None, "missed_run_lookback_days": 7, "deliberate_failure_tests": []}
+            "expected_schedules": None, "rpo_hours": None, "missed_run_lookback_days": 7,
+            "retry_suffix": None, "validation_label": None}
 SUB = "/subscriptions/s1"
 ACCOUNT_ID = f"{SUB}/resourceGroups/rg1/providers/Microsoft.Storage/storageAccounts/backupsa"
 ENDPOINT = "https://backupsa.blob.core.windows.net/"
@@ -196,7 +197,7 @@ def azure(monkeypatch, tmp_path):
     monkeypatch.setenv("FETCHER_STATUS_FILE", str(tmp_path / "status.json"))
     for env in ("AZURE_AUTHORITY_HOST", "AZURE_TENANT_ID", "AZURE_ENVIRONMENT", "AZURE_RESOURCE_EXCLUSIONS", "AZURE_TARGET_SUBSCRIPTION_ONLY",
                 vb.CONTAINERS_ENV, vb.LOCATIONS_ENV, vb.WINDOW_ENV, vb.GRACE_ENV, vb.INTERVAL_ENV,
-                vb.EXPECTED_ENV, vb.RPO_ENV, vb.MISSED_LOOKBACK_ENV, vb.DELIBERATE_ENV):
+                vb.EXPECTED_ENV, vb.RPO_ENV, vb.MISSED_LOOKBACK_ENV, vb.RETRY_SUFFIX_ENV, vb.VALIDATION_LABEL_ENV):
         monkeypatch.delenv(env, raising=False)
     return serve
 
@@ -427,28 +428,58 @@ def test_a_listed_weekly_schedule_is_judged_against_its_own_interval():
     assert vb.success_window_hours(24, SETTINGS) == 26 and vb.success_window_hours(168, SETTINGS) == 184
 
 
-def test_resolved_and_deliberate_failures_stay_in_history_but_are_not_current():
+def test_resolved_failures_stay_in_history_but_are_not_current():
     resolved = _runs("daily", [NOW - timedelta(hours=50)], 720, phase="Failed", name="daily-failed-old")
     current = _runs("hourly", [NOW - timedelta(hours=1)], 720, phase="PartiallyFailed", name="hourly-failed-new")
-    planned = _runs("daily", [NOW - timedelta(hours=1)], 720, phase="Failed", name="failtest-1")
     ok = _runs("daily", [NOW - timedelta(hours=26)], 720)
     snaps_old = _runs("weekly", [NOW - timedelta(hours=200)], 720, attempted=2, completed=1, name="weekly-old")
     snaps_ok = _runs("weekly", [NOW - timedelta(hours=30)], 720, name="weekly-new")
     rs = [vb.restore_record("r-bad-old", results(errors=1), iso(NOW - timedelta(days=5))),
           vb.restore_record("r-good", results(), iso(NOW - timedelta(days=2))),
-          vb.restore_record("r-bad-new", results(errors=2), iso(NOW - timedelta(days=1))),
-          vb.restore_record("failtest-restore", results(errors=1), iso(NOW - timedelta(hours=3)))]
-    settings = {**SETTINGS, "deliberate_failure_tests": ["failtest-*"]}
-    s = vb.summarize([location(resolved + current + planned + ok + snaps_old + snaps_ok, rs)], settings, NOW)
-    assert (s["backups_failed"], s["backups_partially_failed"], s["backups_failed_unresolved"]) == (2, 1, 1)
+          vb.restore_record("r-bad-new", results(errors=2), iso(NOW - timedelta(days=1)))]
+    s = vb.summarize([location(resolved + current + ok + snaps_old + snaps_ok, rs)], SETTINGS, NOW)
+    assert (s["backups_failed"], s["backups_partially_failed"], s["backups_failed_unresolved"]) == (1, 1, 1)
     assert (s["backups_volume_snapshots_incomplete"], s["backups_volume_snapshots_incomplete_unresolved"]) == (1, 0)
-    assert (s["restores_with_errors"], s["restores_with_errors_unresolved"]) == (3, 1)
-    assert (s["deliberate_failure_tests"], s["deliberate_failure_test_patterns"]) == (2, ["failtest-*"])
+    # r-good is a different restore, so it resolves neither failure: storage doesn't say which backup each one used.
+    assert (s["restores_with_errors"], s["restores_with_errors_unresolved"]) == (2, 2)
+
+
+def _validation_backup(name, phase, hours_ago):
+    raw = {"metadata": {"name": name, "labels": {"validation-test": "true", "ticket": "TICKET-1"}},
+           "status": {"phase": phase, "completionTimestamp": iso(NOW - timedelta(hours=hours_ago)),
+                      "expiration": iso(NOW + timedelta(days=30))}}
+    return vb.backup_record(name, raw, NOW, 24)
+
+
+def test_a_failure_is_resolved_only_by_its_own_successful_retry():
+    # Interruption tests named restore-drill-interrupt-<date>; a retry has the same name plus -retry.
+    bk = [_validation_backup("restore-drill-interrupt-20261104", "Failed", 100),
+          _validation_backup("restore-drill-interrupt-20261104-retry", "Completed", 99),
+          _validation_backup("restore-drill-interrupt-20261110", "Failed", 30),
+          _validation_backup("restore-drill-interrupt-20261110-retry", "Failed", 29)]
+    rs = [vb.restore_record("restore-drill-interrupt-20261104", results(errors=1), iso(NOW - timedelta(hours=98))),
+          vb.restore_record("restore-drill-interrupt-20261104-retry", results(), iso(NOW - timedelta(hours=97)))]
+    settings = {**SETTINGS, "retry_suffix": "-retry", "validation_label": ("validation-test", "true")}
+    s = vb.summarize([location(bk, rs)], settings, NOW)
+    # The 20261104 backup and restore are resolved by their retries; the 20261110 test and its failed retry stay current.
+    assert (s["backups_failed"], s["backups_failed_unresolved"], s["failures_resolved_by_retry"]) == (3, 2, 2)
+    assert (s["restores_with_errors"], s["restores_with_errors_unresolved"]) == (1, 0)
+    # Validation backups are counted, never excluded: all four carry the label and three failed.
+    assert (s["validation_backups"], s["validation_backups_failed"], s["validation_label"]) == (4, 3, "validation-test=true")
+    # Without a retry suffix nothing is resolved by retry, and nothing is hidden.
+    plain = vb.summarize([location(bk, rs)], SETTINGS, NOW)
+    assert (plain["backups_failed_unresolved"], plain["failures_resolved_by_retry"], plain["validation_backups"]) == (3, None, None)
+    assert plain["restores_with_errors_unresolved"] == 1
+
+
+def test_a_validation_label_not_in_key_value_form_is_bad_config():
+    assert vb.parse_label("validation-test=true") == ("validation-test", "true")
+    assert vb.parse_label("validation-test") is None and vb.parse_label("=true") is None and vb.parse_label(None) is None
 
 
 def test_unresolved_counts_stay_null_when_a_location_is_unread():
     s = vb.summarize([location(read=False, restores_read=False)], SETTINGS, NOW)
-    assert (s["backups_failed_unresolved"], s["restores_with_errors_unresolved"], s["deliberate_failure_tests"]) == (None, None, None)
+    assert (s["backups_failed_unresolved"], s["restores_with_errors_unresolved"]) == (None, None)
 
 
 def test_blob_reads_retry_a_dropped_connection(monkeypatch):
@@ -505,3 +536,14 @@ def test_a_failed_backup_without_a_schedule_stays_unresolved():
     scheduled_failed = vb.backup_record("d-failed", backup("d-failed", phase="Failed", done_hours_ago=10), NOW, 24)
     scheduled_ok = vb.backup_record("d-ok", backup("d-ok", done_hours_ago=2), NOW, 24)
     assert vb.summarize([location([scheduled_failed, scheduled_ok])], SETTINGS, NOW)["backups_failed_unresolved"] == 0
+
+
+def test_a_clean_restore_of_something_else_never_resolves_a_failed_restore():
+    # A failed restore, then a clean restore with an unrelated name: still a current failure.
+    rs = [vb.restore_record("restore-app-a", results(errors=3), iso(NOW - timedelta(days=2))),
+          vb.restore_record("restore-app-b", results(), iso(NOW - timedelta(days=1)))]
+    s = vb.summarize([location([], rs)], {**SETTINGS, "retry_suffix": "-retry"}, NOW)
+    assert (s["restores_with_errors"], s["restores_with_errors_unresolved"], s["failures_resolved_by_retry"]) == (1, 1, 0)
+    retried = rs + [vb.restore_record("restore-app-a-retry", results(), iso(NOW - timedelta(hours=12)))]
+    s = vb.summarize([location([], retried)], {**SETTINGS, "retry_suffix": "-retry"}, NOW)
+    assert (s["restores_with_errors_unresolved"], s["failures_resolved_by_retry"]) == (0, 1)
