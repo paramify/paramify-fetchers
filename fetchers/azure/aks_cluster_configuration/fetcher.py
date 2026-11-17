@@ -42,8 +42,11 @@ logger = logging.getLogger("azure_aks_cluster_configuration")
 # auto_upgrade_profile.upgrade_channel: "none" is the literal for "no automatic
 # upgrades"; an absent field means the same thing.
 UPGRADE_CHANNEL_NONE = "none"
-# auto_upgrade_profile.node_os_upgrade_channel values that patch node images on their own.
+# auto_upgrade_profile.node_os_upgrade_channel values that replace node images (or apply security patches to them)
+# on their own. Unmanaged leaves node images alone but lets the node OS's own updater install security updates, such
+# as Ubuntu's nightly unattended upgrades with no automatic reboot; None installs nothing.
 NODE_OS_AUTO_UPGRADE_CHANNELS = frozenset({"securitypatch", "nodeimage"})
+NODE_OS_UNMANAGED_CHANNEL = "unmanaged"
 KINDS = ("cluster",)
 
 
@@ -301,9 +304,13 @@ def summarize(clusters: list[dict] | None) -> dict:
         "clusters_with_public_node_ips": sum(1 for c in clusters if c["node_public_ip_pools"]),
         "total_agent_pools": sum(len(c["agent_pool_profiles"]) for c in clusters),
         "autoscaling_agent_pools": sum(1 for c in clusters for p in c["agent_pool_profiles"] if p.get("enable_auto_scaling") is True),
-        # SecurityPatch and NodeImage patch node images automatically; None and Unmanaged do not.
+        # SecurityPatch and NodeImage update node images automatically. Unmanaged is counted apart: the node OS may
+        # still install its own updates, which this count must not read as "no patching".
         "node_os_auto_upgrade_clusters": sum(
             1 for c in clusters if str(c.get("node_os_upgrade_channel") or "").lower() in NODE_OS_AUTO_UPGRADE_CHANNELS
+        ),
+        "node_os_unmanaged_clusters": sum(
+            1 for c in clusters if str(c.get("node_os_upgrade_channel") or "").lower() == NODE_OS_UNMANAGED_CHANNEL
         ),
         "node_os_upgrade_channel_unknown_clusters": sum(1 for c in clusters if c.get("node_os_upgrade_channel") is None),
         **summarize_node_security([p for c in clusters for p in c["agent_pool_profiles"]]),

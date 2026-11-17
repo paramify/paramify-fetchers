@@ -57,7 +57,7 @@ target_schema:
 secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
 
 ksis:
-  - KSI-SVC-SIN   # require_secure_transport and the tls_version ACCEPTED list
+  - KSI-SVC-SIN   # require_secure_transport, the tls_version ACCEPTED list, and customer-managed key encryption at rest
   - KSI-CNA-MAT   # public network access
   - KSI-MLA-LET   # audit_log_enabled and the audit_log_events classes
   - KSI-RPL-ABO   # geo-redundant backup

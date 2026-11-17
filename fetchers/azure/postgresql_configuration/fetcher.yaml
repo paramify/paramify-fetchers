@@ -58,7 +58,7 @@ target_schema:
 secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
 
 ksis:
-  - KSI-SVC-SIN   # require_secure_transport
+  - KSI-SVC-SIN   # require_secure_transport, and customer-managed key encryption at rest
   - KSI-CNA-RNT   # firewall rules, allow-all-Azure pseudo-rule flagged
   - KSI-IAM-APM   # Entra ID authentication and its assigned administrators
   - KSI-MLA-LET   # log_checkpoints / log_connections / log_disconnections / log_retention_days

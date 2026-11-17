@@ -72,8 +72,11 @@ def test_aks_counts_autoscaling_pools_and_node_os_auto_upgrade():
     clusters = [_cluster("NodeImage", [True, False]), _cluster("SecurityPatch", [True]), _cluster("Unmanaged", [False]), _cluster(None, [])]
     s = aks.summarize(clusters)
     assert (s["autoscaling_agent_pools"], s["node_os_auto_upgrade_clusters"], s["node_os_upgrade_channel_unknown_clusters"]) == (2, 2, 1)
+    # Unmanaged is its own count: not automatic, and not read as unpatched either.
+    assert s["node_os_unmanaged_clusters"] == 1
 
 
 def test_aks_new_counts_are_null_when_the_cluster_list_was_unread():
     s = aks.summarize(None)
     assert (s["autoscaling_agent_pools"], s["node_os_auto_upgrade_clusters"], s["node_os_upgrade_channel_unknown_clusters"]) == (None, None, None)
+    assert s["node_os_unmanaged_clusters"] is None
