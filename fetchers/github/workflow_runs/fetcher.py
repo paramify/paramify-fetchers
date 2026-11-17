@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "_shared"))
-from github_client import iso, now_epoch, run, to_epoch  # noqa: E402
+from github_client import iso, newest_since, now_epoch, run  # noqa: E402
 
 NAME = "github_workflow_runs"
 CONFIG = {
@@ -15,24 +15,6 @@ CONFIG = {
 }
 MAX_DAYS_BACK = 366
 FAILED = ("failure", "timed_out", "startup_failure")
-
-
-def newest_since(client, path, key, since, cap, what, env):
-    """Items of a newest-first list created since `since`. None on failure or when more than `cap` are in the window.
-
-    Walked page by page rather than filtered with `created=`: a filtered list stops at 1,000 results and then reports
-    an empty page and total_count 0 (measured), which would read as a quiet window.
-    """
-    seen = []
-    found = client.paginate_required(path, key=key,
-                                     until=lambda x: seen.append(x) or (to_epoch(x.get("created_at")) or since) < since
-                                     or len(seen) > cap)
-    if found is None:
-        return None
-    if len(seen) > cap and (to_epoch(seen[-1].get("created_at")) or since) >= since:
-        client.fail(f"GET {path}", "Truncated", f"more than {cap} {what} in the window; raise {env}", "partial_failure")
-        return None
-    return found
 
 
 def run_row(r, default_branch):

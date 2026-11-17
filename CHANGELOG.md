@@ -18,6 +18,16 @@ schemas and the `paramify` CLI — not the internal code.
   authorized period (unknown retention counted apart), geo-redundant backup, stopped servers, and servers created by point-in-time restore within an
   optional restore-test interval. One API version that serves both the server and backup lists is used. Read replicas are counted, not judged. Unread
   backup lists leave verdicts null rather than 0.
+- **`azure_velero_backups` fetcher.** Reads Velero backup storage locations in Azure Blob Storage, from Azure APIs
+  only: each backup's phase, schedule, completion time and expiry, missed runs of configured expected schedules,
+  schedules past the recovery point objective, each restore's result, and whether the backup
+  storage is geo-replicated and encrypted with a customer-managed key. Missed runs come from the gaps between
+  Completed backups, with 10% grace, and only over the part of the lookback the backups are kept for, so a backup
+  Velero deleted at the end of its retention is not a missed run. A listed schedule is judged against its own
+  interval. Failed backups, incomplete snapshots and restores with errors are counted in full and again as
+  current (unresolved) failures, with planned failure tests matched by name and counted apart. Blob reads go only
+  to endpoints Resource Manager returned for in-scope accounts in the target subscription, with redirects refused,
+  retry dropped connections, and parse XML with defusedxml. Unread locations leave counts null rather than 0.
 - `paramify upload --no-waf-check` turns off the check that drops a file holding `../`, `/etc/passwd`, `/bin/sh`,
   `/bin/bash` or `<script` before the upload. Those strings were confirmed blocked on one host's WAF, but some hosts
   exempt the upload routes, so CVE text in a findings file was dropped though the WAF would accept it. With the flag
@@ -201,6 +211,28 @@ schemas and the `paramify` CLI — not the internal code.
   `change_before_approval_field` `true`, and the new
   `summary.changes_recorded_before_approval_field` counts these changes.
 
+- **`github_image_signing` 0.1.0 shows whether GitHub Actions signs and
+  verifies container images with cosign.** It reads the workflow files on
+  each default branch and records every `cosign sign` step with the kind of
+  key it uses (a key management service, keyless or other), whether the
+  command names the image by digest, whether it skips the transparency log,
+  and whether the step can be skipped or fail without failing the run
+  (an `if`, `continue-on-error`, or `|| true` in the script). It records
+  every `cosign verify` step and what it checks against, and lists the
+  verify steps that cannot fail the run. It lists the workflows that mention
+  cosign without a cosign command in the file, where signing happens
+  somewhere the file does not show, and the workflows that call a reusable
+  workflow, whose signing it does not read. For each workflow that signs, it
+  reads the runs in the window by outcome and the latest successful run,
+  leaving out pull request runs, which it counts apart. The summary lists the repositories that sign
+  without verifying. It needs Contents for the files and Actions for the
+  runs; with `include_runs: false` it reads the files only and every run
+  figure is null. It reads workflow files, not the registry, and copies no
+  script text into the evidence. KSI-SVC-VRI. Not yet run against a live
+  organization. The workflow file reader and the newest-first run walk moved
+  from `github_actions_security` and `github_workflow_runs` into the shared
+  GitHub client so that the three fetchers use one copy; their evidence is
+  unchanged.
 - **`wiz_vulnerability_findings` 0.4.0: SLA columns.** After the 43 legacy
   columns (unchanged, so existing intake presets keep mapping), the CSV adds the
   Wiz fields Paramify's remediation SLAs depend on: `Is Internet Reachable` and
