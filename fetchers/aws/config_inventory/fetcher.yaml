@@ -3,6 +3,9 @@ version: 0.1.0
 description: Lists recorded assets across the accounts and regions of an AWS Config aggregator, with stable identifiers, network details, tags, and source timestamps.
 category: aws
 kind: inventory
+pipeline:
+  type: inventory
+  id_scheme: aws-arn
 supports_targets: false
 runtime:
   type: python

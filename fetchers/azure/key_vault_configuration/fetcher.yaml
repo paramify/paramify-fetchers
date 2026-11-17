@@ -1,5 +1,5 @@
 name: azure_key_vault_configuration
-version: 0.4.1
+version: 0.5.0
 description: >-
   Shows how each key vault grants access, whether deleted vaults and secrets can be recovered, how it's exposed to the network, and whether its audit events are logged.
 category: azure
@@ -86,20 +86,20 @@ evidence_set:
     - in_scope_key_vaults — Number of key vaults read and in scope; null when the key vault list could not be read; 0 means there are none or the patterns took out every vault, which a check can catch by requiring more than 0
 
     Which vaults were checked?
-    - total_key_vaults — Number of in-scope key vaults; every count and percentage below covers only these; reads 0, not null, when the key vault list could not be read, so read it together with in_scope_key_vaults
+    - total_key_vaults — Number of in-scope key vaults; every count and percentage below covers only these; null when the key vault list could not be read, as is every count and percentage below
     - provider_registration_status — Whether Microsoft.KeyVault is registered on the subscription: registered, not_registered or unknown
 
     How is access to the vaults granted?
     - rbac_authorization_vaults — Number of vaults that use Azure RBAC role assignments for access to keys, secrets and certificates (the role assignments aren't in this evidence)
     - access_policy_vaults — Number of vaults that use the older vault access policies instead of Azure RBAC
-    - rbac_authorization_percentage — Percentage of vaults that use Azure RBAC = rbac_authorization_vaults / total_key_vaults × 100 (a whole number, rounded down; reads 0 when total_key_vaults is 0)
-    - total_access_policies — Number of access policy entries across all vaults, each giving a user, group or app permissions on a vault's keys, secrets, certificates or storage accounts; 0 when the key vault list could not be read
+    - rbac_authorization_percentage — Percentage of vaults that use Azure RBAC = rbac_authorization_vaults / total_key_vaults × 100 (a whole number, rounded down; reads 0 when total_key_vaults is 0, null when the key vault list could not be read)
+    - total_access_policies — Number of access policy entries across all vaults, each giving a user, group or app permissions on a vault's keys, secrets, certificates or storage accounts; null when the key vault list could not be read
 
     Can a deleted vault or secret be recovered?
     - soft_delete_vaults — Number of vaults with soft delete on, so deleted vaults, keys and secrets are kept for the retention period and can be restored; a vault that doesn't report the setting counts as off
     - purge_protection_vaults — Number of vaults with purge protection on, so nobody can permanently delete the vault or its contents before the retention period ends
     - recoverable_vaults — Number of recoverable vaults: both soft delete and purge protection on
-    - recoverable_percentage — Percentage of vaults that are recoverable = recoverable_vaults / total_key_vaults × 100 (a whole number, rounded down; reads 0 when total_key_vaults is 0)
+    - recoverable_percentage — Percentage of vaults that are recoverable = recoverable_vaults / total_key_vaults × 100 (a whole number, rounded down; reads 0 when total_key_vaults is 0, null when the key vault list could not be read)
 
     Is network access restricted?
     - public_network_access_disabled_vaults — Number of vaults with public network access disabled, reachable only through private endpoints; a vault that doesn't report the setting counts as enabled
@@ -110,8 +110,8 @@ evidence_set:
     - premium_sku_vaults — Number of vaults on the Premium tier, which can hold keys in hardware security modules (HSMs); whether each key is HSM-backed isn't checked
 
     Is every operation on keys and secrets logged?
-    - vaults_with_diagnostic_settings — Number of vaults with at least one diagnostic setting, whatever it exports
-    - vaults_with_audit_logging — Number of vaults with audit logging: a diagnostic setting that exports the AuditEvent category (directly, or through the audit or allLogs group) to a storage account, Log Analytics workspace, event hub or partner solution; AuditEvent records every read or change of a key, secret or certificate
-    - vaults_without_audit_logging — Number of vaults whose diagnostic settings were read and include no audit logging
+    - vaults_with_diagnostic_settings — Number of vaults with at least one diagnostic setting, whatever it exports; null when any vault's diagnostic settings couldn't be read
+    - vaults_with_audit_logging — Number of vaults with audit logging: a diagnostic setting that exports the AuditEvent category (directly, or through the audit or allLogs group) to a storage account, Log Analytics workspace, event hub or partner solution; AuditEvent records every read or change of a key, secret or certificate; null when any vault's diagnostic settings couldn't be read
+    - vaults_without_audit_logging — Number of vaults whose diagnostic settings were read and include no audit logging; null when any vault's diagnostic settings couldn't be read
     - vaults_audit_logging_unknown — Number of vaults whose diagnostic settings couldn't be read
-    - audit_logging_percentage — Percentage of vaults with audit logging = vaults_with_audit_logging / total_key_vaults × 100 (a whole number, rounded down; reads 0 when total_key_vaults is 0); vaults whose settings couldn't be read count in the total but not as logged
+    - audit_logging_percentage — Percentage of vaults with audit logging = vaults_with_audit_logging / total_key_vaults × 100 (a whole number, rounded down; reads 0 when total_key_vaults is 0, null when the key vault list could not be read); null when any vault's diagnostic settings couldn't be read

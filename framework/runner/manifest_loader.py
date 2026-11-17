@@ -75,15 +75,36 @@ def entry_keys(entries: Sequence[ManifestEntry]) -> List[str]:
     return keys
 
 
-def resolved_paramify(manifest: Manifest, entry: ManifestEntry) -> Dict[str, Any]:
+#: What a pipeline entry uses in place of a `direct` it inherits from run.paramify:
+#: a pipeline file always goes in a batch (a direct upload builds nothing).
+PIPELINE_DEFAULTS = {"delivery": "auto", "no_request": "evidence"}
+
+
+def ignored_run_direct(manifest: Manifest, entry: ManifestEntry) -> List[str]:
+    """The settings a pipeline entry inherits as `direct` from run.paramify, and so ignores.
+
+    The same setting on the entry itself is its own choice: validate refuses it.
+    """
+    return [k for k in PIPELINE_DEFAULTS
+            if manifest.paramify.get(k) == "direct" and k not in entry.paramify]
+
+
+def resolved_paramify(manifest: Manifest, entry: ManifestEntry, *, pipeline: bool = False) -> Dict[str, Any]:
     """The `paramify` settings that apply to one entry: its own values win over the
     manifest's. A key set in neither is absent.
 
     `stack` and `stack_name` are a pair: the label comes only from the level that
     set the stack, so an entry's own stack never takes the run-level label (that
     would warn of a rename that never happened).
+
+    `pipeline`: the entry's fetcher feeds a Paramify pipeline. A `direct` it would
+    inherit from run.paramify is replaced by the pipeline default (`delivery: auto`,
+    `no_request: evidence`); its own `direct` stays.
     """
     merged = {**manifest.paramify, **entry.paramify}
+    if pipeline:
+        for key in ignored_run_direct(manifest, entry):
+            merged[key] = PIPELINE_DEFAULTS[key]
     source = entry.paramify if "stack" in entry.paramify else manifest.paramify
     merged.pop("stack_name", None)
     if "stack" in source and "stack_name" in source:

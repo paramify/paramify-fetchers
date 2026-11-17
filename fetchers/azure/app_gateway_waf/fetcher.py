@@ -24,6 +24,8 @@ from azure_common import (  # noqa: E402
     model_attr,
     resource_group_from_id,
 )
+from azure_rest import target_subscription_scope
+from dotenv import load_dotenv
 from resource_exclusions import ResourceExclusions  # noqa: E402
 
 logger = logging.getLogger("azure_app_gateway_waf")
@@ -279,6 +281,7 @@ def build(raw_gateways: list | None, collector: Collector, subscription_id, cred
     # The completeness check already ran against the full list; listeners follow their gateway.
     exclusions = ResourceExclusions.from_env()
     exclusions.record_invalid(collector)
+    strict = target_subscription_scope() is not None
     listed = raw_gateways is not None
     raw_gateways, excluded = exclusions.split(
         raw_gateways or [], "application_gateway", resource_id=lambda g: model_attr(g, "id"),
@@ -289,6 +292,10 @@ def build(raw_gateways: list | None, collector: Collector, subscription_id, cred
     if cred is not None:
         for policy_id in sorted(set().union(*(referenced_policy_ids(g) for g in raw_gateways)) if raw_gateways else []):
             if arm_id_key(policy_id) not in policy_models:
+                if strict and not policy_id.lower().startswith(f"/subscriptions/{subscription_id}/".lower()):
+                    unresolved_by_id[arm_id_key(policy_id)] = unresolved_policy(
+                        policy_id, "outside_read_scope", "Not read: outside the explicit target subscription")
+                    continue
                 fetched, unresolved = fetch_policy(policy_id, cred, collector)
                 if fetched is not None:
                     policy_models[arm_id_key(policy_id)] = fetched
@@ -318,7 +325,7 @@ def build(raw_gateways: list | None, collector: Collector, subscription_id, cred
         exclusions.mark_unread()
     exclusions.warn_unmatched(logger)
     results = {"application_gateways": gateways, "listeners": listeners, "waf_policies": policy_list,
-               "excluded": excluded}
+               "excluded": excluded, **({"read_scope": "target_subscription"} if strict else {})}
     summary = {**summarize(gateways, listeners, policy_list, listed_policies is not None), **exclusions.summary(
         excluded, ("application_gateway", "waf_policy"), {
             "application_gateways": len(gateways) if listed else None, "listeners": len(listeners) if listed else None,
@@ -326,5 +333,11 @@ def build(raw_gateways: list | None, collector: Collector, subscription_id, cred
     return results, summary
 
 
+def main() -> int:
+    load_dotenv()
+    target_subscription_scope()
+    return run_fetcher("azure_app_gateway_waf", logger, build)
+
+
 if __name__ == "__main__":
-    sys.exit(run_fetcher("azure_app_gateway_waf", logger, build))
+    sys.exit(main())

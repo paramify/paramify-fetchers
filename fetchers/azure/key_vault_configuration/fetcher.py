@@ -374,8 +374,27 @@ def with_audit_logging(vault: dict, settings) -> dict:
     }
 
 
-def summarize(vaults: list[dict]) -> dict:
-    """RBAC adoption and recoverability are the headlines."""
+AUDIT_COUNTS = (
+    "vaults_with_diagnostic_settings", "vaults_with_audit_logging", "vaults_without_audit_logging",
+    "audit_logging_percentage",
+)
+
+
+def summarize(vaults: list[dict] | None) -> dict:
+    """RBAC adoption and recoverability are the headlines.
+
+    `None` means the vault list was not read: every count is null, not 0. The counts built from
+    diagnostic settings are null too while any vault's settings could not be read.
+    """
+    if vaults is None:
+        return {k: None for k in summarize([])}
+    counts = _summarize(vaults)
+    if any(v.get("audit_logging_enabled") is None for v in vaults):
+        counts.update({k: None for k in AUDIT_COUNTS})
+    return counts
+
+
+def _summarize(vaults: list[dict]) -> dict:
     total = len(vaults)
     rbac = sum(1 for v in vaults if v["rbac_authorization_enabled"])
     recoverable = sum(1 for v in vaults if v["recoverable"])
@@ -537,6 +556,7 @@ def main() -> int:
 
     exclusions.record_invalid(collector)
     listed = vaults is not None
+    summary = summarize(vaults)
     vaults = vaults or []
     if not listed:
         exclusions.mark_unread()
@@ -552,7 +572,7 @@ def main() -> int:
             "excluded": excluded,
         },
         summary={
-            **summarize(vaults),
+            **summary,
             "provider_registration_status": registration,
             **exclusions.summary(excluded, ("key_vault",), {"key_vaults": len(vaults) if listed else None}),
         },

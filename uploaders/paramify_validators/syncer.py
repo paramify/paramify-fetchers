@@ -473,12 +473,14 @@ def collect_validators(
     from framework.validators import (
         discover_validators,
         manifest_reference_ids,
+        pipeline_reference_ids,
         select_validators,
     )
 
     registry = discover_validators(root)
     if reference_ids is not None:
-        selected = select_validators(registry.values(), set(reference_ids))
+        pipeline = pipeline_reference_ids(discover_fetchers(root))
+        selected = select_validators(registry.values(), set(reference_ids) - pipeline)
     elif manifest_path is not None:
         fetchers = discover_fetchers(root)
         manifest = api.read_manifest(manifest_path)

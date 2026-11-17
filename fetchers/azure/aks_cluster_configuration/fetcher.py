@@ -208,6 +208,13 @@ def cluster_record(cluster: dict) -> dict:
         "resource_group": resource_group_from_id(resource_id),
         "provisioning_state": cluster.get("provisioning_state"),
         "sku_tier": cluster.get("sku_tier"),
+        # SDK-projected values before normalization, not the raw HTTP response.
+        # None means no value was supplied, not explicit false or an empty list.
+        "configuration_observations": {
+            key: cluster.get(key)
+            for key in ("rbac_enabled", "local_accounts_disabled",
+                        "enable_private_cluster", "authorized_ip_ranges")
+        },
         # --- API server exposure ---
         "public_fqdn": cluster.get("public_fqdn"),
         "private_fqdn": private_fqdn,
@@ -256,8 +263,13 @@ def cluster_record(cluster: dict) -> dict:
     }
 
 
-def summarize(clusters: list[dict]) -> dict:
-    """Coverage counts across the cluster estate, one per Prowler AKS check."""
+def summarize(clusters: list[dict] | None) -> dict:
+    """Coverage counts across the cluster estate, one per Prowler AKS check.
+
+    `clusters` None means the list could not be read: every count is null, never 0.
+    """
+    if clusters is None:
+        return dict.fromkeys(summarize([]))
     total = len(clusters)
     private = sum(1 for c in clusters if c["private_cluster"])
     restricted = sum(1 for c in clusters if c["api_server_access_restricted"])
@@ -412,7 +424,7 @@ def main() -> int:
             "excluded": excluded,
         },
         summary={
-            **summarize(clusters),
+            **summarize(clusters if listed else None),
             "provider_registration_status": registration,
             **exclusions.summary(excluded, KINDS, {"clusters": len(clusters) if listed else None}),
         },
