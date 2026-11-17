@@ -320,7 +320,11 @@ def test_every_fetcher_follows_the_shape(name):
     assert spec["evidence_set"]["reference_id"].startswith("EVD-GITHUB-")
     declared = {f["env"] for f in spec.get("config_schema", {}).values()}
     assert {env for env, _ in getattr(m, "CONFIG", {}).values()} <= declared
-    assert len(spec["evidence_set"]["instructions"].split()) <= 80
+    instructions = spec["evidence_set"]["instructions"]
+    if "\nCommands Executed:\n" not in instructions:
+        # Old-style prose instructions stay short. Those in the Script/Access/Commands/Output/Summary format are
+        # held to that format by test_fetcher_text_follows_the_format, which lists every summary field.
+        assert len(instructions.split()) <= 80
 
 
 @pytest.mark.parametrize("api_url,graphql", [
@@ -3129,7 +3133,7 @@ def run_calls(fake_github):
     return sorted({path for path, _ in fake_github.calls if "/actions/workflows/" in path})
 
 
-def test_image_signing_verdicts(fake, monkeypatch, tmp_path):
+def test_image_signing_verdicts(fake, monkeypatch, tmp_path, assert_summary_documented):
     newest = wf_run(5, 1, "image-promote.yml")
     runs = {("app", "image-promote.yml"): [wf_run(6, 0.5, "image-promote.yml", conclusion=None, status="in_progress"),
                                            newest, wf_run(4, 2, "image-promote.yml", conclusion="failure"),
@@ -3138,6 +3142,7 @@ def test_image_signing_verdicts(fake, monkeypatch, tmp_path):
     github = fake(signing_routes(runs=runs))
     code, ev, _ = run_fetcher("image_signing", monkeypatch, tmp_path)
     assert code == 0 and ev["metadata"]["partial_failure"] is False
+    assert_summary_documented("github/image_signing", ev["summary"])
     assert ev["summary"] == {
         "repositories_total": 4,
         "workflow_files": 5,
