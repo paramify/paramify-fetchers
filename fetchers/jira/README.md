@@ -79,15 +79,19 @@ the admin collector account still needs Administer Jira.
 
 Jira gives this answer in two cases:
 
-- **On every call, including `curl` tests:** `JIRA_BASE_URL` is the site URL
-  (`https://<site>.atlassian.net`), but the token is scoped. Adding scopes does
-  not help. Switch `JIRA_BASE_URL` to the gateway URL above. A fetcher run stops
-  at the first call with `bad_config` and gives the `tenant_info` link to use.
-- **On some calls, through the gateway:** the token lacks a scope that call
-  needs. The run records the call as `not_authorized`. Add the scope from the
-  table above. Do not add `manage:jira-configuration` to fix it.
+- **`JIRA_BASE_URL` is the site URL** (`https://<site>.atlassian.net`) and the
+  token is scoped. Every call fails, and adding scopes does not help. Switch
+  `JIRA_BASE_URL` to the gateway URL above. A fetcher run stops at the first call
+  with `bad_config` and gives the `tenant_info` link to use.
+- **Through the gateway:** the token lacks a scope that call needs. The run
+  records the call as `not_authorized`. Add the scope from the table above. Do
+  not add `manage:jira-configuration` to fix it. If *every* call fails through
+  the gateway, check the four scopes `GET /rest/api/3/myself` needs first
+  (`read:application-role:jira`, `read:group:jira`, `read:user:jira`,
+  `read:avatar:jira`). Each fetcher calls it first, and a token made only for
+  browsing projects usually lacks them.
 
-To test a scoped token by hand, call the gateway, not the site:
+To test a scoped token by hand, call the gateway, not the site, starting with `/myself`:
 
 ```sh
 curl -sS -u "$JIRA_EMAIL:$JIRA_API_TOKEN" -H 'Accept: application/json' \
