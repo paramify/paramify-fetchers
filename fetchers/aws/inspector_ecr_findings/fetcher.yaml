@@ -1,6 +1,6 @@
 name: aws_inspector_ecr_findings
-version: 0.1.0
-description: Collects active Inspector ECR findings, package remediation details, image inventory and scan coverage for one account and region, with optional repository and tag filters.
+version: 0.2.0
+description: Collects active Inspector ECR findings, package remediation details, image inventory and scan coverage for one account and region, with optional repository, tag, usage, push-age and severity filters.
 category: aws
 supports_targets: true
 runtime:
@@ -33,10 +33,30 @@ config_schema:
     type: string
     default: '[]'
     env: AWS_INSPECTOR_IMAGE_TAGS
-    description: JSON array of up to ten image tags, matched with OR. Empty includes untagged images too. Tags do not prove deployment.
+    description: JSON array of up to ten image tags, matched with OR. Empty includes untagged images too. An image matches by its own tags or by the tags of a multi-architecture index that points to it (read with ECR BatchGetImage). Tags do not prove deployment.
+  in_use_only:
+    type: boolean
+    default: false
+    env: AWS_INSPECTOR_IN_USE_ONLY
+    description: Only images Inspector reports as running in Amazon ECS or EKS now (inUseCount of at least 1). Inspector decides usage, so an image it has no coverage record for is out of scope rather than a coverage gap.
+  last_in_use_days:
+    type: integer
+    default: 0
+    env: AWS_INSPECTOR_LAST_IN_USE_DAYS
+    description: Only images Inspector saw running in ECS or EKS within this many days. 0 applies no filter. Like in_use_only, an image without Inspector coverage is out of scope.
+  pushed_within_days:
+    type: integer
+    default: 0
+    env: AWS_INSPECTOR_PUSHED_WITHIN_DAYS
+    description: Only images pushed to ECR within this many days. 0 applies no filter.
+  min_severity:
+    type: string
+    default: ''
+    env: AWS_INSPECTOR_MIN_SEVERITY
+    description: Only findings of this severity or higher (CRITICAL, HIGH, MEDIUM, LOW or INFORMATIONAL). UNTRIAGED findings are always included. Empty applies no filter.
 ksis:
   - KSI-SCR-MON
 evidence_set:
   reference_id: EVD-INSPECTOR-ECR-FINDINGS
   name: Inspector ECR Vulnerability Findings and Coverage
-  instructions: 'Script: aws/inspector_ecr_findings/fetcher.py. Read-only AWS APIs: STS GetCallerIdentity; ECR DescribeRepositories and DescribeImages; Inspector2 BatchGetAccountStatus, ListCoverage and ListFindings. Includes all active finding severities in the declared scope.'
+  instructions: 'Script: aws/inspector_ecr_findings/fetcher.py. Read-only AWS APIs: STS GetCallerIdentity; ECR DescribeRepositories, DescribeImages and, with image_tags, BatchGetImage; Inspector2 BatchGetAccountStatus, ListCoverage and ListFindings. Includes all active finding severities in the declared scope.'

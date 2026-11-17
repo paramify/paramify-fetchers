@@ -19,9 +19,9 @@ from defusedxml.ElementTree import ParseError
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "_lib"))
 from fetcher_status import report_failure  # noqa: E402, F401
 
-DETECTIONS = "/api/2.0/fo/asset/host/vm/detection/"
-KNOWLEDGE_BASE = "/api/2.0/fo/knowledge_base/vuln/"
-QVS = "/api/2.0/fo/knowledge_base/qvs/"
+DETECTIONS = "/api/6.0/fo/asset/host/vm/detection/"
+KNOWLEDGE_BASE = "/api/4.0/fo/knowledge_base/vuln/"
+QVS = "/api/3.0/fo/knowledge_base/qvs/"
 POLICIES = "/api/2.0/fo/compliance/policy/"
 POSTURE = "/api/2.0/fo/compliance/posture/info/"
 ENDPOINTS = {DETECTIONS, KNOWLEDGE_BASE, QVS, POLICIES, POSTURE}
@@ -30,6 +30,12 @@ ENDPOINTS = {DETECTIONS, KNOWLEDGE_BASE, QVS, POLICIES, POSTURE}
 # Assessment reports need bounded XML/JSON responses and strict pagination.
 # Share the upstream evidence client's platform policy and error vocabulary.
 from qualys_client import RETRY_CODES, QualysError, normalize_api_url  # noqa: E402
+
+MAX_RESPONSE_BYTES = 64 * 1024 * 1024
+
+
+class ResponseTooLarge(QualysError):
+    """One response exceeded MAX_RESPONSE_BYTES; callers may narrow the request."""
 
 
 def error_category(status: int, code: str) -> str:
@@ -40,6 +46,28 @@ def error_category(status: int, code: str) -> str:
     if status == 403 or code == "2012":
         return "not_authorized"
     return "partial_failure"
+
+
+LIMIT_HEADERS = {
+    "X-RateLimit-Limit": "limit",
+    "X-RateLimit-Window-Sec": "window",
+    "X-RateLimit-Remaining": "remaining",
+    "X-RateLimit-ToWait-Sec": "to_wait",
+    "X-Concurrency-Limit-Limit": "concurrency_limit",
+    "X-Concurrency-Limit-Running": "concurrency_running",
+}
+
+
+def limit_detail(status, code: str, headers) -> str:
+    parts = [
+        f"HTTP {status if status is not None else 'none'}",
+        f"code {code or 'none'}",
+    ]
+    for header, label in LIMIT_HEADERS.items():
+        raw = str(headers.get(header, "")).strip()
+        if re.fullmatch(r"-?\d{1,10}", raw):
+            parts.append(f"{label}={raw}")
+    return ", ".join(parts)
 
 
 def value(node, path: str, required: bool = False) -> str:
@@ -158,6 +186,7 @@ class QualysReportClient:
             self._last_request = time.monotonic()
             retry_code = "partial_failure"
             headers = {}
+            status, code = None, ""
             try:
                 with self.session.get(
                     self.base_url + path,
@@ -171,8 +200,8 @@ class QualysReportClient:
                     chunks, size = [], 0
                     for chunk in response.iter_content(1024 * 1024):
                         size += len(chunk)
-                        if size > 64 * 1024 * 1024:
-                            raise QualysError(
+                        if size > MAX_RESPONSE_BYTES:
+                            raise ResponseTooLarge(
                                 "Qualys page exceeds 64 MiB; reduce page_size"
                             )
                         chunks.append(chunk)
@@ -220,7 +249,8 @@ class QualysReportClient:
                 retry_code = "target_unreachable"
             if attempt == self.retries:
                 raise QualysError(
-                    f"Qualys request failed after {attempt + 1} attempts at {path}",
+                    f"Qualys request failed after {attempt + 1} attempts at {path} "
+                    f"({limit_detail(status, code, headers)})",
                     retry_code,
                 )
             wait = 2**attempt
@@ -236,11 +266,17 @@ class QualysReportClient:
                 wait = max(wait, delay)
             if wait > 60:
                 raise QualysError(
-                    "Qualys retry delay exceeds 60 seconds; retry the run later",
+                    f"Qualys asked to wait {wait:.0f} seconds at {path}, more than "
+                    f"the 60 second limit; retry the run later "
+                    f"({limit_detail(status, code, headers)})",
                     retry_code,
                 )
             logging.warning(
-                "Retrying Qualys %s request in %.1f seconds", retry_code, wait
+                "Retrying Qualys %s request at %s in %.1f seconds (%s)",
+                retry_code,
+                path,
+                wait,
+                limit_detail(status, code, headers),
             )
             self.sleep(wait)
         raise AssertionError("unreachable")
