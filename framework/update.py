@@ -51,6 +51,7 @@ from packaging.version import InvalidVersion, Version
 RELEASE_TAG = re.compile(r"^v(?P<version>\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)$")
 DISTRIBUTION = "paramify-fetchers"
 HIGHLIGHTS_DIR = "releases"
+UNRELEASED = "unreleased"
 STATE_FILE = Path(".paramify") / "state.json"
 NO_CHECK_ENV = "PARAMIFY_NO_UPDATE_CHECK"
 CONTAINER_ENV = "PARAMIFY_CONTAINER"
@@ -342,6 +343,42 @@ def _load_highlights(text: Optional[str], schema: dict) -> Optional[dict]:
     # A broken file falls back to "see the changelog" rather than failing the
     # update: highlights are a nicety, the CHANGELOG is the record.
     return doc if isinstance(doc, dict) and not highlights_errors(doc, schema) else None
+
+
+def _highlight_files(root: Path, ref: str, schema: dict) -> Dict[str, List[dict]]:
+    """{version: rows} for every readable releases/*.yaml at `ref`. A missing
+    directory, an unparsable file or one the schema rejects contributes nothing."""
+    try:
+        listing = git(root, "ls-tree", "--name-only", ref, f"{HIGHLIGHTS_DIR}/").splitlines()
+    except UpdateError:
+        return {}
+    paths = [p for p in listing if p.endswith(".yaml")]
+    out: Dict[str, List[dict]] = {}
+    for path, text in read_at(root, ref, paths).items():
+        doc = _load_highlights(text, schema)
+        if doc:
+            out[Path(path).stem] = doc.get("highlights") or []
+    return out
+
+
+def curated_rows(root: Path, head: str, target: str) -> List[dict]:
+    """The highlight rows `target` has and `head` doesn't, each with its `release`.
+
+    Rows are compared by tag and title across every releases/*.yaml, so a row
+    that moves from unreleased.yaml into a release's file when that release is
+    cut is not shown a second time. Unreleased rows come first, then releases
+    newest first; rows keep their order within a file.
+    """
+    schema = highlights_schema()
+    have = {(h["tag"], h["title"]) for rows in _highlight_files(root, head, schema).values() for h in rows}
+    files = _highlight_files(root, target, schema)
+
+    released = [r for r in (parse_release(f"v{v}") for v in files if v != UNRELEASED) if r]
+    order = [UNRELEASED] * (UNRELEASED in files) + [r.version for r in sorted(released, key=lambda r: r.key, reverse=True)]
+    out = []
+    for version in order:
+        out.extend({**h, "release": version} for h in files[version] if (h["tag"], h["title"]) not in have)
+    return out
 
 
 def release_notes(root: Path, target: Release, releases: Sequence[Release]) -> List[dict]:

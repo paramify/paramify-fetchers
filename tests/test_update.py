@@ -216,6 +216,34 @@ def test_changelog_parsing_joins_continuation_lines():
     assert up.entry_title("Plain entry. With more.") == "Plain entry"
 
 
+def test_curated_rows_are_those_the_target_adds(repo):
+    rows = up.curated_rows(repo, "v0.1.0-beta", "v0.3.0-beta")
+    assert [r["title"] for r in rows] == ["Gadgets for everyone", "demo_alpha reads more", "A nicer screen"]
+    assert {r["release"] for r in rows} == {"0.3.0-beta"}
+    assert up.curated_rows(repo, "v0.3.0-beta", "v0.3.0-beta") == []
+
+
+def test_a_row_moved_into_a_release_file_is_not_shown_again(repo, tmp_path):
+    upstream = tmp_path / "upstream"
+    row = "highlights:\n  - tag: new\n    title: Sprockets\n"
+    _commit(upstream, {"releases/unreleased.yaml": "version: unreleased\n" + row}, "add row")
+    before = _git(upstream, "rev-parse", "HEAD").strip()
+    _git(upstream, "mv", "releases/unreleased.yaml", "releases/0.4.0-beta.yaml")
+    _commit(upstream, {"releases/0.4.0-beta.yaml": "version: 0.4.0-beta\n" + row,
+                       "releases/unreleased.yaml": "version: unreleased\nhighlights: []\n"}, "release")
+    _git(repo, "fetch", "-q", "origin")
+    assert [r["title"] for r in up.curated_rows(repo, "v0.3.0-beta", before)] == ["Sprockets"]
+    assert up.curated_rows(repo, before, "origin/main") == []
+
+
+def test_curated_rows_survive_a_missing_or_broken_releases_dir(repo, tmp_path):
+    upstream = tmp_path / "upstream"
+    _commit(upstream, {"releases/unreleased.yaml": "version: [not, a, string\n"}, "broken file")
+    _git(repo, "fetch", "-q", "origin")
+    assert up.curated_rows(repo, "v0.1.0-beta", "v0.2.0-beta") == []      # neither tree has releases/
+    assert [r["release"] for r in up.curated_rows(repo, "v0.1.0-beta", "origin/main")] == ["0.3.0-beta"] * 3
+
+
 # --------------------------------------------------------------------------- #
 # The command: breaking stop, switch, rollback
 # --------------------------------------------------------------------------- #

@@ -1,15 +1,15 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Release Highlights Schema",
-  "description": "The short, user-facing summary of one release, in releases/<version>.yaml. `paramify update` shows it instead of the CHANGELOG, which is written for maintainers and runs to thousands of lines. A release without a file still updates; the command points at its CHANGELOG section instead. See releases/README.md.",
+  "description": "The short, user-facing rows for one release, in releases/<version>.yaml, or for main since the last release, in releases/unreleased.yaml. `paramify update` shows the rows that are new between the commit you run and the one you move to, instead of the CHANGELOG, which is written for maintainers and runs to thousands of lines. See releases/README.md.",
   "type": "object",
   "additionalProperties": false,
   "required": ["version", "highlights"],
   "properties": {
     "version": {
       "type": "string",
-      "pattern": "^\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z.]+)?$",
-      "description": "The release, as its CHANGELOG heading writes it and without the tag's leading v (0.6.0-beta for tag v0.6.0-beta). Must equal the file's basename."
+      "pattern": "^(unreleased|\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z.]+)?)$",
+      "description": "The release, as its CHANGELOG heading writes it and without the tag's leading v (0.6.0-beta for tag v0.6.0-beta), or `unreleased` for the file that collects rows on main between releases. Must equal the file's basename."
     },
     "date": {
       "type": "string",
@@ -18,9 +18,9 @@
     },
     "highlights": {
       "type": "array",
-      "minItems": 1,
-      "maxItems": 15,
-      "description": "Three to five rows of what is new, plus one `breaking` row per Breaking entry in the CHANGELOG. The 3-5 limit on the other rows is checked by tests/test_release_highlights.py, not here, so the message can say which rows to cut.",
+      "minItems": 0,
+      "maxItems": 40,
+      "description": "Rows of what is new, plus one `breaking` row per Breaking entry in the CHANGELOG. A release file keeps three to five non-breaking rows; that limit is checked by tests/test_release_highlights.py, not here, so the message can say which rows to cut.",
       "items": { "$ref": "#/$defs/highlight" }
     }
   },
@@ -64,7 +64,11 @@
           "minItems": 1,
           "uniqueItems": true,
           "items": { "type": "string", "pattern": "^[a-z0-9_*?\\[\\]]+$" },
-          "description": "Fetcher names the change affects. Shell-style globs work (okta_*). A breaking row with fetchers names each of the user's manifests that uses one; a fetcher row moves to the top when the user runs it."
+          "description": "Fetcher names the change affects. Shell-style globs work (okta_*). A breaking row with fetchers names each of the user's manifests that uses one. A breaking row with neither `fetchers` nor `custom_fetchers` is treated as touching everyone."
+        },
+        "custom_fetchers": {
+          "type": "boolean",
+          "description": "True when the change affects only fetchers the user wrote themselves (a change to the fetcher contract that no shipped fetcher is affected by). The row then touches only clones that have their own fetcher directories."
         }
       },
       "if": { "properties": { "tag": { "const": "breaking" } } },
