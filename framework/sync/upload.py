@@ -42,6 +42,7 @@ from framework.sync import engine
 from framework.sync.model import Action, Outcome, Plan, SyncContext, Unknown
 from framework.sync.providers.delivery import (
     BATCHES_OFF,
+    WAF_CHECK_OFF,
     DeliveryProvider,
     delivery_mode,
 )
@@ -143,8 +144,9 @@ class _Setup:
     def __init__(self, run_dir: Any, config_path: Optional[Path], stack: Optional[str],
                  only_file: Optional[str], *, upload_cfg: Optional[Dict[str, Any]] = None,
                  token: Optional[str] = None, base_url: Optional[str] = None,
-                 owner: Optional[str] = None) -> None:
+                 owner: Optional[str] = None, waf_check: bool = True) -> None:
         load_dotenv()
+        self.waf_check = waf_check
         self.run_dir = Path(run_dir)
         if not self.run_dir.is_dir():
             raise ValueError(f"No run directory to upload: {self.run_dir}")
@@ -166,6 +168,12 @@ class _Setup:
         # Plan notes the caller adds (see manifest_notes).
         self.notes: List[str] = []
 
+    def plan_notes(self, root: Path, manifest_path: Optional[Path], stack: Optional[str],
+                   owner: Optional[str]) -> List[str]:
+        """The manifest notes, then a note when the WAF pre-check is off."""
+        notes = manifest_notes(self.run_dir, root, manifest_path, stack, owner)
+        return notes if self.waf_check else [*notes, WAF_CHECK_OFF]
+
     def client(self) -> Client:
         token = self.token or resolve_upload_token()[0]
         if not token:
@@ -184,7 +192,8 @@ class _Setup:
         on_delivery_event: Optional[Event] = None,
         capability: Optional[Capability] = None,
     ) -> Tuple[List[Any], DeliveryProvider]:
-        delivery = DeliveryProvider(run_state, on_event=on_delivery_event, capability=capability)
+        delivery = DeliveryProvider(run_state, on_event=on_delivery_event, capability=capability,
+                                    waf_check=self.waf_check)
         providers: List[Any] = [EvidenceSetsProvider(custom_tags, category_display_names(root), self.config)]
         if with_validators:
             from framework.api import reference_ids_from_run  # api imports this module
@@ -232,14 +241,15 @@ def plan_upload(
     with_validators: bool = False,
     manifest_path: Optional[Path] = None,
     owner: Optional[str] = None,
+    waf_check: bool = True,
 ) -> Plan:
     """The plan for uploading `run_dir`. Online it reads the workspace (read-only); offline it needs no token.
 
     `manifest_path` is the manifest to compare the run's Paramify settings with
     (see manifest_notes); without it, the run's own manifest is used.
     """
-    setup = _Setup(run_dir, config_path, stack, only_file, owner=owner)
-    notes = manifest_notes(setup.run_dir, root, manifest_path, stack, owner)
+    setup = _Setup(run_dir, config_path, stack, only_file, owner=owner, waf_check=waf_check)
+    notes = setup.plan_notes(root, manifest_path, stack, owner)
     reader = None
     capability: Optional[Capability] = None  # offline: no check, no note
     if online:
@@ -487,6 +497,7 @@ def run_upload(
     deprecations: Sequence[str] = (),
     manifest_path: Optional[Path] = None,
     owner: Optional[str] = None,
+    waf_check: bool = True,
 ) -> Dict[str, Any]:
     """Plan and apply the upload of one run; see the module docstring.
 
@@ -502,8 +513,8 @@ def run_upload(
     """
     emit: Event = on_event or (lambda _ev: None)
     setup = _Setup(run_dir, config_path, stack, only_file,
-                   upload_cfg=upload_cfg, token=token, base_url=base_url, owner=owner)
-    setup.notes = manifest_notes(setup.run_dir, root, manifest_path, stack, owner)
+                   upload_cfg=upload_cfg, token=token, base_url=base_url, owner=owner, waf_check=waf_check)
+    setup.notes = setup.plan_notes(root, manifest_path, stack, owner)
     policy = resolve_tag_policy(setup.config, override_off=None if custom_tags else NO_TAGS)
     report = _Report(emit, dry_run, Tagger(None, "", policy=policy, display_names=category_display_names(root)))
     base = {"run_dir": str(setup.run_dir), "base_url": setup.base_url, "dry_run": dry_run,
