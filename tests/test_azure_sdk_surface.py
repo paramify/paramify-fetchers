@@ -1626,6 +1626,45 @@ REQUIRED_MODEL_FIELDS: list[tuple[str, str, list[str], str]] = [
     ),
     (
         "azure.mgmt.containerservice.models",
+        "ManagedClusterAgentPoolProfile",
+        ["enable_auto_scaling"],
+        "azure/aks_cluster_configuration — a renamed enable_auto_scaling counts no pool as autoscaling",
+    ),
+    (
+        "azure.mgmt.containerservice.models",
+        "ManagedClusterAutoUpgradeProfile",
+        ["node_os_upgrade_channel"],
+        "azure/aks_cluster_configuration — a renamed node_os_upgrade_channel reads every cluster's node OS channel as unknown",
+    ),
+    # azure-mgmt-postgresqlflexibleservers is a TypeSpec SDK: data_encryption is
+    # declared on ServerProperties and flattened onto Server for attribute access,
+    # so the properties model is where a rename would show.
+    (
+        "azure.mgmt.postgresqlflexibleservers.models",
+        "ServerProperties",
+        ["data_encryption"],
+        "azure/postgresql_configuration — a renamed data_encryption reads every server's key source as unknown",
+    ),
+    (
+        "azure.mgmt.postgresqlflexibleservers.models",
+        "DataEncryption",
+        ["type"],
+        "azure/postgresql_configuration — data encryption type (AzureKeyVault or SystemManaged)",
+    ),
+    (
+        "azure.mgmt.rdbms.mysql_flexibleservers.models",
+        "Server",
+        ["data_encryption"],
+        "azure/mysql_configuration — a renamed data_encryption reads every server's key source as unknown",
+    ),
+    (
+        "azure.mgmt.rdbms.mysql_flexibleservers.models",
+        "DataEncryption",
+        ["type"],
+        "azure/mysql_configuration — data encryption type (AzureKeyVault or SystemManaged)",
+    ),
+    (
+        "azure.mgmt.containerservice.models",
         "AgentPoolSecurityProfile",
         ["enable_secure_boot", "enable_vtpm", "ssh_access"],
         "azure/aks_cluster_configuration — node pool Trusted Launch and SSH access",
