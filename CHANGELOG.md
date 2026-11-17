@@ -12,6 +12,12 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **Summary counts for database encryption, AKS autoscaling and node OS patching.**
+  `azure_postgresql_configuration` and `azure_mysql_configuration` 0.3.0 add `customer_managed_key_servers` and
+  `data_encryption_unknown_servers` from each server's data encryption type (AzureKeyVault or SystemManaged); a
+  server with no type is counted apart, never as platform-managed. `azure_aks_cluster_configuration` 0.6.0 adds
+  `autoscaling_agent_pools`, `node_os_auto_upgrade_clusters` (SecurityPatch or NodeImage) and
+  `node_os_upgrade_channel_unknown_clusters`, null like the other counts when the cluster list can't be read.
 - **`wiz_inventory`**, the Wiz cloud resource inventory, as a pipeline fetcher (`kind: inventory`, `id_scheme:
   wiz-resource-id`). One record per resource from `cloudResourcesV2` under `payload.data`, keyed by the Wiz resource
   id, with its cloud ID (`external_id`), account, region, type, IPs, OS, image, environment and owner, and internet

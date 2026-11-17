@@ -1,5 +1,5 @@
 name: azure_mysql_configuration
-version: 0.2.1
+version: 0.3.0
 description: >-
   Shows whether each MySQL flexible server requires encrypted connections, accepts only current TLS versions, logs connections, blocks public access, and has geo-redundant backups and a standby.
 category: azure
@@ -107,3 +107,5 @@ evidence_set:
     Will the server survive a zone or region loss?
     - geo_redundant_backup_servers — Number of servers whose backups are geo-redundant (stored in a second region too)
     - high_availability_servers — Number of servers with a high-availability mode other than Disabled (ZoneRedundant or SameZone); Disabled or no mode doesn't count
+    - customer_managed_key_servers — Number of servers whose data is encrypted with a customer-managed key from Azure Key Vault (data encryption type AzureKeyVault) rather than a platform-managed key
+    - data_encryption_unknown_servers — Number of servers for which Azure returned no data encryption type; counted apart, never as platform-managed

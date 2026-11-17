@@ -42,6 +42,8 @@ logger = logging.getLogger("azure_aks_cluster_configuration")
 # auto_upgrade_profile.upgrade_channel: "none" is the literal for "no automatic
 # upgrades"; an absent field means the same thing.
 UPGRADE_CHANNEL_NONE = "none"
+# auto_upgrade_profile.node_os_upgrade_channel values that patch node images on their own.
+NODE_OS_AUTO_UPGRADE_CHANNELS = frozenset({"securitypatch", "nodeimage"})
 KINDS = ("cluster",)
 
 
@@ -298,6 +300,12 @@ def summarize(clusters: list[dict] | None) -> dict:
         ),
         "clusters_with_public_node_ips": sum(1 for c in clusters if c["node_public_ip_pools"]),
         "total_agent_pools": sum(len(c["agent_pool_profiles"]) for c in clusters),
+        "autoscaling_agent_pools": sum(1 for c in clusters for p in c["agent_pool_profiles"] if p.get("enable_auto_scaling") is True),
+        # SecurityPatch and NodeImage patch node images automatically; None and Unmanaged do not.
+        "node_os_auto_upgrade_clusters": sum(
+            1 for c in clusters if str(c.get("node_os_upgrade_channel") or "").lower() in NODE_OS_AUTO_UPGRADE_CHANNELS
+        ),
+        "node_os_upgrade_channel_unknown_clusters": sum(1 for c in clusters if c.get("node_os_upgrade_channel") is None),
         **summarize_node_security([p for c in clusters for p in c["agent_pool_profiles"]]),
         # Sorted unique: the version spread at a glance, and a byte-stable payload.
         "kubernetes_versions": sorted(

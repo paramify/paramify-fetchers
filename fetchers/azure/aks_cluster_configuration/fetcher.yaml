@@ -1,5 +1,5 @@
 name: azure_aks_cluster_configuration
-version: 0.5.0
+version: 0.6.0
 description: >-
   Shows whether each AKS cluster's API server is private or IP-restricted, who can sign in, and whether it has network policy, auto-upgrade, Defender and Azure Monitor.
 category: azure
@@ -90,6 +90,9 @@ evidence_set:
     Which clusters and node pools were checked?
     - total_clusters — Number of in-scope AKS clusters, including clusters still provisioning or in a failed state; every count below about clusters is out of this total; null when the cluster list could not be read, as is every count below
     - total_agent_pools — Number of node pools (agent pools) across the in-scope clusters; null when the cluster list could not be read
+    - autoscaling_agent_pools — Number of node pools with the cluster autoscaler enabled; null when the cluster list could not be read
+    - node_os_auto_upgrade_clusters — Number of clusters whose node OS upgrade channel patches node images automatically (SecurityPatch or NodeImage); None and Unmanaged do not
+    - node_os_upgrade_channel_unknown_clusters — Number of clusters for which Azure returned no node OS upgrade channel; counted apart, never as automatic
     - kubernetes_versions — List of the distinct Kubernetes versions the clusters are set to run (the requested version, which an upgrade in progress may not have reached yet), sorted; null when the cluster list could not be read
     - provider_registration_status — Whether the AKS provider (Microsoft.ContainerService) is registered on the subscription: registered, not_registered or unknown
 
