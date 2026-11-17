@@ -12,6 +12,11 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- `paramify upload --no-waf-check` turns off the check that drops a file holding `../`, `/etc/passwd`, `/bin/sh`,
+  `/bin/bash` or `<script` before the upload. Those strings were confirmed blocked on one host's WAF, but some hosts
+  exempt the upload routes, so CVE text in a findings file was dropped though the WAF would accept it. With the flag
+  the file is sent; if the WAF does refuse it (a 403 with no request id), the upload still drops only that file. The
+  plan notes that the check is off. `--plan` takes the flag too.
 - **`wiz_inventory`**, the Wiz cloud resource inventory, as a pipeline fetcher (`kind: inventory`, `id_scheme:
   wiz-resource-id`). One record per resource from `cloudResourcesV2` under `payload.data`, keyed by the Wiz resource
   id, with its cloud ID (`external_id`), account, region, type, IPs, OS, image, environment and owner, and internet
@@ -199,6 +204,28 @@ schemas and the `paramify` CLI — not the internal code.
   `change_before_approval_field` `true`, and the new
   `summary.changes_recorded_before_approval_field` counts these changes.
 
+- **`github_image_signing` 0.1.0 shows whether GitHub Actions signs and
+  verifies container images with cosign.** It reads the workflow files on
+  each default branch and records every `cosign sign` step with the kind of
+  key it uses (a key management service, keyless or other), whether the
+  command names the image by digest, whether it skips the transparency log,
+  and whether the step can be skipped or fail without failing the run
+  (an `if`, `continue-on-error`, or `|| true` in the script). It records
+  every `cosign verify` step and what it checks against, and lists the
+  verify steps that cannot fail the run. It lists the workflows that mention
+  cosign without a cosign command in the file, where signing happens
+  somewhere the file does not show, and the workflows that call a reusable
+  workflow, whose signing it does not read. For each workflow that signs, it
+  reads the runs in the window by outcome and the latest successful run,
+  leaving out pull request runs, which it counts apart. The summary lists the repositories that sign
+  without verifying. It needs Contents for the files and Actions for the
+  runs; with `include_runs: false` it reads the files only and every run
+  figure is null. It reads workflow files, not the registry, and copies no
+  script text into the evidence. KSI-SVC-VRI. Not yet run against a live
+  organization. The workflow file reader and the newest-first run walk moved
+  from `github_actions_security` and `github_workflow_runs` into the shared
+  GitHub client so that the three fetchers use one copy; their evidence is
+  unchanged.
 - **`wiz_vulnerability_findings` 0.4.0: SLA columns.** After the 43 legacy
   columns (unchanged, so existing intake presets keep mapping), the CSV adds the
   Wiz fields Paramify's remediation SLAs depend on: `Is Internet Reachable` and
@@ -421,6 +448,20 @@ schemas and the `paramify` CLI — not the internal code.
   - Needs read on the workspace's logs (Reader, or a custom role with
     `workspaces/query/read` on the four tables, plus `IdentityInfo` when `groups`
     is set). Maps to KSI-IAM-APM, KSI-SVC-SIN, KSI-IAM-SNU and KSI-MLA-LET.
+- **`azure_aks_workload_security`** (`EVD-AZURE-AKS-WORKLOAD-SECURITY`): workload security
+  read from each AKS cluster's Kubernetes API with a Microsoft Entra token, with no
+  kubectl and no stored kubeconfig. For every workload (pods grouped by the Deployment,
+  StatefulSet, DaemonSet or Job that runs them) it records each container's effective
+  security context: non-root, privilege escalation, read-only root filesystem, dropped and
+  added capabilities, privileged, seccomp profile, plus host namespaces and host path
+  volumes. For every namespace it records the Pod Security Admission levels and network
+  policy coverage, including default-deny policies and workloads no policy selects, and
+  for the cluster whether a network policy engine enforces those policies at all.
+  System namespaces (`AKS_SYSTEM_NAMESPACES`) and Windows workloads are listed but not
+  judged. Needs Azure Kubernetes Service Cluster User Role and Azure Kubernetes Service
+  RBAC Reader on the cluster, Entra integration, and a network path to the API server; a
+  list that cannot be read leaves its counts null and fails the run. No environment
+  variables, images, secrets or logs are read.
 - **`checkov_bicep` 0.3.0: the TFVC source signs in with Entra when no token is set.**
   Before, `source_type: tfvc` authenticated only with the `tfvc_token` PAT.
   - With no `tfvc_token`, the fetcher gets an Entra token for Azure DevOps from
