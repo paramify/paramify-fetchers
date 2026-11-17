@@ -21,7 +21,7 @@ from fetcher_status import report_failure  # noqa: E402, F401
 
 DETECTIONS = "/api/2.0/fo/asset/host/vm/detection/"
 KNOWLEDGE_BASE = "/api/2.0/fo/knowledge_base/vuln/"
-QVS = "/api/2.0/fo/knowledge_base/qvs/"
+QVS = "/api/3.0/fo/knowledge_base/qvs/"
 POLICIES = "/api/2.0/fo/compliance/policy/"
 POSTURE = "/api/2.0/fo/compliance/posture/info/"
 ENDPOINTS = {DETECTIONS, KNOWLEDGE_BASE, QVS, POLICIES, POSTURE}
@@ -30,6 +30,12 @@ ENDPOINTS = {DETECTIONS, KNOWLEDGE_BASE, QVS, POLICIES, POSTURE}
 # Assessment reports need bounded XML/JSON responses and strict pagination.
 # Share the upstream evidence client's platform policy and error vocabulary.
 from qualys_client import RETRY_CODES, QualysError, normalize_api_url  # noqa: E402
+
+MAX_RESPONSE_BYTES = 64 * 1024 * 1024
+
+
+class ResponseTooLarge(QualysError):
+    """One response exceeded MAX_RESPONSE_BYTES; callers may narrow the request."""
 
 
 def error_category(status: int, code: str) -> str:
@@ -40,7 +46,6 @@ def error_category(status: int, code: str) -> str:
     if status == 403 or code == "2012":
         return "not_authorized"
     return "partial_failure"
-
 
 
 LIMIT_HEADERS = {
@@ -54,7 +59,10 @@ LIMIT_HEADERS = {
 
 
 def limit_detail(status, code: str, headers) -> str:
-    parts = [f"HTTP {status if status is not None else 'none'}", f"code {code or 'none'}"]
+    parts = [
+        f"HTTP {status if status is not None else 'none'}",
+        f"code {code or 'none'}",
+    ]
     for header, label in LIMIT_HEADERS.items():
         raw = str(headers.get(header, "")).strip()
         if re.fullmatch(r"-?\d{1,10}", raw):
@@ -192,8 +200,8 @@ class QualysReportClient:
                     chunks, size = [], 0
                     for chunk in response.iter_content(1024 * 1024):
                         size += len(chunk)
-                        if size > 64 * 1024 * 1024:
-                            raise QualysError(
+                        if size > MAX_RESPONSE_BYTES:
+                            raise ResponseTooLarge(
                                 "Qualys page exceeds 64 MiB; reduce page_size"
                             )
                         chunks.append(chunk)

@@ -79,9 +79,18 @@ without them; upload requires assessment selection and a configured preset.
 - Follow every documented truncation continuation. Preserve the original scope
   and filters, reject changed origins/endpoints, and fail on non-advancing cursors,
   unexpected warnings, duplicate identities, and page/record limits.
-- VMDR requires KnowledgeBase records for every QID and a successful QVS request
-  for every distinct CVE (at most 25 CVEs per request). No CVEs means no QVS call.
-  A valid QVS response may omit a CVE: that CVE is explicitly `unavailable`, not a
+- VMDR requires KnowledgeBase records for every QID and QVS data for every distinct
+  CVE. No CVEs means no QVS call. QVS is read by change window, not per CVE: each
+  unfiltered QVS request returns every record whose score last changed in an
+  `qvs_last_modified_after`/`qvs_last_modified_before` window (Qualys limits a window
+  to about 89 days). The fetcher walks windows newest first, keeps only the CVEs it
+  needs, and stops once it has them all or after four empty windows. Every record in
+  QVS is covered in a few dozen requests, whatever the number of CVEs, where per-CVE
+  lookups (at most 25 CVEs per request) can exceed the hourly rate limit for large
+  environments. A window too large for one response is split in half. CVEs the walk
+  does not return are looked up individually; more than 500 of them, or a record
+  outside its requested window, fails the report.
+- A valid QVS response may omit a CVE: that CVE is explicitly `unavailable`, not a
   zero score or a negative CISA finding. Request failures and malformed enrichment
   fail the report. There is no option to skip required enrichment.
 - STIG results cover evaluated postures exposed by Qualys. Unscanned hosts and
@@ -111,8 +120,10 @@ scope also changes what a complete report contains.
 
 ## API compatibility and verification
 
-Uses the documented FO v2 endpoints for detections, KnowledgeBase, QVS, policy
-listing, and posture information. The product's Policy Audit naming does not
+Uses the documented FO v2 endpoints for detections, KnowledgeBase, policy listing,
+and posture information, and the v3 QVS endpoint. Unfiltered QVS listing by change
+window is observed behavior rather than documented API; the window checks above
+fail the report if it changes. The product's Policy Audit naming does not
 change this explicit API contract; PCRS gateway APIs and JWT authentication are
 not implemented. Support on other Qualys platforms depends on endpoint availability
 and subscription entitlements.

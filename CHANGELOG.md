@@ -1771,6 +1771,13 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- `qualys_vmdr_vulnerability_findings` reads QVS by change window instead of 25 CVEs per request. It walks
+  `qvs_last_modified_after`/`qvs_last_modified_before` windows newest first and keeps the CVEs it needs, so QVS
+  enrichment takes a few dozen requests regardless of how many CVEs the detections reference. Per-CVE lookups
+  could exceed the QVS hourly rate limit in large environments. Windows too large for one response are split; CVEs
+  the walk does not return are looked up individually, and a record outside its window fails the report. QVS
+  requests use the v3 endpoint.
+
 - `qualys_vmdr_vulnerability_findings` and `qualys_stig_compliance_report` failures caused by throttling name the
   endpoint, HTTP status, Qualys code, requested wait and the numeric `X-RateLimit-*` / `X-Concurrency-Limit-*` header
   values, so the limit that was hit is visible in the failure reason. Response bodies are still never reported.
