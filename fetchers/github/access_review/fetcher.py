@@ -99,8 +99,20 @@ def collect(client, org, repos, config):
     owners = client.paginate_required(f"orgs/{login}/members", {"role": "admin"})
     members = client.paginate_required(f"orgs/{login}/members", {"role": "all"})
     outsiders = client.paginate_required(f"orgs/{login}/outside_collaborators")
+    failures_before = len(client.failures)
     state, invitations = client.paginate(f"orgs/{login}/invitations")
+    invitation_failures = client.failures[failures_before:]
     teams = client.paginate_required(f"orgs/{login}/teams")
+    # GitHub answers a bare 404 for the invitation list of an organization that has none to give, such as one whose
+    # accounts an identity provider provisions (measured on an Enterprise Managed Users organization), and the same
+    # 404 to a token without members: read. Outside collaborators and teams need that same permission, so when both
+    # were read the 404 describes the organization, not the token: unavailable, recorded, and not a failure.
+    invitations_available = None if state is not None else True
+    if state == "failed" and outsiders is not None and teams is not None \
+            and [f["type"] for f in invitation_failures] == ["HTTP 404"]:
+        del client.failures[failures_before:failures_before + 1]
+        del client.codes[failures_before:failures_before + 1]
+        invitations_available = False
     roles, roles_available = organization_roles(client, login) if config["include_organization_roles"] else \
         (None, None)
     if owners is None or members is None or outsiders is None or teams is None:
@@ -125,7 +137,10 @@ def collect(client, org, repos, config):
          "inviter": (i.get("inviter") or {}).get("login")} for i in invitations]
     held = None if roles is None else [r for r in roles if r["users"] or r["teams"]]
     return {
-        "metadata": {"organization_roles_available": roles_available},
+        "metadata": {"organization_roles_available": roles_available,
+                     # True: read. False: the organization has no invitation list (pending_invitations stays null).
+                     # None: the read failed, and the failure is listed.
+                     "pending_invitations_available": invitations_available},
         "summary": {
             "owners": sorted(owner_set),
             "owners_total": len(owner_set),

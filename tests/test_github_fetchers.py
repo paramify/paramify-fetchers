@@ -3668,3 +3668,69 @@ def test_audit_log_truncation_is_judged_on_the_events_read_not_the_events_kept(f
 ])
 def test_audit_event_repository_scope(event, allow, exclude, kept):
     assert MODS["audit_log"].in_repository_scope(event, allow, exclude) is kept
+
+
+# --- access_review: an organization with no invitation list -------------------------------
+
+NO_INVITATIONS = (404, {"message": "Not Found"}, {"X-Accepted-GitHub-Permissions": "members=read"})
+
+
+def test_invitations_read_normally_are_marked_available(fake, monkeypatch, tmp_path):
+    fake(access_routes())
+    code, ev, _ = run_fetcher("access_review", monkeypatch, tmp_path)
+    assert code == 0 and ev["metadata"]["pending_invitations_available"] is True
+    assert ev["summary"]["pending_invitations"] == 1
+
+
+def test_a_404_on_invitations_with_teams_and_outsiders_readable_is_unavailable_not_a_failure(fake, monkeypatch, tmp_path):
+    routes = access_routes()
+    routes[f"orgs/{ORG}/invitations"] = NO_INVITATIONS
+    fake(routes)
+    code, ev, status = run_fetcher("access_review", monkeypatch, tmp_path)
+    assert code == 0 and ev["metadata"]["partial_failure"] is False and ev["metadata"]["api_failures"] == []
+    assert ev["metadata"]["pending_invitations_available"] is False
+    assert ev["pending_invitations"] is None and ev["summary"]["pending_invitations"] is None  # unknown, never zero
+    assert ev["summary"]["members_total"] == 2 and ev["summary"]["teams_total"] == 1  # the rest is collected
+
+
+def test_a_404_on_invitations_when_teams_are_unreadable_stays_a_failure(fake, monkeypatch, tmp_path):
+    # A token without members: read gets the same 404, and cannot list teams either.
+    routes = access_routes()
+    routes[f"orgs/{ORG}/invitations"] = NO_INVITATIONS
+    routes[f"orgs/{ORG}/teams"] = (403, {"message": "Resource not accessible by integration"})
+    fake(routes)
+    code, ev, _ = run_fetcher("access_review", monkeypatch, tmp_path)
+    operations = [f["operation"] for f in ev["metadata"]["api_failures"]]
+    assert code == 1 and f"GET orgs/{ORG}/invitations" in operations and f"GET orgs/{ORG}/teams" in operations
+
+
+def test_a_404_on_invitations_when_outside_collaborators_are_unreadable_stays_a_failure(fake, monkeypatch, tmp_path):
+    routes = access_routes()
+    routes[f"orgs/{ORG}/invitations"] = NO_INVITATIONS
+    routes[f"orgs/{ORG}/outside_collaborators"] = (403, {"message": "Resource not accessible by integration"})
+    fake(routes)
+    code, ev, _ = run_fetcher("access_review", monkeypatch, tmp_path)
+    assert code == 1 and f"GET orgs/{ORG}/invitations" in [f["operation"] for f in ev["metadata"]["api_failures"]]
+
+
+@pytest.mark.parametrize("answer", [(403, {"message": "Resource not accessible by integration"}),
+                                    (500, {"message": "Server Error"})])
+def test_any_other_invitations_error_stays_a_failure(fake, monkeypatch, tmp_path, answer):
+    routes = access_routes()
+    routes[f"orgs/{ORG}/invitations"] = answer
+    fake(routes)
+    code, ev, _ = run_fetcher("access_review", monkeypatch, tmp_path)
+    assert code == 1 and ev["metadata"]["pending_invitations_available"] is None
+    assert f"GET orgs/{ORG}/invitations" in [f["operation"] for f in ev["metadata"]["api_failures"]]
+    assert ev["pending_invitations"] is None
+
+
+def test_an_earlier_failure_is_kept_when_invitations_are_unavailable(fake, monkeypatch, tmp_path):
+    routes = access_routes()
+    routes[f"orgs/{ORG}/invitations"] = NO_INVITATIONS
+    routes[f"orgs/{ORG}/teams/platform/members"] = FAILING
+    fake(routes)
+    code, ev, _ = run_fetcher("access_review", monkeypatch, tmp_path)
+    operations = [f["operation"] for f in ev["metadata"]["api_failures"]]
+    assert code == 1 and f"GET orgs/{ORG}/invitations" not in operations and len(operations) == 1
+    assert ev["metadata"]["pending_invitations_available"] is False
