@@ -14,7 +14,7 @@ import logging
 import os
 import re
 import tempfile
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from qualys_report_client import (
@@ -24,8 +24,19 @@ from qualys_report_client import (
     POSTURE,
     QVS,
     QualysError,
+    ResponseTooLarge,
     value,
 )
+
+# QVS is walked in windows of qvs_last_modified_after/_before to get all CVE data
+QVS_WINDOW = timedelta(days=89)
+QVS_MIN_WINDOW = timedelta(hours=1)
+QVS_EMPTY_WINDOWS_TO_STOP = 4
+QVS_MAX_WINDOWS = 120
+# CVEs the walk did not return are looked up 25 per call; more than this many means the
+# walk itself is not returning complete data, so the run fails instead.
+QVS_MAX_LOOKUPS = 500
+QVS_LOOKUP_BATCH_SIZE = 25
 
 VM_COLUMNS = [
     "Record ID",
@@ -171,36 +182,160 @@ def kb_records(client, qids):
     return records
 
 
-def qvs_records(client, cves):
-    records = {}
-    for batch in batches(cves, 25):
-        try:
-            data = json.loads(
-                client.request(
-                    QVS, {"action": "list", "cve": ",".join(batch), "details": "All"}
-                )
+def qvs_json(body: bytes) -> dict:
+    try:
+        data = json.loads(body)
+    except (ValueError, UnicodeError):
+        raise QualysError("QVS returned invalid JSON") from None
+    if data == []:
+        return {}
+    if not isinstance(data, dict):
+        raise QualysError("QVS returned an unexpected response or error object")
+    return data
+
+
+def check_qvs_record(key, item):
+    if (
+        not isinstance(item, dict)
+        or not isinstance(item.get("base"), dict)
+        or item["base"].get("id") != key
+        or not isinstance(item.get("contributingFactors", {}), dict)
+    ):
+        raise QualysError("QVS returned malformed CVE enrichment")
+    try:
+        score = float(item["base"]["qvs"])
+        if not 0 <= score <= 100:
+            raise ValueError
+    except (KeyError, TypeError, ValueError):
+        raise QualysError("QVS returned an invalid score") from None
+
+
+def qvs_changed_at(item):
+    try:
+        stamp = int(item["base"]["qvsLastChangedDate"])
+        if stamp >= 100_000_000_000:
+            stamp //= 1000
+        return datetime.fromtimestamp(stamp, timezone.utc)
+    except (KeyError, TypeError, ValueError, OverflowError, OSError):
+        return None
+
+
+def qvs_stamp(moment: datetime) -> str:
+    return moment.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def qvs_window(client, start: datetime, end: datetime, stats: dict) -> dict:
+    """Every QVS record last changed in [start, end], halving the window if it is too large."""
+    params = {
+        "action": "list",
+        "details": "All",
+        "qvs_last_modified_after": qvs_stamp(start),
+        "qvs_last_modified_before": qvs_stamp(end),
+    }
+    stats["calls"] += 1
+    try:
+        data = qvs_json(client.request(QVS, params))
+    except ResponseTooLarge:
+        if end - start <= QVS_MIN_WINDOW:
+            raise QualysError(
+                f"QVS records changed {qvs_stamp(start)}..{qvs_stamp(end)} exceed one response"
+            ) from None
+        middle = start + (end - start) / 2
+        logging.info(
+            "QVS %s..%s exceeds one response; splitting it", start.date(), end.date()
+        )
+        newer = qvs_window(client, middle, end, stats)
+        older = qvs_window(client, start, middle, stats)
+        return {**older, **newer}
+    # Date-level bounds with a day of slack: the window semantics are what matter, and a
+    # record outside them means the unfiltered listing no longer behaves as a window.
+    low, high = start.date() - timedelta(days=1), end.date() + timedelta(days=1)
+    for item in data.values():
+        changed = qvs_changed_at(item) if isinstance(item, dict) else None
+        if changed is None or not low <= changed.date() <= high:
+            raise QualysError(
+                "QVS returned a record outside the requested change window; "
+                "the windowed QVS listing may have changed"
             )
-        except (ValueError, UnicodeError):
-            raise QualysError("QVS returned invalid JSON") from None
-        if not isinstance(data, dict) or set(data) - set(batch):
+    return data
+
+
+def qvs_lookup(client, cves):
+    """Look up specific CVEs, 25 per call (the QVS limit for the cve filter)."""
+    records = {}
+    for batch in batches(cves, QVS_LOOKUP_BATCH_SIZE):
+        data = qvs_json(
+            client.request(
+                QVS, {"action": "list", "cve": ",".join(batch), "details": "All"}
+            )
+        )
+        if set(data) - set(batch):
             raise QualysError("QVS returned an unexpected response or error object")
         for cve, item in data.items():
-            if (
-                not isinstance(item, dict)
-                or not isinstance(item.get("base"), dict)
-                or item["base"].get("id") != cve
-                or not isinstance(item.get("contributingFactors", {}), dict)
-            ):
-                raise QualysError("QVS returned malformed CVE enrichment")
-            try:
-                score = float(item["base"]["qvs"])
-                if not 0 <= score <= 100:
-                    raise ValueError
-            except (KeyError, TypeError, ValueError):
-                raise QualysError("QVS returned an invalid score") from None
+            check_qvs_record(cve, item)
             records[cve] = item
         # Omitted CVEs in a successful, valid object mean unavailable, never
         # a score of zero or an assertion that CISA does not list the CVE.
+    return records
+
+
+def qvs_records(client, cves, now=None):
+    """QVS records for the given CVEs: walk the change windows, then look up stragglers."""
+    needed = set(cves)
+    if not needed:
+        return {}
+    records, stats = {}, {"calls": 0}
+    end = (now or datetime.now(timezone.utc)).replace(microsecond=0) + timedelta(
+        hours=1
+    )
+    windows = empty = 0
+    while (
+        len(records) < len(needed)
+        and empty < QVS_EMPTY_WINDOWS_TO_STOP
+        and windows < QVS_MAX_WINDOWS
+    ):
+        start = end - QVS_WINDOW
+        data = qvs_window(client, start, end, stats)
+        windows += 1
+        kept = 0
+        # Newest first: a record seen in a newer window is never replaced by an older one.
+        for key, item in data.items():
+            if key in needed and key not in records:
+                check_qvs_record(key, item)
+                records[key] = item
+                kept += 1
+        logging.info(
+            "QVS changed %s..%s: %d records, %d needed (%d/%d found)",
+            start.date(),
+            end.date(),
+            len(data),
+            kept,
+            len(records),
+            len(needed),
+        )
+        empty = 0 if data else empty + 1
+        end = start
+    missing = sorted(needed - set(records))
+    logging.info(
+        "QVS walk: %d windows in %d calls found %d/%d CVEs",
+        windows,
+        stats["calls"],
+        len(records),
+        len(needed),
+    )
+    if missing:
+        if len(missing) > QVS_MAX_LOOKUPS:
+            raise QualysError(
+                f"QVS change windows lacked {len(missing)} CVEs (more than "
+                f"{QVS_MAX_LOOKUPS}); the windowed QVS listing may be incomplete"
+            )
+        found = qvs_lookup(client, missing)
+        records.update(found)
+        logging.info(
+            "Looked up %d CVEs missing from the walk individually; QVS had %d",
+            len(missing),
+            len(found),
+        )
     return records
 
 
