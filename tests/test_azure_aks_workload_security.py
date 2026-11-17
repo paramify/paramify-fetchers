@@ -391,11 +391,13 @@ def test_a_forbidden_list_nulls_only_what_depends_on_it_and_fails() -> None:
 
 
 def test_an_unreachable_private_api_server_is_tried_once_and_fails_as_unreachable(monkeypatch) -> None:
-    monkeypatch.setattr(azure_rest.time, "sleep", lambda s: None)
+    sleeps: list = []
+    monkeypatch.setattr(azure_rest.time, "sleep", sleeps.append)
     api = _Api(unreachable=True)
     results, summary, collector = _collect(api)
     assert len(collector.failures) == 1 and azure_common.classify_failure_code(collector.failures) == "target_unreachable"
-    assert {c[1] for c in api.calls if c[1].startswith(("/api/", "/apis/"))} == {"/api/v1/pods"}
+    # One request in all: no retry of the pods list, and the other lists are not tried.
+    assert [c[1] for c in api.calls if c[1].startswith(("/api/", "/apis/"))] == ["/api/v1/pods"] and sleeps == []
     cluster = results["clusters"][0]
     assert cluster["kubernetes_api_read"] is False and any("did not answer" in n for n in cluster["notes"])
     assert summary["workloads"] is None and summary["network_policies"] is None and summary["namespaces"] is None
@@ -556,3 +558,43 @@ def test_legacy_or_unmanaged_entra_profiles_are_not_entra_integrated() -> None:
     assert aks.cluster_identity(legacy)["entra_integrated"] is False
     assert aks.cluster_identity(raw_cluster())["entra_integrated"] is True
     assert aks.cluster_identity(raw_cluster(entra=False))["azure_rbac_enabled"] is False
+
+
+class _Session:
+    """A requests.Session stand-in for one Kubernetes API server: raises `error`, or answers `statuses` in turn."""
+
+    def __init__(self, error=None, statuses=()):
+        self.error, self.statuses, self.calls = error, list(statuses), []
+
+    def get(self, url, params=None, headers=None, timeout=None, verify=None, **kwargs):
+        self.calls.append(timeout)
+        if self.error is not None:
+            raise self.error
+        status = self.statuses.pop(0)
+        return _Resp(status, {"items": [], "metadata": {}} if status == 200 else {"message": "busy"})
+
+
+@pytest.mark.parametrize("error", [requests.ConnectTimeout("connect timed out"),
+                                   requests.ConnectionError("Failed to establish a new connection")])
+def test_a_connection_failure_to_the_api_server_is_not_retried(monkeypatch, error) -> None:
+    # Through the real AzureRestClient: each retry of a dropped connection would wait out the whole timeout again.
+    sleeps: list = []
+    monkeypatch.setattr(azure_rest.time, "sleep", sleeps.append)
+    session = _Session(error=error)
+    client = azure_rest.AzureRestClient(_Cred(), session=session)
+    collector = Collector(logging.getLogger("test"))
+    with pytest.raises(requests.ConnectionError):
+        aks.kube_list(client, SERVER, None, "/api/v1/pods")
+    assert len(session.calls) == 1 and sleeps == []
+    assert session.calls[0] == (azure_rest.CONNECT_TIMEOUT, azure_rest.HTTP_TIMEOUT)
+    collector.record("kubernetes.pods.list(c)", error)
+    assert azure_common.classify_failure_code(collector.failures) == "target_unreachable"
+
+
+def test_a_busy_api_server_is_still_retried(monkeypatch) -> None:
+    # The server answered a 503, so a retry can help.
+    monkeypatch.setattr(azure_rest.time, "sleep", lambda s: None)
+    session = _Session(statuses=[503, 200])
+    client = azure_rest.AzureRestClient(_Cred(), session=session)
+    assert aks.kube_list(client, SERVER, None, "/api/v1/pods") == []
+    assert len(session.calls) == 2
