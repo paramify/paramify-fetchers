@@ -2733,6 +2733,17 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- **Jira fetchers: a scoped API token sent to the site URL now gives the fix,
+  not a generic `auth_failed`.** Jira answers `401 Unauthorized; scope does not
+  match` on every call when a scoped token is used with
+  `JIRA_BASE_URL=https://<site>.atlassian.net`. The run now stops with
+  `bad_config` and names the gateway URL to use
+  (`https://api.atlassian.com/ex/jira/<cloudId>`, or the Government Cloud
+  gateway) and the site's `_edge/tenant_info` link that gives the cloudId.
+  Through the gateway, the same answer is reported as `not_authorized`, a
+  missing scope. `fetchers/jira/README.md` now lists all four Jira fetchers that
+  need no admin access. New sections say how to run without Jira admin access
+  and how to read this error.
 - **Disk, Key Vault, storage and SQL Managed Instance fetchers: an unread list
   gives null counts, not 0.** When a list the run needs is refused (403),
   throttled or times out, every total, count and percentage built from it is
