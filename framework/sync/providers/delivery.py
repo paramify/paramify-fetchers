@@ -16,7 +16,8 @@ For each entry, in this order (the first refusal ends the entry):
    warning: a direct upload built nothing. A pipeline entry on a set with
    validators is refused, unless this run's batch is already submitted or
    approved (then it is a no-op);
-4. WAF: a file the production WAF would block is dropped at plan time.
+4. WAF: a file the production WAF would block is dropped at plan time,
+   unless the pre-check is off (`paramify upload --no-waf-check`).
 
 An entry is sent direct (the route before batches: no batch, no submit) when
 the workspace has no batches or the entry says `delivery: direct`; then it
@@ -93,6 +94,8 @@ WAF_BLOCKED = "blocked by the production WAF"
 PIPELINE_DIRECT_SENT = "sent direct: this workspace has no batches; the pipeline runs the pre-batch way"
 BATCHES_OFF = "batches are off for this workspace"
 DELIVERY_DIRECT = "delivery: direct"
+WAF_CHECK_OFF = ("WAF pre-check off (--no-waf-check): files that hold '../', '/bin/sh' or '<script' are "
+                 "sent as they are; if the WAF does block one, the upload drops that file and sends the rest")
 DIRECT = "DIRECT"  # the payload target of an entry sent direct
 _BATCH_TARGETS = ("ARTIFACT_REQUEST", "EVIDENCE")
 _FAILING = ("FAIL", "ERROR")
@@ -337,8 +340,11 @@ class DeliveryProvider:
         today: Callable[[], date] = date.today,
         on_event: Optional[Callable[[dict], None]] = None,
         capability: Optional[Capability] = None,
+        waf_check: bool = True,
     ) -> None:
         self._run_state = run_state
+        # False: send every file and let a real WAF 403 drop it (see Client.classify).
+        self._waf_check = waf_check
         self._capability = capability  # None: batches are assumed (offline)
         self._today = today
         self._on_event = on_event
@@ -380,6 +386,8 @@ class DeliveryProvider:
 
     def _scan(self, f: DeliveryFile) -> List[str]:
         """WAF signatures in what the upload of `f` would send: the bytes, the note and the title."""
+        if not self._waf_check:
+            return []
         mode = self._mode_for(f.pipeline)
         key = (str(f.path), mode)
         if key not in self._waf_hits:
