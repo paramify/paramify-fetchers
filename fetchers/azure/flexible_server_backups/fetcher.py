@@ -14,7 +14,7 @@ from azure_common import NOT_REGISTERED, REGISTERED, REGISTRATION_UNKNOWN, Colle
 from azure_rest import int_config, parse_time, run_subscription  # noqa: E402
 from resource_exclusions import ResourceExclusions  # noqa: E402
 
-NAME = "azure_database_backups"
+NAME = "azure_flexible_server_backups"
 logger = logging.getLogger(NAME)
 
 PROVIDERS_API = "2021-04-01"
@@ -26,9 +26,9 @@ ENGINES = {
 }
 REPLICA_ROLES = frozenset({"replica", "asyncreplica", "geoasyncreplica", "secondary"})
 
-WINDOW_ENV = "AZURE_DATABASE_BACKUP_WINDOW_HOURS"
-RETENTION_ENV = "AZURE_DATABASE_BACKUP_RETENTION_DAYS"
-LOOKBACK_ENV = "AZURE_DATABASE_RESTORE_LOOKBACK_DAYS"
+WINDOW_ENV = "AZURE_FLEXIBLE_SERVER_BACKUP_WINDOW_HOURS"
+RETENTION_ENV = "AZURE_FLEXIBLE_SERVER_BACKUP_RETENTION_DAYS"
+LOOKBACK_ENV = "AZURE_FLEXIBLE_SERVER_RESTORE_LOOKBACK_DAYS"
 DEFAULT_WINDOW_HOURS = 26
 MAX_LOOKBACK_DAYS = 3650
 
@@ -38,6 +38,16 @@ MAX_LOOKBACK_DAYS = 3650
 def choose_api_version(listed: List[str], preferred: str) -> str:
     stable = sorted(v for v in listed if "preview" not in v.lower() and v <= preferred)
     return stable[-1] if stable else preferred
+
+
+def shared_versions(resource_types: List[Dict[str, Any]]) -> List[str]:
+    """API versions listed for both flexibleServers and flexibleServers/backups, since one version serves both calls.
+    Falls back to the flexibleServers list when the provider does not list the backups type."""
+    def listed(name):
+        return next((list(rt.get("apiVersions") or []) for rt in resource_types
+                     if (rt.get("resourceType") or "").lower() == name), None)
+    servers, backups = listed("flexibleservers") or [], listed("flexibleservers/backups")
+    return [v for v in servers if v in set(backups)] if backups is not None else servers
 
 
 def server_record(engine: str, raw: Dict[str, Any]) -> Dict[str, Any]:
@@ -52,6 +62,8 @@ def server_record(engine: str, raw: Dict[str, Any]) -> Dict[str, Any]:
         "resource_group": resource_group_from_id(raw.get("id")),
         "location": raw.get("location"),
         "state": props.get("state"),
+        # A stopped server takes no backups, so it shows without a recent one; stopped_servers names the reason.
+        "stopped": (props.get("state") or "").lower() == "stopped",
         "replica": role in REPLICA_ROLES,
         "restored_from": source if source and role not in REPLICA_ROLES else None,
         "created": (raw.get("systemData") or {}).get("createdAt"),
@@ -104,6 +116,7 @@ def summarize(servers: List[Dict[str, Any]], settings: Dict[str, Any], now: date
         return value if complete else None
 
     retention = [s["backup_retention_days"] for s in primaries if s["backup_retention_days"] is not None]
+    unknown_retention = sum(1 for s in primaries if s["backup_retention_days"] is None)
     return {
         "database_servers_postgresql": sum(1 for s in servers if s["engine"] == "postgresql") if listed else None,
         "database_servers_mysql": sum(1 for s in servers if s["engine"] == "mysql") if listed else None,
@@ -119,8 +132,11 @@ def summarize(servers: List[Dict[str, Any]], settings: Dict[str, Any], now: date
         "servers_geo_redundant_backup": sum(1 for s in primaries if s["geo_redundant_backup"]) if listed else None,
         "min_backup_retention_days": min(retention) if listed and retention else None,
         "max_backup_retention_days": max(retention) if listed and retention else None,
-        "servers_retention_not_required": (sum(1 for s in primaries if s["backup_retention_days"] != required)
-                                           if listed and required is not None else None),
+        "servers_retention_below_required": (sum(1 for s in primaries if s["backup_retention_days"] is not None
+                                                 and s["backup_retention_days"] < required)
+                                             if listed and required is not None else None),
+        "servers_retention_unknown": unknown_retention if listed else None,
+        "stopped_servers": sum(1 for s in primaries if s["stopped"]) if listed else None,
         "required_retention_days": required,
         "restored_servers_within_lookback": sum(1 for s in servers if s["restored_from"] and parse_time(s["created"])
                                                 and parse_time(s["created"]) >= now - timedelta(days=lookback)) if listed and lookback else None,
@@ -150,8 +166,7 @@ def read_provider(client, subscription_id: str, engine: str, collector: Collecto
         f"/subscriptions/{subscription_id}/providers/{spec['namespace']}", PROVIDERS_API), default=None)
     if body is None:
         return {"registration": REGISTRATION_UNKNOWN, "api_version": spec["preferred"]}
-    versions = next((list(rt.get("apiVersions") or []) for rt in body.get("resourceTypes") or []
-                     if (rt.get("resourceType") or "").lower() == "flexibleservers"), [])
+    versions = shared_versions(body.get("resourceTypes") or [])
     state = (body.get("registrationState") or "").lower()
     return {"registration": REGISTERED if state == "registered" else NOT_REGISTERED,
             "api_version": choose_api_version(versions, spec["preferred"])}

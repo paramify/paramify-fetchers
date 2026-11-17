@@ -1,4 +1,4 @@
-"""azure_database_backups: server projection, backup recency against the window, replica and restore handling, retention against the authorized period, null-not-zero summaries, and a full run against synthetic ARM responses. No SDK or network."""
+"""azure_flexible_server_backups: server projection, backup recency against the window, replica and restore handling, retention against the authorized period, null-not-zero summaries, and a full run against synthetic ARM responses. No SDK or network."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ AZURE = REPO_ROOT / "fetchers" / "azure"
 sys.path.insert(0, str(REPO_ROOT / "fetchers" / "_lib"))
 sys.path.insert(0, str(AZURE / "_shared"))
 
-_spec = importlib.util.spec_from_file_location("azure_database_backups_under_test", AZURE / "database_backups" / "fetcher.py")
+_spec = importlib.util.spec_from_file_location("azure_flexible_server_backups_under_test", AZURE / "flexible_server_backups" / "fetcher.py")
 db = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(db)
 azure_rest = sys.modules["azure_rest"]
@@ -31,9 +31,9 @@ def iso(dt):
     return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def raw_server(name, engine="postgresql", role="Primary", source=None, retention=7, geo="Enabled", created=None):
+def raw_server(name, engine="postgresql", role="Primary", source=None, retention=7, geo="Enabled", created=None, state="Ready"):
     ns = db.ENGINES[engine]["namespace"]
-    props = {"state": "Ready", "replicationRole": role,
+    props = {"state": state, "replicationRole": role,
              "backup": {"backupRetentionDays": retention, "geoRedundantBackup": geo, "earliestRestoreDate": "2026-11-10T00:00:00Z"}}
     if source:
         props["sourceServerResourceId"] = source
@@ -81,12 +81,33 @@ def test_summary_judges_backup_servers_and_skips_replicas():
     assert (s["database_servers_postgresql"], s["database_servers_mysql"], s["replica_servers"], s["backup_servers"], s["backup_servers_read"]) == (2, 2, 1, 3, 3)
     assert (s["servers_with_automatic_backup_within_window"], s["servers_without_automatic_backup_within_window"], s["max_hours_since_automatic_backup"]) == (2, ["my1"], 50.0)
     assert (s["servers_geo_redundant_backup"], s["min_backup_retention_days"], s["max_backup_retention_days"]) == (2, 7, 35)
-    assert (s["servers_retention_not_required"], s["restored_servers_within_lookback"]) == (None, 1)
+    assert (s["servers_retention_below_required"], s["restored_servers_within_lookback"]) == (None, 1)
 
 
 def test_retention_is_counted_only_against_a_configured_authorized_period():
     s = db.summarize(_servers(), {**SETTINGS, "required_retention_days": 35}, NOW)
-    assert (s["servers_retention_not_required"], s["required_retention_days"]) == (2, 35)
+    assert (s["servers_retention_below_required"], s["required_retention_days"]) == (2, 35)
+
+
+def test_longer_retention_meets_the_requirement_and_unknown_retention_is_counted_apart():
+    longer = db.with_backups(db.server_record("postgresql", raw_server("long", retention=35)), [backup(5)], SETTINGS, NOW)
+    short = db.with_backups(db.server_record("postgresql", raw_server("short", retention=7)), [backup(5)], SETTINGS, NOW)
+    unknown = db.with_backups(db.server_record("mysql", raw_server("unk", "mysql", retention=None)), [backup(5)], SETTINGS, NOW)
+    s = db.summarize([longer, short, unknown], {**SETTINGS, "required_retention_days": 14}, NOW)
+    assert (s["servers_retention_below_required"], s["servers_retention_unknown"]) == (1, 1)
+
+
+def test_a_stopped_server_is_counted_so_its_missing_backup_has_a_reason():
+    stopped = db.with_backups(db.server_record("postgresql", raw_server("off", state="Stopped")), [backup(80)], SETTINGS, NOW)
+    s = db.summarize([stopped], SETTINGS, NOW)
+    assert (s["stopped_servers"], s["servers_without_automatic_backup_within_window"]) == (1, ["off"])
+
+
+def test_one_api_version_serves_both_the_server_list_and_the_backups_list():
+    types = [{"resourceType": "flexibleServers", "apiVersions": ["2022-12-01", "2023-06-01", "2024-08-01"]},
+             {"resourceType": "flexibleServers/backups", "apiVersions": ["2022-12-01", "2023-06-01"]}]
+    assert db.choose_api_version(db.shared_versions(types), "2024-08-01") == "2023-06-01"
+    assert db.shared_versions(types[:1]) == ["2022-12-01", "2023-06-01", "2024-08-01"]  # backups type not listed
 
 
 def test_an_unread_backup_list_or_server_list_leaves_verdicts_null():
@@ -108,7 +129,7 @@ def test_summary_matches_the_instructions(assert_summary_documented):
     s = db.summarize(_servers(), SETTINGS, NOW)
     s.update({"postgresql_provider_registration_status": "registered", "mysql_provider_registration_status": "registered"})
     s.update(db.ResourceExclusions().summary([], ("database_server",), {"database_servers": 4}))
-    assert_summary_documented("azure/database_backups", s)
+    assert_summary_documented("azure/flexible_server_backups", s)
 
 
 # --- full run against synthetic ARM responses ---
@@ -136,7 +157,8 @@ class _Arm:
             if path.endswith(f"/providers/{ns}"):
                 registered = engine == "postgresql" or self.mysql_registered
                 return _Resp(200, {"registrationState": "Registered" if registered else "NotRegistered",
-                                   "resourceTypes": [{"resourceType": "flexibleServers", "apiVersions": ["2021-05-01", "2022-12-01", spec["preferred"]]}]})
+                                   "resourceTypes": [{"resourceType": "flexibleServers", "apiVersions": ["2021-05-01", "2022-12-01", spec["preferred"]]},
+                                                     {"resourceType": "flexibleServers/backups", "apiVersions": ["2021-05-01", "2022-12-01", spec["preferred"]]}]})
             if path.endswith(f"/providers/{ns}/flexibleServers"):
                 return _Resp(200, {"value": [raw_server("pg1"), raw_server("pg-replica", role="AsyncReplica", source="/src")]} if engine == "postgresql"
                              else {"value": [raw_server("my1", "mysql", geo="Disabled")]})
@@ -173,7 +195,7 @@ def arm(monkeypatch, tmp_path):
 
 
 def _evidence(tmp_path):
-    [path] = tmp_path.glob("azure_database_backups_s1.json")
+    [path] = tmp_path.glob("azure_flexible_server_backups_s1.json")
     return json.loads(path.read_text())
 
 
@@ -206,7 +228,7 @@ def test_an_invalid_retention_setting_fails_the_run(arm, tmp_path, monkeypatch):
     monkeypatch.setenv(db.RETENTION_ENV, "a week")
     arm()
     assert db.main() != 0
-    assert _evidence(tmp_path)["summary"]["servers_retention_not_required"] is None
+    assert _evidence(tmp_path)["summary"]["servers_retention_below_required"] is None
 
 
 def test_restored_servers_are_counted_only_once_an_interval_is_adopted():

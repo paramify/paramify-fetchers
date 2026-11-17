@@ -275,6 +275,7 @@ TEXT_FORMAT_FETCHERS = (
     "azure/entra_service_principals",
     "azure/entra_sign_ins",
     "azure/firewall_configuration",
+    "azure/flexible_server_backups",
     "azure/front_door_waf_policies",
     "azure/function_app_configuration",
     "azure/key_vault_configuration",

@@ -12,10 +12,11 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
-- **`azure_database_backups` fetcher.** Reads Azure Database for PostgreSQL and MySQL flexible servers: each
-  server's newest completed automatic backup against a window (manual, on-demand backups reported apart), backup retention against an optional authorized
-  period, geo-redundant backup, and servers created by point-in-time restore within an optional restore-test interval. Read replicas are counted, not
-  judged. Unread backup lists leave verdicts null rather than 0.
+- **`azure_flexible_server_backups` fetcher.** Reads Azure Database for PostgreSQL and MySQL flexible servers: each
+  server's newest completed automatic backup against a window (manual, on-demand backups reported apart), backup retention against an optional minimum
+  authorized period (unknown retention counted apart), geo-redundant backup, stopped servers, and servers created by point-in-time restore within an
+  optional restore-test interval. One API version that serves both the server and backup lists is used. Read replicas are counted, not judged. Unread
+  backup lists leave verdicts null rather than 0.
 - **`wiz_inventory`**, the Wiz cloud resource inventory, as a pipeline fetcher (`kind: inventory`, `id_scheme:
   wiz-resource-id`). One record per resource from `cloudResourcesV2` under `payload.data`, keyed by the Wiz resource
   id, with its cloud ID (`external_id`), account, region, type, IPs, OS, image, environment and owner, and internet
