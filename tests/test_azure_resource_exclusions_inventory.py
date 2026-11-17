@@ -747,7 +747,7 @@ def test_policy_remediation_totals_are_null_when_a_task_or_deployment_list_fails
     for fail in ("deployments", "tasks"):
         code, evidence, _ = run_policy(monkeypatch, tmp_path, PATTERNS, fail=(fail,))
         summary = evidence["summary"]
-        assert code == 1 and summary["remediation_deployments_truncated"] is False, fail
+        assert code == 1 and summary["remediation_deployments_truncated"] is None, fail
         assert (summary["remediation_failed_deployments"], summary["remediation_successful_deployments"]) == (
             None, None), fail
         assert summary["non_compliant_resources"] == 2, fail
