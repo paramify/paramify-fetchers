@@ -1771,6 +1771,9 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- `qualys_vmdr_vulnerability_findings` uses the v6 host detection and v4 KnowledgeBase endpoints in place of v2,
+  which Qualys has scheduled for end of life. Requests, parameters and the report columns are unchanged.
+
 - `qualys_vmdr_vulnerability_findings` reads QVS by change window instead of 25 CVEs per request. It walks
   `qvs_last_modified_after`/`qvs_last_modified_before` windows newest first and keeps the CVEs it needs, so QVS
   enrichment takes a few dozen requests regardless of how many CVEs the detections reference. Per-CVE lookups

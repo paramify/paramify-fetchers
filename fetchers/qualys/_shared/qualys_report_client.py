@@ -19,8 +19,8 @@ from defusedxml.ElementTree import ParseError
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "_lib"))
 from fetcher_status import report_failure  # noqa: E402, F401
 
-DETECTIONS = "/api/2.0/fo/asset/host/vm/detection/"
-KNOWLEDGE_BASE = "/api/2.0/fo/knowledge_base/vuln/"
+DETECTIONS = "/api/6.0/fo/asset/host/vm/detection/"
+KNOWLEDGE_BASE = "/api/4.0/fo/knowledge_base/vuln/"
 QVS = "/api/3.0/fo/knowledge_base/qvs/"
 POLICIES = "/api/2.0/fo/compliance/policy/"
 POSTURE = "/api/2.0/fo/compliance/posture/info/"

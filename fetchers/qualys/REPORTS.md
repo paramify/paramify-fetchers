@@ -120,8 +120,9 @@ scope also changes what a complete report contains.
 
 ## API compatibility and verification
 
-Uses the documented FO v2 endpoints for detections, KnowledgeBase, policy listing,
-and posture information, and the v3 QVS endpoint. Unfiltered QVS listing by change
+Uses the documented FO endpoints: v6 host detections, v4 KnowledgeBase, v3 QVS, and
+v2 policy listing and posture information. Qualys has scheduled end of life for the
+v2 detection, KnowledgeBase and QVS endpoints. Unfiltered QVS listing by change
 window is observed behavior rather than documented API; the window checks above
 fail the report if it changes. The product's Policy Audit naming does not
 change this explicit API contract; PCRS gateway APIs and JWT authentication are
