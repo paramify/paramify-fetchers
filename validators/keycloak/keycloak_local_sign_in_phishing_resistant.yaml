@@ -5,10 +5,11 @@ role: configuration
 statement: >
   Every local way through the realm's browser flow passes a phishing-resistant authenticator, such as a
   WebAuthn security key or passkey or an X.509 client certificate
-  (local_sign_in_requires_phishing_resistant is true), judged by Keycloak's flow rules. Leaves out session
-  reuse and the federated path: what an external identity provider enforces is not visible to Keycloak and
-  needs its own evidence. Account recovery is a separate check. Supports KSI-IAM-APM. Does not check
-  whether the collection run succeeded.
+  (local_sign_in_requires_phishing_resistant is true), judged by Keycloak's flow rules. The cookie step,
+  which only reuses an existing session, is not counted as a way around the flow. Does not cover sign-ins
+  through an external identity provider; identity_providers_enabled shows how many are enabled, and what
+  they enforce needs its own evidence. Account recovery is a separate check. Supports KSI-IAM-APM. Does not
+  check whether the collection run succeeded.
 
 regex: '"local_sign_in_requires_phishing_resistant":\s*true\b'
 rules_summary: MATCH_COUNT NOT_EQUALS 0
