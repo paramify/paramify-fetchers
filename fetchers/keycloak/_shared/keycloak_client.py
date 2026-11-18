@@ -60,10 +60,20 @@ class KeycloakClient:
                                                     "client_secret": self._client_secret}, timeout=TIMEOUT)
         except requests.RequestException as exc:
             raise KeycloakAuthError(f"Keycloak token request failed: {type(exc).__name__}", "target_unreachable") from exc
+        if response.status_code == 404:
+            # Keycloak answers 404 when the realm doesn't exist: a wrong realm or base URL, not bad credentials.
+            raise KeycloakAuthError(f"Keycloak token endpoint answered 404: check the base URL and that realm "
+                                    f"{self.auth_realm!r} exists", "bad_config")
         if response.status_code != 200:
             raise KeycloakAuthError(f"Keycloak token request answered {response.status_code}", CODES.get(response.status_code, "auth_failed"))
-        body = response.json()
-        self._token, self._expires = body["access_token"], time.time() + float(body.get("expires_in") or 60)
+        try:
+            body = response.json()
+            token = body["access_token"]
+        except (ValueError, KeyError, TypeError) as exc:
+            # Such as an HTML page from a proxy in front of Keycloak.
+            raise KeycloakAuthError(f"Keycloak token response had no access token ({type(exc).__name__}); "
+                                    "check the base URL", "auth_failed") from exc
+        self._token, self._expires = token, time.time() + float(body.get("expires_in") or 60)
         return self._token
 
     def get(self, operation: str, path: str, params: Optional[Dict[str, str]] = None, role: Optional[str] = None) -> Any:
@@ -87,9 +97,36 @@ class KeycloakClient:
         if response.status_code != 200:
             detail = (response.text or "")[:300]
             if response.status_code == 403 and role:
-                detail = f"needs the realm-management role {role}. {detail}".strip()
+                detail = f"needs the role {role} {self.role_holder()}. {detail}".strip()
+            elif response.status_code == 401:
+                # Keycloak 26.8.2 (CVE-2026-19688) accepts admin API tokens only with the admin API audience, which the
+                # built-in kc-admin-api client scope adds; a client created for a service account doesn't get it.
+                detail = ("Keycloak refused the token. On Keycloak 26.8.2 and later, assign the built-in kc-admin-api client "
+                          f"scope to this client as a default scope. {detail}").strip()
             return self._fail(operation, f"HTTP {response.status_code}", detail, CODES.get(response.status_code, "partial_failure"))
-        return response.json()
+        try:
+            return response.json()
+        except ValueError:
+            # A 200 that isn't JSON, such as an HTML page from a proxy in front of Keycloak.
+            return self._fail(operation, "ValueError", "response was not JSON; check the base URL", "partial_failure")
+
+    def role_holder(self) -> str:
+        """Where the needed role lives: realm-management in the target realm, or <realm>-realm in master for an account
+        in master (Keycloak's realm-specific admin roles)."""
+        if self.auth_realm == self.realm:
+            return "of the realm-management client"
+        return f"of the {self.realm}-realm client in the {self.auth_realm} realm"
+
+    def get_all(self, operation: str, path: str, role: Optional[str] = None, page: int = 100) -> Optional[List[Any]]:
+        """Every item of a list endpoint, page by page with first and max; None when any page can't be read."""
+        items: List[Any] = []
+        while True:
+            batch = self.get(operation, path, {"first": str(len(items)), "max": str(page)}, role=role)
+            if batch is None:
+                return None
+            items.extend(batch)
+            if len(batch) < page:
+                return items
 
     def flow_executions(self, alias: str) -> Optional[List[Dict[str, Any]]]:
         return self.get(f"authentication flow executions ({alias})", f"/authentication/flows/{quote(alias, safe='')}/executions",

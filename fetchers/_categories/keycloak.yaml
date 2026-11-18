@@ -37,7 +37,9 @@ secrets:
     env: KEYCLOAK_CLIENT_ID
     description: >-
       Client ID of a confidential client with service accounts enabled. Its service account needs the realm-management
-      client roles view-realm, view-identity-providers and view-events, and nothing else.
+      roles view-realm, view-identity-providers and view-events, and nothing else: from realm-management in the
+      realm being read, or from the <realm>-realm client when the client is in master. On Keycloak 26.8.2 and
+      later, also assign the built-in kc-admin-api client scope to the client as a default scope.
   - name: client_secret
     env: KEYCLOAK_CLIENT_SECRET
     description: Client secret of that client.

@@ -29,6 +29,9 @@ PHISHING_RESISTANT = frozenset({"webauthn-authenticator", "webauthn-authenticato
                                 "direct-grant-auth-x509-username"})
 TERMS_ACTION = "terms_and_conditions"
 # Not a new sign-in (session reuse) or the federated path, which the external identity provider governs.
+# Settings only the full realm view (view-realm) carries. The reduced view keeps the realm name and a few flags
+# (bruteForceProtected among them, on Keycloak 26.8), so a full view is one with every one of these.
+REALM_FULL_VIEW_KEYS = frozenset({"browserFlow", "ssoSessionIdleTimeout", "registrationAllowed", "rememberMe"})
 NOT_LOCAL_SIGN_IN = frozenset({"auth-cookie", "identity-provider-redirector"})
 MAX_IDLE_ENV = "KEYCLOAK_MAX_IDLE_TIMEOUT_MINUTES"
 USER_STORAGE = "org.keycloak.storage.UserStorageProvider"
@@ -37,21 +40,21 @@ USER_STORAGE = "org.keycloak.storage.UserStorageProvider"
 # --- pure transforms ---
 
 def effective_requirements(executions: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Each execution with `always`: True when it and every subflow above it are REQUIRED, so every sign-in through the
-    flow must pass it. Keycloak lists executions depth first, with `level` giving the nesting."""
-    out, stack = [], []  # stack holds (level, always) for the enclosing subflows
-    for e in executions or []:
-        level = int(e.get("level") or 0)
-        while stack and stack[-1][0] >= level:
-            stack.pop()
-        parent_always = all(a for _, a in stack)
-        req = (e.get("requirement") or "").upper()
-        always = parent_always and req == "REQUIRED"
-        out.append({"provider": e.get("providerId"), "alias": e.get("displayName") or e.get("alias"), "level": level,
-                    "requirement": req, "subflow": bool(e.get("authenticationFlow")), "always": always})
-        if e.get("authenticationFlow"):
-            stack.append((level, always))
-    return out
+    """Each execution's provider, nesting level and requirement, depth first as Keycloak lists them. Whether a sign-in
+    must pass a step is judged over paths by requires_phishing_resistant, not per step."""
+    return [{"provider": e.get("providerId"), "alias": e.get("displayName") or e.get("alias"), "level": int(e.get("level") or 0),
+             "requirement": (e.get("requirement") or "").upper(), "subflow": bool(e.get("authenticationFlow"))}
+            for e in executions or []]
+
+
+def _login_events_saved(events: Dict[str, Any]) -> Optional[bool]:
+    """True if event storage is on and LOGIN and LOGIN_ERROR are saved types; null when the saved types are missing."""
+    if not events.get("eventsEnabled"):
+        return False
+    saved = events.get("enabledEventTypes")
+    if not isinstance(saved, list):
+        return None
+    return {"LOGIN", "LOGIN_ERROR"}.issubset(saved)
 
 
 def _tree(executions: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -132,7 +135,9 @@ def summarize(realm: Optional[Dict[str, Any]], browser: Optional[List[Dict[str, 
         "access_token_lifespan_minutes": realm_value(_minutes(r.get("accessTokenLifespan"))),
         "remember_me_enabled": realm_value(bool(r.get("rememberMe"))),
         "max_idle_timeout_minutes": max_idle_minutes,
-        "sso_session_idle_within_max": (0 < (_minutes(r.get("ssoSessionIdleTimeout")) or 0) <= max_idle_minutes)
+        # Compared in seconds: rounding first would let 902 seconds pass as 15.0 minutes.
+        "sso_session_idle_within_max": (isinstance(r.get("ssoSessionIdleTimeout"), int)
+                                        and 0 < r["ssoSessionIdleTimeout"] <= max_idle_minutes * 60)
         if rs and max_idle_minutes is not None else None,
         # Lockout
         "brute_force_protected": realm_value(bool(r.get("bruteForceProtected"))),
@@ -146,17 +151,15 @@ def summarize(realm: Optional[Dict[str, Any]], browser: Optional[List[Dict[str, 
         "password_expiry_days": realm_value(rules.get("forceExpiredPasswordChange")),
         # Browser flow
         "browser_flow": realm_value(r.get("browserFlow")),
-        "browser_flow_always_required_authenticators": sorted({e["provider"] for e in steps if e["always"]}) if flow is not None else None,
-        "browser_flow_phishing_resistant_always_required": (any(e["always"] and e["provider"] in PHISHING_RESISTANT for e in steps)
-                                                            if flow is not None else None),
         "browser_flow_alternative_authenticators": sorted({e["provider"] for e in steps if e["requirement"] == "ALTERNATIVE"})
         if flow is not None else None,
         "browser_flow_conditional_authenticators": sorted({e["provider"] for e in steps if (e["provider"] or "").startswith("conditional-")})
         if flow is not None else None,
         "local_sign_in_requires_phishing_resistant": requires_phishing_resistant(browser, NOT_LOCAL_SIGN_IN) if browser is not None else None,
-        "federated_sign_in_available": (any(i.get("enabled") for i in idps or [])
-                                        or any(e["provider"] == "identity-provider-redirector" and e["requirement"] != "DISABLED" for e in flow or []))
-        if idps is not None and browser is not None else None,
+        # A redirector alone sends nobody anywhere: federation needs an enabled identity provider.
+        "federated_sign_in_available": any(i.get("enabled") for i in idps or []) if idps is not None else None,
+        "identity_provider_redirector_enabled": (any(e["provider"] == "identity-provider-redirector" and e["requirement"] != "DISABLED"
+                                                     for e in flow or []) if flow is not None else None),
         "recovery_requires_phishing_resistant": requires_phishing_resistant(reset) if reset is not None else None,
         "reset_credentials_authenticators": sorted({e["provider"] for e in effective_requirements(reset)
                                                     if not e["subflow"] and e["requirement"] != "DISABLED"}) if reset is not None else None,
@@ -170,7 +173,9 @@ def summarize(realm: Optional[Dict[str, Any]], browser: Optional[List[Dict[str, 
         "identity_provider_types": sorted({i.get("providerId") for i in idps or [] if i.get("enabled")}) if idps is not None else None,
         "user_federation_providers": len(storage) if storage is not None else None,
         # Events
-        "login_events_enabled": bool((events or {}).get("eventsEnabled")) if events is not None else None,
+        # Keycloak stores only the saved event types, so storage being on isn't enough: LOGIN and LOGIN_ERROR must be saved.
+        "login_events_enabled": _login_events_saved(events) if events is not None else None,
+        "saved_event_types": sorted(events["enabledEventTypes"]) if events is not None and isinstance(events.get("enabledEventTypes"), list) else None,
         "login_events_expiration_days": (round(int(events["eventsExpiration"]) / 86400, 1) if events and events.get("eventsExpiration") else None)
         if events is not None else None,
         "admin_events_enabled": bool((events or {}).get("adminEventsEnabled")) if events is not None else None,
@@ -189,12 +194,22 @@ REALM_KEYS = ("realm", "enabled", "sslRequired", "registrationAllowed", "verifyE
 
 def collect(client: KeycloakClient, max_idle_minutes: Optional[int] = None) -> Dict[str, Any]:
     realm = client.get("realm settings", "", role="view-realm")
-    browser_alias = (realm or {}).get("browserFlow") or "browser"
-    reset_alias = (realm or {}).get("resetCredentialsFlow") or "reset credentials"
-    browser = client.flow_executions(browser_alias)
-    reset = client.flow_executions(reset_alias)
+    if realm is not None and not REALM_FULL_VIEW_KEYS.issubset(realm):
+        # Without view-realm, Keycloak answers 200 with a reduced view (name and a few flags). Reading absent settings
+        # as false would report lockout, registration and remember me as configured when nothing was read.
+        client._fail("realm settings", "Reduced realm view",
+                     f"needs the role view-realm {client.role_holder()}: Keycloak returned only the reduced realm view", "not_authorized")
+        realm = None
+    # The bound flows are known only from the realm: never fall back to the default names, which may be unused flows.
+    browser_alias = realm.get("browserFlow") if realm is not None else None
+    reset_alias = realm.get("resetCredentialsFlow") if realm is not None else None
+    if realm is not None and not reset_alias:
+        client._fail("realm settings", "Missing flow binding", "the realm settings have no reset-credentials flow binding",
+                     "partial_failure")
+    browser = client.flow_executions(browser_alias) if browser_alias else None
+    reset = client.flow_executions(reset_alias) if reset_alias else None
     actions = client.get("required actions", "/authentication/required-actions", role="view-realm")
-    idps = client.get("identity providers", "/identity-provider/instances", role="view-identity-providers")
+    idps = client.get_all("identity providers", "/identity-provider/instances", role="view-identity-providers")
     storage = client.get("user federation providers", "/components", {"type": USER_STORAGE}, role="view-realm")
     events = client.get("events configuration", "/events/config", role="view-events")
     results = {
