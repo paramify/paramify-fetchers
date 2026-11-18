@@ -1,0 +1,20 @@
+key: keycloak_sign_in_events_stored
+name: 'Keycloak: Sign-In Events Stored'
+type: AUTOMATED
+role: configuration
+statement: >
+  Keycloak actually stored at least one sign-in event within the lookback window (lookback_days, 7 by
+  default), not counting the fetcher's own token requests (newest_login_event has a time). This shows
+  events are produced and kept, not only that storage is enabled. Stored in Keycloak is not proof that
+  events reach a SIEM, and no recency limit is applied. Supports KSI-MLA-LET. Does not check whether the
+  collection run succeeded.
+
+regex: '"newest_login_event":\s*"'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-KEYCLOAK-ADMIN-EVENTS
