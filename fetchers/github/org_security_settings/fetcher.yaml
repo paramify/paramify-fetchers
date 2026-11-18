@@ -1,5 +1,5 @@
 name: github_org_security_settings
-version: 0.2.0
+version: 0.3.0
 description: >-
   An organization's security settings: whether two-factor authentication is
   required and which members lack it, default member permissions, what the
@@ -46,6 +46,20 @@ target_schema:
     env: GITHUB_INCLUDE_ARCHIVED
     description: Include archived repositories, which cannot change.
 
+config_schema:
+  managed_user_accounts:
+    type: string
+    required: false
+    default: auto
+    env: GITHUB_MANAGED_USER_ACCOUNTS
+    description: >-
+      Whether the organization's members are managed user accounts
+      (Enterprise Managed Users), which sign in and use two-factor through the
+      identity provider. auto decides from the member list (every login has
+      the enterprise's underscore suffix); true or false states it. When
+      true, the two-factor fields are null with a note, since GitHub keeps no
+      two-factor setting for managed accounts.
+
 runtime:
   type: python
   entry: fetcher.py
@@ -67,7 +81,7 @@ evidence_set:
   name: GitHub Organization Security Settings
   instructions: >-
     Script: github/org_security_settings/fetcher.py. The organization's two-factor requirement and the members without two-factor
-    (owners only; null otherwise), default repository permission and member
+    (owners only; null otherwise, and null with a note for managed user accounts), default repository permission and member
     creation rights, Actions token default permissions and whether workflows may
     approve pull requests, and every code security configuration with the
     repositories it is attached to. A configuration attached to no repository

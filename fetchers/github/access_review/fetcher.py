@@ -8,7 +8,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "_shared"))
 from github_client import PLAN_UNAVAILABLE, run  # noqa: E402
 
 NAME = "github_access_review"
-CONFIG = {"include_organization_roles": ("GITHUB_INCLUDE_ORGANIZATION_ROLES", True)}
+CONFIG = {"include_organization_roles": ("GITHUB_INCLUDE_ORGANIZATION_ROLES", True),
+          "scope_to_repositories": ("GITHUB_SCOPE_TO_REPOSITORIES", False),
+          "include_members": ("GITHUB_INCLUDE_MEMBERS", True)}
 
 
 def logins(items):
@@ -61,6 +63,8 @@ def repo_record(client, org, repo, owners, outsiders):
         "teams": [{"team": t.get("slug"), "permission": t.get("permission"), "access": access_of(t, "permission")}
                   for t in teams],
         "collaborators_total": len(people),
+        # Every account with access, for scoping organization roles; removed before the evidence is written.
+        "_logins": sorted(p["login"] for p in people if p["login"]),
     }
 
 
@@ -92,6 +96,30 @@ def organization_roles(client, login):
                                                      if t.get("slug"))} for u in users],
                       "teams": [{"team": t.get("slug"), "assignment": t.get("assignment")} for t in teams]})
     return roles, True
+
+
+def teams_in_scope(teams, done, roles):
+    """Slugs of the teams that reach a collected repository: granted on one, holding an organization role with a base
+    role (which reaches every repository), or nested under such a team (nested teams inherit both)."""
+    kept = {x["team"] for r in done for x in r["teams"]}
+    kept |= {t["team"] for r in roles or [] if r["base_role"] for t in r["teams"]}
+    parent = {t.get("slug"): (t.get("parent") or {}).get("slug") for t in teams}
+    changed = True
+    while changed:
+        changed = False
+        for slug, up in parent.items():
+            if up in kept and slug not in kept:
+                kept.add(slug)
+                changed = True
+    return kept
+
+
+def roles_in_scope(roles, people, team_slugs):
+    """Held roles that reach the repositories: a base role reaches every repository in the organization; any other
+    role is kept when an account with access to a collected repository, or a kept team, holds it."""
+    return [r for r in roles if (r["users"] or r["teams"]) and (
+        r["base_role"] or any(u["login"] in people for u in r["users"])
+        or any(t["team"] in team_slugs for t in r["teams"]))]
 
 
 def token_user_is_owner(client, owners):
@@ -133,6 +161,21 @@ def collect(client, org, repos, config):
     owner_set, outsider_set = set(logins(owners)), set(logins(outsiders))
     records = [repo_record(client, login, r, owner_set, outsider_set) for r in repos]
     done = [r for r in records if r["collected"]]
+    people = {name for r in done for name in r.pop("_logins")}
+    # Scoping leaves out teams and roles with no reach into the collected repositories. It needs every repository's
+    # grants: with one unread, a team or role could reach it unseen, so nothing is left out (and the run fails).
+    # Roles asked for but unread could hold a team that reaches every repository, so they also leave scope unknown.
+    scoped = None
+    if config["scope_to_repositories"] and len(done) == len(records) \
+            and not (config["include_organization_roles"] and roles is None):
+        scoped = True
+    team_slugs = teams_in_scope(teams, done, roles) if scoped else {t.get("slug") for t in teams}
+    teams_out = [t for t in teams if t.get("slug") not in team_slugs]
+    teams = [t for t in teams if t.get("slug") in team_slugs]
+    roles_out = 0
+    if scoped and roles is not None:
+        kept_roles = roles_in_scope(roles, people, team_slugs)
+        roles_out, roles = len(roles) - len(kept_roles), kept_roles
     team_rows = []
     for t in teams:
         team_members = client.paginate_required(f"orgs/{login}/teams/{t['slug']}/members")
@@ -151,6 +194,11 @@ def collect(client, org, repos, config):
     held = None if roles is None else [r for r in roles if r["users"] or r["teams"]]
     return {
         "metadata": {"organization_roles_available": roles_available,
+                     # True: teams and organization roles are limited to those reaching the collected repositories.
+                     # None: asked for, not applied because a repository's grants were not read. False: not asked.
+                     "scoped_to_repositories": scoped if config["scope_to_repositories"] else False,
+                     "teams_left_out": len(teams_out) if scoped else 0,
+                     "organization_roles_left_out": roles_out,
                      # True: read. False: the organization has no invitation list (pending_invitations stays null).
                      # None: the read failed, and the failure is listed.
                      "pending_invitations_available": invitations_available},
@@ -173,7 +221,8 @@ def collect(client, org, repos, config):
                 {u["login"] for r in held if r["base_role"] in ("write", "maintain", "admin") for u in r["users"]}),
             "not_collected": [r["repository"] for r in records if not r["collected"]],
         },
-        "members": logins(members),
+        # The member list itself; members_total stays when it is left out.
+        "members": logins(members) if config["include_members"] else None,
         "outside_collaborators": sorted(outsider_set),
         "pending_invitations": pending,
         "teams": team_rows,
