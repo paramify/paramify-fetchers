@@ -67,10 +67,16 @@ def test_a_refused_list_leaves_every_count_null(m, collect_name, operation, file
 
 
 def test_summaries_of_a_read_empty_list_are_still_numbers():
+    expected_pool_fields = set(aks.summarize_expected_pools(None, None))
     for summary in (aks.summarize([]), redis_cache.summarize([]), managed_redis.summarize([]), rbac.summarize([], 5)):
-        # all_agent_pools_fips is null for a read estate with no pools, by design
-        assert summary and all(v is not None for k, v in summary.items() if k != "all_agent_pools_fips")
+        # all_agent_pools_fips is null for a read estate with no pools, by design; the expected-pool fields are null
+        # while their setting is unset (a policy not adopted stays unevaluated), never because the list was empty
+        assert summary and all(v is not None for k, v in summary.items() if k != "all_agent_pools_fips" and k not in expected_pool_fields)
     assert rbac.summarize([], 5)["builtin_role_definitions"] == 5
+    # Once listed, they are numbers for a read empty estate: a bound pool in a cluster that isn't there is missing.
+    listed = aks.summarize([], aks.parse_expected_pools("prod-aks/web")[0])
+    assert all(listed[k] is not None for k in expected_pool_fields)
+    assert (listed["expected_autoscaling_pools_missing"], listed["all_expected_pools_autoscaling"]) == (1, False)
 
 
 def _cache(extras):
