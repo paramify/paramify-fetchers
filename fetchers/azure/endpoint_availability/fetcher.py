@@ -9,6 +9,7 @@ import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import urlsplit, urlunsplit
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR.parent / "_shared"))
@@ -30,6 +31,7 @@ LOOKBACK_ENV = "AZURE_ENDPOINT_AVAILABILITY_LOOKBACK_DAYS"
 TARGET_ENV = "AZURE_AVAILABILITY_TARGET_PERCENTAGE"
 DEFAULT_LOOKBACK_DAYS = 7
 MAX_LOOKBACK_DAYS = 30
+EXPECTED_ENV = "AZURE_EXPECTED_ENDPOINTS"
 
 READ, ERROR, NOT_APPLICABLE = "read", "error", "not_applicable"
 LB_METRICS = ("data_path", "health_probe")
@@ -135,6 +137,27 @@ def judged(points: List[Tuple[str, float]], status: str, target: Optional[float]
             "below_target": (average < target) if complete and average is not None and target is not None else None}
 
 
+def normalize_url(url: Optional[str]) -> Optional[str]:
+    """Scheme and host in lowercase, without a trailing slash, so the same endpoint matches however it is written.
+    None unless it is an http or https URL with a host."""
+    parts = urlsplit((url or "").strip())
+    if parts.scheme.lower() not in ("http", "https") or not parts.netloc:
+        return None
+    path = parts.path.rstrip("/")
+    return urlunsplit((parts.scheme.lower(), parts.netloc.lower(), path, parts.query, ""))
+
+
+def expected_endpoint_records(enabled: List[Dict[str, Any]], expected: List[str]) -> List[Dict[str, Any]]:
+    """Each expected URL: the enabled in-scope tests that request it, and whether one of them was measured in every
+    hour of the lookback."""
+    out = []
+    for url in expected:
+        mine = [t for t in enabled if normalize_url(t["url"]) == url]
+        out.append({"url": url, "tested": bool(mine), "tests": sorted(t["test_name"] or t["name"] for t in mine),
+                    "fully_measured": any(t["measurement_complete"] for t in mine)})
+    return out
+
+
 def _lowest(values: List[Optional[float]]) -> Optional[float]:
     known = [v for v in values if v is not None]
     return min(known) if known else None
@@ -144,6 +167,8 @@ def summarize(tests: List[Dict[str, Any]], balancers: List[Dict[str, Any]], sett
               tests_listed: bool = True, balancers_listed: bool = True) -> Dict[str, Any]:
     enabled = [t for t in tests if t["enabled"]]
     tests_complete = tests_listed and all(t["metric_status"] == READ for t in enabled)
+    expected = settings.get("expected_endpoints")
+    endpoints = expected_endpoint_records(enabled, expected or [])
     standard = [b for b in balancers if b["standard"]]
     lb_complete = balancers_listed and all(b[k]["metric_status"] in (READ, NOT_APPLICABLE) for b in standard for k in LB_METRICS)
     target = settings["target"]
@@ -201,6 +226,15 @@ def summarize(tests: List[Dict[str, Any]], balancers: List[Dict[str, Any]], sett
             [b[k]["measurement_coverage_percentage"] for b in standard for k in ("data_path", "health_probe")])),
         "lookback_days": settings["lookback_days"],
         "availability_target_percentage": settings["target"],
+        # Missing samples apart from the averages, and whether the window is complete.
+        "availability_hours_missing": t_known(sum(t["hours_missing"] or 0 for t in enabled)),
+        "expected_endpoints": len(expected) if expected is not None else None,
+        "expected_endpoints_untested": (sum(1 for e in endpoints if not e["tested"]) if tests_listed else None) if expected is not None else None,
+        "expected_endpoints_untested_names": (sorted(e["url"] for e in endpoints if not e["tested"]) if tests_listed else None)
+        if expected is not None else None,
+        "expected_endpoints_fully_measured": t_known(sum(1 for e in endpoints if e["fully_measured"])) if expected is not None else None,
+        "measurement_window_complete": t_known(all(e["fully_measured"] for e in endpoints) if expected is not None
+                                               else bool(enabled) and all(t["measurement_complete"] for t in enabled)),
     }
 
 
@@ -217,7 +251,16 @@ def settings_from_env(collector: Collector) -> Dict[str, Any]:
         except ValueError:
             collector.record(f"config {TARGET_ENV}", ValueError(
                 f"invalid setting {TARGET_ENV}={raw!r}: expected a number above 0 and up to 100; left unset"))
-    return {"lookback_days": days, "target": target}
+    expected = None  # unset until the offering lists the endpoints that must be tested
+    raw = (os.environ.get(EXPECTED_ENV) or "").strip()
+    if raw:
+        entries = [e.strip() for e in raw.split(",") if e.strip()]
+        bad = [e for e in entries if normalize_url(e) is None]
+        if bad:
+            collector.record(f"config {EXPECTED_ENV}", ValueError(
+                f"invalid setting {EXPECTED_ENV}: {', '.join(bad)} not an http or https URL with a host"))
+        expected = sorted({normalize_url(e) for e in entries if normalize_url(e)})
+    return {"lookback_days": days, "target": target, "expected_endpoints": expected}
 
 
 # --- collection ---
