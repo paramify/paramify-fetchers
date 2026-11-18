@@ -6,9 +6,9 @@ statement: >
   No enabled availability test with every hour measured averaged below availability_target_percentage
   over the lookback (availability_tests_below_target is 0). Also fails while no target is configured
   (see 'Availability Target Is Configured' for the cause), so an undecided or unread value is never
-  reported as a pass. Tests that could not be judged are checked by 'Every Test Was Judged'. Supports
-  KSI-CNA-OFA. These are inputs to availability reporting; they do not replace the availability
-  reporting itself. Does not check whether the collection run succeeded.
+  reported as a pass. Tests that could not be judged are checked by 'Every Test Was Judged'. These
+  are inputs to availability reporting; they do not replace the availability reporting itself. Does
+  not check whether the collection run succeeded.
 
 regex: '"availability_tests_below_target":\s*(?<availability_tests_below_target>\d+)'
 rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0

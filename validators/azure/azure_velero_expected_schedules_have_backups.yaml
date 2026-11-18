@@ -6,8 +6,7 @@ statement: >
   No expected schedule is missing from backup storage (expected_schedules_without_backups is 0). Also
   fails while expected_schedules is not set or a location is unread (see 'Expected Backup Schedules
   Are Configured' and 'Every Backup Storage Location Read' for the cause), so an undecided or unread
-  value is never reported as a pass. Supports KSI-RPL-ABO. Does not check whether the collection run
-  succeeded.
+  value is never reported as a pass. Does not check whether the collection run succeeded.
 
 regex: '"expected_schedules_without_backups":\s*(?<expected_schedules_without_backups>\d+)'
 rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0

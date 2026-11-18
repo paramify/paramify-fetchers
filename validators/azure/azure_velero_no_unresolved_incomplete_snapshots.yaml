@@ -7,7 +7,7 @@ statement: >
   same schedule that completed every snapshot it attempted
   (backups_volume_snapshots_incomplete_unresolved is 0). Resolved failures and deliberate failure
   tests (names matching deliberate_failure_tests) stay in the totals, so history is kept without
-  failing this check. Supports KSI-RPL-ABO. Does not check whether the collection run succeeded.
+  failing this check. Does not check whether the collection run succeeded.
 
 regex: '"backups_volume_snapshots_incomplete_unresolved":\s*(?<backups_volume_snapshots_incomplete_unresolved>\d+)'
 rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0

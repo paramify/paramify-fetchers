@@ -4,9 +4,9 @@ type: AUTOMATED
 role: configuration
 statement: >
   No backup stays in storage more than expiry_grace_hours past its expiration
-  (expired_backups_not_deleted is 0), so Velero's retention is enforced. Supports KSI-SVC-RUD. Does
-  not show that the retention period itself is the authorized one. Does not check whether the
-  collection run succeeded.
+  (expired_backups_not_deleted is 0), so Velero's retention is enforced. Does not show that the
+  retention period itself is the authorized one. Does not check whether the collection run
+  succeeded.
 
 regex: '"expired_backups_not_deleted":\s*(?<expired_backups_not_deleted>\d+)'
 rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0

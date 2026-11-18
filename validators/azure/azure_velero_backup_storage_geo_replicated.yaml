@@ -5,8 +5,8 @@ role: configuration
 statement: >
   Every Velero backup storage location (at least one) is in a geo-replicated storage account (GRS,
   RA-GRS, GZRS or RA-GZRS), so what Velero writes there (Kubernetes resource backups and backup
-  metadata, and file-system backup data if used) has a copy in the paired region. Supports KSI-RPL-ARP
-  for that data only. Does not cover volume snapshots taken by the Azure disk snapshotter: those are
+  metadata, and file-system backup data if used) has a copy in the paired region. Does not cover
+  volume snapshots taken by the Azure disk snapshotter: those are
   managed disk snapshots outside the storage account, and this check does not show them copied
   off-site. Does not check whether the collection run succeeded.
 
