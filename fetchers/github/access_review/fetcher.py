@@ -132,6 +132,13 @@ def token_user_is_owner(client, owners):
 
 def collect(client, org, repos, config):
     login = org["login"]
+    if config["scope_to_repositories"] and not config["include_organization_roles"]:
+        # Scoping needs the roles: a team holding a role with a base role (all_repo_admin, all_repo_write...) reaches
+        # every repository with no grant on any of them. Without the roles it would be left out unseen.
+        client.fail("config scope_to_repositories", "BadConfig",
+                    "scope_to_repositories needs include_organization_roles: without the organization roles, a team "
+                    "that reaches every repository through a role would be left out", "bad_config")
+        return None
     owners = client.paginate_required(f"orgs/{login}/members", {"role": "admin"})
     members = client.paginate_required(f"orgs/{login}/members", {"role": "all"})
     outsiders = client.paginate_required(f"orgs/{login}/outside_collaborators")
@@ -166,8 +173,7 @@ def collect(client, org, repos, config):
     # grants: with one unread, a team or role could reach it unseen, so nothing is left out (and the run fails).
     # Roles asked for but unread could hold a team that reaches every repository, so they also leave scope unknown.
     scoped = None
-    if config["scope_to_repositories"] and len(done) == len(records) \
-            and not (config["include_organization_roles"] and roles is None):
+    if config["scope_to_repositories"] and len(done) == len(records) and roles is not None:
         scoped = True
     team_slugs = teams_in_scope(teams, done, roles) if scoped else {t.get("slug") for t in teams}
     teams_out = [t for t in teams if t.get("slug") not in team_slugs]

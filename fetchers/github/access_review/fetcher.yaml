@@ -74,11 +74,14 @@ config_schema:
     description: >-
       Limit teams and organization roles to those that reach the collected
       repositories: teams granted on one of them or holding an organization
-      role with a base role (and teams nested under those), and held roles with a base role or held by an account or team
-      with access. Owners, members and outside collaborators stay. Not applied
-      when a repository's grants, or requested organization roles, could not
-      be read. metadata.teams_left_out
-      and metadata.organization_roles_left_out give the counts left out.
+      role with a base role (and teams nested under those), and held roles
+      with a base role or held by an account or team with access. Owners,
+      members and outside collaborators stay. Needs
+      include_organization_roles: with it false the run fails as bad_config,
+      because a team reaching every repository through a role would be left
+      out unseen. Not applied when a repository's grants or the organization
+      roles could not be read. metadata.teams_left_out and
+      metadata.organization_roles_left_out give the counts left out.
   include_members:
     type: boolean
     required: false

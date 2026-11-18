@@ -1283,11 +1283,26 @@ def test_scope_is_not_applied_when_requested_roles_are_unread(fake, monkeypatch,
     assert {t["team"] for t in ev["teams"]} == {"platform", "platform-oncall", "marketing"}
 
 
-def test_scope_without_organization_roles(fake, monkeypatch, tmp_path):
+def test_scope_without_organization_roles_is_bad_config(fake, monkeypatch, tmp_path):
+    # platform reaches every repository only through all_repo_admin: with the roles unread, scoping would drop it and
+    # still claim to be complete. So the combination is refused before anything is read.
+    routes = scoped_access_routes()
+    routes[f"repos/{ORG}/app/teams"] = routes[f"repos/{ORG}/infra/teams"] = []
+    f = fake(routes)
+    code, ev, status = run_fetcher("access_review", monkeypatch, tmp_path, GITHUB_SCOPE_TO_REPOSITORIES="true",
+                                   GITHUB_INCLUDE_ORGANIZATION_ROLES="false")
+    assert code == 1 and status["code"] == "bad_config" and "include_organization_roles" in status["error"]
+    assert "teams" not in ev and ev["metadata"].get("scoped_to_repositories") is None
+    # run() reads the organization and its repository list before collect; collect itself reads nothing.
+    assert not any(k in p for p, _ in f.calls for k in ("/members", "/teams", "/collaborators", "organization-roles",
+                                                         "outside_collaborators", "invitations"))
+
+
+def test_roles_switched_off_without_scope_still_runs(fake, monkeypatch, tmp_path):
     f = fake(scoped_access_routes())
-    code, ev, _ = run_fetcher("access_review", monkeypatch, tmp_path, GITHUB_SCOPE_TO_REPOSITORIES="true",
-                              GITHUB_INCLUDE_ORGANIZATION_ROLES="false")
-    assert code == 0 and ev["organization_roles"] is None and ev["metadata"]["organization_roles_left_out"] == 0
+    code, ev, _ = run_fetcher("access_review", monkeypatch, tmp_path, GITHUB_INCLUDE_ORGANIZATION_ROLES="false")
+    assert code == 0 and ev["organization_roles"] is None and ev["metadata"]["scoped_to_repositories"] is False
+    assert {t["team"] for t in ev["teams"]} == {"platform", "platform-oncall", "marketing"}
     assert not any("organization-roles" in p for p, _ in f.calls)
 
 
