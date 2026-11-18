@@ -4,8 +4,8 @@ type: AUTOMATED
 role: configuration
 statement: >
   No ALLOW AuthorizationPolicy has an empty rule, which would match every request to the workloads it
-  selects (authorization_policies_allowing_all is empty). Supports KSI-CNA-MAT and KSI-IAM-ELP. Does not
-  check whether the collection run succeeded.
+  selects (authorization_policies_allowing_all is empty). Does not check whether the collection run
+  succeeded.
 
 regex: '"authorization_policies_allowing_all":\s*\[\]'
 rules_summary: MATCH_COUNT NOT_EQUALS 0

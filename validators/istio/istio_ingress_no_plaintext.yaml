@@ -4,8 +4,8 @@ type: AUTOMATED
 role: configuration
 statement: >
   No Istio Gateway server takes HTTP or TCP without TLS and without an HTTPS redirect
-  (gateway_servers_plaintext is empty). Covers Istio Gateways only, not other ingress paths. Supports KSI-
-  CNA-ULN and KSI-SVC-SIN. Does not check whether the collection run succeeded.
+  (gateway_servers_plaintext is empty). Covers Istio Gateways only, not other ingress paths. Does not
+  check whether the collection run succeeded.
 
 regex: '"gateway_servers_plaintext":\s*\[\]'
 rules_summary: MATCH_COUNT NOT_EQUALS 0

@@ -5,8 +5,8 @@ role: configuration
 statement: >
   Every in-mesh namespace is covered by an allow-nothing AuthorizationPolicy, its own or the mesh-wide one
   (namespaces_in_mesh_without_default_deny is empty), so requests are denied unless a policy allows them.
-  Configuration evidence: it does not show requests actually denied. Supports KSI-CNA-MAT and KSI-IAM-ELP.
-  Does not check whether the collection run succeeded.
+  Configuration evidence: it does not show requests actually denied. Does not check whether the collection
+  run succeeded.
 
 regex: '"namespaces_in_mesh_without_default_deny":\s*\[\]'
 rules_summary: MATCH_COUNT NOT_EQUALS 0

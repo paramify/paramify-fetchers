@@ -5,8 +5,7 @@ role: configuration
 statement: >
   The mesh's outbound traffic policy is REGISTRY_ONLY (outbound_traffic_policy), so sidecars send traffic
   only to services in the mesh's registry, not to arbitrary external hosts. Istio's default, ALLOW_ANY,
-  fails. Covers traffic through sidecars only. Supports KSI-CNA-ULN. Does not check whether the collection
-  run succeeded.
+  fails. Covers traffic through sidecars only. Does not check whether the collection run succeeded.
 
 regex: '"outbound_traffic_policy":\s*"REGISTRY_ONLY"'
 rules_summary: MATCH_COUNT NOT_EQUALS 0

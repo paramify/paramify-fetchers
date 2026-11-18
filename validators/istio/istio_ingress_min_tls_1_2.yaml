@@ -4,8 +4,8 @@ type: AUTOMATED
 role: configuration
 statement: >
   No Istio Gateway server allows a minimum TLS version below 1.2 (gateway_servers_weak_tls is empty); a
-  server with no minimum set uses Istio's default of 1.2. Supports KSI-SVC-SIN. Does not check whether the
-  collection run succeeded.
+  server with no minimum set uses Istio's default of 1.2. Does not check whether the collection run
+  succeeded.
 
 regex: '"gateway_servers_weak_tls":\s*\[\]'
 rules_summary: MATCH_COUNT NOT_EQUALS 0
