@@ -1,0 +1,20 @@
+key: alertmanager_no_failed_notifications
+name: 'Alertmanager: No Failed Notifications Since Start'
+type: AUTOMATED
+role: configuration
+statement: >
+  No notification attempt failed since Alertmanager's process started (notifications_failed is 0),
+  retries included: every integration accepted what it was sent. notification_failures names any
+  receiver (or integration type) that failed. Accepted by the integration is not proof that a person
+  received it. Counts reset when Alertmanager restarts (counters_since), so a recent restart can hide
+  earlier failures. Supports KSI-INR-RIR. Does not check whether the collection run succeeded.
+
+regex: '"notifications_failed":\s*0\b'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-ALERTMANAGER-ALERT-DELIVERY
