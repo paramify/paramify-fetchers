@@ -10,6 +10,14 @@ schemas and the `paramify` CLI — not the internal code.
 
 ## [Unreleased]
 
+### Changed
+
+- **`azure_endpoint_availability` 0.2.0: expected endpoints and a complete window.** A new `expected_endpoints` setting
+  lists the URLs that must be tested; expected endpoints that no enabled, in-scope test requests are reported, and
+  `expected_endpoints_fully_measured` counts those with a result in every hour. `availability_hours_missing` shows
+  missing samples apart from the averages, and `measurement_window_complete` says whether every expected endpoint
+  (or every enabled test) was measured for the whole lookback. Unset, the expected-endpoint counts stay null.
+
 ### Added
 
 - Manifest: `concurrency` on a fetcher entry (1 to 32, default 1) runs up to that many of its targets at once. Each

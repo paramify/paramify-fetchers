@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import logging
 import sys
 from collections import namedtuple
 from pathlib import Path
@@ -169,7 +170,7 @@ def arm(monkeypatch, tmp_path):
     monkeypatch.setenv("EVIDENCE_DIR", str(tmp_path))
     monkeypatch.setenv("FETCHER_STATUS_FILE", str(tmp_path / "status.json"))
     for env in ("AZURE_AUTHORITY_HOST", "AZURE_TENANT_ID", "AZURE_ENVIRONMENT", "AZURE_RESOURCE_EXCLUSIONS", "AZURE_TARGET_SUBSCRIPTION_ONLY",
-                ea.LOOKBACK_ENV, ea.TARGET_ENV):
+                ea.LOOKBACK_ENV, ea.TARGET_ENV, ea.EXPECTED_ENV):
         monkeypatch.delenv(env, raising=False)
     return serve
 
@@ -301,3 +302,69 @@ def test_classic_ping_tests_read_their_url_from_the_webtest_xml():
 def test_without_a_target_the_not_judged_counts_stay_null():
     s = ea.summarize([_test()], [_lb()], {"lookback_days": 7, "target": None})
     assert (s["availability_tests_not_judged"], s["load_balancers_not_judged"]) == (None, None)
+
+
+
+# --- expected endpoints and a complete window ---
+
+FULL_DAY = tuple((str(h), 100.0) for h in range(24))
+
+
+def _day_test(url, hours=24, name="t"):
+    t = ea.test_record(raw_test(name, url=url))
+    t.update(ea.judged(list(FULL_DAY[:hours]), ea.READ, 99.9, 24))
+    return t
+
+
+def _settings(*urls):
+    return {**SETTINGS, "lookback_days": 1, "expected_endpoints": sorted(ea.normalize_url(u) for u in urls) if urls else None}
+
+
+def test_urls_match_regardless_of_scheme_and_host_case_and_a_trailing_slash():
+    assert ea.normalize_url("HTTPS://App.Example.com/Health/") == "https://app.example.com/Health"
+    assert ea.normalize_url("https://app.example.com/") == ea.normalize_url("https://app.example.com")
+    assert ea.normalize_url("ftp://files.example.com") is None and ea.normalize_url("not a url") is None
+
+
+def test_an_expected_endpoint_without_a_test_is_reported():
+    s = ea.summarize([_day_test("https://app.example.com/health")], [],
+                     _settings("https://app.example.com/health", "https://api.example.com/"))
+    assert (s["expected_endpoints"], s["expected_endpoints_untested"]) == (2, 1)
+    assert s["expected_endpoints_untested_names"] == ["https://api.example.com"]
+    assert (s["expected_endpoints_fully_measured"], s["measurement_window_complete"]) == (1, False)
+
+
+def test_missing_hours_are_counted_apart_and_leave_the_window_incomplete():
+    s = ea.summarize([_day_test("https://app.example.com/health", hours=20)], [], _settings("https://app.example.com/health"))
+    assert (s["availability_hours_missing"], s["expected_endpoints_fully_measured"], s["measurement_window_complete"]) == (4, 0, False)
+    assert s["lowest_availability_percentage"] == 100.0  # the average alone would look healthy
+
+
+def test_every_expected_endpoint_measured_every_hour_is_a_complete_window():
+    tests = [_day_test("https://app.example.com/health", name="app"), _day_test("https://api.example.com", name="api")]
+    s = ea.summarize(tests, [], _settings("https://APP.example.com/health/", "https://api.example.com/"))
+    assert (s["expected_endpoints_untested"], s["expected_endpoints_fully_measured"]) == (0, 2)
+    assert (s["availability_hours_missing"], s["measurement_window_complete"]) == (0, True)
+
+
+def test_without_expected_endpoints_their_counts_are_null_and_the_window_covers_every_enabled_test():
+    s = ea.summarize([_day_test("https://app.example.com/health"), _day_test("https://api.example.com", hours=23)], [], _settings())
+    assert (s["expected_endpoints"], s["expected_endpoints_untested"], s["expected_endpoints_fully_measured"]) == (None, None, None)
+    assert (s["availability_hours_missing"], s["measurement_window_complete"]) == (1, False)
+    assert ea.summarize([], [], _settings())["measurement_window_complete"] is False  # nothing tested is not a complete window
+
+
+def test_unread_results_leave_the_window_unknown():
+    unread = ea.test_record(raw_test("app", url="https://app.example.com/health"))
+    unread.update(ea.judged([], ea.ERROR, 99.9, 24))
+    s = ea.summarize([unread], [], _settings("https://app.example.com/health"))
+    assert (s["availability_hours_missing"], s["expected_endpoints_fully_measured"], s["measurement_window_complete"]) == (None, None, None)
+    assert s["expected_endpoints_untested"] == 0  # the test exists; only its results are unknown
+
+
+def test_an_expected_endpoint_that_is_not_a_url_fails_the_run(arm, tmp_path, monkeypatch):
+    monkeypatch.setenv(ea.EXPECTED_ENV, "https://app.example.com, not-a-url")
+    collector = ea.Collector(logging.getLogger("test"))
+    settings = ea.settings_from_env(collector)
+    assert settings["expected_endpoints"] == ["https://app.example.com"]
+    assert [f["operation"] for f in collector.failures] == [f"config {ea.EXPECTED_ENV}"] and "not-a-url" in collector.failures[0]["message"]

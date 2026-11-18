@@ -1,5 +1,5 @@
 name: azure_endpoint_availability
-version: 0.1.0
+version: 0.2.0
 description: >-
   Shows whether customer-facing endpoints are tested for availability from outside and how available they were, and whether Standard load balancers kept their data path and backend health probes up.
 category: azure
@@ -33,6 +33,16 @@ config_schema:
       default: while it is unset, every below-target count is null rather than judged against an objective nobody
       adopted. A test or load balancer whose average over the lookback is lower counts as below target. A value
       outside that range fails the run as bad_config and leaves it unset.
+  expected_endpoints:
+    type: string
+    required: false
+    env: AZURE_EXPECTED_ENDPOINTS
+    description: >
+      Comma-separated URLs that must be tested for availability, such as https://app.example.com. An expected
+      endpoint that no enabled, in-scope availability test requests is reported, so a missing test is visible rather
+      than absent from the evidence. Matching ignores the case of the scheme and host and a trailing slash. There is no
+      default: while it is unset, the expected-endpoint counts are null. An entry that is not an http or https URL with
+      a host fails the run as bad_config.
   resource_exclusions:
     type: patterns
     prefixes: [rg, location, id]
@@ -90,6 +100,14 @@ evidence_set:
     - load_balancers_without_measured_traffic — Number of Standard load balancers with neither load-balancing rules nor health probes, such as an outbound-only load balancer, which report no availability metrics and are not judged
     - lookback_days — Days of hourly availability read
     - availability_target_percentage — The adopted availability objective each average is compared with; null when not set
+
+    Is the expected population tested, and is the window complete?
+    - availability_hours_missing — Total hours of the lookback with no result, summed over the enabled tests (missing samples), shown apart from the averages; null unless every enabled test's results were read
+    - expected_endpoints — Number of URLs listed in expected_endpoints; null when none are listed, as are the three fields below
+    - expected_endpoints_untested — Number of expected endpoints that no enabled, in-scope availability test requests; null if the test list could not be read
+    - expected_endpoints_untested_names — List of the expected endpoints no enabled, in-scope test requests
+    - expected_endpoints_fully_measured — Number of expected endpoints with an enabled test that has a result in every hour of the lookback; null unless every enabled test's results were read
+    - measurement_window_complete — True if every expected endpoint, or every enabled test when none are listed, has a result in every hour of the lookback (a complete measurement window); false if any hour is missing or an expected endpoint is untested; null unless every enabled test's results were read
     - resource_exclusion_patterns — List of the resource_exclusions patterns as given
     - resource_exclusion_patterns_unmatched — List of the patterns that matched nothing, such as a mistyped name; null when the test or load balancer list could not be read
     - excluded_availability_tests — Number of availability tests a pattern took out of scope
