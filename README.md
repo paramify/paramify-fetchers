@@ -114,28 +114,53 @@ paramify evidence evidence/run-*/demo_hello.json   # read what it wrote
 
 ## Install
 
-**Prerequisites:** git, and Python 3.11 or later. If you have [uv](https://docs.astral.sh/uv/) instead, the script uses it to get Python.
-
 ```bash
 curl -fsSL https://raw.githubusercontent.com/paramify/paramify-fetchers/main/install.sh | bash
 ```
 
-The [install script](install.sh) clones the repo to `~/paramify-fetchers`, installs the CLI and the TUI into a virtualenv at `.venv` inside the clone, and links `paramify` into `~/.local/bin`. It uses [uv](https://docs.astral.sh/uv/) for the install when uv is on your `PATH`. If `~/.local/bin` is not on your `PATH`, it asks before adding it to your shell profile. At the end it offers to open the TUI. Without a terminal (CI or another script), it asks nothing and only prints what to do. Run `paramify` commands from inside the clone. Running the script again reinstalls into the existing clone without changing its code.
+You need git and Python 3.11 or later. If you have [uv](https://docs.astral.sh/uv/) but no Python, the [install script](install.sh) uses uv to get one. The script:
 
-To change the defaults, set environment variables for `bash`. For example, this clones a release tag to another directory and adds the Azure SDKs:
+1. Clones the repo to `~/paramify-fetchers`.
+2. Installs the CLI and the TUI into a virtualenv at `.venv` inside the clone, with uv if you have it.
+3. Links `paramify` into `~/.local/bin`, and asks before adding that folder to your shell profile.
+4. Offers to open the TUI.
+
+Running it again reinstalls into the same clone without changing its code. Without a terminal (CI or another script), it asks nothing and only prints what to do.
+
+> [!TIP]
+> Run `paramify` commands from inside the clone: `cd ~/paramify-fetchers` first.
+
+<details>
+<summary><b>Options:</b> another directory, a release tag, or the Azure, GCP and OCI SDKs</summary>
+
+<br>
+
+Set these environment variables for `bash`:
+
+| Variable | Default | Sets |
+|---|---|---|
+| `PARAMIFY_DIR` | `~/paramify-fetchers` | Where to clone |
+| `PARAMIFY_REF` | `main` | The branch or release tag to clone |
+| `PARAMIFY_EXTRAS` | `all` | The pip extras, such as `all,azure`. Leave it empty for the headless CLI only. |
+| `PARAMIFY_REPO_URL` | this repo | The repo to clone, such as your fork |
+
+For example, this clones a release tag to another directory and adds the Azure SDKs:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/paramify/paramify-fetchers/main/install.sh \
   | PARAMIFY_DIR=~/src/paramify-fetchers PARAMIFY_REF=v0.6.0-beta PARAMIFY_EXTRAS=all,azure bash
 ```
 
-`PARAMIFY_EXTRAS=` (empty) installs only the headless CLI. The top of the script lists every variable.
+</details>
 
-### Install without the script
+<details>
+<summary><b>Install without the script</b></summary>
 
-The project needs **Python 3.11 or later**. Most install problems come from building the virtualenv with an older Python. On macOS, `python3` is often the system's 3.9, even when a newer Python is installed as `python3.12`. Use one of these two ways.
+<br>
 
-**With [uv](https://docs.astral.sh/uv/)** (recommended). uv downloads Python 3.12 if your machine doesn't have it, so the Python you already have doesn't matter:
+You need **Python 3.11 or later**. Most install problems come from building the virtualenv with an older Python. On macOS, `python3` is often the system's 3.9, even when a newer Python is installed as `python3.12`.
+
+**With [uv](https://docs.astral.sh/uv/) (recommended).** uv downloads Python 3.12 if your machine doesn't have it, so the Python you already have doesn't matter:
 
 ```bash
 git clone https://github.com/paramify/paramify-fetchers.git
@@ -145,13 +170,7 @@ uv pip install -e '.[all]'       # '[all]' bundles the TUI; use -e . for the hea
 source .venv/bin/activate
 ```
 
-**With pip.** First check which Python you have:
-
-```bash
-python3 --version
-```
-
-If it's older than 3.11, install a newer one (`brew install python@3.12` on macOS, or `sudo apt install python3.12 python3.12-venv` on Debian or Ubuntu). Then use that versioned command, such as `python3.12`, instead of `python3` below.
+**With pip.** Check your Python first with `python3 --version`. If it's older than 3.11, install a newer one (`brew install python@3.12` on macOS, or `sudo apt install python3.12 python3.12-venv` on Debian or Ubuntu). Then use that versioned command, such as `python3.12`, instead of `python3`:
 
 ```bash
 git clone https://github.com/paramify/paramify-fetchers.git
@@ -162,12 +181,21 @@ python --version                 # must say 3.11 or later
 pip install -e '.[all]'          # '[all]' bundles the TUI; use -e . for the headless CLI only
 ```
 
-If something goes wrong:
+</details>
 
-- **`File "setup.py" or "setup.cfg" not found. Directory cannot be installed in editable mode`**, or **`requires a different Python: 3.9.6 not in '>=3.11'`.** The `.venv` was built with an older Python. The first message comes from the old pip that Python 3.9 ships with. Remove the virtualenv with `rm -rf .venv`, then create it again with a newer Python.
-- **`ensurepip is not available` or `No module named venv`.** On Debian or Ubuntu, install the venv package for your Python, such as `sudo apt install python3.12-venv`.
-- **`command not found: paramify`.** The virtualenv isn't active. Run `source .venv/bin/activate` in the clone, or run `.venv/bin/paramify` instead.
+<details>
+<summary><b>Troubleshooting</b></summary>
 
+<br>
+
+- **`File "setup.py" or "setup.cfg" not found. Directory cannot be installed in editable mode`**, or **`requires a different Python: 3.9.6 not in '>=3.11'`**
+  The `.venv` was built with an older Python. The first message comes from the old pip that Python 3.9 ships with. Remove the virtualenv with `rm -rf .venv`, then create it again with a newer Python. The install script does this for you.
+- **`ensurepip is not available`** or **`No module named venv`**
+  On Debian or Ubuntu, install the venv package for your Python, such as `sudo apt install python3.12-venv`.
+- **`command not found: paramify`**
+  `~/.local/bin` isn't on your `PATH` (open a new terminal if the script just added it), or, after a manual install, the virtualenv isn't active. Run `source .venv/bin/activate` in the clone, or run `.venv/bin/paramify` directly.
+
+</details>
 
 ### Platform requirements
 

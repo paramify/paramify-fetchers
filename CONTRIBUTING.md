@@ -21,8 +21,8 @@ pip install -e '.[dev,tui]'
 
 If `python3` is older than 3.11, use a versioned command such as `python3.12`, or let uv
 supply Python: `uv venv --seed --python 3.12 && uv pip install -e '.[dev,tui]'`. The
-README's [Install without the script](README.md#install-without-the-script) covers the
-common errors.
+README's [Install](README.md#install) section covers the common errors under
+Troubleshooting.
 
 To work on Azure or GCP fetchers, add `azure` or `gcp` to the extras.
 
