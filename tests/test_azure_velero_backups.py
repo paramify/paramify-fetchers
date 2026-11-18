@@ -643,3 +643,13 @@ def test_freshness_is_judged_per_location_even_without_listed_schedules():
     s = vb.summarize([stopped, current], SETTINGS, NOW)
     assert (s["schedules_observed"], s["schedules_with_success_within_window"]) == (2, 1)
     assert s["schedules_without_success_within_window"] == ["daily@backupsa/velero/cluster-a"]
+
+
+def test_a_prefix_can_span_several_path_segments():
+    """A storage location shared by several clusters often nests the prefix: org/environment/cluster-id/resource-group."""
+    prefix = "org-a/staging/00000000-0000-0000-0000-000000000001/cluster-rg"
+    locs, invalid = vb.parse_locations(f"BackupSA/velero/{prefix}/")
+    assert (locs, invalid) == ([{"account": "backupsa", "container": "velero", "prefix": prefix}], [])
+    expected, invalid = vb.parse_expected(f"nightly:24@BackupSA/velero/{prefix}/")
+    assert expected == [{"name": "nightly", "interval_hours": 24, "location": f"backupsa/velero/{prefix}"}] and invalid == []
+    assert expected[0]["location"] == vb.location_key("backupsa", "velero", prefix)
