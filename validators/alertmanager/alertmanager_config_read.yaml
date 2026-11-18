@@ -5,8 +5,7 @@ role: integrity
 statement: >
   Alertmanager's loaded configuration was read and parsed (config_read is true), so the routing checks
   for this set describe the configuration actually in use. Receiver settings are never copied, only
-  their names and integration types. Supports KSI-INR-RIR. Does not check whether the collection run
-  succeeded.
+  their names and integration types. Does not check whether the collection run succeeded.
 
 regex: '"config_read":\s*true\b'
 rules_summary: MATCH_COUNT NOT_EQUALS 0

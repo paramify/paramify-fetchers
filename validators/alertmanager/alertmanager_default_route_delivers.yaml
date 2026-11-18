@@ -6,7 +6,7 @@ statement: >
   The top-level route's receiver, used by every alert no child route matches, has at least one
   integration such as a webhook, email or paging service (default_receiver_has_integrations is true),
   so an unmatched alert is not dropped. A configured integration is not proof that notifications are
-  delivered or received. Supports KSI-INR-RIR. Does not check whether the collection run succeeded.
+  delivered or received. Does not check whether the collection run succeeded.
 
 regex: '"default_receiver_has_integrations":\s*true\b'
 rules_summary: MATCH_COUNT NOT_EQUALS 0
