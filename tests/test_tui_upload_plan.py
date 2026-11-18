@@ -361,8 +361,7 @@ def test_confirm_shows_brackets_in_file_names_and_messages(tmp_path, monkeypatch
     def fake_plan(run_dir, root, config_path=None, *, online, **kw):
         return Plan([Action(id="delivery/x", provider="delivery", key="x", verb="deliver",
                             summary="deliver 1 file to [bold]EVD-X[/bold]",
-                            payload={"dropped": [{"original_file_name": "report[x].json",
-                                                  "reason": "blocked [red]by[/red] the WAF"}]})])
+                            warnings=["report[x].json: blocked [red]by[/red] the WAF"])])
 
     monkeypatch.setattr(api, "plan_upload", fake_plan)
     text = _open_confirm(tmp_path, run_tui, _rendered_confirm, monkeypatch)
