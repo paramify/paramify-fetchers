@@ -1,0 +1,46 @@
+display_name: Istio
+description: >-
+  Istio service mesh, read through the Kubernetes API of the cluster it runs in: mTLS policy, authorization policies,
+  ingress gateways, destination rules, mesh configuration and the mesh root certificate. Works with any conformant
+  cluster (AKS, EKS, GKE, others) through a standard kubeconfig, or through the in-cluster service account when the
+  fetcher runs inside the cluster. GET and LIST only.
+
+requires:
+  python_packages:
+    - kubernetes
+    - cryptography
+    - pyyaml
+    - python-dotenv
+
+config_schema:
+  context:
+    type: string
+    required: false
+    env: ISTIO_KUBE_CONTEXT
+    description: >-
+      The kubeconfig context to use. Leave unset to use the kubeconfig's current context, or the in-cluster service
+      account when the fetcher runs in a pod.
+  root_namespace:
+    type: string
+    required: false
+    default: istio-system
+    env: ISTIO_ROOT_NAMESPACE
+    description: >-
+      Istio's root namespace, where mesh-wide policies, the mesh configuration and the root certificate live.
+
+# No secrets: credentials come from the kubeconfig (such as an AKS kubeconfig that signs in through kubelogin) or from
+# the in-cluster service account. These variables are passed through so either path works.
+auth:
+  passthrough_env:
+    # Kubeconfig location (defaults to ~/.kube/config when unset).
+    - KUBECONFIG
+    # In-cluster service account (set by Kubernetes inside a pod).
+    - KUBERNETES_SERVICE_HOST
+    - KUBERNETES_SERVICE_PORT
+    # kubelogin's non-interactive sign-in for AKS with Microsoft Entra ID (workload identity or service principal).
+    - AZURE_CLIENT_ID
+    - AZURE_TENANT_ID
+    - AZURE_CLIENT_SECRET
+    - AZURE_FEDERATED_TOKEN_FILE
+    - AZURE_AUTHORITY_HOST
+    - AAD_LOGIN_METHOD

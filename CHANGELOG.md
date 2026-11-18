@@ -12,6 +12,12 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`istio_mesh_security` fetcher and `istio` category.** Reads an Istio mesh through the Kubernetes API (GET and LIST
+  only), with a kubeconfig (including AKS with kubelogin) or the in-cluster service account: mesh-wide mTLS mode and
+  weaker namespace, workload or port overrides; allow-nothing default-deny policies and allow-all rules; plaintext and
+  sub-TLS 1.2 gateway servers; DestinationRules turning TLS off; the outbound traffic policy; the root certificate's
+  expiry and istiod's workload certificate lifetime. Judgments follow Istio's own rules (no mesh-wide policy means
+  PERMISSIVE). A refused call names the permission it needs; the README has the least-privilege RBAC.
 - Manifest: `concurrency` on a fetcher entry (1 to 32, default 1) runs up to that many of its targets at once. Each
   concurrent target writes to its own staging directory, moved into the run directory in target order, so results,
   envelopes and `_run_metadata.json` keep target order and a file name two targets share still fails the later one
