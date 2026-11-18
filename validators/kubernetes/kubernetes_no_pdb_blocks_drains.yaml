@@ -5,8 +5,8 @@ role: configuration
 statement: >
   No PodDisruptionBudget refuses every eviction (maxUnavailable 0, or minAvailable at least the replicas
   or 100%) (workloads_with_pdb_blocking_drains is empty), so nodes can be drained for maintenance and
-  patching. Covers Deployments and StatefulSets outside the excluded namespaces. Supports KSI-CNA-OFA.
-  Does not check whether the collection run succeeded.
+  patching. Covers Deployments and StatefulSets outside the excluded namespaces. Does not check whether
+  the collection run succeeded.
 
 regex: '"workloads_with_pdb_blocking_drains":\s*\[\]'
 rules_summary: MATCH_COUNT NOT_EQUALS 0

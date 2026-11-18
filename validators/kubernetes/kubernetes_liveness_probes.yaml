@@ -5,8 +5,8 @@ role: configuration
 statement: >
   Every container in every workload has a liveness probe (workloads_without_liveness_probe is empty), so a
   hung container is restarted. A probe being configured is not proof it tests the right thing. Covers
-  Deployments and StatefulSets outside the excluded namespaces. Supports KSI-CNA-OFA. Does not check
-  whether the collection run succeeded.
+  Deployments and StatefulSets outside the excluded namespaces. Does not check whether the collection run
+  succeeded.
 
 regex: '"workloads_without_liveness_probe":\s*\[\]'
 rules_summary: MATCH_COUNT NOT_EQUALS 0

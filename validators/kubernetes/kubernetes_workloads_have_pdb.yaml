@@ -5,7 +5,7 @@ role: configuration
 statement: >
   Every multi-replica workload has a PodDisruptionBudget matching its pods (workloads_without_pdb is
   empty), so node drains keep a minimum running. Covers Deployments and StatefulSets outside the excluded
-  namespaces. Supports KSI-CNA-OFA. Does not check whether the collection run succeeded.
+  namespaces. Does not check whether the collection run succeeded.
 
 regex: '"workloads_without_pdb":\s*\[\]'
 rules_summary: MATCH_COUNT NOT_EQUALS 0

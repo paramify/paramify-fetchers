@@ -4,8 +4,8 @@ type: AUTOMATED
 role: configuration
 statement: >
   Every workload with replicas set has at least one ready pod (workloads_without_ready_pods is empty).
-  Covers Deployments and StatefulSets outside the excluded namespaces. Supports KSI-CNA-OFA. Does not
-  check whether the collection run succeeded.
+  Covers Deployments and StatefulSets outside the excluded namespaces. Does not check whether the
+  collection run succeeded.
 
 regex: '"workloads_without_ready_pods":\s*\[\]'
 rules_summary: MATCH_COUNT NOT_EQUALS 0
