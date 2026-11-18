@@ -139,7 +139,7 @@ def test_an_unreadable_stream_leaves_only_its_own_fields_null(keycloak, tmp_path
     s = ev["summary"]
     assert (s["login_events"], s["lockouts"], s["newest_login_event"]) == (None, None, None)
     assert s["admin_events"] == len(ADMIN_EVENTS)
-    assert "needs the realm-management role view-events" in ev["metadata"]["api_failures"][0]["message"]
+    assert "needs the role view-events of the realm-management client" in ev["metadata"]["api_failures"][0]["message"]
 
 
 def test_a_user_counts_as_disabled_only_from_its_changed_object():
@@ -156,3 +156,9 @@ def test_an_out_of_range_lookback_is_bad_config(keycloak, tmp_path, monkeypatch)
     keycloak()
     assert ae.main() == 1
     assert json.loads((tmp_path / "status.json").read_text())["code"] == "bad_config"
+
+
+@pytest.mark.parametrize("saved, expected", [(["LOGIN", "LOGIN_ERROR"], True), (["LOGIN"], False), (None, None)])
+def test_sign_in_storage_counts_only_when_both_types_are_saved(saved, expected):
+    config = dict(CONFIG, enabledEventTypes=saved) if saved is not None else {k: v for k, v in CONFIG.items() if k != "enabledEventTypes"}
+    assert ae.summarize(config, [], [], 7, NOW)["login_events_storage_enabled"] is expected

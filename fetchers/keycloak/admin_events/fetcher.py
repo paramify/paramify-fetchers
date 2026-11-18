@@ -46,6 +46,14 @@ logger = logging.getLogger(NAME)
 
 # --- pure transforms ---
 
+def _login_events_saved(config: Dict[str, Any]) -> Optional[bool]:
+    """True if event storage is on and LOGIN and LOGIN_ERROR are saved types; null when the saved types are missing."""
+    if not config.get("eventsEnabled"):
+        return False
+    saved = config.get("enabledEventTypes")
+    return {"LOGIN", "LOGIN_ERROR"}.issubset(saved) if isinstance(saved, list) else None
+
+
 def _iso(ms: Optional[int]) -> Optional[str]:
     return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ") if ms else None
 
@@ -90,7 +98,8 @@ def summarize(config: Optional[Dict[str, Any]], logins: Optional[List[Dict[str, 
     return {
         "lookback_days": lookback_days,
         # Is storage on?
-        "login_events_storage_enabled": bool(config.get("eventsEnabled")) if config is not None else None,
+        # Keycloak stores only saved event types: sign-ins are stored only if LOGIN and LOGIN_ERROR are saved.
+        "login_events_storage_enabled": _login_events_saved(config) if config is not None else None,
         "admin_events_storage_enabled": bool(config.get("adminEventsEnabled")) if config is not None else None,
         "admin_events_details_enabled": bool(config.get("adminEventsDetailsEnabled")) if config is not None else None,
         # Sign-ins

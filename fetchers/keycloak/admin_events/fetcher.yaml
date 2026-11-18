@@ -54,7 +54,7 @@ evidence_set:
 
     Is event storage on?
     - lookback_days — Days of events read
-    - login_events_storage_enabled — True if Keycloak stores sign-in events; null if the event settings could not be read, as are the two fields below
+    - login_events_storage_enabled — True if event storage is on and LOGIN and LOGIN_ERROR are saved event types, so successful and failed sign-ins are stored; null if the event settings or the saved types could not be read, as are the two fields below (when unread)
     - admin_events_storage_enabled — True if Keycloak stores admin events
     - admin_events_details_enabled — True if admin events keep the changed object, which users_disabled needs
 
