@@ -98,6 +98,22 @@ Two settings are visible only to an **organization owner**: the two-factor
 requirement and the list of members without two-factor. Collected by a
 non-owner they are `null`, never `false`.
 
+In an organization of **managed user accounts** (Enterprise Managed Users)
+members sign in, and use two-factor, through the identity provider. GitHub
+keeps no two-factor method for them, so it lists every member as lacking
+two-factor and reports the requirement as off. `org_security_settings`
+detects such an organization from its member list (every login carries the
+enterprise's underscore suffix; a personal login cannot hold an underscore),
+or takes `managed_user_accounts: true`, and then reports the two-factor
+fields as `null` with `two_factor_note`. It does not read the identity
+provider.
+
+`access_review` reads members, teams and organization roles across the whole
+organization; a `repositories` filter narrows only the per-repository
+section. Set `scope_to_repositories: true` to keep only the teams and roles
+that reach the collected repositories, and `include_members: false` to
+leave the member list out (the count stays).
+
 A **GitHub App installation token** holding the same read-only permissions
 produced the same evidence as a personal token for those fifteen, with two
 differences, both measured: it can list the organization's fine-grained
