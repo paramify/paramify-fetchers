@@ -1914,7 +1914,6 @@ def plan_upload(
     with_validators: bool = False,
     manifest_path: Optional[Path] = None,
     owner: Optional[str] = None,
-    waf_check: bool = True,
 ) -> Plan:
     """The upload plan for one run directory; nothing is written.
 
@@ -1928,14 +1927,11 @@ def plan_upload(
     delivery) that `manifest_path` now sets differently from the run. Without
     it, the run's own manifest is used; with neither, nothing is compared. The
     run's settings still apply.
-
-    `waf_check=False` turns off the WAF pre-check: no file is dropped at plan
-    time for holding a string the production WAF blocks, and the plan says so.
     """
     return _sync_upload.plan_upload(
         run_dir, root, _upload_config(root, config_path), online=online, stack=stack,
         only_file=only_file, custom_tags=custom_tags, with_validators=with_validators,
-        manifest_path=manifest_path, owner=owner, waf_check=waf_check,
+        manifest_path=manifest_path, owner=owner,
     )
 
 
@@ -1956,7 +1952,6 @@ def upload_run(
     deprecations: Sequence[str] = (),
     manifest_path: Optional[Path] = None,
     owner: Optional[str] = None,
-    waf_check: bool = True,
 ) -> dict:
     """Upload one run directory to Paramify, one batch per manifest entry.
 
@@ -1971,14 +1966,13 @@ def upload_run(
     `token` and `base_url` (both ahead of the environment) are for callers that
     already hold them; `deprecations` are notes for `upload_log.json`.
     `manifest_path` is as for plan_upload: the plan notes the settings it now
-    sets differently from the run. `stack`, `owner` and `waf_check` are as for
-    plan_upload.
+    sets differently from the run. `stack` and `owner` are as for plan_upload.
     """
     return _sync_upload.run_upload(
         run_dir, root, _upload_config(root, config_path), dry_run=dry_run, on_event=on_event,
         custom_tags=custom_tags, stack=stack, only_file=only_file, with_validators=with_validators,
         upload_cfg=upload_cfg, token=token, base_url=base_url, deprecations=deprecations,
-        manifest_path=manifest_path, owner=owner, waf_check=waf_check,
+        manifest_path=manifest_path, owner=owner,
     )
 
 

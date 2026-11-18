@@ -206,9 +206,9 @@ def test_main_returns_1_on_a_setup_error(no_env, tmp_path):  # noqa: F811
 
 
 def test_main_returns_1_when_an_entry_is_refused(fake, tmp_path):  # noqa: F811
-    run_dir = _run(tmp_path)
-    (run_dir / "a.json").write_text((run_dir / "a.json").read_text().replace('"k": 1', '"k": "/bin/sh -c x"'))
-    assert uploader.main([str(run_dir)]) == 1
+    st1, st2 = fake.add_stack("Prod"), fake.add_stack("Gov")
+    fake.add_evidence("EVD-1", channels=[st1.id, st2.id])  # two channels and no stack: refused
+    assert uploader.main([str(_run(tmp_path))]) == 1
 
 
 def test_main_returns_1_when_a_file_is_not_an_envelope(fake, tmp_path):  # noqa: F811

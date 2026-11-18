@@ -52,11 +52,6 @@ schemas and the `paramify` CLI — not the internal code.
   name or label, and labelled validation backups are counted, still judged. Blob reads go only
   to endpoints Resource Manager returned for in-scope accounts in the target subscription, with redirects refused,
   retry dropped connections, and parse XML with defusedxml. Unread locations leave counts null rather than 0.
-- `paramify upload --no-waf-check` turns off the check that drops a file holding `../`, `/etc/passwd`, `/bin/sh`,
-  `/bin/bash` or `<script` before the upload. Those strings were confirmed blocked on one host's WAF, but some hosts
-  exempt the upload routes, so CVE text in a findings file was dropped though the WAF would accept it. With the flag
-  the file is sent; if the WAF does refuse it (a 403 with no request id), the upload still drops only that file. The
-  plan notes that the check is off. `--plan` takes the flag too.
 - **`wiz_inventory`**, the Wiz cloud resource inventory, as a pipeline fetcher (`kind: inventory`, `id_scheme:
   wiz-resource-id`). One record per resource from `cloudResourcesV2` under `payload.data`, keyed by the Wiz resource
   id, with its cloud ID (`external_id`), account, region, type, IPs, OS, image, environment and owner, and internet
@@ -149,8 +144,7 @@ schemas and the `paramify` CLI — not the internal code.
 - **Pipeline files upload as the full envelope, and the result says whether the
   pipeline ran.** `paramify upload` sends an inventory (or any pipeline) file as
   the whole envelope even when `artifact_payload: payload` is set, because
-  Paramify's inventory pipeline reads `payload.data`; the WAF scan reads the same
-  bytes. When the batch is approved on submit, the entry says `APPROVED: pipeline
+  Paramify's inventory pipeline reads `payload.data`. When the batch is approved on submit, the entry says `APPROVED: pipeline
   runs now` and where to look (Monitoring → Inventory); when it waits for a
   person it says `SUBMITTED: waiting for approval; the pipeline has not run`. The
   entry result in `--json` gains `pipeline: {type, approved}`. A file sent direct
@@ -1919,6 +1913,14 @@ schemas and the `paramify` CLI — not the internal code.
   can't be looked up.
 
 ### Changed
+
+- **`paramify upload` no longer drops a file for holding `../`, `/etc/passwd`, `/bin/sh`, `/bin/bash` or
+  `<script`.** It checked every file for these strings and dropped a match before sending it, with `blocked by the
+  production WAF: '…'`. The WAF has exempted the upload routes from those rules since 2026-10-29, so the check only
+  dropped good files, often findings whose CVE text holds one of the strings. Every file is now sent. If the WAF does
+  refuse one (a 403 with no request id), the upload still drops only that file, names it `blocked by the production
+  WAF`, and sends the rest. `--no-waf-check`, added for this on 2026-11-17, is still accepted but does nothing, and
+  the upload says so.
 
 - **`aws_ecr_image_scanning` 0.4.0 runs on boto3.** One Python process replaces a shell script that started
   the AWS CLI and several `jq` processes per repository. It reads eight repositories at a time and requests the

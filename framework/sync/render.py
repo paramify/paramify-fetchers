@@ -38,9 +38,6 @@ def render_plan(plan: Plan) -> List[str]:
             lines.append(a.provider)
         lines.append(f"  {a.verb} {a.key}: {a.summary}")
         lines.extend(f"    ! {w}" for w in a.warnings)
-        if a.provider == DELIVERY:
-            lines.extend(f"    ! dropped {d['original_file_name']}: {d['reason']}"
-                         for d in a.payload.get("dropped") or [])
         if a.verb == "refuse" and a.fix:
             lines.append(f"    → fix: {a.fix}")
     lines.append(_totals(plan))
