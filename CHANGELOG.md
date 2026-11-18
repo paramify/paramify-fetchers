@@ -10,6 +10,13 @@ schemas and the `paramify` CLI — not the internal code.
 
 ## [Unreleased]
 
+### Changed
+
+- **`azure_aks_cluster_configuration` 0.7.0: autoscaling for expected pools.** A new `expected_autoscaling_pools`
+  setting lists the node pools that must have the cluster autoscaler on, as `pool` (every cluster) or `cluster/pool`.
+  Missing pools and pools without the autoscaler are counted and named, a pool at zero nodes stays expected, and
+  `all_expected_pools_autoscaling` gives one verdict. Each pool now records `min_count`. Unset, the fields stay null.
+
 ### Added
 
 - Manifest: `concurrency` on a fetcher entry (1 to 32, default 1) runs up to that many of its targets at once. Each
