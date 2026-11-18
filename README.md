@@ -102,9 +102,8 @@ More integrations are in progress. To ask for a new platform or fetcher, post in
 You do not need credentials. The bundled `demo_hello` fetcher writes synthetic evidence, so you can watch a full run before you connect a real service.
 
 ```bash
-git clone https://github.com/paramify/paramify-fetchers.git && cd paramify-fetchers
-python -m venv .venv && source .venv/bin/activate
-pip install -e .
+curl -fsSL https://raw.githubusercontent.com/paramify/paramify-fetchers/main/install.sh | bash
+cd ~/paramify-fetchers
 paramify run examples/demo.yaml                    # synthetic evidence, no credentials
 paramify evidence evidence/run-*/demo_hello.json   # read what it wrote
 ```
@@ -115,20 +114,68 @@ paramify evidence evidence/run-*/demo_hello.json   # read what it wrote
 
 ## Install
 
-**Prerequisites:** Python 3.11 or later.
+**Prerequisites:** git, and Python 3.11 or later. If you have [uv](https://docs.astral.sh/uv/) instead, the script uses it to get Python.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/paramify/paramify-fetchers/main/install.sh | bash
+```
+
+The [install script](install.sh) clones the repo to `~/paramify-fetchers`, installs the CLI and the TUI into a virtualenv at `.venv` inside the clone, and links `paramify` into `~/.local/bin`. It uses [uv](https://docs.astral.sh/uv/) for the install when uv is on your `PATH`. If `~/.local/bin` is not on your `PATH`, it asks before adding it to your shell profile. At the end it offers to open the TUI. Without a terminal (CI or another script), it asks nothing and only prints what to do. Run `paramify` commands from inside the clone. Running the script again reinstalls into the existing clone without changing its code.
+
+To change the defaults, set environment variables for `bash`. For example, this clones a release tag to another directory and adds the Azure SDKs:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/paramify/paramify-fetchers/main/install.sh \
+  | PARAMIFY_DIR=~/src/paramify-fetchers PARAMIFY_REF=v0.6.0-beta PARAMIFY_EXTRAS=all,azure bash
+```
+
+`PARAMIFY_EXTRAS=` (empty) installs only the headless CLI. The top of the script lists every variable.
+
+### Install without the script
+
+The project needs **Python 3.11 or later**. Most install problems come from building the virtualenv with an older Python. On macOS, `python3` is often the system's 3.9, even when a newer Python is installed as `python3.12`. Use one of these two ways.
+
+**With [uv](https://docs.astral.sh/uv/)** (recommended). uv downloads Python 3.12 if your machine doesn't have it, so the Python you already have doesn't matter:
 
 ```bash
 git clone https://github.com/paramify/paramify-fetchers.git
 cd paramify-fetchers
-python -m venv .venv && source .venv/bin/activate
-pip install -e '.[all]'      # '[all]' bundles the TUI; use `pip install -e .` for the headless CLI only
+uv venv --seed --python 3.12     # .venv on Python 3.12, downloaded if needed
+uv pip install -e '.[all]'       # '[all]' bundles the TUI; use -e . for the headless CLI only
+source .venv/bin/activate
 ```
+
+**With pip.** First check which Python you have:
+
+```bash
+python3 --version
+```
+
+If it's older than 3.11, install a newer one (`brew install python@3.12` on macOS, or `sudo apt install python3.12 python3.12-venv` on Debian or Ubuntu). Then use that versioned command, such as `python3.12`, instead of `python3` below.
+
+```bash
+git clone https://github.com/paramify/paramify-fetchers.git
+cd paramify-fetchers
+python3 -m venv .venv            # or python3.12 -m venv .venv
+source .venv/bin/activate
+python --version                 # must say 3.11 or later
+pip install -e '.[all]'          # '[all]' bundles the TUI; use -e . for the headless CLI only
+```
+
+If something goes wrong:
+
+- **`File "setup.py" or "setup.cfg" not found. Directory cannot be installed in editable mode`**, or **`requires a different Python: 3.9.6 not in '>=3.11'`.** The `.venv` was built with an older Python. The first message comes from the old pip that Python 3.9 ships with. Remove the virtualenv with `rm -rf .venv`, then create it again with a newer Python.
+- **`ensurepip is not available` or `No module named venv`.** On Debian or Ubuntu, install the venv package for your Python, such as `sudo apt install python3.12-venv`.
+- **`command not found: paramify`.** The virtualenv isn't active. Run `source .venv/bin/activate` in the clone, or run `.venv/bin/paramify` instead.
+
+
+### Platform requirements
 
 Each platform has its own requirements:
 
 - Most fetchers call a CLI, such as `aws`, `jq`, `curl` or `kubectl`. Install only the CLIs for the platforms that you use.
 - The checkov fetchers call the `checkov` CLI. Install it in its own environment with `pipx install checkov`, not with pip in this one: it pins exact versions of libraries other fetchers use. See [`fetchers/checkov/README.md`](fetchers/checkov/README.md).
-- Azure, GCP and Oracle Cloud use the official SDKs, not a CLI. Install them with `pip install -e '.[azure]'`, `pip install -e '.[gcp]'` or `pip install -e '.[oci]'`. These extras are only needed for those platforms, so `[all]` does not include them. Azure signs in with `DefaultAzureCredential` and GCP with Application Default Credentials, so neither one needs a key file. For a collector limited to one explicit Azure subscription, see the [Azure read scope guide](docs/azure_read_scope.md). OCI uses an API signing key that the runner injects as a secret, or an instance or resource principal where it is deployed; see [`fetchers/oci/README.md`](fetchers/oci/README.md).
+- Azure, GCP and Oracle Cloud use the official SDKs, not a CLI. Add them with the install script's `PARAMIFY_EXTRAS` variable (`PARAMIFY_EXTRAS=all,azure`, `all,gcp` or `all,oci`), or with `.venv/bin/pip install -e '.[azure]'` (or `[gcp]`, `[oci]`) inside the clone. These extras are only needed for those platforms, so `[all]` does not include them. Azure signs in with `DefaultAzureCredential` and GCP with Application Default Credentials, so neither one needs a key file. For a collector limited to one explicit Azure subscription, see the [Azure read scope guide](docs/azure_read_scope.md). OCI uses an API signing key that the runner injects as a secret, or an instance or resource principal where it is deployed; see [`fetchers/oci/README.md`](fetchers/oci/README.md).
 - Most platforms have a credential setup guide at `fetchers/<category>/README.md`. Select a logo under [Supported services](#supported-services) to open its folder.
 
 ---

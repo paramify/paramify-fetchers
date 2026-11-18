@@ -15,9 +15,14 @@ Thank you for your help. Most contributions start in one of three places:
 ```bash
 git clone https://github.com/paramify/paramify-fetchers.git
 cd paramify-fetchers
-python -m venv .venv && source .venv/bin/activate
+python3 -m venv .venv && source .venv/bin/activate   # Python 3.11 or later
 pip install -e '.[dev,tui]'
 ```
+
+If `python3` is older than 3.11, use a versioned command such as `python3.12`, or let uv
+supply Python: `uv venv --seed --python 3.12 && uv pip install -e '.[dev,tui]'`. The
+README's [Install without the script](README.md#install-without-the-script) covers the
+common errors.
 
 To work on Azure or GCP fetchers, add `azure` or `gcp` to the extras.
 
