@@ -241,13 +241,13 @@ def test_one_incomplete_test_is_not_judged_and_the_others_still_are():
 
 def test_status_code_and_content_checks_are_read_from_standard_and_classic_tests():
     standard = {"ValidationRules": {"ExpectedHttpStatusCode": 200, "SSLCheck": True, "ContentValidation": {"ContentMatch": "healthy"}}}
-    assert ea.validation(standard) == {"checks_status_code": True, "checks_content": True, "checks_ssl": True}
+    assert ea.validation(standard) == {"checks_status_code": True, "expected_status_code": 200, "checks_content": True, "checks_ssl": True}
     assert ea.validation({"ValidationRules": {"ExpectedHttpStatusCode": 200}})["checks_content"] is False
     ping = {"Configuration": {"WebTest": '<WebTest><Items><Request ExpectedHttpStatusCode="200" /></Items><ValidationRules><ValidationRule '
                                           'Classname="Microsoft.VisualStudio.TestTools.WebTesting.Rules.ValidationRuleFindText"><RuleParameters>'
                                           '<RuleParameter Name="FindText" Value="OK" /></RuleParameters></ValidationRule></ValidationRules></WebTest>'}}
-    assert ea.validation(ping) == {"checks_status_code": True, "checks_content": True, "checks_ssl": False}
-    assert ea.validation({}) == {"checks_status_code": False, "checks_content": False, "checks_ssl": False}
+    assert ea.validation(ping) == {"checks_status_code": True, "expected_status_code": 200, "checks_content": True, "checks_ssl": False}
+    assert ea.validation({}) == {"checks_status_code": False, "expected_status_code": None, "checks_content": False, "checks_ssl": False}
 
 
 def test_application_checks_are_counted_across_enabled_tests():
@@ -368,3 +368,75 @@ def test_an_expected_endpoint_that_is_not_a_url_fails_the_run(arm, tmp_path, mon
     settings = ea.settings_from_env(collector)
     assert settings["expected_endpoints"] == ["https://app.example.com"]
     assert [f["operation"] for f in collector.failures] == [f"config {ea.EXPECTED_ENV}"] and "not-a-url" in collector.failures[0]["message"]
+
+
+# --- expected responses ---
+
+def _coded_test(url, code, name="t", classic=False):
+    raw = raw_test(name, url=url)
+    if classic:
+        raw["properties"].pop("Request")
+        raw["properties"]["Configuration"] = {"WebTest": f'<WebTest><Items><Request Url="{url}" ExpectedHttpStatusCode="{code}" /></Items></WebTest>'}
+    else:
+        raw["properties"]["ValidationRules"] = {"ExpectedHttpStatusCode": code}
+    t = ea.test_record(raw)
+    t.update(ea.judged(list(FULL_DAY), ea.READ, 99.9, 24))
+    return t
+
+
+def test_the_expected_status_code_is_read_from_standard_and_classic_tests():
+    assert _coded_test("https://app.example.com", 200)["expected_status_code"] == 200
+    assert _coded_test("https://app.example.com", 401, classic=True)["expected_status_code"] == 401
+    zero = _coded_test("https://app.example.com", 0)
+    assert (zero["expected_status_code"], zero["checks_status_code"]) == (None, False)  # 0 checks no status
+
+
+def test_entries_take_an_optional_status_code_after_the_last_at():
+    urls, codes, bad = ea.parse_expected_endpoints(
+        "https://registry.example.com/v2/@401, https://sso.example.com/realms/r/.well-known/openid-configuration@200, "
+        "https://user@app.example.com, https://x.example.com@999, https://y.example.com@200, https://Y.example.com/@404, nope@200")
+    assert urls == ["https://registry.example.com/v2", "https://sso.example.com/realms/r/.well-known/openid-configuration",
+                    "https://user@app.example.com", "https://y.example.com"]
+    assert codes == {"https://registry.example.com/v2": 401, "https://sso.example.com/realms/r/.well-known/openid-configuration": 200,
+                     "https://y.example.com": 200}
+    assert bad == ["https://x.example.com@999", "https://Y.example.com/@404", "nope@200"]
+    assert ea.parse_expected_endpoints("  ") == (None, {}, [])
+
+
+def _coded_settings(value):
+    urls, codes, _ = ea.parse_expected_endpoints(value)
+    return {**SETTINGS, "lookback_days": 1, "expected_endpoints": urls, "expected_status_codes": codes}
+
+
+def test_an_expected_response_no_test_checks_for_is_reported():
+    tests = [_coded_test("https://registry.example.com/v2/", 200, name="reg"), _coded_test("https://app.example.com", 200, name="app")]
+    s = ea.summarize(tests, [], _coded_settings(
+        "https://registry.example.com/v2@401, https://app.example.com@200, https://api.example.com@200, https://docs.example.com"))
+    assert (s["expected_endpoints"], s["expected_responses"], s["expected_responses_unchecked"]) == (4, 3, 2)
+    assert s["expected_responses_unchecked_names"] == ["https://api.example.com@200", "https://registry.example.com/v2@401"]
+
+
+def test_a_test_expecting_the_listed_code_checks_the_response():
+    tests = [_coded_test("https://registry.example.com/v2/", 401, name="reg"), _coded_test("https://app.example.com", 200, name="app", classic=True)]
+    s = ea.summarize(tests, [], _coded_settings("https://registry.example.com/v2@401, https://app.example.com@200"))
+    assert (s["expected_responses"], s["expected_responses_unchecked"], s["expected_responses_unchecked_names"]) == (2, 0, [])
+
+
+def test_without_expected_responses_their_counts_are_null():
+    s = ea.summarize([_coded_test("https://app.example.com", 200)], [], _coded_settings("https://app.example.com"))
+    assert (s["expected_responses"], s["expected_responses_unchecked"], s["expected_responses_unchecked_names"]) == (0, None, None)
+    s = ea.summarize([], [], _coded_settings(""))
+    assert (s["expected_responses"], s["expected_responses_unchecked"]) == (None, None)
+
+
+def test_unlisted_tests_leave_the_expected_responses_unknown():
+    s = ea.summarize([], [], _coded_settings("https://app.example.com@200"), tests_listed=False)
+    assert (s["expected_responses"], s["expected_responses_unchecked"], s["expected_responses_unchecked_names"]) == (1, None, None)
+
+
+def test_two_codes_for_one_url_fail_the_run(monkeypatch):
+    monkeypatch.setenv(ea.EXPECTED_ENV, "https://app.example.com@200, https://app.example.com/@503")
+    collector = ea.Collector(logging.getLogger("test"))
+    settings = ea.settings_from_env(collector)
+    assert settings["expected_status_codes"] == {"https://app.example.com": 200}
+    assert [f["operation"] for f in collector.failures] == [f"config {ea.EXPECTED_ENV}"]

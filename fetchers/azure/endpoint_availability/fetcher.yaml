@@ -40,9 +40,12 @@ config_schema:
     description: >
       Comma-separated URLs that must be tested for availability, such as https://app.example.com. An expected
       endpoint that no enabled, in-scope availability test requests is reported, so a missing test is visible rather
-      than absent from the evidence. Matching ignores the case of the scheme and host and a trailing slash. There is no
-      default: while it is unset, the expected-endpoint counts are null. An entry that is not an http or https URL with
-      a host fails the run as bad_config.
+      than absent from the evidence. Add @ and an HTTP status code to give the response a test must expect, such as
+      https://registry.example.com/v2/@401 for an endpoint that answers 401 without credentials; an expected response
+      that no test requesting that URL checks for is reported. Matching ignores the case of the scheme and host and a
+      trailing slash. There is no default: while it is unset, the expected-endpoint counts are null. An entry that is
+      not an http or https URL with a host, a status code outside 100 to 599, or two different codes for one URL
+      fails the run as bad_config.
   resource_exclusions:
     type: patterns
     prefixes: [rg, location, id]
@@ -82,7 +85,7 @@ evidence_set:
 
     Commands Executed:
     - subscriptions.list() — picks a subscription when none is set
-    - GET Microsoft.Insights/webtests — every Application Insights availability test, its URL (for a classic URL ping test, from its WebTest XML), locations, frequency, component, and the status code, content and certificate checks it validates
+    - GET Microsoft.Insights/webtests — every Application Insights availability test, its URL (for a classic URL ping test, from its WebTest XML), locations, frequency, component, and the status code it expects and the content and certificate checks it validates
     - GET components/{component}/providers/Microsoft.Insights/metrics (per enabled test) — hourly availabilityResults/availabilityPercentage for that test
     - GET Microsoft.Network/loadBalancers — every load balancer, its SKU, whether it has a public frontend, and how many load-balancing rules, inbound NAT rules and health probes it has
     - GET loadBalancers/{lb}/providers/Microsoft.Insights/metrics (per Standard load balancer) — hourly VipAvailability when it has load-balancing rules and DipAvailability when it has health probes; a load balancer without them (outbound-only, say) reports no data for that metric, so it is not read
@@ -107,6 +110,9 @@ evidence_set:
     - expected_endpoints_untested — Number of expected endpoints that no enabled, in-scope availability test requests; null if the test list could not be read
     - expected_endpoints_untested_names — List of the expected endpoints no enabled, in-scope test requests
     - expected_endpoints_fully_measured — Number of expected endpoints with an enabled test that has a result in every hour of the lookback; null unless every enabled test's results were read
+    - expected_responses — Number of expected endpoints listed with an expected HTTP status code; null when no expected endpoints are listed
+    - expected_responses_unchecked — Number of expected responses that no enabled, in-scope test requesting that URL expects, including an endpoint with no test; null when no expected response is listed or the test list could not be read
+    - expected_responses_unchecked_names — List of those expected responses, each as URL@status
     - measurement_window_complete — True if every expected endpoint, or every enabled test when none are listed, has a result in every hour of the lookback (a complete measurement window); false if any hour is missing or an expected endpoint is untested; null unless every enabled test's results were read
     - resource_exclusion_patterns — List of the resource_exclusions patterns as given
     - resource_exclusion_patterns_unmatched — List of the patterns that matched nothing, such as a mistyped name; null when the test or load balancer list could not be read
