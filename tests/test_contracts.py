@@ -259,6 +259,7 @@ TEXT_FORMAT_PENDING = (
     "aws/dynamodb_pitr_status",
     "aws/ebs_snapshot_status",
     "aws/ec2_public_exposure",
+    "aws/ecr_image_scanning",
     "aws/efs_encryption_status",
     "aws/efs_high_availability",
     "aws/eks_high_availability",
