@@ -12,11 +12,6 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
-- Manifest: `concurrency` on a fetcher entry (1 to 32, default 1) runs up to that many of its targets at once. Each
-  concurrent target writes to its own staging directory, moved into the run directory in target order, so results,
-  envelopes and `_run_metadata.json` keep target order and a file name two targets share still fails the later one
-  with `output_overwritten`. Live output lines start with the target. `paramify validate` notes a `concurrency` that
-  has no effect (a fetcher without targets, or fewer than two).
 - **`azure_endpoint_availability` fetcher.** Reads Application Insights availability tests and their hourly
   results, and Standard load balancers' data-path (VipAvailability) and health-probe (DipAvailability)
   availability with measurement coverage, each judged against an availability target once one is set (none by
@@ -2759,11 +2754,6 @@ schemas and the `paramify` CLI — not the internal code.
   - `datadog_siem_configuration`: the suppression rule field `rule_id`.
 
 ### Fixed
-
-- **`paramify run` stops its running fetchers on Ctrl-C or SIGTERM.** Each fetcher runs in its own session, so before,
-  an interrupted run left it running and writing into the run directory. The runner now kills the fetcher's process
-  group before exiting, and a run with `concurrency` starts none of its queued targets. `paramify run` turns SIGTERM
-  into exit code 143 so it reaches the same cleanup.
 
 - **Jira fetchers: a scoped API token sent to the site URL now gives the fix,
   not a generic `auth_failed`.** Jira answers `401 Unauthorized; scope does not

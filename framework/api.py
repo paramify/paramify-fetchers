@@ -1194,7 +1194,6 @@ def validate_notes(manifest: dict, root: Path, fetchers=None, platforms=None) ->
     if not UNKNOWN_CONFIG_KEYS_ARE_ERRORS:
         notes += unknown_config_keys(parsed, fetchers, platforms)
     notes += _duplicate_entry_notes(parsed, fetchers)
-    notes += _unused_concurrency_notes(parsed, fetchers)
     for entry, key in zip(parsed.entries, manifest_loader.entry_keys(parsed.entries)):
         f = fetchers.get(entry.use)
         if f is None or not f.is_pipeline:
@@ -1221,19 +1220,6 @@ def _duplicate_entry_notes(parsed, fetchers) -> List[str]:
         names = f"{', '.join(same[:-1])} and {same[-1]}"
         later = "the second entry's run fails" if len(same) == 2 else "every entry after the first fails"
         notes.append(f"entries {names} run the same fetcher with no targets; they write the same files, so {later}.")
-    return notes
-
-
-def _unused_concurrency_notes(parsed, fetchers) -> List[str]:
-    """Entries whose `concurrency` the runner ignores: only a fan-out of two or more targets runs at once."""
-    notes = []
-    for e, key in zip(parsed.entries, manifest_loader.entry_keys(parsed.entries)):
-        if e.concurrency <= 1 or e.use not in fetchers:
-            continue
-        if not fetchers[e.use].supports_targets:
-            notes.append(f"{key}: concurrency {e.concurrency} has no effect; the fetcher takes no targets")
-        elif len(e.targets) < 2:
-            notes.append(f"{key}: concurrency {e.concurrency} has no effect with fewer than two targets")
     return notes
 
 

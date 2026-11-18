@@ -333,7 +333,6 @@ class ManifestEntry:
     secrets: Dict[str, str] = field(default_factory=dict)
     targets: List[TargetInstance] = field(default_factory=list)
     paramify: Dict[str, Any] = field(default_factory=dict)
-    concurrency: int = 1
 
 
 @dataclass
