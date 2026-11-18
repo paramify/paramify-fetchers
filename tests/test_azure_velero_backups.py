@@ -472,6 +472,45 @@ def test_a_failure_is_resolved_only_by_its_own_successful_retry():
     assert plain["restores_with_errors_unresolved"] == 1
 
 
+@pytest.mark.parametrize("different_field", ["storage_account", "container", "prefix"])
+@pytest.mark.parametrize("failure_kind", ["backup", "snapshots", "restore"])
+def test_only_a_retry_in_the_same_location_resolves_a_failure(different_field, failure_kind):
+    identity = {"storage_account": "backupsa", "container": "velero", "prefix": "cluster-a"}
+    original, unrelated = location(), location()
+    original.update(identity)
+    unrelated.update({**identity, different_field: "other"})
+    if failure_kind == "restore":
+        failed = vb.restore_record("drill", results(errors=1), iso(NOW - timedelta(hours=10)))
+        retry = vb.restore_record("drill-retry", results(), iso(NOW - timedelta(hours=2)))
+        records, unresolved = "restores", "restores_with_errors_unresolved"
+        resolved_field = "error_resolved"
+    else:
+        raw = backup("drill", schedule=None, done_hours_ago=10,
+                     phase="Failed" if failure_kind == "backup" else "Completed",
+                     attempted=2, completed=1)
+        failed = vb.backup_record("drill", raw, NOW, 24)
+        retry = vb.backup_record("drill-retry", backup("drill-retry", schedule=None, done_hours_ago=2), NOW, 24)
+        records = "backups"
+        unresolved = "backups_failed_unresolved" if failure_kind == "backup" else "backups_volume_snapshots_incomplete_unresolved"
+        resolved_field = "failure_resolved" if failure_kind == "backup" else "snapshots_resolved"
+    original[records].append(failed)
+    unrelated[records].append(retry)
+    settings = {**SETTINGS, "retry_suffix": "-retry"}
+
+    summary = vb.summarize([original, unrelated], settings, NOW)
+    assert summary[unresolved] == 1
+    assert summary["failures_resolved_by_retry"] == 0
+    assert failed[resolved_field] is False
+    assert failed["resolved_by_retry"] is False
+
+    original[records].append(dict(retry))
+    recovered = vb.summarize([original, unrelated], settings, NOW)
+    assert recovered[unresolved] == 0
+    assert recovered["failures_resolved_by_retry"] == 1
+    assert failed[resolved_field] is True
+    assert failed["resolved_by_retry"] is True
+
+
 def test_a_validation_label_not_in_key_value_form_is_bad_config():
     assert vb.parse_label("validation-test=true") == ("validation-test", "true")
     assert vb.parse_label("validation-test") is None and vb.parse_label("=true") is None and vb.parse_label(None) is None

@@ -239,7 +239,7 @@ def parse_label(value: Optional[str]) -> Optional[Tuple[str, str]]:
 
 
 def classify_history(backups: List[Dict[str, Any]], restores: List[Dict[str, Any]], retry_suffix: Optional[str]) -> None:
-    """Mark each failure as resolved by a later success, or current; records are updated in place.
+    """Classify one location's failures as resolved or current; records are updated in place.
 
     No failure is excluded by its name or labels. When retry_suffix is set, a failure is also resolved by its own retry:
     a backup named <name><retry_suffix> that completed later (every attempted snapshot, for a snapshot shortfall), or a
@@ -301,7 +301,10 @@ def summarize(locations: List[Dict[str, Any]], settings: Dict[str, Any], now: da
     backups = [b for loc in read for b in loc["backups"]]
     restores = [r for loc in locations if loc["restores_read"] for r in loc["restores"]]
     restores_complete = discovered and all(loc["restores_read"] for loc in locations)
-    classify_history(backups, restores, settings.get("retry_suffix"))
+    # Names and schedules are local to an account/container/prefix, not globally unique.
+    for loc in locations:
+        classify_history(loc["backups"] if loc["backups_read"] else [],
+                         loc["restores"] if loc["restores_read"] else [], settings.get("retry_suffix"))
     label = settings.get("validation_label")
     validation = [b for b in backups if label and b.get("labels", {}).get(label[0]) == label[1]]
     latest: Dict[str, datetime] = {}
