@@ -54,7 +54,9 @@ NOT_SCANNED. `severity_counts` is null for missing, pending, failed or expired
 scans, and when AWS supplies no count map. Only a completed or active scan with a
 count map fills absent severity entries with zero. Collection failures exit
 nonzero while preserving partial evidence; a failed configuration read does not
-default the registry to BASIC.
+default the registry to BASIC. When a repository's effective configuration is not
+read, `scan_frequency` and `applied_scan_filters` are null; an empty
+`applied_scan_filters` means AWS reports that no registry filter applies.
 
 If the newest image disappears between listing and reading its scan, the result
 keeps its digest with `scan_status: IMAGE_NOT_FOUND`, null severity counts and

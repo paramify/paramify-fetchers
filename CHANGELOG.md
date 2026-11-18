@@ -1926,6 +1926,9 @@ schemas and the `paramify` CLI — not the internal code.
   scan is read in one. The output, its file name and the IAM actions are unchanged. It needs the `aws` extra
   (boto3), which the Docker image already installs.
 
+- `aws_ecr_image_scanning` 0.5.0 writes `applied_scan_filters` as null, not `[]`, when a repository's effective
+  scanning configuration could not be read, so an unread configuration no longer looks like one no filter applies to.
+
 - `qualys_vmdr_vulnerability_findings` uses the v6 host detection and v4 KnowledgeBase endpoints in place of v2,
   which Qualys has scheduled for end of life. Requests, parameters and the report columns are unchanged.
 

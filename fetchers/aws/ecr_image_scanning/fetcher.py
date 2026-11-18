@@ -230,7 +230,7 @@ class Collector:
             "immutability": repo.get("imageTagMutability") or "MUTABLE",
             "latest_image_scan": None,
             "scan_frequency": (effective or {}).get("scanFrequency"),
-            "applied_scan_filters": (effective or {}).get("appliedScanFilters") or [],
+            "applied_scan_filters": None if effective is None else effective.get("appliedScanFilters") or [],
             "scan_collection_status": "empty_repository",
         }
         try:

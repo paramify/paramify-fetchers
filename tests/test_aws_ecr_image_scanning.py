@@ -182,6 +182,7 @@ def test_collects_every_repository_in_order():
     assert repos["enhanced"]["scan_on_push"] is True
     assert repos["enhanced"]["immutability"] == "IMMUTABLE"
     assert repos["enhanced"]["scan_frequency"] == "CONTINUOUS_SCAN"
+    assert repos["enhanced"]["applied_scan_filters"] == [{"filter": "*", "filterType": "WILDCARD"}]
     assert repos["enhanced"]["scan_collection_status"] == "collected"
 
     assert repos["basic"]["latest_image_scan"]["severity_counts"] == {
@@ -200,6 +201,8 @@ def test_collects_every_repository_in_order():
     assert repos["empty"]["latest_image_scan"] is None
     assert repos["empty"]["scan_collection_status"] == "empty_repository"
     assert repos["empty"]["scan_frequency"] is None
+    # Not read, so unknown: [] would claim no registry filter applies.
+    assert repos["empty"]["applied_scan_filters"] is None
 
     labels = [label for label, _ in collector.failures]
     assert sorted(labels) == [
