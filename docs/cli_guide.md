@@ -25,13 +25,12 @@ paramify manifest set-secret okta_phishing_resistant_mfa org_url OKTA_ORG_URL
 # Keep going until it says the manifest is runnable.
 
 # 3. Set your credentials and run
-export OKTA_API_TOKEN=<your token>
-export OKTA_ORG_URL=https://your-org.okta.com
+paramify env --write                  # adds the variables the manifest reads to .env
+$EDITOR .env                          # fill in OKTA_API_TOKEN, OKTA_ORG_URL, ...
 paramify validate manifest.yaml
 paramify run     manifest.yaml         # evidence → ./evidence/run-<timestamp>/
 
-# 4. Upload to Paramify
-export PARAMIFY_UPLOAD_API_TOKEN=<your token>   # see uploaders/paramify_evidence/README.md for setup
+# 4. Upload to Paramify (PARAMIFY_UPLOAD_API_TOKEN in .env; see uploaders/paramify_evidence/README.md)
 paramify upload                                  # push the latest run
 ```
 
@@ -52,6 +51,7 @@ paramify describe <fetcher>    # one fetcher's config / secrets / target fields
 paramify ksi                   # FedRAMP KSI coverage
 paramify doctor   [manifest]   # preflight: Python, CLIs/packages, manifest, upload
 paramify manifests             # discovered run manifests (manifests/*.yaml)
+paramify env      [-m manifest] # the .env a manifest needs; --write adds what is missing
 paramify validate <manifest>   # validate a manifest without running
 paramify run      <manifest>   # run it
 paramify runs                  # past runs under an output dir (newest first)
@@ -205,6 +205,32 @@ They never touch a pattern list that shows more when it grows, such as
 Every `manifest` subcommand also accepts `--json` and returns a stable
 `{"ok", "path", "errors"}` object. Thus an agent can build a manifest step by
 step and read `errors` to find what is still missing.
+
+## Generate the `.env`
+
+`paramify env` prints the environment variables a manifest reads, grouped by
+tool, each with a one-line note saying what it is and whether it is required.
+Paramify's own upload token comes first.
+
+```bash
+paramify env                          # print what ./manifest.yaml needs (writes nothing)
+paramify env -m manifests/prod.yaml   # another manifest
+paramify env --write                  # append the missing variables to ./.env
+paramify env --write --path ~/secrets/fetchers.env
+```
+
+- It reads the names from the manifest itself. A secret mapped with
+  `set-secret ... OKTA_PROD_TOKEN`, a token per target, or a `${env:}` in a
+  config value gives those names. A secret the manifest has not mapped yet
+  gets the name the fetcher declares.
+- `--write` only appends. A line already in the file is never changed,
+  reordered or printed, so the output never shows a secret. New variables for a
+  tool that already has a section go under a `(continued)` header.
+- Optional variables with a default are written with that default. Optional
+  ones without a default are written commented out, because an empty
+  `AWS_ACCESS_KEY_ID=` would hide the ambient credentials.
+- It ends with the required variables that still have no value, in the file
+  or exported in your shell.
 
 ## Collect, then upload
 
