@@ -1,0 +1,19 @@
+key: kubernetes_no_single_replica_workloads
+name: 'Kubernetes: No Single-Replica Workloads'
+type: AUTOMATED
+role: configuration
+statement: >
+  Every workload with replicas set runs at least two, counting an autoscaler's minimum where one targets
+  it (workloads_single_replica is 0), so losing one pod doesn't stop it. Workloads scaled to zero aren't
+  judged. Covers Deployments and StatefulSets outside the excluded namespaces. Supports KSI-CNA-OFA. Does
+  not check whether the collection run succeeded.
+
+regex: '"workloads_single_replica":\s*0\b'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-KUBERNETES-WORKLOAD-RESILIENCE

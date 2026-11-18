@@ -1,0 +1,17 @@
+evidence_set: EVD-KUBERNETES-WORKLOAD-RESILIENCE
+cases:
+  - name: all_compliant
+    expect: PASS
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"metadata": {"api_failures": [], "datetime": "2026-11-18T19:00:00Z", "partial_failure": false}, "results": {}, "summary": {"nodes_without_zone": [], "workloads": 6, "workloads_autoscaled": 1, "workloads_ready_pods_in_one_zone": [], "workloads_scaled_to_zero": 1, "workloads_single_replica": 0, "workloads_single_replica_names": [], "workloads_with_pdb_blocking_drains": [], "workloads_without_liveness_probe": [], "workloads_without_pdb": [], "workloads_without_readiness_probe": [], "workloads_without_ready_pods": [], "workloads_without_zone_spread_config": ["billing/Deployment/api", "reports/Deployment/worker", "web/Deployment/frontend"], "zones": 3}}}'
+
+  - name: real_cluster_with_planted_problems
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"metadata": {"api_failures": [], "datetime": "2026-11-18T19:00:00Z", "partial_failure": false}, "results": {}, "summary": {"nodes_without_zone": [], "workloads": 7, "workloads_autoscaled": 1, "workloads_ready_pods_in_one_zone": ["billing/Deployment/api"], "workloads_scaled_to_zero": 1, "workloads_single_replica": 2, "workloads_single_replica_names": ["istio-system/Deployment/istiod", "reports/Deployment/worker"], "workloads_with_pdb_blocking_drains": ["warehouse/StatefulSet/db"], "workloads_without_liveness_probe": ["billing/Deployment/api", "istio-system/Deployment/istiod"], "workloads_without_pdb": ["billing/Deployment/api", "web/Deployment/frontend"], "workloads_without_readiness_probe": ["istio-system/Deployment/istiod", "warehouse/StatefulSet/db"], "workloads_without_ready_pods": ["istio-system/Deployment/istiod"], "workloads_without_zone_spread_config": ["billing/Deployment/api", "web/Deployment/frontend"], "zones": 3}}}'
+
+  - name: everything_unread
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"metadata": {"api_failures": [], "datetime": "2026-11-18T19:00:00Z", "partial_failure": false}, "results": {}, "summary": {"nodes_without_zone": null, "workloads": null, "workloads_autoscaled": null, "workloads_ready_pods_in_one_zone": null, "workloads_scaled_to_zero": null, "workloads_single_replica": null, "workloads_single_replica_names": null, "workloads_with_pdb_blocking_drains": null, "workloads_without_liveness_probe": null, "workloads_without_pdb": null, "workloads_without_readiness_probe": null, "workloads_without_ready_pods": null, "workloads_without_zone_spread_config": null, "zones": null}}}'
+
+  - name: collection_failed
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 1, "status": "error"}, "payload": {"metadata": {"api_failures": [], "datetime": "2026-11-18T19:00:00Z", "partial_failure": false}, "results": {}, "summary": {"nodes_without_zone": [], "workloads": 6, "workloads_autoscaled": 1, "workloads_ready_pods_in_one_zone": [], "workloads_scaled_to_zero": 1, "workloads_single_replica": 0, "workloads_single_replica_names": [], "workloads_with_pdb_blocking_drains": [], "workloads_without_liveness_probe": [], "workloads_without_pdb": [], "workloads_without_readiness_probe": [], "workloads_without_ready_pods": [], "workloads_without_zone_spread_config": ["billing/Deployment/api", "reports/Deployment/worker", "web/Deployment/frontend"], "zones": 3}}}'

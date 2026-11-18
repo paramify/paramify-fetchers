@@ -1,0 +1,18 @@
+key: kubernetes_workloads_read
+name: 'Kubernetes: Workloads Read'
+type: AUTOMATED
+role: integrity
+statement: >
+  The cluster's Deployments and StatefulSets were read, so workloads has a count. The resilience checks in
+  this set rely on this read. Covers Deployments and StatefulSets outside the excluded namespaces.
+  Supports KSI-CNA-OFA. Does not check whether the collection run succeeded.
+
+regex: '"workloads":\s*\d'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-KUBERNETES-WORKLOAD-RESILIENCE
