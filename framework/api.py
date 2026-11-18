@@ -477,6 +477,7 @@ def doctor(
     that touches the network, and its results never gate `ok` — see
     framework/probe.py.
     """
+    refresh_env(root)  # judge secrets as `run` will see them, .env included
     py = sys.version_info
     python = {
         "version": f"{py.major}.{py.minor}.{py.micro}",
@@ -1561,6 +1562,7 @@ def run(
     errs = manifest_loader.schema_errors(manifest, root)
     if errs:
         raise ValueError("manifest schema invalid:\n  " + "\n  ".join(errs))
+    refresh_env(root)  # a value kept in .env reaches ${env:...}, whoever started the run
 
     fetchers = discover_fetchers(root)
     platforms = discover_platforms(root)
@@ -4109,3 +4111,61 @@ def shared_config_state(
         "conflict": len(runtime) > 1,
         "missing": missing,
     }
+
+
+def refresh_env(root: Path) -> List[str]:
+    """Copy into os.environ each <root>/.env value whose variable is unset or
+    empty here. Returns the names it filled.
+
+    A run resolves ${env:...} from os.environ, so without this a value kept
+    only in `.env` (the file `paramify env --write` makes) reaches a run only
+    when something else happened to load it first. And `load_dotenv` never
+    overrides: a line still empty when it ran (`OKTA_API_TOKEN=`) leaves the
+    variable set to "", so a value typed in later would never be read. A
+    non-empty export always wins; an empty .env value is never copied.
+    Called by `run` and `doctor` before they read anything.
+    """
+    from dotenv import dotenv_values
+
+    path = Path(root) / ".env"
+    disabled = os.environ.get("PYTHON_DOTENV_DISABLED", "").casefold() in {"1", "true", "t", "yes", "y"}
+    if disabled or not path.is_file():  # disabled as load_dotenv is: the demo's offline guard sets it
+        return []
+    filled = []
+    for name, value in dotenv_values(path).items():
+        if value and not (os.environ.get(name) or "").strip():
+            os.environ[name] = value
+            filled.append(name)
+    return filled
+
+
+def generate_env(
+    root: Path, fetchers: Sequence[Any], write: bool = False, path: Optional[Path] = None,
+    manifest_platforms: Optional[Mapping[str, Any]] = None,
+) -> dict:
+    """The .env the given fetchers need, merged with the one at `path`
+    (default <root>/.env) without changing anything already in it. Each of
+    `fetchers` is a fetcher name or a manifest entry; an entry's own ${env:}
+    references name its variables, as do `manifest_platforms` (the manifest's
+    `run.platforms`; see envgen.env_groups).
+
+    Returns {"text", "added", "already_set", "missing_values", "path"}. `text`
+    is what is added (the whole file when there was none), never existing
+    content, so printing it cannot leak a value. `missing_values` names required
+    variables that would still be empty: empty in the file and not exported
+    (non-empty) in this process's environment. Writes only when `write` is set.
+    """
+    from framework import envgen
+
+    path = Path(path) if path else Path(root) / ".env"
+    groups = envgen.env_groups(root, fetchers, manifest_platforms)
+    existing = path.read_text() if path.is_file() else ""
+    addition, added, already = envgen.plan(existing, groups)
+    if write:
+        envgen.merge_into(path, groups)
+    sep = "\n" if existing and not existing.endswith("\n") else ""
+    values = envgen.assigned(existing + sep + addition)
+    missing = [v.name for g in groups for v in g.vars
+               if v.required and not values.get(v.name, "").strip() and not os.environ.get(v.name, "").strip()]
+    return {"text": addition, "added": added, "already_set": already,
+            "missing_values": missing, "path": str(path)}

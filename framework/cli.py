@@ -1388,6 +1388,37 @@ def validate_cmd(
         typer.echo(f"  {style.dim('NOTE')}   {note}")
 
 
+@app.command("env")
+def env_cmd(
+    manifest: Optional[str] = typer.Option(None, "--manifest", "-m", help=f"Manifest to read (default: {_DEFAULT_MANIFEST})"),
+    write: bool = typer.Option(False, "--write", help="Add the missing variables to the .env file (existing lines are never changed)"),
+    path: Optional[Path] = typer.Option(None, "--path", help="The .env file (default: .env in the repo root)"),
+):
+    """Print the .env a manifest needs, grouped by tool. Prints by default.
+
+    Only the variables its fetchers read. With --write, appends the ones the
+    file lacks; a value already there is never changed or shown.
+    """
+    root = api.find_repo_root()
+    mpath = _resolve_manifest_arg(root, manifest or _DEFAULT_MANIFEST, False)
+    try:
+        data = api.read_manifest(mpath, must_exist=True)
+    except Exception as e:  # noqa: BLE001 — a setup error, reported as one line
+        _fail(mpath, f"could not read {mpath}: {e}", False)
+    entries = [e for e in (data.get("run") or {}).get("fetchers") or [] if isinstance(e, dict) and e.get("use")]
+    res = api.generate_env(root, entries, write=write, path=path,
+                           manifest_platforms=(data.get("run") or {}).get("platforms"))
+    typer.echo(res["text"], nl=False)
+    if res["text"]:
+        typer.echo("")
+    if write:
+        typer.echo(f"Wrote {style.path(res['path'])}: {len(res['added'])} added, {len(res['already_set'])} already set.")
+    else:
+        typer.echo(f"Not written (add --write). {len(res['added'])} would be added, {len(res['already_set'])} already set in {style.path(res['path'])}.")
+    if res["missing_values"]:
+        typer.echo(style.warn("Still need a value: " + ", ".join(res["missing_values"])))
+
+
 @app.command("run")
 def run_cmd(
     manifest: str = typer.Argument(..., help="Path to manifest yaml"),

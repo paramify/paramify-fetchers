@@ -72,6 +72,27 @@ def _no_upload_yaml_from_the_working_tree(monkeypatch):
     monkeypatch.setattr(api, "default_upload_config", default_upload_config)
 
 
+@pytest.fixture(autouse=True)
+def _no_dotenv_from_the_working_tree(monkeypatch):
+    """Tests never copy the user's own `<repo>/.env` into os.environ.
+
+    `api.run` and `api.doctor` fill unset variables from `<root>/.env`. A
+    developer's file often holds real tokens (CI never has one), and with the
+    real repo root they would land in os.environ for every later test in the
+    process. For that root only, act as if there is none.
+    """
+    from framework import api
+
+    real = api.refresh_env
+
+    def refresh_env(root):
+        if Path(root).resolve() == REPO_ROOT:
+            return []
+        return real(root)
+
+    monkeypatch.setattr(api, "refresh_env", refresh_env)
+
+
 # --------------------------------------------------------------------------- #
 # --fail-on-skip: the tui job's guard against a missing textual passing as skips.
 # --------------------------------------------------------------------------- #
