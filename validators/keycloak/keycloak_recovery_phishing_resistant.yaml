@@ -6,8 +6,8 @@ statement: >
   Every way through the realm's reset-credentials flow, the recovery path that restores access, passes a
   phishing-resistant authenticator (recovery_requires_phishing_resistant is true). Fails when access can
   be restored without one, such as by an email link alone. Does not cover recovery handled outside
-  Keycloak, such as at an external identity provider or by an administrator. Supports KSI-IAM-APM. Does
-  not check whether the collection run succeeded.
+  Keycloak, such as at an external identity provider or by an administrator. Does not check whether the
+  collection run succeeded.
 
 regex: '"recovery_requires_phishing_resistant":\s*true\b'
 rules_summary: MATCH_COUNT NOT_EQUALS 0

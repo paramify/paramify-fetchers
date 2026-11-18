@@ -4,9 +4,8 @@ type: AUTOMATED
 role: configuration
 statement: >
   Keycloak's setting to include the full representation of what changed in admin events is on
-  (admin_events_details_enabled is true). Supports KSI-MLA-LET. An enabled setting is configuration
-  evidence only: it does not show that events are produced or arrive anywhere. Does not check whether the
-  collection run succeeded.
+  (admin_events_details_enabled is true). An enabled setting is configuration evidence only: it does not
+  show that events are produced or arrive anywhere. Does not check whether the collection run succeeded.
 
 regex: '"admin_events_details_enabled":\s*true\b'
 rules_summary: MATCH_COUNT NOT_EQUALS 0

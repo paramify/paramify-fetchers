@@ -4,8 +4,8 @@ type: AUTOMATED
 role: configuration
 statement: >
   Brute-force detection is on for the realm (brute_force_protected is true), so repeated failed
-  sign-ins lock the account; the threshold and lockout length are in the evidence. Supports
-  KSI-IAM-SUS. Does not check whether the collection run succeeded.
+  sign-ins lock the account; the threshold and lockout length are in the evidence. Does not
+  check whether the collection run succeeded.
 
 regex: '"brute_force_protected":\s*true\b'
 rules_summary: MATCH_COUNT NOT_EQUALS 0

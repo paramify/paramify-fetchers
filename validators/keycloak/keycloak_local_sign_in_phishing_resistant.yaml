@@ -8,8 +8,8 @@ statement: >
   (local_sign_in_requires_phishing_resistant is true), judged by Keycloak's flow rules. The cookie step,
   which only reuses an existing session, is not counted as a way around the flow. Does not cover sign-ins
   through an external identity provider; identity_providers_enabled shows how many are enabled, and what
-  they enforce needs its own evidence. Account recovery is a separate check. Supports KSI-IAM-APM. Does not
-  check whether the collection run succeeded.
+  they enforce needs its own evidence. Account recovery is a separate check. Does not check whether the
+  collection run succeeded.
 
 regex: '"local_sign_in_requires_phishing_resistant":\s*true\b'
 rules_summary: MATCH_COUNT NOT_EQUALS 0
