@@ -1,0 +1,18 @@
+key: istio_destination_rules_keep_tls
+name: 'Istio: No Destination Rule Turns TLS Off'
+type: AUTOMATED
+role: configuration
+statement: >
+  No DestinationRule sets tls.mode DISABLE for a host or a port (destination_rules_tls_disabled is empty),
+  so no rule sends traffic in plaintext where mTLS would apply. Supports KSI-SVC-SIN. Does not check
+  whether the collection run succeeded.
+
+regex: '"destination_rules_tls_disabled":\s*\[\]'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-ISTIO-MESH-SECURITY

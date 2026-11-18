@@ -49,6 +49,7 @@ validation_rules:
 # Every evidence set that wants a collection-health check. Add a line per set as
 # validators are authored for it.
 evidence_sets:
+  - EVD-ISTIO-MESH-SECURITY
   - EVD-LB-ENC-STATUS
   - EVD-SQS-ENC
   - EVD-BETTERSTACK-PUBLIC-STATUS-PAGE

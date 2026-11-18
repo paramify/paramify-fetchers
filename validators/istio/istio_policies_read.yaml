@@ -1,0 +1,19 @@
+key: istio_policies_read
+name: 'Istio: mTLS Policies Read'
+type: AUTOMATED
+role: integrity
+statement: >
+  Istio's PeerAuthentication policies were read, so mesh_mtls_mode has a value (STRICT, PERMISSIVE,
+  DISABLE, UNSET or NONE). NONE means there is no mesh-wide policy and Istio applies PERMISSIVE. The mTLS
+  checks in this set rely on this read. Supports KSI-SVC-SIN. Does not check whether the collection run
+  succeeded.
+
+regex: '"mesh_mtls_mode":\s*"[A-Z]'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-ISTIO-MESH-SECURITY
