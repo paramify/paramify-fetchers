@@ -50,7 +50,8 @@ def results(errors=0, warnings=0):
 
 
 def location(backups=(), restores=(), read=True, restores_read=True, **kw):
-    return {"backups_read": read, "backups_unreadable": 0, "backups": list(backups), "restores_read": restores_read,
+    return {"storage_account": kw.get("account", "backupsa"), "container": kw.get("container", "velero"), "prefix": kw.get("prefix"),
+            "backups_read": read, "backups_unreadable": 0, "backups": list(backups), "restores_read": restores_read,
             "restores": list(restores), "geo_replicated": kw.get("geo", True), "customer_managed_key": kw.get("cmk", False)}
 
 
@@ -94,7 +95,7 @@ def test_summary_judges_each_schedule_by_its_newest_completed_backup():
     rs = [vb.restore_record("r1", results(), iso(NOW - timedelta(days=3, hours=1))), vb.restore_record("r2", results(errors=1), iso(NOW))]
     s = vb.summarize([location(bk, rs)], SETTINGS, NOW)
     assert (s["backups_total"], s["backups_completed"], s["backups_failed"], s["backups_partially_failed"]) == (5, 3, 1, 1)
-    assert (s["schedules_observed"], s["schedules_with_success_within_window"], s["schedules_without_success_within_window"]) == (2, 1, ["weekly"])
+    assert (s["schedules_observed"], s["schedules_with_success_within_window"], s["schedules_without_success_within_window"]) == (2, 1, ["weekly@backupsa/velero"])
     assert s["max_hours_since_scheduled_success"] == 100.0
     assert (s["restores_total"], s["restores_without_errors"], s["restores_with_errors"], s["days_since_last_clean_restore"]) == (2, 1, 1, 3)
 
@@ -317,21 +318,21 @@ def _daily(hours_ago_list, schedule="daily", phase="Completed"):
 def test_expected_schedules_parse_name_and_interval():
     assert vb.parse_expected(None) == (None, [])
     assert vb.parse_expected("daily:24, weekly-db:168 , bad, x:0") == (
-        [{"name": "daily", "interval_hours": 24}, {"name": "weekly-db", "interval_hours": 168}], ["bad", "x:0"])
+        [{"name": "daily", "interval_hours": 24, "location": None}, {"name": "weekly-db", "interval_hours": 168, "location": None}], ["bad", "x:0"])
 
 
 def test_missed_daily_runs_are_each_24_hour_period_without_a_completed_backup():
     # Completed 6, 30, 54 and 126 hours ago: periods 0, 1, 2 and 5 are covered; 3, 4 and 6 are missed.
     bk = _daily([6, 30, 54, 126]) + _daily([78], phase="Failed")
-    settings = {**SETTINGS, "expected_schedules": [{"name": "daily", "interval_hours": 24}], "rpo_hours": 168}
-    [c] = vb.schedule_checks(bk, settings, NOW)
+    settings = {**SETTINGS, "expected_schedules": [{"name": "daily", "interval_hours": 24, "location": None}], "rpo_hours": 168}
+    [c] = vb.schedule_checks([location(bk)], settings, NOW)
     assert (c["periods_checked"], c["missed_runs"], c["hours_since_success"], c["exceeds_rpo"]) == (7, 3, 6.0, False)
 
 
 def test_an_expected_schedule_with_no_backups_is_reported_and_exceeds_the_rpo():
-    settings = {**SETTINGS, "expected_schedules": [{"name": "daily", "interval_hours": 24}, {"name": "weekly", "interval_hours": 168}], "rpo_hours": 168}
+    settings = {**SETTINGS, "expected_schedules": [{"name": "daily", "interval_hours": 24, "location": None}, {"name": "weekly", "interval_hours": 168, "location": None}], "rpo_hours": 168}
     s = vb.summarize([location(_daily([6]))], settings, NOW)
-    assert (s["expected_schedules"], s["expected_schedules_without_backups"], s["expected_schedules_without_backups_names"]) == (2, 1, ["weekly"])
+    assert (s["expected_schedules"], s["expected_schedules_without_backups"], s["expected_schedules_without_backups_names"]) == (2, 1, ["weekly@backupsa/velero"])
     assert (s["missed_scheduled_runs"], s["schedules_with_missed_runs"], s["schedules_exceeding_rpo"]) == (7, 2, 1)
 
 
@@ -368,7 +369,7 @@ def test_real_sandbox_shows_the_daily_schedule_has_not_produced_a_backup(monkeyp
     client = azure_rest.AzureRestClient(_Cred(), _RealVelero())
     results, s = vb.collect(client, "s1", sys.modules["azure_common"].Collector(vb.logger), now=CAPTURED)
     # The schedule existed in the cluster but had not run yet: storage holds only the two manual backups.
-    assert (s["expected_schedules"], s["expected_schedules_without_backups"], s["expected_schedules_without_backups_names"]) == (1, 1, ["daily"])
+    assert (s["expected_schedules"], s["expected_schedules_without_backups"], s["expected_schedules_without_backups_names"]) == (1, 1, ["daily@backupsa/velero"])
     assert (s["missed_scheduled_runs"], s["schedules_exceeding_rpo"]) == (7, 1)
     assert results["schedules"][0]["backups"] == 0
 
@@ -387,16 +388,16 @@ def _runs(schedule, done_times, ttl_hours, phase="Completed", attempted=1, compl
 
 
 def _expected(name, hours, **extra):
-    return {**SETTINGS, "expected_schedules": [{"name": name, "interval_hours": hours}], **extra}
+    return {**SETTINGS, "expected_schedules": [{"name": name, "interval_hours": hours, "location": None}], **extra}
 
 
 def test_backups_velero_deleted_at_the_end_of_their_retention_are_not_missed_runs():
     # Every run succeeded; only the retained backups are in storage.
     hourly = _runs("hourly", [NOW - timedelta(hours=h, minutes=10) for h in range(24)], ttl_hours=24)
-    [c] = vb.schedule_checks(hourly, _expected("hourly", 1), NOW)
+    [c] = vb.schedule_checks([location(hourly)], _expected("hourly", 1), NOW)
     assert (c["missed_runs"], c["hours_checked_for_missed_runs"]) == (0, 24.0)
     daily = _runs("daily", [NOW - timedelta(hours=h) for h in (2, 26, 50)], ttl_hours=72)
-    [c] = vb.schedule_checks(daily, _expected("daily", 24), NOW)
+    [c] = vb.schedule_checks([location(daily)], _expected("daily", 24), NOW)
     assert (c["missed_runs"], c["periods_checked"]) == (0, 3)
 
 
@@ -409,13 +410,13 @@ def test_a_backup_finishing_a_few_minutes_late_is_not_a_missed_run():
         raw = {"metadata": {"labels": {"velero.io/schedule-name": "daily"}},
                "status": {"phase": "Completed", "completionTimestamp": iso(done), "expiration": iso(done + timedelta(days=30))}}
         bk.append(vb.backup_record(f"d{i}", raw, now, 24))
-    [c] = vb.schedule_checks(bk, _expected("daily", 24), now)
+    [c] = vb.schedule_checks([location(bk)], _expected("daily", 24), now)
     assert c["missed_runs"] == 0
 
 
 def test_a_real_gap_still_counts_each_missed_interval():
     daily = _runs("daily", [NOW - timedelta(hours=h) for h in (2, 98)], ttl_hours=720)
-    [c] = vb.schedule_checks(daily, _expected("daily", 24), NOW)
+    [c] = vb.schedule_checks([location(daily)], _expected("daily", 24), NOW)
     assert c["missed_runs"] == 5  # 3 runs missed between the two backups, 2 before the older one
 
 
@@ -586,3 +587,59 @@ def test_a_clean_restore_of_something_else_never_resolves_a_failed_restore():
     retried = rs + [vb.restore_record("restore-app-a-retry", results(), iso(NOW - timedelta(hours=12)))]
     s = vb.summarize([location([], retried)], {**SETTINGS, "retry_suffix": "-retry"}, NOW)
     assert (s["restores_with_errors_unresolved"], s["failures_resolved_by_retry"]) == (0, 1)
+
+
+# --- schedule checks per storage location ---
+
+def _daily_runs(hours_ago_list):
+    return _runs("daily", [NOW - timedelta(hours=h) for h in hours_ago_list], 240)
+
+
+def _two_clusters():
+    """Both run `daily`: cluster-a stopped 60 hours ago, cluster-b is current."""
+    stopped = location(_daily_runs(range(60, 200, 24)), prefix="cluster-a")
+    current = location(_daily_runs(range(2, 200, 24)), prefix="cluster-b")
+    return stopped, current
+
+
+def test_expected_schedules_can_be_bound_to_one_location():
+    expected, invalid = vb.parse_expected("backup-daily:24@BackupSA/velero/cluster-a/, weekly:168, d:24@nocontainer, x:24@a/b@c")
+    assert expected == [{"name": "backup-daily", "interval_hours": 24, "location": "backupsa/velero/cluster-a"},
+                        {"name": "weekly", "interval_hours": 168, "location": None}]
+    assert invalid == ["d:24@nocontainer", "x:24@a/b@c"]
+
+
+def test_one_locations_backups_never_hide_another_locations_missed_runs():
+    # Before per-location checks, cluster-b's backups covered cluster-a's stop entirely.
+    stopped, current = _two_clusters()
+    s = vb.summarize([stopped, current], _expected("daily", 24, rpo_hours=48), NOW)
+    assert s["expected_schedules"] == 2                      # an unbound entry is checked in every location
+    assert s["schedules_with_missed_runs"] == 1 and s["missed_scheduled_runs"] >= 2
+    assert s["schedules_exceeding_rpo"] == 1
+    assert s["schedules_without_success_within_window"] == ["daily@backupsa/velero/cluster-a"]
+
+
+def test_a_bound_schedule_is_checked_only_in_its_location():
+    stopped, current = _two_clusters()
+    settings = {**SETTINGS, "expected_schedules": vb.parse_expected("daily:24@backupsa/velero/cluster-b")[0], "rpo_hours": 168}
+    s = vb.summarize([stopped, current], settings, NOW)
+    assert (s["expected_schedules"], s["schedules_with_missed_runs"], s["schedules_exceeding_rpo"]) == (1, 0, 0)
+    [c] = vb.schedule_checks([stopped, current], settings, NOW)
+    assert (c["id"], c["location_found"]) == ("daily@backupsa/velero/cluster-b", True)
+
+
+def test_a_bound_location_that_was_not_found_counts_as_having_no_backups():
+    stopped, current = _two_clusters()
+    settings = {**SETTINGS, "expected_schedules": vb.parse_expected("daily:24@backupsa/velero/cluster-c")[0], "rpo_hours": 168}
+    s = vb.summarize([stopped, current], settings, NOW)
+    assert (s["expected_schedules_without_backups"], s["expected_schedules_without_backups_names"]) == (1, ["daily@backupsa/velero/cluster-c"])
+    assert s["schedules_exceeding_rpo"] == 1
+    [c] = vb.schedule_checks([stopped, current], settings, NOW)
+    assert c["location_found"] is False
+
+
+def test_freshness_is_judged_per_location_even_without_listed_schedules():
+    stopped, current = _two_clusters()
+    s = vb.summarize([stopped, current], SETTINGS, NOW)
+    assert (s["schedules_observed"], s["schedules_with_success_within_window"]) == (2, 1)
+    assert s["schedules_without_success_within_window"] == ["daily@backupsa/velero/cluster-a"]

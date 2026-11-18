@@ -1,5 +1,5 @@
 name: azure_velero_backups
-version: 0.1.0
+version: 0.2.0
 description: >-
   Shows whether Velero backups stored in Azure Blob Storage succeed on schedule, expire on time and restore cleanly, and whether their storage is geo-replicated and encrypted with a customer key.
 category: azure
@@ -55,9 +55,14 @@ config_schema:
     env: AZURE_VELERO_EXPECTED_SCHEDULES
     description: >
       Comma-separated schedules that must be producing backups, as schedule:hours (the Velero schedule name and how
-      often it should produce one, such as daily:24). Velero does not write schedules to backup storage, so a schedule
-      that has never produced a backup is only visible when it is listed here. There is no default: while it is unset,
-      the expected-schedule and missed-run counts are null. An entry not in that form fails the run as bad_config.
+      often it should produce one, such as daily:24), optionally bound to one storage location as
+      schedule:hours@account/container or schedule:hours@account/container/prefix (the form backup_locations uses).
+      A bound schedule is checked only in that location, and counts as having no backups when the location isn't
+      found. An unbound schedule is checked in every location read, so each one must run it. Schedules are always
+      judged per location: one location's backups never count for another. Velero does not write schedules to backup
+      storage, so a schedule that has never produced a backup is only visible when it is listed here. There is no
+      default: while it is unset, the expected-schedule and missed-run counts are null. An entry not in that form
+      fails the run as bad_config.
   rpo_hours:
     type: integer
     required: false
@@ -169,16 +174,16 @@ evidence_set:
     - backups_volume_snapshots_incomplete — Number of backups that completed fewer volume snapshots (native and CSI) than they attempted
     - backups_failed_unresolved — Number of Failed or PartiallyFailed backups that have no later Completed backup of the same schedule (a current failure); a backup with no schedule label stays unresolved, since a later manual backup may cover other namespaces; resolved failures stay in backups_failed and backups_partially_failed
     - backups_volume_snapshots_incomplete_unresolved — Number of backups with incomplete volume snapshots that have no later Completed backup of the same schedule that completed every snapshot it attempted; a backup with no schedule label stays unresolved
-    - schedules_observed — Number of schedules named by a backup's velero.io/schedule-name label
+    - schedules_observed — Number of schedules named by a backup's velero.io/schedule-name label, counted once per storage location they run in
     - schedules_with_success_within_window — Number of schedules whose newest Completed backup finished within the schedule's window (a success within the window): its interval plus 10% (at least 2 hours) when listed in expected_schedules, otherwise success_window_hours
-    - schedules_without_success_within_window — List of schedule names without a success within the window
+    - schedules_without_success_within_window — List of schedules without a success within the window, each as schedule@location (account/container[/prefix])
     - max_hours_since_scheduled_success — Hours since the newest Completed backup of the schedule that has gone longest without one; null if any schedule has no Completed backup
     - success_window_hours — Hours a schedule not listed in expected_schedules may go since its newest Completed backup and still count as a success within the window
 
     Is every expected backup happening?
-    - expected_schedules — Number of schedules listed in expected_schedules; null when none are listed
+    - expected_schedules — Number of expected schedule checks: each bound entry once, and each unbound entry once per location read; null when none are listed
     - expected_schedules_without_backups — Number of expected schedules with no backup at all in storage; null when expected_schedules is not set or any location could not be read
-    - expected_schedules_without_backups_names — List of the expected schedules with no backup at all
+    - expected_schedules_without_backups_names — List of the expected schedules with no backup at all, each as schedule@location
     - missed_scheduled_runs — Number of missed runs across expected schedules, from the gaps between Completed backups and from the newest one to now: each gap longer than the interval plus 10% adds one missed run per whole interval. Only the part of missed_run_lookback_days that the schedule's backups are kept for is checked, so a backup Velero deleted when its retention ended is not a missed run. Null when expected_schedules is not set or any location could not be read
     - schedules_with_missed_runs — Number of expected schedules with at least one missed run
     - missed_run_lookback_days — Days of each expected schedule's periods checked for missed runs
