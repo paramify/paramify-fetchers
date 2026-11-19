@@ -65,7 +65,8 @@ def assigned(text: str) -> Dict[str, str]:
 
 def _first_sentence(text: Optional[str]) -> str:
     flat = " ".join((text or "").split())
-    m = re.match(r"(.+?[.!?])(?:\s|$)", flat)
+    # A sentence ends where the next one starts with a capital, so "e.g. https://..." doesn't end it.
+    m = re.match(r"(.+?[.!?])(?=\s+[A-Z]|$)", flat)
     return m.group(1) if m else flat
 
 

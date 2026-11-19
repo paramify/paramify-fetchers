@@ -569,3 +569,10 @@ def test_json_with_write_says_what_it_wrote(tmp_path):
 def test_json_reports_an_unreadable_manifest_as_json(tmp_path):
     out = CliRunner().invoke(cli.app, ["env", "-m", str(tmp_path / "nope.yaml"), "--json"])
     assert out.exit_code == 1 and json.loads(out.stdout)["ok"] is False
+
+
+def test_a_note_does_not_stop_at_an_abbreviation():
+    assert envgen._first_sentence("Okta org base URL, no trailing slash (e.g. https://your-org.okta.com).") == \
+        "Okta org base URL, no trailing slash (e.g. https://your-org.okta.com)."
+    assert envgen._first_sentence("Read-only token. Create it in Settings.") == "Read-only token."
+    assert envgen._first_sentence("Ends here") == "Ends here"
