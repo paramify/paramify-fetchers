@@ -2824,6 +2824,16 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- **In-scope counts read null, not 0, when their list couldn't be read.** A failed sign-in or list call left
+  `in_scope_*` at 0, as if the subscription had none. Each now reads null when the list it counts wasn't read, and 0
+  only when it was read and is empty; the matching `excluded_*` count is null with it.
+  `azure_network_security_groups` 0.6.1 (`in_scope_network_security_groups`, `in_scope_virtual_networks`,
+  `in_scope_network_interfaces`, each by its own list), `azure_resource_inventory` 0.4.2 and
+  `azure_resource_diagnostic_settings` 0.4.2 (`in_scope_resources`), `azure_private_dns_zone_configuration` 0.4.2
+  (`in_scope_private_dns_zones`), `azure_private_endpoint_configuration` 0.3.3 (`in_scope_private_endpoints`),
+  `azure_defender_assessments` 0.4.2 (`in_scope_assessments`, also null when the list stopped partway; still 0 when
+  Defender for Cloud isn't registered) and `azure_residual_resources` 0.3.2 (`in_scope_orphaned_resources` when any
+  list orphans are found from wasn't read, `in_scope_role_assignments` by its own list).
 - **Every secret has a description, and settings the fetcher defaults are no longer required.** 19 secret env vars
   across datadog, crowdstrike, okta, knowbe4, sentinelone, github, gitlab, rippling, checkov, paramify and splunk
   had no `description`, so `paramify describe` and the TUI said nothing about what they were or where to get them.

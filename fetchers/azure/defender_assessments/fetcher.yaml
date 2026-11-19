@@ -1,5 +1,5 @@
 name: azure_defender_assessments
-version: 0.4.1
+version: 0.4.2
 description: >-
   Lists every Defender for Cloud check result on the subscription, showing which resources pass or fail which checks and how severe each failure is.
 category: azure
@@ -106,8 +106,8 @@ evidence_set:
     Which resources are left out of scope?
     - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
     - resource_exclusion_patterns_unmatched — List of configured patterns that matched no check result, such as a mistyped name, or null when the result list was not read (the read failed, or Defender for Cloud is not registered)
-    - excluded_assessments — Number of check results left out of scope because a pattern matched the resource they are about by resource group or id; a check result has no region, so location: patterns never match one, and results about the subscription itself or an on-premises machine (named by machine name or VM UUID rather than an Azure resource id) stay; each is listed under excluded with the pattern, and no other count includes them
-    - in_scope_assessments — Number of check results read and in scope; equals total_assessments
+    - excluded_assessments — Number of check results left out of scope because a pattern matched the resource they are about by resource group or id; a check result has no region, so location: patterns never match one, and results about the subscription itself or an on-premises machine (named by machine name or VM UUID rather than an Azure resource id) stay; each is listed under excluded with the pattern, and no other count includes them; null when the check result list could not be read in full
+    - in_scope_assessments — Number of check results read and in scope; equals total_assessments, but null when the check result list could not be read in full; 0 when Defender for Cloud is not registered
 
     Which checks pass and fail?
     - healthy_count — Number of check results with status Healthy (the resource passes the check)
