@@ -56,8 +56,14 @@ class UpdateScreen(ButtonRowNav, Screen):
         return [] if self.plan.get("ok", True) else list(self.plan.get("errors") or ["the update could not be planned"])
 
     @property
+    def _ready(self) -> bool:
+        """A whole plan to show: not refused, not up to date, nothing in the way."""
+        return bool(self.plan.get("ok")) and self.plan.get("state") == "ready"
+
+    @property
     def _actionable(self) -> bool:
-        return bool(self.plan.get("ok")) and "target" in self.plan and not self.plan.get("up_to_date")
+        """A plan Apply can carry out. A Python too old for the target is shown, not offered."""
+        return self._ready and not self._stops.get("python_required")
 
     @property
     def _stops(self) -> dict:
@@ -70,7 +76,9 @@ class UpdateScreen(ButtonRowNav, Screen):
             yield Static(Text("Update", style="bold"), id="update-title")
             with VerticalScroll(id="update-body"):
                 yield Static(self._header_text(), id="update-header")
-                if self._actionable:
+                if self.plan.get("ok") and self.plan.get("state") == "blocked":
+                    yield Static(Group(*view.blocked(self.plan["blocking"])), id="update-blocked")
+                if self._ready:
                     yield Static(self._check_text(), id="update-check")
                     yield Static(Text("Your fetchers", style="bold"), id="update-fetchers-title", classes="update-heading")
                     yield DataTable(id="update-fetchers")
@@ -86,7 +94,7 @@ class UpdateScreen(ButtonRowNav, Screen):
                 yield Button("Close", id="update-close")
 
     def on_mount(self) -> None:
-        if self._actionable:
+        if self._ready:
             table = self.query_one("#update-fetchers", DataTable)
             table.cursor_type = "row"
             table.add_columns("fetcher", "version", "what changed")

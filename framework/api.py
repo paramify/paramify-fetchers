@@ -143,7 +143,7 @@ def _run_update(root: Path, *flags: str) -> dict:
     try:
         proc = subprocess.run(
             [sys.executable, "-m", "framework.cli", "update", *flags],
-            cwd=root, capture_output=True, text=True, timeout=900,
+            cwd=root, capture_output=True, text=True,  # no timeout: killing it mid-pip would leave a half install
         )
     except (OSError, subprocess.SubprocessError) as exc:
         return {"ok": False, "errors": [str(exc)]}
@@ -164,8 +164,8 @@ def update_plan(root: Path) -> dict:
     The plan the CLI draws (framework.update.plan, as `--json` shows it), read
     in this process: reading is safe here, only the move must be a subprocess.
     {ok, errors, current, target, ...}, or {ok: False, errors} when update
-    refuses outright. Adds `can_roll_back`: whether an earlier update left a
-    position to return to.
+    refuses outright. Adds `can_roll_back`: whether `--rollback` would go back
+    from here (update.rollback_refusal).
     """
     from framework import update
 
@@ -173,10 +173,7 @@ def update_plan(root: Path) -> dict:
         doc = {"ok": True, "errors": [], **update.public(update.plan(root))}
     except update.UpdateError as e:
         doc = {"ok": False, "errors": [str(e)]}
-    try:
-        doc["can_roll_back"] = bool(update.read_state(root).get("previous"))
-    except Exception:
-        doc["can_roll_back"] = False
+    doc["can_roll_back"] = update.rollback_refusal(root) is None
     return doc
 
 

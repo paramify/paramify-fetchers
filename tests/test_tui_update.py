@@ -71,6 +71,7 @@ PLAN = {
     "stops": {"breaks": [], "python_required": None,
               "touching": ["An inventory fetcher needs a pipeline block in fetcher.yaml",
                            "Inventory records must carry asset_type"]},
+    "state": "ready",
     "can_roll_back": False,
 }
 SHA = PLAN["target"]["sha"]
@@ -276,6 +277,33 @@ def test_rollback_confirms_then_runs(monkeypatch):
     _run(body)
 
 
+def test_a_blocked_plan_names_the_files_and_offers_no_apply():
+    plan = {k: v for k, v in PLAN.items() if k not in ("check", "fetchers", "breaking", "highlights", "stops")}
+    plan.update(state="blocked", blocking={"tracked": ["fetchers/demo/alpha/fetch.py"], "untracked": []})
+
+    async def body(app, pilot):
+        await app.push_screen(UpdateScreen(plan))
+        await pilot.pause()
+        screen = app.screen
+        assert "fetchers/demo/alpha/fetch.py" in _text(screen.query_one("#update-blocked"))
+        assert not screen.query("#update-apply")
+
+    _run(body)
+
+
+def test_a_python_too_old_for_the_target_is_shown_not_offered():
+    plan = _plan(stops={**PLAN["stops"], "python_required": ">=3.13"},
+                 check={**PLAN["check"], "python_required": ">=3.13"})
+
+    async def body(app, pilot):
+        await app.push_screen(UpdateScreen(plan))
+        await pilot.pause()
+        assert "needs Python >=3.13" in _text(app.screen.query_one("#update-check"))
+        assert not app.screen.query("#update-apply")
+
+    _run(body)
+
+
 def test_an_up_to_date_clone_has_nothing_to_apply():
     async def body(app, pilot):
         await app.push_screen(UpdateScreen({"ok": True, "errors": [], "up_to_date": True,
@@ -349,7 +377,7 @@ def test_update_plan_reads_the_plan_in_this_process(monkeypatch, tmp_path):
     located = {"current": {"label": "main @ fc74f19"}, "target": PLAN["target"], "up_to_date": False,
                "manifests": [{"label": "manifests/prod.yaml", "path": "/x"}], "rows": [{"tag": "new"}]}
     monkeypatch.setattr(update, "plan", lambda root: located)
-    monkeypatch.setattr(update, "read_state", lambda root: {"previous": {"sha": "abc"}})
+    monkeypatch.setattr(update, "rollback_refusal", lambda root: None)
     plan = api.update_plan(tmp_path)
     assert plan["ok"] and plan["errors"] == [] and plan["can_roll_back"]
     assert plan["manifests"] == ["manifests/prod.yaml"] and "rows" not in plan
@@ -358,7 +386,7 @@ def test_update_plan_reads_the_plan_in_this_process(monkeypatch, tmp_path):
         raise update.UpdateError("main has 2 commits that origin/main does not")
 
     monkeypatch.setattr(update, "plan", refuse)
-    monkeypatch.setattr(update, "read_state", lambda root: {})
+    monkeypatch.setattr(update, "rollback_refusal", lambda root: "nothing to roll back to")
     assert api.update_plan(tmp_path) == {"ok": False, "errors": ["main has 2 commits that origin/main does not"],
                                          "can_roll_back": False}
 
