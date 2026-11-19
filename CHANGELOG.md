@@ -12,6 +12,10 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **`azure_entra_sign_in_logs` 0.4.0: lockouts that occurred.** `sign_ins_locked_out` counts interactive sign-ins
+  Entra rejected with ResultType 50053 (smart lockout, or a sign-in from an IP with malicious activity, which Entra
+  logs under the same code), and `users_locked_out` counts the users they belong to. With the sign-in logs unread,
+  both are null.
 - **`azure_aks_cluster_configuration` 0.7.0: autoscaling for expected pools.** A new `expected_autoscaling_pools`
   setting lists the node pools that must have the cluster autoscaler on, as `pool` (every cluster) or `cluster/pool`.
   Missing pools and pools without the autoscaler are counted and named, a pool at zero nodes stays expected, and

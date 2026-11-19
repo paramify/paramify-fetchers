@@ -129,6 +129,16 @@ def test_sign_in_summary_percentages():
             summary["users_with_single_factor_success"], summary["succeeded_device_logons"]) == (90, 40, 1, 3)
 
 
+def test_lockouts_are_counted_by_their_result_code_in_both_overview_queries():
+    settings = sl.settings_from_env()
+    for query in (sl.overview_query(settings), sl.user_count_query(settings)):
+        assert "LockedOut = countif(tostring(ResultType) == '50053')" in query
+    assert "UsersLockedOut = countif(LockedOut > 0)" in sl.user_count_query(settings)
+    summary = sl.sign_in_summary({"LockedOut": 4}, {"UsersLockedOut": 2})
+    assert (summary["locked_out"], summary["users_locked_out"]) == (4, 2)
+    assert sl.sign_in_summary({}, {})["locked_out"] == 0  # a workspace that answered with no lockouts
+
+
 def test_capped_marks_truncation():
     assert sl.capped([1, 2, 3], 2) == ([1, 2], True)
     assert sl.capped([1, 2], 2) == ([1, 2], False)
@@ -156,11 +166,11 @@ def table(columns, rows):
 
 QUERY_RESULTS = {
     "SucceededDeviceLogons = countif": table(
-        ["SignIns", "Succeeded", "Failed", "SucceededMultiFactor", "SucceededSingleFactor",
+        ["SignIns", "Succeeded", "Failed", "LockedOut", "SucceededMultiFactor", "SucceededSingleFactor",
          "SucceededSingleFactorPhishingResistant", "SucceededDeviceLogons", "SucceededPhishingResistant",
          "SucceededRisky", "FirstSignIn", "LastSignIn"],
-        [[12, 10, 2, 9, 1, 0, 0, 4, 0, "2026-10-05T01:00:00Z", "2026-11-03T22:10:00Z"]]),
-    "UsersWithSingleFactorSuccess": table(["Users", "UsersWithSingleFactorSuccess"], [[3, 1]]),
+        [[12, 10, 2, 1, 9, 1, 0, 0, 4, 0, "2026-10-05T01:00:00Z", "2026-11-03T22:10:00Z"]]),
+    "UsersWithSingleFactorSuccess": table(["Users", "UsersWithSingleFactorSuccess", "UsersLockedOut"], [[3, 1, 1]]),
     "by UserKey | order by Upn": table(
         ["Upn", "SignIns", "Succeeded", "Failed", "SucceededSingleFactor", "SucceededPhishingResistant", "LastSignIn"],
         [["a@contoso.com", 5, 5, 0, 0, 4, "2026-11-03T22:10:00Z"], ["b@contoso.com", 4, 3, 1, 1, 0, "2026-11-02T10:00:00Z"],
@@ -302,6 +312,7 @@ def test_main_reads_sign_ins_and_policy_changes_from_the_workspace_that_has_them
         "all_successful_sign_ins_multi_factor": False, "users_signed_in": 3, "users_with_single_factor_success": 1,
         "latest_sign_in": "2026-11-03T22:10:00Z", "audit_logs_read": True, "policy_changes": 3}
     assert summary["succeeded_by_method"] == {"FIDO2 security key": 4, "Mobile app notification": 5, "Password": 6}
+    assert (summary["sign_ins_failed"], summary["sign_ins_locked_out"], summary["users_locked_out"]) == (2, 1, 1)
     assert summary["succeeded_by_requirement_provider"] == {"multiConditionalAccess": 9}
     # Counts come from the uncapped query even though the event list (cap 2) is cut.
     assert summary["policy_changes_by_operation"] == {"Authentication Methods Policy Update": 1,
@@ -324,6 +335,7 @@ def test_a_refused_query_fails_the_run_and_leaves_every_sign_in_field_null(arm, 
     assert (summary["sign_in_logs_read"], summary["sign_ins"], summary["multi_factor_percentage"],
             summary["all_successful_sign_ins_multi_factor"], summary["audit_logs_read"],
             summary["policy_changes"]) == (False, None, None, None, False, None)
+    assert (summary["sign_ins_locked_out"], summary["users_locked_out"]) == (None, None)
     assert json.loads((tmp_path / "status.json").read_text())["code"] == "not_authorized"
 
 
