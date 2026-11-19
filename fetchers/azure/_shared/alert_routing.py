@@ -195,9 +195,11 @@ def _tri(groups: list[dict], has: Callable[[dict], bool]) -> Optional[bool]:
     return False
 
 
-def route(enabled: bool, group_ids: list[str], alert_scopes: list[str], groups: dict, rules: list[dict]) -> dict:
-    """Resolve an alert rule's notification path; `groups` is keyed by lower-cased action group id."""
-    matches = matching_processing_rules(alert_scopes, rules)
+def route(enabled: bool, group_ids: list[str], alert_scopes: list[str], groups: dict, rules: list[dict] | None) -> dict:
+    """Resolve an alert rule's notification path; `groups` is keyed by lower-cased action group id.
+
+    rules=None means the processing rule list was not read, so whether anything suppresses the alert is unknown."""
+    matches = matching_processing_rules(alert_scopes, rules or [])
     own = {}
     for gid in group_ids:
         if gid:
@@ -224,8 +226,14 @@ def route(enabled: bool, group_ids: list[str], alert_scopes: list[str], groups: 
         })
     routes = _tri(resolved, lambda g: g["deliverable"]) if enabled else False
     to_person = _tri(resolved, lambda g: g["notifies_people"]) if enabled else False
+    if rules is None and enabled:
+        # A processing rule may add a group, so a "no" from the own groups is unknown.
+        routes = None if routes is False else routes
+        to_person = None if to_person is False else to_person
     suppressors = [m for m in matches if m["rule"]["suppresses_notifications"]]
-    if any(m["applies_to_every_fire"] for m in suppressors):
+    if rules is None and enabled:
+        suppressed = None
+    elif any(m["applies_to_every_fire"] for m in suppressors):
         suppressed = True
     elif suppressors:
         suppressed = None
@@ -242,11 +250,11 @@ def route(enabled: bool, group_ids: list[str], alert_scopes: list[str], groups: 
         "unresolved_action_group_ids": [g["id"] for g in resolved if not g["found"]],
         "routes_to_enabled_receiver": routes,
         "routes_to_person": to_person,
-        "processing_rule_matches": [
+        "processing_rule_matches": None if rules is None else [
             {"id": m["rule"]["id"], "scope_match": m["scope_match"], "applies_to_every_fire": m["applies_to_every_fire"]}
             for m in matches
         ],
-        "suppressed_by_processing_rules": [m["rule"]["id"] for m in suppressors],
+        "suppressed_by_processing_rules": None if rules is None else [m["rule"]["id"] for m in suppressors],
         "suppressed": suppressed,
         "reaches_human": reaches,
     }

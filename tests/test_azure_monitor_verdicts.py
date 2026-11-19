@@ -169,6 +169,25 @@ def test_suppression_elsewhere_does_not_touch_the_alert():
     assert (r["processing_rule_matches"], r["suppressed"], r["reaches_human"]) == ([], False, True)
 
 
+def test_unread_processing_rules_leave_a_rule_without_an_own_group_unknown():
+    r = routing.route(True, [], [VAULT], {}, None)
+    assert (r["routes_to_enabled_receiver"], r["routes_to_person"], r["reaches_human"]) == (None, None, None)
+    assert r["processing_rule_matches"] is None and r["suppressed_by_processing_rules"] is None
+
+
+def test_unread_processing_rules_keep_a_known_own_group_true_and_a_disabled_rule_false():
+    r = routing.route(True, [AG_EMAIL], [VAULT], groups(EMAIL_GROUP), None)
+    assert (r["routes_to_enabled_receiver"], r["routes_to_person"], r["reaches_human"]) == (True, True, None)
+    r = routing.route(False, [], [VAULT], {}, None)
+    assert (r["routes_to_enabled_receiver"], r["reaches_human"]) == (False, False)
+
+
+def test_read_empty_processing_rules_still_give_false_for_a_rule_without_a_group():
+    r = routing.route(True, [], [VAULT], {}, [])
+    assert (r["routes_to_enabled_receiver"], r["reaches_human"]) == (False, False)
+    assert r["processing_rule_matches"] == [] and r["suppressed_by_processing_rules"] == []
+
+
 def test_suppression_scope_match_ignores_case_and_trailing_slash():
     r = routing.route(True, [AG_EMAIL], [VAULT], groups(EMAIL_GROUP), [processing_rule([RG.upper() + "/"])])
     assert r["suppressed"] is True
@@ -736,7 +755,7 @@ def test_main_wires_inventory_settings_and_ingestion_into_the_evidence(monkeypat
     monkeypatch.setattr(rds, "credential", lambda: object())
     monkeypatch.setattr(rds, "provider_registration_status", lambda *a: "registered")
     monkeypatch.setattr(rds, "enumerate_resources", lambda *a: {
-        "rows": [{"id": VAULT, "name": "kv1", "type": "Microsoft.KeyVault/vaults"}], "total_records": 1, "pages": 1})
+        "rows": [{"id": VAULT, "name": "kv1", "type": "Microsoft.KeyVault/vaults"}], "total_records": 1, "pages": 1, "read": True})
     monkeypatch.setattr(rds, "monitor_client", lambda *a: monitor)
     monkeypatch.setattr(rds, "AzureRestClient", lambda cred: _Workspaces())
     monkeypatch.setenv("EVIDENCE_DIR", str(tmp_path))

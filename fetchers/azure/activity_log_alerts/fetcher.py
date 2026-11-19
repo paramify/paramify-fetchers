@@ -248,12 +248,45 @@ def operation_coverage(alerts: list[dict], operations_map=MONITORED_OPERATIONS) 
     }
 
 
-def with_routing(alert: dict, groups: dict, processing_rules: list[dict]) -> dict:
+def with_routing(alert: dict, groups: dict, processing_rules: list[dict] | None) -> dict:
     return {**alert, **route(alert["enabled"], alert["action_groups"], alert["scopes"], groups, processing_rules)}
 
 
-def summarize(alerts: list[dict]) -> dict:
-    """Coverage of the monitored operations is the headline, not the alert count."""
+ALERT_FIELDS = (
+    "total_activity_log_alerts", "enabled_alerts", "disabled_alerts", "alerts_with_action_groups",
+    "alerts_without_action_groups", "monitored_operation_coverage", "monitored_operations_covered",
+    "monitored_operation_percentage", "all_monitored_operations_covered",
+    "uncovered_monitored_operations", "service_health_alert_configured",
+    "alerts_routing_to_enabled_receiver", "alerts_routing_unknown", "alerts_suppressed",
+    "alerts_possibly_suppressed", "alerts_reaching_human", "alerts_reaching_human_unknown",
+    "monitored_operation_coverage_reaching_human", "change_operation_coverage",
+    "change_operations_covered", "change_operations_possibly_covered",
+    "all_change_operations_covered", "uncovered_change_operations",
+)
+
+
+SUPPRESSION_FIELDS = (
+    "alerts_suppressed", "alerts_possibly_suppressed", "alerts_reaching_human",
+    "monitored_operation_coverage_reaching_human", "change_operation_coverage", "change_operations_covered",
+    "change_operations_possibly_covered", "all_change_operations_covered", "uncovered_change_operations",
+)
+
+
+def summarize(alerts: list[dict] | None, processing_rules_read: bool = True) -> dict:
+    """Coverage of the monitored operations is the headline, not the alert count.
+
+    None (the alert list was not read) gives null for every count, coverage map and verdict built from it.
+    processing_rules_read=False (that list was not read) gives null for what depends on suppression."""
+    if alerts is None:
+        return {**dict.fromkeys(ALERT_FIELDS), "monitored_operations_total": len(MONITORED_OPERATIONS),
+                "change_operations_total": len(CHANGE_OPERATIONS)}
+    summary = alert_summary(alerts)
+    if not processing_rules_read:
+        summary.update(dict.fromkeys(SUPPRESSION_FIELDS))
+    return summary
+
+
+def alert_summary(alerts: list[dict]) -> dict:
     coverage = operation_coverage(alerts)
     covered = sum(1 for is_covered in coverage.values() if is_covered)
     total_monitored = len(MONITORED_OPERATIONS)
@@ -350,6 +383,7 @@ def main() -> int:
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
     alerts: list[dict] = []
+    alerts_read = False
     group_records: list[dict] = []
     processing_rules: list[dict] = []
     exclusions = ResourceExclusions.from_env()
@@ -370,7 +404,7 @@ def main() -> int:
                 subscription_id,
             )
         listed = collect_activity_log_alerts(subscription_id, cred, collector)
-        read["activity_log_alerts"] = listed is not None
+        read["activity_log_alerts"] = alerts_read = listed is not None
         alerts, excluded = exclusions.split(listed or [], "activity_log_alert")
         alerts_mgmt = provider_registration_status(collector, subscription_id, cred, "Microsoft.AlertsManagement")
         rest = collector.guard("arm_rest.ARMPipelineClient (init)", lambda: arm_rest_client(cred))
@@ -403,7 +437,7 @@ def main() -> int:
                 outside_scope = sorted({g for g in referenced if not g.lower().startswith(prefix)})
                 referenced = [g for g in referenced if g.lower().startswith(prefix)]
             add_referenced_groups(rest, referenced, by_id, collector)
-            alerts = [with_routing(a, by_id, processing_rules) for a in alerts]
+            alerts = [with_routing(a, by_id, processing_rules if read["processing_rules"] else None) for a in alerts]
             processing_rules = in_scope_processing
     elif not subscription_id:
         collector.record(
@@ -448,7 +482,7 @@ def main() -> int:
             "excluded": excluded,
         },
         summary={
-            **summarize(alerts),
+            **summarize(alerts if alerts_read else None, read["processing_rules"]),
             "provider_registration_status": registration,
             **counts,
         },
