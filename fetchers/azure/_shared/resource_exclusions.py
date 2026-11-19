@@ -400,6 +400,8 @@ class ResourceScope:
         if failed or any(e.get("reason") == SCOPE_UNKNOWN for e in excluded):
             out.update({f"scope_unknown_{plural(kind)}": count(kind, (SCOPE_UNKNOWN,)) for kind in kinds})
         if self.uses_tags:
+        if self.tags_unreadable():
+            return  # no pattern was judged
             out["scope_not_found_resources"] = None if failed else len(self._not_found)
             if self._not_found and not failed:
                 _log.warning("%d resources Resource Graph didn't return (deleted, or newer than its read) are kept in "

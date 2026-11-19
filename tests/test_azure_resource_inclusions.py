@@ -397,6 +397,17 @@ def test_unmatched_inclusions_are_logged(caplog):
     assert "resource inclusion pattern 'tag:Typo' matched nothing" in caplog.text
 
 
+def test_no_pattern_is_called_unmatched_after_a_failed_index_read(caplog):
+    def broken(sub):
+        raise PermissionError("(403)")
+
+    rules = ResourceScope(["rg:rg-out"], ["tag:Boundary=FedRAMP"], index=TagIndex(broken))
+    rules.match(VAULT)
+    with caplog.at_level(logging.WARNING):
+        rules.warn_unmatched(logging.getLogger("t"))
+    assert "matched nothing" not in caplog.text
+
+
 def test_match_callers_get_a_reason_through_excluded_item():
     assert excluded_item("alert", "a", NOT_INCLUDED, "resource_matched", id="x") == {
         "kind": "alert", "name": "a", "pattern": None, "reason": "not_included", "id": "x"}
