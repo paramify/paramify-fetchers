@@ -1224,7 +1224,8 @@ def main() -> int:
         f"{sanitize_for_filename(subscription_id or 'unknown')}.json"
     )
     path = write_evidence(output_dir, filename, evidence)
-    logger.info("Evidence saved to %s (%d web apps)", path, len(apps))
+    if path:
+        logger.info("Evidence saved to %s (%d web apps)", path, len(apps))
 
     if not collector.ok:
         report_failure(

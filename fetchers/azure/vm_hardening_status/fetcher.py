@@ -41,7 +41,7 @@ from azure_common import (  # noqa: E402
     sanitize_for_filename,
     write_evidence,
 )
-from resource_exclusions import ResourceExclusions  # noqa: E402
+from resource_exclusions import ResourceExclusions, taken_out  # noqa: E402
 from scope_exclusions import excluded_item  # noqa: E402
 
 logger = logging.getLogger("azure_vm_hardening_status")
@@ -459,7 +459,7 @@ def follow_scale_sets(machines: list[dict], exclusions: ResourceExclusions) -> t
     for vm in machines:
         set_id = vm.get("virtual_machine_scale_set_id")
         pattern = exclusions.match(set_id) if set_id and exclusions else None
-        if pattern is None:
+        if not taken_out(pattern):
             kept.append(vm)
         else:
             excluded.append(excluded_item(

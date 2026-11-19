@@ -40,7 +40,7 @@ from azure_common import (  # noqa: E402
     vnet_id_of,
     write_evidence,
 )
-from resource_exclusions import ResourceExclusions  # noqa: E402
+from resource_exclusions import ResourceExclusions, taken_out  # noqa: E402
 from scope_exclusions import excluded_item  # noqa: E402
 
 logger = logging.getLogger("azure_network_security_groups")
@@ -616,7 +616,7 @@ def subnet_match(nic: dict, exclusions: ResourceExclusions):
         vnet_id = subnet_id[: len(vnet_id_of(subnet_id))]
         for reason, matched_id in (("virtual_network_matched", vnet_id), ("subnet_matched", subnet_id)):
             pattern = exclusions.match(matched_id) if matched_id else None
-            if pattern:
+            if taken_out(pattern):
                 return pattern, reason, matched_id
     return None
 

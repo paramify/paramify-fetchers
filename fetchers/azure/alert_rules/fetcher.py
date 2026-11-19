@@ -293,7 +293,8 @@ def main() -> int:
 
     filename = f"azure_alert_rules_{sanitize_for_filename(subscription_id or 'unknown')}.json"
     path = write_evidence(output_dir, filename, evidence)
-    logger.info("Evidence saved to %s (%d rules)", path, len(rules))
+    if path:
+        logger.info("Evidence saved to %s (%d rules)", path, len(rules))
 
     if not collector.ok:
         report_failure(failure_reason(collector.failures), classify_failure_code(collector.failures))

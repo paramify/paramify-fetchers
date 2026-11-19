@@ -694,15 +694,9 @@ def summarize(records: list[dict], listed: dict, settings: dict, registration: s
 
 def boundary_summary(scope: ResourceExclusions, excluded: list[dict], records: list[dict], listed: dict) -> dict:
     """Boundary counts per kind; null when that kind's list failed."""
-    out = {
-        "resource_exclusion_patterns": list(scope.patterns),
-        "resource_exclusion_patterns_unmatched": scope.unmatched(),
-    }
-    for resource_type, kind in EXCLUDED_KIND.items():
-        ok = listed[resource_type] is not None
-        out[f"excluded_{kind}s"] = sum(1 for e in excluded if e["kind"] == kind) if ok else None
-        out[f"in_scope_{kind}s"] = sum(1 for r in records if r["resource_type"] == resource_type) if ok else None
-    return out
+    in_scope = {f"{kind}s": sum(1 for r in records if r["resource_type"] == resource_type)
+                if listed[resource_type] is not None else None for resource_type, kind in EXCLUDED_KIND.items()}
+    return scope.summary(excluded, EXCLUDED_KIND.values(), in_scope)
 
 
 # --- collection ---

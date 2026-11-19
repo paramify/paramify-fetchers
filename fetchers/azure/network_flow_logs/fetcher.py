@@ -399,7 +399,9 @@ def collect(subscription_id, cred, collector: Collector, exclusions: ResourceExc
         narrowed = []
         in_scope, out_vnets = exclusions.split(vnets, "virtual_network")
         for v in in_scope:
-            subnets, gone = exclusions.split(v["subnets"], "subnet", location=lambda r: None)
+            # A subnet has no region of its own; for an inclusion it takes its network's.
+            region = v["location"] if exclusions.inclusions else None
+            subnets, gone = exclusions.split(v["subnets"], "subnet", location=lambda r, region=region: region)
             out_subnets += gone
             if gone and not subnets:
                 # Nothing of it is left in scope to judge, so the network leaves with its last subnet.

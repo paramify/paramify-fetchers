@@ -117,12 +117,41 @@ paramify validate scope.yaml
 ```
 </details>
 
+To name what is in scope instead, set Azure's `resource_inclusions`, mainly by
+tag: `tag:Boundary=FedRAMP`, or `tag:Boundary` for any value. Exclusions take
+`tag:` too, and win. Only a resource's own tags count: a key vault key, a
+storage container or a diagnostic setting goes with the resource it belongs to.
+A grant, lock or policy on a resource group or the subscription stays while it
+holds an in-scope resource, and one on a management group always stays. Under
+`rg:` inclusions alone, one on the subscription always stays too, with no read.
+A `location:` inclusion judges a record with no region, such as a Defender
+finding, by the region of the resource it is about; a global resource, such as
+a private DNS zone, matches only `location:global`.
+Double-quote a tag name or value that holds a space, comma, `=` or `:`. A value
+takes `*` globs; a name doesn't, so `*` in a name matches only a `*`.
+`manifest exclude` never adds to this list; set it with `set-platform-config`,
+or with reasons in the TUI or the manifest. Tags come from one Resource Graph
+read per subscription; if it fails, the run fails and writes no evidence. A
+resource Resource Graph doesn't return (deleted, or newer than the read) stays
+in scope and is counted in `scope_not_found_resources`. Resources left out are
+listed with the reason `not_included`.
+
+<details><summary>Copy the commands</summary>
+
+```bash
+paramify manifest set-platform-config azure 'resource_inclusions=tag:Boundary=FedRAMP,tag:"Cost Center"=Shared' -f scope.yaml
+paramify manifest exclude azure tag:Scope=Out --reason "Tagged out by its owner" -f scope.yaml
+paramify validate scope.yaml
+```
+</details>
+
 Front Door and DNS `scope_exclusions` take different patterns, so set them on
 each fetcher. The TUI edits an entry's lists too (`e`), one
 `pattern  # reason` per line. Each evidence file records the patterns and
 reasons its fetcher received in
 [`metadata.config_patterns`](envelope_guide.md#2-read-its-envelope).
-Full sample: [`azure_scope_exclusions.yaml`](../examples/azure_scope_exclusions.yaml).
+Full samples: [`azure_scope_exclusions.yaml`](../examples/azure_scope_exclusions.yaml),
+[`azure_resource_inclusions.yaml`](../examples/azure_resource_inclusions.yaml).
 
 ---
 
@@ -134,6 +163,9 @@ Full sample: [`azure_scope_exclusions.yaml`](../examples/azure_scope_exclusions.
 | `NOTE target selects AWS_PROFILE; ignored ambient credentials …` | Expected: a target's `profile:` overrides static AWS keys. Remove it to use them. |
 | `has the unknown prefix …` or `needs one of the prefixes …` | That list doesn't take the pattern. `paramify describe <fetcher>` shows what each list takes. |
 | `${env:} references aren't read for a pattern list` | Write the patterns in the manifest with `paramify manifest exclude`. |
+| `resource inclusion pattern … matched nothing`, or `no … are in scope` | Check the tag's name and value on the resources; `resource_inclusion_patterns_unmatched` lists the patterns that matched nothing. |
+| `resourcegraph.resources (tags in subscription …)` failed, no evidence written | The credential can't query Resource Graph there, or can't see the subscription (`returned no row for subscription`). A `tag:` pattern or an inclusion needs Reader on every subscription whose resources it judges. |
+| `resource scope` failed: `… of unknown scope` | A record with no id, or one outside any subscription, couldn't be judged by `tag:`; `scope_unknown_<kind>s` counts them. |
 | `a comparator ignores platforms.<category>.config` | A [comparator](comparators.md#how-the-runner-runs-one) gets none of its category's config, secrets or passthrough env. Set its own config on its entry with `paramify manifest set-config`. |
 
 **More detail:** [shared platform config](run_manifest_guide.md#4-set-shared-config-once)

@@ -9,6 +9,8 @@ from fnmatch import fnmatchcase
 from typing import Iterable, Optional
 
 SEPARATORS = re.compile(r"[\s,]+")
+# A run with no space or comma outside double quotes, so tag:"Cost Center"=Shared is one pattern.
+TOKEN = re.compile(r'(?:"[^"]*"?|[^\s,"])+')
 
 
 def normalize(name: str) -> str:
@@ -25,7 +27,7 @@ def split_kind(pattern: str) -> tuple[Optional[str], str]:
 def parse_patterns(raw: Optional[str]) -> list[str]:
     """Comma- or whitespace-separated globs, in configured order, duplicates (ignoring case) dropped."""
     parts: list[str] = []
-    for part in SEPARATORS.split(raw or ""):
+    for part in TOKEN.findall(raw or ""):
         # "route: qa-*" is one pattern, not an empty route: plus a bare host pattern.
         if parts and parts[-1].endswith(":") and part:
             parts[-1] += part
@@ -96,5 +98,8 @@ class ScopeExclusions:
 
 
 def excluded_item(kind: str, name: Optional[str], pattern: Optional[str], reason: str = "name_matched", **context) -> dict:
-    """One excluded item; `pattern` is None when the item is out of scope only because the items it serves are."""
+    """One excluded item; `pattern` is None when the item is out of scope only because the items it serves are, or
+    when no inclusion took it in (a resource scope's not_included or scope_unknown answer, which becomes the reason)."""
+    if getattr(pattern, "scope_reason", None):
+        pattern, reason = None, pattern.scope_reason
     return {"kind": kind, "name": name, "pattern": pattern, "reason": reason, **context}

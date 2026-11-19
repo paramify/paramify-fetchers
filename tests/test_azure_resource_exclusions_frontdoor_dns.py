@@ -649,7 +649,7 @@ def test_a_bare_pattern_fails_the_run(monkeypatch, tmp_path, run):
     code, evidence = run(monkeypatch, tmp_path, "rg-out")
     assert code == 1
     assert evidence["results"]["excluded"] == [] and evidence["summary"]["resource_exclusion_patterns_unmatched"] == ["rg-out"]
-    assert "rg:, location: or id:" in json.dumps(evidence["metadata"]["api_failures"])
+    assert "rg:, location:, id: or tag:" in json.dumps(evidence["metadata"]["api_failures"])
 
 
 # --- a list that wasn't read leaves its counts null ---

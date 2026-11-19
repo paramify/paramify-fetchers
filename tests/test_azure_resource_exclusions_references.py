@@ -106,8 +106,9 @@ def _cp_records():
     return changes, deployments
 
 
-def run_cp(monkeypatch, tmp_path, patterns):
+def run_cp(monkeypatch, tmp_path, patterns, extra=()):
     changes, deployments = _cp_records()
+    changes += list(extra)
     monkeypatch.setattr(cp, "pinned_credential", lambda sub: object())
     monkeypatch.setattr(cp, "collect_changes", lambda sub, cred, days, collector, paths=None: (
         changes, {t: {} for t in cp.CHANGE_TABLES}))
@@ -115,6 +116,42 @@ def run_cp(monkeypatch, tmp_path, patterns):
     monkeypatch.delenv("AZURE_PIPELINE_PRINCIPALS", raising=False)
     monkeypatch.delenv("AZURE_CHANGE_LOOKBACK_DAYS", raising=False)
     return _run(cp, monkeypatch, tmp_path, patterns, "azure_change_provenance")
+
+
+def test_change_provenance_keeps_a_change_to_a_deleted_resource_under_a_tag_inclusion(monkeypatch, tmp_path):
+    import tag_index
+    from resource_exclusions import INCLUSIONS_ENV
+
+    gone = f"{IN_RG}/providers/Microsoft.KeyVault/vaults/kv-deleted"
+    held = {SUB.lower(): ({}, None), IN_RG.lower(): ({}, None), OUT_RG.lower(): ({}, None),
+            **{rid.lower(): ({"boundary": "FedRAMP"}, "eastus") for rid in (SA_IN, SA_IN2, APP_X)},
+            SA_OUT.lower(): ({}, "eastus")}
+    real = tag_index.TagIndex
+    monkeypatch.setattr(tag_index, "TagIndex", lambda: real(lambda sub: held))
+    monkeypatch.setenv(INCLUSIONS_ENV, "tag:Boundary=FedRAMP")
+    code, evidence = run_cp(monkeypatch, tmp_path, None, extra=[_change("c-gone", gone, "2026-10-10T10:05:00Z")])
+    # Resource Graph no longer holds the vault: its change stays in scope, is counted, and the run succeeds.
+    assert code == 0 and evidence["metadata"]["api_failures"] == []
+    kept = {c["target_resource_id"] for c in evidence["results"]["changes"]}
+    assert gone in kept and SA_IN in kept and SA_OUT not in kept
+    summary = evidence["summary"]
+    assert summary["scope_not_found_resources"] == 1 and "scope_unknown_changes" not in summary
+    assert ("change", "c-out", None, "not_included") in _excluded(evidence)
+
+
+def test_change_provenance_still_fails_and_writes_nothing_when_the_index_cant_be_read(monkeypatch, tmp_path):
+    import tag_index
+    from resource_exclusions import INCLUSIONS_ENV
+
+    def broken(sub):
+        raise PermissionError("(AuthorizationFailed) (403) no read on Microsoft.ResourceGraph")
+
+    real = tag_index.TagIndex
+    monkeypatch.setattr(tag_index, "TagIndex", lambda: real(broken))
+    monkeypatch.setenv(INCLUSIONS_ENV, "tag:Boundary=FedRAMP")
+    with pytest.raises(FileNotFoundError):
+        run_cp(monkeypatch, tmp_path, None)
+    assert json.loads((tmp_path / "status.json").read_text())["code"] == "not_authorized"
 
 
 def _cp_summary(keep):

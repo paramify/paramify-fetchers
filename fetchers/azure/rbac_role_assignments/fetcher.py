@@ -52,7 +52,7 @@ from azure_common import (  # noqa: E402
     sanitize_for_filename,
     write_evidence,
 )
-from resource_exclusions import ResourceExclusions  # noqa: E402
+from resource_exclusions import ResourceExclusions, taken_out  # noqa: E402
 from scope_exclusions import excluded_item  # noqa: E402
 
 logger = logging.getLogger("azure_rbac_role_assignments")
@@ -488,7 +488,7 @@ def split_by_scope(records: list[dict], kind: str, exclusions: ResourceExclusion
         below = record.get("scope_level") in (SCOPE_RESOURCE_GROUP, SCOPE_RESOURCE)
         pattern = exclusions.match(record.get("scope")) if exclusions and below else None
         if pattern is not None and (record.get("scope") or "").lower() in keep:
-            record["kept_by_identity_rule"] = pattern
+            record["kept_by_identity_rule"] = pattern if taken_out(pattern) else None
             pattern = None
         if pattern is None:
             kept.append(record)

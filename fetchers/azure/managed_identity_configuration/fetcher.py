@@ -492,7 +492,7 @@ def keep_reaching(items: list, entries: list, id_of, principal_of, roles_by_prin
                 scope_level(r["scope"]) not in ("resource_group", "resource")
                 or not exclusions.match(r["scope"], record=False)
                 or (r["scope"] or "").lower() in kept for r in roles or [])):
-            item["kept_by_identity_rule"] = entry["pattern"]
+            item["kept_by_identity_rule"] = entry["pattern"] or entry["reason"]
             back.append(item)
         else:
             out.append(entry)

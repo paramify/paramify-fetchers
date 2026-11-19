@@ -1,0 +1,34 @@
+# Example: name the resources inside the authorization boundary by tag, and still
+# leave some out. Every tag, name and resource group below is synthetic.
+#
+# A resource is in scope when a resource_inclusions pattern matches it and no
+# resource_exclusions pattern does: exclusions win. Only a resource's own tags count;
+# a key vault key, a storage container or a diagnostic setting goes with the resource
+# it belongs to. A tag: pattern makes each fetcher read every resource's tags once,
+# with one Resource Graph query per subscription (Reader is enough). Resources left
+# out are listed under results.excluded with the reason not_included.
+#
+# Write tag:<name>=<value glob>, or tag:<name> for any value. Names and values
+# compare without case. Double-quote a name or value holding a space, comma, = or :.
+# See docs/config_injection_guide.md.
+
+run:
+  output_dir: ./evidence
+
+  platforms:
+    azure:
+      config:
+        resource_inclusions:
+          - pattern: tag:Boundary=FedRAMP
+            reason: Resources in the authorization boundary
+          - pattern: tag:"Cost Center"="Shared Services"
+            reason: Shared logging and key management for the boundary
+        resource_exclusions:
+          - pattern: rg:rg-sandbox-*
+            reason: Developer sandboxes; no customer data
+          - pattern: tag:Scope=Out
+            reason: Tagged out of scope by the resource owner
+
+  fetchers:
+    - use: azure_key_vault_configuration
+    - use: azure_storage_encryption_status
