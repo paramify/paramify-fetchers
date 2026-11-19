@@ -12,6 +12,11 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **`azure_resource_inventory` 0.5.0: reconciled against an expected population.** A new `expected_resources`
+  setting lists the resources the boundary should hold, as `rg:`, `location:` or `id:` patterns in the same form as
+  `resource_exclusions`. Expected patterns that match no in-scope resource and in-scope resources that match no
+  pattern are counted and listed (`expected_resources_missing`, `unexpected_resources`), each resource records the
+  pattern that expects it, and `inventory_matches_expected` gives one verdict. Unset, the fields stay null.
 - **`azure_aks_cluster_configuration` 0.7.0: autoscaling for expected pools.** A new `expected_autoscaling_pools`
   setting lists the node pools that must have the cluster autoscaler on, as `pool` (every cluster) or `cluster/pool`.
   Missing pools and pools without the autoscaler are counted and named, a pool at zero nodes stays expected, and

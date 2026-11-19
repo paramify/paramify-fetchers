@@ -1,5 +1,5 @@
 name: azure_resource_inventory
-version: 0.4.1
+version: 0.5.0
 description: >-
   Lists every resource in the subscription with its details, and how many Defender for Cloud assessments and Azure Policy evaluations cover it and how many fail.
 category: azure
@@ -38,6 +38,26 @@ config_schema:
       the outside-inventory ones. A pattern without one of these prefixes fails
       the run. Set it once under platforms.azure.config for every Azure fetcher that has this field; fetchers without it ignore it.
       Each item is a pattern, or a pattern with a reason. Empty: every resource is in scope.
+  expected_resources:
+    type: patterns
+    prefixes: [rg, location, id]
+    bare: false
+    required: false
+    env: AZURE_EXPECTED_RESOURCES
+    exclusion: false     # an expected population, not an exclusion: manifest exclude never changes it
+    description: >
+      The resources the boundary is expected to hold, as case-insensitive glob
+      patterns listed in the manifest, in the same form as resource_exclusions:
+      rg:<resource group>, location:<region> or id:<resource id> (also matches
+      that resource's child resources). * matches any run of characters and ?
+      one character. The inventory is reconciled against the list both ways: a
+      pattern that matches no in-scope resource is reported as missing, and an
+      in-scope resource that matches no pattern is reported as unexpected, so
+      the evidence shows the deployed population is the intended one rather than
+      only that resources carry a tag. Each resource in results names the first
+      pattern that expects it under expected_by. A pattern without one of these
+      prefixes fails the run. Each item is a pattern, or a pattern with a reason.
+      Empty: no expected population, and the reconciliation fields are null.
 
 target_schema:
   subscription_id:
@@ -94,6 +114,14 @@ evidence_set:
     - location_count — Number of different locations (regions, plus global)
     - resources_by_location — Number of resources in each location
     - resource_group_count — Number of resource groups that hold at least one resource
+
+    Is the inventory the expected population?
+    - expected_resource_patterns — List of the configured expected_resources patterns (rg:, location: or id:); empty when none are set
+    - expected_resource_patterns_unmatched — List of expected patterns that matched no in-scope resource (an expected resource that is missing, or a mistyped pattern); null when no patterns are set or the inventory could not be read
+    - expected_resources_missing — Number of patterns in expected_resource_patterns_unmatched; null when it is null
+    - unexpected_resources — Number of in-scope resources that match no expected pattern; each is listed in results with expected_by null; null when no patterns are set or the inventory could not be read
+    - unexpected_resources_by_type — Number of unexpected resources of each type; null when unexpected_resources is null
+    - inventory_matches_expected — True if every expected pattern matched an in-scope resource and every in-scope resource matched a pattern; false if either is not so; null when no patterns are set or the inventory could not be read
 
     Are resources tagged?
     - untagged_resources — Number of resources with no tags at all

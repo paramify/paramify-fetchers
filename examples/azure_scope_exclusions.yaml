@@ -40,6 +40,17 @@ run:
             reason: Developer sandboxes; no customer data
           - pattern: rg:rg-load-test
             reason: Short-lived load-test environment
+        # The resources the boundary should hold, in the same pattern form. The inventory
+        # is reconciled against it both ways: a pattern matching no in-scope resource is
+        # missing, and an in-scope resource no pattern matches is unexpected. It is not an
+        # exclusion list, so `manifest exclude` never changes it.
+        expected_resources:
+          - pattern: rg:rg-app-*
+            reason: Application workloads
+          - pattern: rg:rg-platform
+            reason: Shared networking, Key Vault and monitoring
+          - pattern: id:*/providers/microsoft.network/networkwatchers/*
+            reason: Created by Azure, one per region
 
     # scope_exclusions takes different prefixes in Front Door (route: and host
     # names) and DNS (record names only), so it is set per entry.

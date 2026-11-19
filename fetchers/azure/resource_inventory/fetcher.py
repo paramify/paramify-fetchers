@@ -38,8 +38,9 @@ from azure_common import (  # noqa: E402
     sorted_counts,
     write_evidence,
 )
-from resource_exclusions import ResourceExclusions  # noqa: E402
+from resource_exclusions import KINDS, ResourceExclusions  # noqa: E402
 from resource_graph import query_all, resource_graph_client  # noqa: E402
+from scope_exclusions import parse_patterns  # noqa: E402
 
 logger = logging.getLogger("azure_resource_inventory")
 
@@ -383,6 +384,46 @@ def summarize(resources: list[dict], defender: dict | None = None, policy: dict 
     }
 
 
+# --- expected population ---
+
+EXPECTED_ENV = "AZURE_EXPECTED_RESOURCES"
+
+
+def expected_from_env() -> ResourceExclusions:
+    """The expected_resources patterns; the same rg:, location: and id: globs as resource_exclusions."""
+    return ResourceExclusions(parse_patterns(os.environ.get(EXPECTED_ENV)))
+
+
+def record_invalid_expected(expected: ResourceExclusions, collector: Collector) -> None:
+    for pattern in expected.invalid():
+        collector.record(f"config {EXPECTED_ENV}", ValueError(
+            f"expected resource pattern {pattern!r} needs one of the prefixes {', '.join(k + ':' for k in KINDS)} "
+            "and something after it"))
+
+
+def reconcile(resources: list[dict], expected: ResourceExclusions, inventory_read: bool) -> dict:
+    """Compare the in-scope inventory with the expected population, both ways: expected patterns that match no
+    resource (missing), and resources that match no pattern (unexpected). Each resource is marked with the first
+    pattern that expects it. Unset, or with the inventory unread, every count is null rather than 0."""
+    judged = bool(expected) and inventory_read
+    unexpected: Counter = Counter()
+    for r in resources:
+        pattern = expected.match(r["id"], r["location"], r["resource_group"]) if judged else None
+        r["expected_by"] = pattern
+        if judged and pattern is None:
+            unexpected[r["type"] or "unknown"] += 1
+    missing = expected.unmatched() if judged else None
+    count = sum(unexpected.values()) if judged else None
+    return {
+        "expected_resource_patterns": list(expected.patterns),
+        "expected_resource_patterns_unmatched": missing,
+        "expected_resources_missing": None if missing is None else len(missing),
+        "unexpected_resources": count,
+        "unexpected_resources_by_type": sorted_counts(unexpected) if judged else None,
+        "inventory_matches_expected": None if not judged else not missing and count == 0,
+    }
+
+
 # --- collection (lazy azure imports) ---
 
 def _query_status(query: str, result: dict | None, tally: dict | None) -> dict:
@@ -463,6 +504,8 @@ def main() -> int:
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
     exclusions = ResourceExclusions.from_env()
     exclusions.record_invalid(collector)
+    expected = expected_from_env()
+    record_invalid_expected(expected, collector)
 
     collected: dict = {"resources": [], "total_records": None, "pages": 0, "defender": None, "policy": None,
                        "coverage_queries": {}, "excluded": []}
@@ -482,6 +525,9 @@ def main() -> int:
     exclusions.warn_unmatched(logger)
 
     resources, excluded = collected["resources"], collected["excluded"]
+    population = reconcile(resources, expected, inventory_read=bool(collected["pages"]))
+    for pattern in population["expected_resource_patterns_unmatched"] or ():
+        logger.warning("expected resource pattern %r matched no in-scope resource", pattern)
     evidence = build_payload(
         subscription_id=subscription_id,
         subscription_source=sub["subscription_source"],
@@ -498,6 +544,7 @@ def main() -> int:
         summary={
             **summarize(resources, collected["defender"], collected["policy"]),
             **exclusions.summary(excluded, ("resource",), {"resources": len(resources)}),
+            **population,
         },
     )
 
