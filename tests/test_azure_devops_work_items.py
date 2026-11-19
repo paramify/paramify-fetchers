@@ -1259,9 +1259,19 @@ def test_a_long_change_list_is_paged_until_an_included_path_or_its_end(tmp_path,
     assert code == 0
     assert [c["id"] for c in evidence["results"]["changesets"]] == [501]
     assert [(e["id"], e["reason"]) for e in evidence["results"]["excluded"]] == [(502, "not_included")]
-    # Paging starts after the 100 the changeset read listed, and ends only on an empty page.
+    # Paging starts from the first change, and ends only on an empty page.
     skips = [(path.split("/")[-2], params["$skip"]) for _, path, params, _ in fake.calls if path.endswith("/changes")]
-    assert skips == [("501", 100), ("502", 100), ("502", 103)]
+    assert skips == [("501", 0), ("501", 100), ("502", 0), ("502", 100), ("502", 103)]
+
+
+def test_paging_reads_from_the_start_when_the_change_list_comes_in_another_order(tmp_path, monkeypatch):
+    include(monkeypatch)
+    fake = scoped(FakeADO(), {501: outside(100), 502: [change(f"{INCLUDED}/a.cs")]}, more=(501,))
+    # The included file is 51st in /changes but wasn't among the 100 the changeset read listed.
+    change_list(fake, 501, outside(50, 100) + [change(f"{INCLUDED}/x.cs")] + outside(49, 150) + outside(100))
+    code, evidence, _, _, _ = run(tmp_path, fake)
+    assert code == 0 and evidence["results"]["excluded"] == []
+    assert {c["id"] for c in evidence["results"]["changesets"]} == {501, 502}
 
 
 def test_paging_goes_past_a_short_page(tmp_path, monkeypatch):

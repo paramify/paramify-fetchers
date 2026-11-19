@@ -16,8 +16,6 @@ schemas and the `paramify` CLI — not the internal code.
   setting lists the node pools that must have the cluster autoscaler on, as `pool` (every cluster) or `cluster/pool`.
   Missing pools and pools without the autoscaler are counted and named, a pool at zero nodes stays expected, and
   `all_expected_pools_autoscaling` gives one verdict. Each pool now records `min_count`. Unset, the fields stay null.
-- **Literal pattern lists.** A `type: patterns` field can declare `globs: false`; `validate`, the run and the TUI then
-  refuse a pattern holding `*` or `?`, and `describe` says the field takes patterns without wildcards.
 - **`azure_devops_work_items` 0.4.0: TFVC changeset inclusions.** A new `changeset_inclusions` pattern list
   (`AZURE_DEVOPS_CHANGESET_INCLUSIONS`, `path:<TFVC server path>` patterns with a reason each, edited like the Front
   Door and DNS lists) names the TFVC paths whose linked changesets are in scope. A pattern takes in its path and
@@ -39,6 +37,8 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **Literal pattern lists.** A `type: patterns` field can declare `globs: false`; `validate`, the run and the TUI then
+  refuse a pattern holding `*` or `?`, and `describe` says the field takes patterns without wildcards.
 - **One-line install.** `curl -fsSL https://raw.githubusercontent.com/paramify/paramify-fetchers/main/install.sh |
   bash` clones the repo to `~/paramify-fetchers`, installs the CLI and TUI into the clone's `.venv`, and links
   `paramify` into `~/.local/bin`. In a terminal it shows a spinner and elapsed time for each step, offers to add

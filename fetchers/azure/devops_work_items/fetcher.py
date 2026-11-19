@@ -315,9 +315,9 @@ def every_path_named(changes: Any) -> bool:
     return isinstance(changes, list) and all(isinstance(c, dict) and (c.get("item") or {}).get("path") for c in changes)
 
 
-def changes_included(client: DevOpsClient, cid: int, scope: ChangesetScope, skip: int = 0) -> Optional[bool]:
-    """Pages a changeset's change list from skip to an empty page; None unless every changed path was read."""
-    named, last = skip > 0, None
+def changes_included(client: DevOpsClient, cid: int, scope: ChangesetScope) -> Optional[bool]:
+    """Pages a changeset's whole change list to an empty page; None unless every changed path was read."""
+    named, skip, last = False, 0, None
     for _ in range(MAX_CHANGE_PAGES):
         body = client.get(f"_apis/tfvc/changesets/{cid}/changes", params={"$top": CHANGES_PAGE, "$skip": skip})
         page = body.get("value") if isinstance(body, dict) else None
@@ -737,9 +737,9 @@ def read_changeset(client: DevOpsClient, collector: DevOpsCollector, cid: int, s
         named = every_path_named(changes)
         if not included and not (named and changes and not body.get("hasMoreChanges")
                                  and len(changes) < CHANGES_PAGE):
-            # The read didn't list every changed path: page the rest, keeping it in scope unless all were read.
+            # The read didn't list every changed path: page them all from the start, as the order may differ.
             included = call(collector, f"tfvc.changesets.changes({cid})", SCOPE_CODE, partial(
-                changes_included, client, cid, scope, len(changes) if named else 0)) is not False
+                changes_included, client, cid, scope)) is not False
         if not included:
             left_out[cid] = NOT_INCLUDED
             return None

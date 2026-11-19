@@ -17,7 +17,7 @@ A field spec is a plain dict:
 secret value); the caller turns it into a ${env:VAR} reference via api.set_secret.
 
 `kind == "patterns"` is a text area, one `pattern  # reason` per line (see
-patterns.to_lines). Its spec adds "prefixes" and "bare" (the field's grammar)
+patterns.to_lines). Its spec adds "prefixes", "bare" and "globs" (the field's grammar)
 and "note" (where the list comes from). get_value() is None while the text
 holds the patterns it opened with, else the list as manifest items.
 """
