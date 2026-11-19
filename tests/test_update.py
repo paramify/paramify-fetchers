@@ -586,6 +586,18 @@ def test_a_failed_reinstall_puts_the_old_commit_back(main_repo, stubs, monkeypat
     assert "previous" not in up.read_state(main_repo)
 
 
+def test_a_failed_reinstall_keeps_the_earlier_rollback_record(main_repo, stubs, monkeypatch, tmp_path):
+    earlier = {"sha": "aaaa", "after": _sha(main_repo), "branch": "main", "describe": "0.2.0-beta"}
+    up.write_state(main_repo, {"previous": earlier})
+    _commit(tmp_path / "upstream", {"pyproject.toml": "[project]\nname='x'\n"}, "deps")
+    results = iter([{"ok": False, "command": ["pip"], "error": "boom"},
+                    {"ok": True, "command": ["pip"], "error": None}])
+    monkeypatch.setattr(up, "reinstall", lambda root, extras, python=None: next(results))
+    result, doc = _run("--yes", "--json")
+    assert result.exit_code == 1
+    assert up.read_state(main_repo)["previous"] == earlier  # still the way back from the last good update
+
+
 def test_check_exit_codes(main_repo):
     result, doc = _run("--check", "--json")
     assert result.exit_code == 1 and doc["update_available"] and doc["waiting"] == "1 new commit on main"
@@ -942,3 +954,31 @@ def test_a_failed_move_puts_the_old_rollback_record_back(main_repo):
             assert up.read_state(main_repo)["previous"]["after"] == "abc"
             raise up.UpdateError("git refused")
     assert up.read_state(main_repo)["previous"] == {"sha": "old", "after": "older"}
+
+
+def test_stray_files_in_a_tracked_fetcher_are_not_your_own_fetchers(repo):
+    (repo / "fetchers/demo/alpha/.env").write_text("X=1\n")
+    (repo / "fetchers/demo/alpha/output").mkdir()
+    (repo / "fetchers/demo/alpha/output/run.json").write_text("{}")
+    tree = repo.parent / "tree"
+    (tree / "fetchers/demo/alpha").mkdir(parents=True)
+    assert up._mirror_local_fetchers(repo, tree) == []
+    (repo / "fetchers/custom/mine").mkdir(parents=True)
+    (repo / "fetchers/custom/mine/fetcher.yaml").write_text("name: my_own\n")
+    assert up._mirror_local_fetchers(repo, tree) == ["fetchers/custom"]
+
+
+def test_a_blocked_plan_says_so(main_repo, stubs):
+    (main_repo / "fetchers/demo/alpha/fetch.py").write_text("# mine\n")  # and the update changes it too
+    plan = up.plan(main_repo)
+    assert plan["state"] == "blocked" and plan["blocking"]["tracked"] == ["fetchers/demo/alpha/fetch.py"]
+    assert "check" not in plan
+
+
+def test_rollback_refusal_is_one_rule(main_repo):
+    assert up.rollback_refusal(main_repo) == "nothing to roll back to: no update has been recorded here " \
+                                             "(or it was already rolled back)"
+    up.write_state(main_repo, {"previous": {"sha": "a" * 40, "after": "b" * 40}})
+    assert "has moved since the update" in up.rollback_refusal(main_repo)
+    up.write_state(main_repo, {"previous": {"sha": "a" * 40, "after": _sha(main_repo)}})
+    assert up.rollback_refusal(main_repo) is None

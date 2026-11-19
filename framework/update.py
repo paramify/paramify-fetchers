@@ -529,7 +529,8 @@ def temp_worktree(root: Path, ref: str) -> Iterator[Path]:
 
 
 def _mirror_local_fetchers(root: Path, tree: Path) -> List[str]:
-    """Link the user's own fetcher dirs into the temp tree.
+    """Link the user's own fetcher dirs (untracked or ignored directories that
+    hold a fetcher.yaml) into the temp tree; returns the ones linked.
 
     Custom fetchers are untracked (or ignored), so a real switch keeps them,
     but a fresh worktree doesn't have them. Without this, every manifest that
@@ -542,10 +543,11 @@ def _mirror_local_fetchers(root: Path, tree: Path) -> List[str]:
     linked = []
     for rel in filter(None, out.split("\0")):
         rel = rel.rstrip("/")
-        if "__pycache__" in rel or rel.endswith((".pyc", ".DS_Store")):
-            continue
         src, dst = root / rel, tree / rel
-        if dst.exists() or not src.exists():
+        # A stray .env or output/ inside a tracked fetcher is not a fetcher of the user's own.
+        if not src.is_dir() or not any(src.rglob("fetcher.yaml")):
+            continue
+        if dst.exists():
             continue
         dst.parent.mkdir(parents=True, exist_ok=True)
         try:
@@ -789,8 +791,9 @@ def locate(root: Path, to: Optional[str] = None, *, fetched: bool = True) -> dic
     what is in the way. Raises UpdateError when update refuses outright (a
     branch with commits of its own, a detached commit, an unknown --to).
 
-    {current, target, channel, fetched, up_to_date} and, unless up to date,
-    {blocking, manifests, rows, span, direction}. `manifests` are full records
+    {current, target, channel, fetched, up_to_date, state} and, unless up to
+    date, {blocking, manifests, rows, span, direction}. `state` is up_to_date,
+    blocked (local files are in the way; nothing more is worked out) or ready. `manifests` are full records
     (path, label, uses, errors_now); the JSON names them by label.
     """
     pos = position(root)
@@ -800,6 +803,7 @@ def locate(root: Path, to: Optional[str] = None, *, fetched: bool = True) -> dic
         "fetched": fetched, "up_to_date": target.sha == pos["sha"] and target.branch == pos["branch"],
     }
     if doc["up_to_date"]:
+        doc["state"] = "up_to_date"
         return doc
     spanned = span(root, "HEAD", target.sha)
     doc.update(
@@ -810,6 +814,8 @@ def locate(root: Path, to: Optional[str] = None, *, fetched: bool = True) -> dic
         # Same commit, another branch (a detached clone moving onto main) is still forward.
         direction="forward" if spanned["commits"] or target.sha == pos["sha"] else "back",
     )
+    blocked = doc["blocking"]["tracked"] or doc["blocking"]["untracked"]
+    doc["state"] = "blocked" if blocked else "ready"
     return doc
 
 
@@ -847,9 +853,7 @@ def plan(root: Path, to: Optional[str] = None) -> dict:
     fetch, locate, assess. Raises UpdateError when update refuses."""
     fetched, _ = try_fetch(root)
     located = locate(root, to, fetched=fetched)
-    if located["up_to_date"] or located["blocking"]["tracked"] or located["blocking"]["untracked"]:
-        return located
-    return assess(root, located)
+    return assess(root, located) if located["state"] == "ready" else located
 
 
 def public(doc: dict) -> dict:
@@ -1005,10 +1009,11 @@ def write_state(root: Path, state: dict) -> None:
 
 
 @contextmanager
-def recorded_move(root: Path, pos: dict, after_sha: str) -> Iterator[None]:
+def recorded_move(root: Path, pos: dict, after_sha: str) -> Iterator[Optional[dict]]:
     """Record where the clone is before the body moves it to `after_sha`, so a
     move cut short can still be rolled back. If the body raises, the record it
-    replaced is put back."""
+    replaced is put back. Yields that replaced record, for a caller that undoes
+    the move later (forget_previous(root, replaced))."""
     state = read_state(root)
     replaced = state.get("previous")
     state["previous"] = {
@@ -1022,10 +1027,23 @@ def recorded_move(root: Path, pos: dict, after_sha: str) -> Iterator[None]:
     }
     write_state(root, state)
     try:
-        yield
+        yield replaced
     except BaseException:
         forget_previous(root, replaced)
         raise
+
+
+def rollback_refusal(root: Path) -> Optional[str]:
+    """Why --rollback would refuse here, or None when it can go back."""
+    prev = read_state(root).get("previous")
+    if not prev:
+        return "nothing to roll back to: no update has been recorded here (or it was already rolled back)"
+    pos = position(root)
+    if prev.get("after") and pos["sha"] != prev["after"]:
+        return (f"this clone has moved since the update (it is at {pos['short']}; the update left it at "
+                f"{prev['after'][:7]}), so rolling back would discard that work. To go back anyway: "
+                f"git switch --detach {prev['sha'][:7]}")
+    return None
 
 
 def forget_previous(root: Path, replaced: Optional[dict] = None) -> None:

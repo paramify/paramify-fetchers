@@ -202,7 +202,8 @@ def _update(run: _Run, root: Path, *, to: Optional[str], expect: Optional[str], 
             _emit(run.doc, 0)
         run.show(view.ok(f"Nothing to do: {pos['label']} is up to date."))
         raise typer.Exit(0)
-    _refuse_if_blocked(run, located["blocking"])
+    if located["state"] == "blocked":
+        _refuse_if_blocked(run, located["blocking"])
     run.section([view.header(located)])
 
     if not run.json:
@@ -235,7 +236,7 @@ def _update(run: _Run, root: Path, *, to: Optional[str], expect: Optional[str], 
 
     with run.step(f"move to {target['label']}") as s:
         try:
-            with up.recorded_move(root, pos, target["sha"]):
+            with up.recorded_move(root, pos, target["sha"]) as replaced:
                 up.move(root, up.Target(**target))
         except up.UpdateError as e:
             s.fail(str(e))
@@ -243,7 +244,7 @@ def _update(run: _Run, root: Path, *, to: Optional[str], expect: Optional[str], 
         s.done(target["sha"][:7])
     run.doc["switched"] = True
     if _reinstall(run, root, pos, target["sha"]):
-        up.forget_previous(root)
+        up.forget_previous(root, replaced)  # the move is undone; the way back from the last good update stays
         run.fail("the reinstall failed, so update put your previous version back; the pip error is above")
     _validate_and_report(run, root, plan["manifests"], target["label"], plan["tries"], offer_rollback=True)
 
@@ -325,14 +326,11 @@ def _validate_and_report(run: _Run, root: Path, manifests: List[dict], label: st
 # --------------------------------------------------------------------------- #
 
 def _rollback(run: _Run, root: Path, yes: bool) -> NoReturn:
-    prev = up.read_state(root).get("previous")
-    if not prev:
-        run.fail("nothing to roll back to: no update has been recorded here (or it was already rolled back)")
+    refusal = up.rollback_refusal(root)
+    if refusal:
+        run.fail(refusal)
+    prev = up.read_state(root)["previous"]
     pos = up.position(root)
-    if prev.get("after") and pos["sha"] != prev["after"]:
-        run.fail(f"this clone has moved since the update (it is at {pos['short']}; the update left it at "
-                 f"{prev['after'][:7]}), so rolling back would discard that work. To go back anyway: "
-                 f"git switch --detach {prev['sha'][:7]}")
     _refuse_if_blocked(run, up.blocking_changes(root, prev["sha"]))
     manifests = up.user_manifests(root)
     label = prev.get("describe") or prev["sha"][:7]
