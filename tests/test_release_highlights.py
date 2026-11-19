@@ -10,9 +10,10 @@ manifests it affects.
 from __future__ import annotations
 
 import fnmatch
+import json
 import re
 from pathlib import Path
-from typing import Dict
+from typing import Any, Dict, List
 
 import pytest
 import yaml
@@ -44,8 +45,24 @@ def _changelog_sections() -> Dict[str, Dict]:
 CHANGELOG = _changelog_sections()
 
 
+SCHEMA = json.loads((REPO_ROOT / "framework/schemas/release_highlights_schema.json").read_text())
+
+
 def _doc(path: Path) -> dict:
-    return update._normalize_highlights(yaml.safe_load(path.read_text()))
+    """The file as its author typed it: YAML reads an unquoted 2026-10-23 as a
+    date and 0.6 as a float, and the schema wants text."""
+    doc = yaml.safe_load(path.read_text())
+    for key in ("date", "version"):
+        if key in doc and not isinstance(doc[key], str):
+            doc[key] = doc[key].isoformat() if hasattr(doc[key], "isoformat") else str(doc[key])
+    return doc
+
+
+def _schema_errors(doc: Any) -> List[str]:
+    from jsonschema import Draft202012Validator
+
+    return [f"{'/'.join(map(str, e.absolute_path)) or '(root)'}: {e.message}"
+            for e in Draft202012Validator(SCHEMA).iter_errors(doc)]
 
 
 def _fetcher_names() -> set:
@@ -64,7 +81,7 @@ def test_there_is_at_least_one_highlights_file():
 def test_unreleased_file_exists_and_matches_the_schema():
     doc = _doc(UNRELEASED)
     assert doc["version"] == "unreleased"
-    assert not update.highlights_errors(doc, update.highlights_schema())
+    assert not _schema_errors(doc)
 
 
 def test_every_unreleased_breaking_entry_has_a_row():
@@ -77,7 +94,7 @@ def test_every_unreleased_breaking_entry_has_a_row():
 
 @pytest.mark.parametrize("path", FILES, ids=lambda p: p.name)
 def test_highlights_file_matches_the_schema(path):
-    errors = update.highlights_errors(_doc(path), update.highlights_schema())
+    errors = _schema_errors(_doc(path))
     assert not errors, f"{path.name}: " + "; ".join(errors)
 
 

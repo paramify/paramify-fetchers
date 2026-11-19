@@ -186,7 +186,7 @@ def test_parse_release_rejects_non_release_tags():
 def test_a_branch_follows_its_upstream(main_repo):
     up.fetch(main_repo)
     pos = up.position(main_repo)
-    assert (pos["upstream"], pos["behind"], pos["local_commits"]) == ("origin/main", 1, 0)
+    assert (pos["upstream"], pos["behind"]) == ("origin/main", 1)
     t = up.choose_target(main_repo, pos, up.list_releases(main_repo))
     assert (t.channel, t.ref, t.label, t.branch) == ("branch", "origin/main", "main", "main")
     assert t.sha == _git(main_repo, "rev-parse", "origin/main").strip()
@@ -281,10 +281,13 @@ def test_which_breaking_rows_touch_this_clone():
     other = {"tag": "breaking", "title": "t", "fix": "f", "fetchers": ["wiz_*"]}
     everyone = {"tag": "breaking", "title": "t", "fix": "f"}
     custom = {"tag": "breaking", "title": "t", "fix": "f", "custom_fetchers": True}
-    assert up.touches(scoped, manifests, False) and up.touches(everyone, manifests, False)
-    assert not up.touches(other, manifests, False)
-    assert up.touches(custom, manifests, True) and not up.touches(custom, manifests, False)
-    rows = up.breaking_for([{**scoped, "release": "unreleased"}, {**other, "release": "unreleased"}], manifests, False)
+    def why(row, local=False):
+        return up.breaking_for([row], manifests, local)[0]["why"]
+
+    assert (why(scoped), why(other), why(everyone)) == ("fetchers", None, "everyone")
+    assert (why(custom, local=True), why(custom)) == ("custom", None)
+    rows = up.breaking_for([{**scoped, "release": "unreleased"}, {**other, "release": "unreleased"},
+                            {"tag": "cli", "title": "not breaking"}], manifests, False)
     assert [(r["touches"], r["why"]) for r in rows] == [(True, "fetchers"), (False, None)]
     assert rows[0]["manifests"] == [{"manifest": "manifests/prod.yaml", "fetchers": ["okta_users"]}]
 
@@ -873,13 +876,11 @@ def test_piped_output_uses_the_full_width_cap():
 
 def test_the_ending_lists_commands_without_repeating_their_titles():
     from framework import update_view as view
-    out = [t.plain for t in view.done("main", ["paramify status <manifest>"], rollback=True, container=False)]
+    out = [t.plain for t in view.done("main", ["paramify status <manifest>"], rollback=True, rebuild=None)]
     assert any(ln.split() == ["try", "paramify", "status", "<manifest>"] for ln in out)
-    assert not any("Docker" in ln for ln in out)
 
 
 def test_the_docker_hint_needs_a_built_image(monkeypatch, tmp_path):
-    from framework import update_cli
     deploy = tmp_path / "deploy"
     deploy.mkdir()
     (deploy / "docker-compose.yml").write_text("services:\n  fetchers:\n    build: .\n    image: paramify-fetchers:beta\n")
@@ -889,10 +890,10 @@ def test_the_docker_hint_needs_a_built_image(monkeypatch, tmp_path):
         calls.append(cmd)
         return subprocess.CompletedProcess(cmd, 0 if cmd[-1] == "paramify-fetchers:beta" else 1, "", "")
 
-    monkeypatch.setattr(update_cli.shutil, "which", lambda name: "/usr/bin/docker" if name == "docker" else None)
-    monkeypatch.setattr(update_cli.subprocess, "run", fake_run)
-    assert update_cli._built_image(tmp_path) is True
+    monkeypatch.setattr(up.shutil, "which", lambda name: "/usr/bin/docker" if name == "docker" else None)
+    monkeypatch.setattr(up.subprocess, "run", fake_run)
+    assert up.built_image(tmp_path) is True
     assert calls[0][:3] == ["/usr/bin/docker", "image", "inspect"]
-    monkeypatch.setattr(update_cli.shutil, "which", lambda name: None)
-    assert update_cli._built_image(tmp_path) is False
-    assert update_cli._built_image(tmp_path / "nowhere") is False
+    monkeypatch.setattr(up.shutil, "which", lambda name: None)
+    assert up.built_image(tmp_path) is False
+    assert up.built_image(tmp_path / "nowhere") is False

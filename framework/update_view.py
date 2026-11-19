@@ -293,7 +293,7 @@ def blocked(blocking: dict) -> List[RenderableType]:
     return out
 
 
-def done(label: str, tries: Sequence[str], *, rollback: bool, container: bool) -> List[Text]:
+def done(label: str, tries: Sequence[str], *, rollback: bool, rebuild: Optional[str]) -> List[Text]:
     """The ending. `tries` are the new highlights' commands; their titles were
     shown under New, so only the commands are repeated here."""
     out = [ok(f"You're on {label}.")]
@@ -301,9 +301,8 @@ def done(label: str, tries: Sequence[str], *, rollback: bool, container: bool) -
         out.append(line(("try  ", "dim"), (cmd, "cyan")))
     if rollback:
         out.append(line(("Changed your mind? ", "dim"), ("paramify update --rollback", "cyan")))
-    if container:
-        out.append(line(("Run it in Docker too? Rebuild the image: ", "dim"),
-                        ("docker compose -f deploy/docker-compose.yml build", "cyan")))
+    if rebuild:
+        out.append(line(("Run it in Docker too? Rebuild the image: ", "dim"), (rebuild, "cyan")))
     return out
 
 

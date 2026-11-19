@@ -38,7 +38,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from importlib import metadata
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional, Sequence, Tuple
+from typing import Dict, Iterator, List, Optional, Sequence, Tuple
 
 import yaml
 from packaging.requirements import Requirement
@@ -53,6 +53,7 @@ from packaging.version import InvalidVersion, Version
 RELEASE_TAG = re.compile(r"^v(?P<version>\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)$")
 DISTRIBUTION = "paramify-fetchers"
 MAIN = "main"
+REMOTE = "origin"  # where updates come from: fetched, followed by --to main, linked for the changelog
 HIGHLIGHTS_DIR = "releases"
 UNRELEASED = "unreleased"
 STATE_FILE = Path(".paramify") / "state.json"
@@ -60,7 +61,8 @@ NO_CHECK_ENV = "PARAMIFY_NO_UPDATE_CHECK"
 CONTAINER_ENV = "PARAMIFY_CONTAINER"
 CHECK_INTERVAL = 24 * 60 * 60
 PUBLIC_REPO = "https://github.com/paramify/paramify-fetchers"
-COMPOSE_BUILD = "docker compose -f deploy/docker-compose.yml build"
+COMPOSE_FILE = Path("deploy") / "docker-compose.yml"
+COMPOSE_BUILD = f"docker compose -f {COMPOSE_FILE.as_posix()} build"
 
 
 class UpdateError(RuntimeError):
@@ -156,19 +158,26 @@ def list_releases(root: Path) -> List[Release]:
     return sorted((r for r in found if r), key=lambda r: r.key)
 
 
+FETCH_ARGS = ("fetch", "--tags", "--quiet", REMOTE)
+
+
 def fetch(root: Path, timeout: float = 90) -> None:
-    """Bring in origin's branches and release tags."""
-    git(root, "fetch", "--tags", "--quiet", "origin", timeout=timeout)
+    """Bring in the remote's branches and release tags."""
+    git(root, *FETCH_ARGS, timeout=timeout)
+
+
+def current_branch(root: Path) -> Optional[str]:
+    try:
+        return git(root, "symbolic-ref", "-q", "--short", "HEAD").strip() or None
+    except UpdateError:
+        return None
 
 
 def position(root: Path) -> dict:
     """Where the checkout is: the branch and the remote branch it follows (with
     how far apart they are), and the nearest release tag behind HEAD."""
     sha = git(root, "rev-parse", "HEAD").strip()
-    try:
-        branch: Optional[str] = git(root, "symbolic-ref", "-q", "--short", "HEAD").strip() or None
-    except UpdateError:
-        branch = None
+    branch = current_branch(root)
     tag, ahead = None, None
     try:
         described = git(root, "describe", "--tags", "--long", "--match", "v[0-9]*").strip()
@@ -177,18 +186,16 @@ def position(root: Path) -> dict:
     except (UpdateError, ValueError):
         pass
     rel = parse_release(tag) if tag else None
-    upstream, behind, local = None, None, None
+    upstream, behind = None, None
     if branch:
         try:
             upstream = git(root, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}").strip() or None
-            mine, theirs = git(root, "rev-list", "--left-right", "--count", "HEAD...@{upstream}").split()
-            local, behind = int(mine), int(theirs)
+            behind = int(git(root, "rev-list", "--count", "HEAD..@{upstream}").strip())
         except (UpdateError, ValueError):
             upstream = None
     return {
         "upstream": upstream,
         "behind": behind,
-        "local_commits": local,
         "tag": tag,
         "version": rel.version if rel else None,
         "ahead": ahead,
@@ -217,6 +224,32 @@ def container_advice(root: Path) -> dict:
         "commands": ["paramify update", COMPOSE_BUILD],
         "version": installed_version(),
     }
+
+
+def built_image(root: Path) -> bool:
+    """Has this machine built the deploy image? Only then is "rebuild the image"
+    worth saying after an update. The image name comes from the compose file;
+    no docker, no compose file, a daemon that is not running or slow to answer
+    all mean no."""
+    compose = Path(root) / COMPOSE_FILE
+    docker = shutil.which("docker")
+    if not docker or not compose.is_file():
+        return False
+    try:
+        services = (yaml.safe_load(compose.read_text()) or {}).get("services") or {}
+    except (OSError, yaml.YAMLError):
+        return False
+    for svc in services.values():
+        image = svc.get("image") if isinstance(svc, dict) else None
+        if not isinstance(image, str):
+            continue
+        try:
+            found = subprocess.run([docker, "image", "inspect", image], capture_output=True, text=True, timeout=5)
+        except (OSError, subprocess.SubprocessError):
+            return False
+        if found.returncode == 0:
+            return True
+    return False
 
 
 def installed_version() -> Optional[str]:
@@ -249,6 +282,21 @@ def _release_target(root: Path, rel: Release) -> Target:
     return Target("release", rel.tag, _sha(root, rel.tag), rel.version, None)
 
 
+def _refuse_own_commits(root: Path, branch: str, upstream: str, then: str) -> None:
+    """Update fast-forwards, it never merges: a local branch with commits its
+    upstream lacks is refused. A branch that doesn't exist yet has none (update
+    creates it)."""
+    try:
+        mine = int(git(root, "rev-list", "--count", f"{upstream}..refs/heads/{branch}").strip())
+    except (UpdateError, ValueError):
+        return
+    if mine:
+        raise UpdateError(
+            f"{branch} has {mine} commit{'s' if mine != 1 else ''} that {upstream} does not, so update "
+            f"can't fast-forward it. {then}"
+        )
+
+
 def choose_target(root: Path, pos: dict, releases: Sequence[Release], to: Optional[str] = None) -> Target:
     """The commit to move to, from --to or from what the clone is on.
 
@@ -258,19 +306,12 @@ def choose_target(root: Path, pos: dict, releases: Sequence[Release], to: Option
     merges. The caller decides "nothing to do" by comparing sha with HEAD's.
     """
     if to == MAIN:
+        upstream = f"{REMOTE}/{MAIN}"
         try:
-            target = Target("branch", f"origin/{MAIN}", _sha(root, f"origin/{MAIN}"), MAIN, MAIN)
+            target = Target("branch", upstream, _sha(root, upstream), MAIN, MAIN)
         except UpdateError:
-            raise UpdateError(f"origin has no {MAIN} branch to follow") from None
-        try:
-            mine = int(git(root, "rev-list", "--count", f"origin/{MAIN}..refs/heads/{MAIN}").strip())
-        except (UpdateError, ValueError):
-            mine = 0  # no local main yet: update creates it
-        if mine:
-            raise UpdateError(
-                f"{MAIN} has {mine} commit{'s' if mine != 1 else ''} that origin/{MAIN} does not, so update "
-                f"can't fast-forward it. Push or move them first"
-            )
+            raise UpdateError(f"{REMOTE} has no {MAIN} branch to follow") from None
+        _refuse_own_commits(root, MAIN, upstream, "Push or move them first")
         return target
     if to:
         want = to if to.startswith("v") else f"v{to}"
@@ -287,12 +328,7 @@ def choose_target(root: Path, pos: dict, releases: Sequence[Release], to: Option
     hint = f"Run paramify update --to {MAIN}, or --to <tag> to pin a release"
     branch, upstream = pos["branch"], pos["upstream"]
     if branch and upstream:
-        if pos["local_commits"]:
-            n = pos["local_commits"]
-            raise UpdateError(
-                f"{branch} has {n} commit{'s' if n != 1 else ''} that {upstream} does not, so update "
-                f"can't fast-forward it. Push or move them, or pin with --to <tag>"
-            )
+        _refuse_own_commits(root, branch, upstream, "Push or move them, or pin with --to <tag>")
         return Target("branch", upstream, _sha(root, upstream), branch, branch)
     if branch:
         raise UpdateError(f"{branch} does not follow a remote branch. {hint}")
@@ -306,10 +342,10 @@ def choose_target(root: Path, pos: dict, releases: Sequence[Release], to: Option
 # --------------------------------------------------------------------------- #
 
 def repo_web_url(root: Path) -> str:
-    """The GitHub page of origin, for changelog links; the public repo when
-    origin isn't on GitHub (a private mirror elsewhere still has the same tags)."""
+    """The GitHub page of the remote, for changelog links; the public repo when
+    it isn't on GitHub (a private mirror elsewhere still has the same tags)."""
     try:
-        url = git(root, "remote", "get-url", "origin", timeout=10).strip()
+        url = git(root, "remote", "get-url", REMOTE, timeout=10).strip()
     except UpdateError:
         return PUBLIC_REPO
     m = re.match(r"^(?:https://github\.com/|git@[^:]*github[^:]*:|ssh://git@github\.com/)(.+?)(?:\.git)?/?$", url)
@@ -320,27 +356,6 @@ def changelog_url(root: Path, target: "Target") -> str:
     """The CHANGELOG as it is at the target, on GitHub."""
     at = target.ref if target.channel == "release" else target.sha[:10]
     return f"{repo_web_url(root)}/blob/{at}/CHANGELOG.md"
-
-
-def highlights_schema() -> dict:
-    # The running code's own copy: it is what this code knows how to read.
-    return json.loads((Path(__file__).parent / "schemas/release_highlights_schema.json").read_text())
-
-
-def highlights_errors(doc: Any, schema: dict) -> List[str]:
-    from jsonschema import Draft202012Validator
-
-    v = Draft202012Validator(schema)
-    return [f"{'/'.join(map(str, e.absolute_path)) or '(root)'}: {e.message}" for e in v.iter_errors(doc)]
-
-
-def _normalize_highlights(doc: dict) -> dict:
-    """YAML reads an unquoted 2026-10-23 as a date and 0.6 as a float; the
-    schema wants the text the author typed."""
-    for key in ("date", "version"):
-        if key in doc and not isinstance(doc[key], str):
-            doc[key] = doc[key].isoformat() if hasattr(doc[key], "isoformat") else str(doc[key])
-    return doc
 
 
 def _highlight_files(root: Path, ref: str) -> Dict[str, List[dict]]:
@@ -690,34 +705,28 @@ def span(root: Path, head: str, target_ref: str) -> dict:
     return {"commits": commits, "days": max(0, (new - old) // 86400)}
 
 
-def touches(row: dict, manifests: Sequence[dict], has_local_fetchers: bool) -> bool:
-    """Does this breaking row affect the clone being updated?
-
-    A row that lists fetchers touches clones whose manifests use one. A row
-    marked custom_fetchers touches clones with fetchers of their own. A row
-    with neither is about everyone (a Python version, a CLI flag).
-    """
-    if row.get("fetchers"):
-        return any(match_fetchers(row["fetchers"], m["uses"]) for m in manifests)
-    if row.get("custom_fetchers"):
-        return has_local_fetchers
-    return True
-
-
 def breaking_for(rows: Sequence[dict], manifests: Sequence[dict], has_local_fetchers: bool) -> List[dict]:
-    """Every breaking row crossed, with whether and why it touches this clone."""
+    """Every breaking row crossed, with whether and why it touches this clone.
+
+    A row that lists fetchers touches clones whose manifests use one ("fetchers").
+    A row marked custom_fetchers touches clones with fetchers of their own
+    ("custom"). A row with neither is about everyone (a Python version, a CLI flag).
+    """
     out = []
     for row in rows:
         if row.get("tag") != "breaking":
             continue
-        hit = touches(row, manifests, has_local_fetchers)
-        why = None if not hit else "fetchers" if row.get("fetchers") else "custom" if row.get("custom_fetchers") else "everyone"
-        named = [
-            {"manifest": m["label"], "fetchers": match_fetchers(row["fetchers"], m["uses"])}
-            for m in manifests if row.get("fetchers") and match_fetchers(row["fetchers"], m["uses"])
-        ]
+        named = []
+        if row.get("fetchers"):
+            named = [{"manifest": m["label"], "fetchers": hit} for m in manifests
+                     if (hit := match_fetchers(row["fetchers"], m["uses"]))]
+            why = "fetchers" if named else None
+        elif row.get("custom_fetchers"):
+            why = "custom" if has_local_fetchers else None
+        else:
+            why = "everyone"
         out.append({"title": row["title"], "fix": row.get("fix"), "release": row.get("release"),
-                    "touches": hit, "why": why, "manifests": named})
+                    "touches": why is not None, "why": why, "manifests": named})
     return out
 
 
@@ -757,19 +766,12 @@ def check_target(root: Path, target: Target, manifests: Sequence[dict], python: 
 # Switch, reinstall, validate
 # --------------------------------------------------------------------------- #
 
-def _on_branch(root: Path, branch: str) -> bool:
-    try:
-        return git(root, "symbolic-ref", "-q", "--short", "HEAD").strip() == branch
-    except UpdateError:
-        return False
-
-
 def move(root: Path, target: Target) -> None:
     """Fast-forward the branch to its upstream, or detach at the release tag."""
     if target.branch is None:
         git(root, "switch", "--quiet", "--detach", target.ref)
         return
-    if not _on_branch(root, target.branch):
+    if current_branch(root) != target.branch:
         try:
             git(root, "rev-parse", "--verify", "--quiet", f"refs/heads/{target.branch}")
             git(root, "switch", "--quiet", target.branch)
@@ -782,7 +784,7 @@ def restore(root: Path, prev: dict) -> None:
     """Put the clone back where `prev` says it was. A branch is reset to its
     old commit and stays checked out, so the next update moves it forward again."""
     if prev.get("branch"):
-        if not _on_branch(root, prev["branch"]):
+        if current_branch(root) != prev["branch"]:
             git(root, "switch", "--quiet", prev["branch"])
         git(root, "reset", "--keep", "--quiet", prev["sha"])
     else:
@@ -827,13 +829,21 @@ def detect_extras() -> Optional[List[str]]:
     return sorted(kept)
 
 
-def install_command(root: Path, extras: Optional[List[str]], python: str = sys.executable) -> List[str]:
-    """`pip install -e` for the same interpreter that is running.
+def install_extras(extras: Optional[List[str]]) -> List[str]:
+    """The extras a reinstall asks for: those detected, or `all` (which the
+    versioning guide uses) when there is no way to tell."""
+    return ["all"] if extras is None else extras
 
-    A uv-made venv has no pip, so fall back to `uv pip --python` there. With no
-    way to tell the extras, install `all`, which the versioning guide uses.
-    """
-    chosen = ["all"] if extras is None else extras
+
+def install_label(extras: Optional[List[str]]) -> str:
+    chosen = install_extras(extras)
+    return f".[{','.join(chosen)}]" if chosen else "the base install"
+
+
+def install_command(root: Path, extras: Optional[List[str]], python: str = sys.executable) -> List[str]:
+    """`pip install -e` for the same interpreter that is running. A uv-made
+    venv has no pip, so fall back to `uv pip --python` there."""
+    chosen = install_extras(extras)
     spec = f"{root}[{','.join(chosen)}]" if chosen else str(root)
     if importlib.util.find_spec("pip") is None and shutil.which("uv"):
         return ["uv", "pip", "install", "--quiet", "--python", python, "-e", spec]
@@ -963,7 +973,7 @@ def _background_fetch(root: Path) -> None:
     the next check, so a slow or absent network never delays the command the
     user actually ran."""
     subprocess.Popen(
-        ["git", "fetch", "--tags", "--quiet", "origin"], cwd=root, env=_git_env(),
+        ["git", *FETCH_ARGS], cwd=root, env=_git_env(),
         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         start_new_session=True,
     )

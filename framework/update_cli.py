@@ -11,8 +11,6 @@ Exit codes: 0 done (or nothing to do), 1 refused or failed. `--check` follows
 from __future__ import annotations
 
 import json
-import shutil
-import subprocess
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, NoReturn, Optional, Tuple
@@ -265,32 +263,6 @@ def _update(run: _Run, root: Path, *, to: Optional[str], yes: bool, allow_breaki
            go=lambda: up.move(root, target), verb=f"move to {target.label}")
 
 
-def _built_image(root: Path) -> bool:
-    """Has this machine built the deploy image? Only then is "rebuild the image"
-    worth saying after an update. The image name comes from
-    deploy/docker-compose.yml; no docker, no compose file, a daemon that is not
-    running or slow to answer all mean no."""
-    import yaml
-
-    compose = root / "deploy" / "docker-compose.yml"
-    docker = shutil.which("docker")
-    if not docker or not compose.is_file():
-        return False
-    try:
-        services = (yaml.safe_load(compose.read_text()) or {}).get("services") or {}
-    except (OSError, yaml.YAMLError):
-        return False
-    images = [s["image"] for s in services.values() if isinstance(s, dict) and isinstance(s.get("image"), str)]
-    for image in images:
-        try:
-            done = subprocess.run([docker, "image", "inspect", image], capture_output=True, text=True, timeout=5)
-        except (OSError, subprocess.SubprocessError):
-            return False
-        if done.returncode == 0:
-            return True
-    return False
-
-
 def _apply(run: _Run, root: Path, pos: dict, manifests: List[dict], *, label: str, new_sha: str,
            tries: List[str], go: Any, verb: str, rolling_back: bool = False) -> NoReturn:
     """Move, reinstall if pyproject.toml changed, validate. Shared by update and --rollback."""
@@ -319,8 +291,7 @@ def _apply(run: _Run, root: Path, pos: dict, manifests: List[dict], *, label: st
         else:
             res = {"skipped": False, **up.reinstall(root, extras)}
             if res["ok"]:
-                chosen = ["all"] if extras is None else extras
-                s.done(f".[{','.join(chosen)}]" if chosen else "the base install")
+                s.done(up.install_label(extras))
             else:
                 s.fail("pip failed")
                 for err in (res.get("error") or "").splitlines()[-4:]:
@@ -350,7 +321,7 @@ def _apply(run: _Run, root: Path, pos: dict, manifests: List[dict], *, label: st
             s.done(f"{view.plural(len(manifests), 'manifest')} valid")
 
     run.doc["version"] = label
-    run.section(view.done(label, tries, rollback=not rolling_back, container=_built_image(root)))
+    run.section(view.done(label, tries, rollback=not rolling_back, rebuild=up.COMPOSE_BUILD if up.built_image(root) else None))
     if new_bad:
         # The move happened, but a script must not read this as a clean update.
         n = len(new_bad)
