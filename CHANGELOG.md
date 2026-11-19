@@ -33,7 +33,8 @@ schemas and the `paramify` CLI — not the internal code.
   pinned to a release moves to the newest release, and `--to main` / `--to vX.Y.Z-beta` switch between them. Before it
   moves it runs the target's own `paramify validate` on each manifest in a temporary worktree and shows which of your
   fetchers change (with versions), the breaking changes that touch this clone and a few highlights. It reinstalls only
-  when `pyproject.toml` changed. Also `--check` (exit 0/1/2), `--rollback`, `--yes`, `--allow-breaking`, `--json`, and
+  when `pyproject.toml` changed. Also `--check` (exit 0/1/2), `--rollback`, `--yes`, `--allow-breaking`, `--json`, `--expect <sha>` (move
+  only to the commit a plan showed), and
   a once-a-day notice (`PARAMIFY_NO_UPDATE_CHECK=1` turns it off). See `docs/versioning_guide.md`.
 - **Update notes**, `releases/unreleased.yaml` and `releases/<version>.yaml`: the short rows `paramify update` shows
   instead of the CHANGELOG. Add a row with the change; format in `releases/README.md`.
