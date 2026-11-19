@@ -123,7 +123,8 @@ tag: `tag:Boundary=FedRAMP`, or `tag:Boundary` for any value. Exclusions take
 storage container or a diagnostic setting goes with the resource it belongs to.
 A grant, lock or policy on a resource group or the subscription stays while it
 holds an in-scope resource, and one on a management group always stays.
-Double-quote a tag name or value that holds a space, comma, `=` or `:`.
+Double-quote a tag name or value that holds a space, comma, `=` or `:`. A value
+takes `*` globs; a name doesn't, so `*` in a name matches only a `*`.
 `manifest exclude` never adds to this list; set it with `set-platform-config`,
 or with reasons in the TUI or the manifest. Tags come from one Resource Graph
 read per subscription; if it fails, the run fails and writes no evidence. A

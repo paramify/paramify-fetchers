@@ -90,12 +90,26 @@ def check(items: Sequence[Item], prefixes: Sequence[str] = (), bare: bool = True
             problems.append(f"pattern {p!r} has the unknown prefix {kind + ':'!r}; {takes}")
         elif sep and not glob:
             problems.append(f"pattern {p!r} has nothing after its prefix")
+        elif sep and kind.lower() == "tag" and not _tag_name(glob):
+            problems.append(f"pattern {p!r} has no tag name; write tag:Name or tag:Name=value")
         elif not sep and not bare:
             problems.append(f"pattern {p!r} needs one of the prefixes {known}")
         elif p.lower() in seen:
             problems.append(f"pattern {p!r} is listed twice")
         seen.add(p.lower())
     return problems
+
+
+def _tag_name(body: str) -> str:
+    """The tag name before the first = outside double quotes, unquoted, as the fetchers read it."""
+    quoted = False
+    for i, ch in enumerate(body):
+        if ch == '"':
+            quoted = not quoted
+        elif ch == "=" and not quoted:
+            body = body[:i]
+            break
+    return body.replace('"', "").strip()
 
 
 def problems(value: Any, prefixes: Sequence[str] = (), bare: bool = True) -> List[str]:
