@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Any, List, Mapping, Optional, Tuple
+from typing import Any, Callable, List, Mapping, Optional, Tuple, TypeVar
 
 from dotenv import load_dotenv
 
@@ -20,6 +20,7 @@ from framework.paramify_auth import (
     resolve_upload_token,
 )
 
+W = TypeVar("W")
 
 @dataclass(frozen=True)
 class Settings:
@@ -85,22 +86,31 @@ def open_workspace(
     base_url: Optional[str] = None,
     token: Optional[str] = None,
     client: Optional[Client] = None,
+    use: Optional[W] = None,
     dry_run: bool = False,
+    wrap: Callable[[Client], W] = Resources,  # type: ignore[assignment]
     log: Optional[logging.Logger] = None,
-) -> Tuple[str, Optional[Resources]]:
+) -> Tuple[str, Optional[W]]:
     """A sync stage's start: load `.env`, connect, and return the base URL and the
-    `Resources` to call (None for a dry run without a token).
+    client wrapped for the stage's endpoints (`Resources`, or e.g. `Pipelines`),
+    None for a dry run without a token.
 
-    A given `client` is used as is. A dry run with a token still gets `Resources`,
-    so its reads show the real workspace; it must not write. A setup error is
-    logged to `log`, for a stage run as a script, then raised as ValueError.
+    `client` is a ready Client to wrap; `use` is a ready endpoint object, returned
+    as is. Either one means no token is needed. A dry run with a token still gets
+    one, so its reads show the real workspace; it must not write. A setup error is
+    logged to `log` when given (for a stage run as a script), then raised as
+    ValueError.
     """
     load_dotenv()
+    given = client is not None or use is not None
     try:
-        resolved, made = connect(config, base_url=base_url, token=token,
-                                 need_token=not dry_run and client is None)
+        resolved, made = connect(config, base_url=base_url, token=None if given else token,
+                                 need_token=not dry_run and not given)
     except ValueError as e:
-        (log or logging.getLogger(__name__)).error("%s", e)
+        if log is not None:
+            log.error("%s", e)
         raise
+    if use is not None:
+        return resolved.base_url, use
     client = client or made
-    return resolved.base_url, Resources(client) if client is not None else None
+    return resolved.base_url, wrap(client) if client is not None else None
