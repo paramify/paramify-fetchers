@@ -983,10 +983,11 @@ def test_runner_to_paramify_intake_preserves_rows_and_does_not_reupload(tmp_path
 
     class Response:
         status_code = 200
-        text = ""
+        headers: dict = {}
 
         def __init__(self, body):
             self.body = body
+            self.text = json.dumps(body)
 
         def json(self):
             return self.body
@@ -995,21 +996,24 @@ def test_runner_to_paramify_intake_preserves_rows_and_does_not_reupload(tmp_path
         def __init__(self):
             self.headers = {}
 
-        def post(self, url, **kwargs):
-            posts.append((url, kwargs))
-            if url.endswith("/intake"):
-                return Response({"artifact": {"id": "artifact-1"}})
-            assert url.endswith("/process")
-            return Response({"id": "job-1", "status": "COMPLETED", "type": "PROCESS"})
-
-        def get(self, url, **kwargs):
+        def request(self, method, url, **kwargs):
+            if method == "POST":
+                posts.append((url, kwargs))
+                if url.endswith("/intake"):
+                    return Response({"artifact": {"id": "artifact-1"}})
+                assert url.endswith("/process")
+                return Response({"id": "job-1", "status": "COMPLETED", "type": "PROCESS"})
             assert url.endswith("/pipeline-jobs/job-1")
             return Response({"id": "job-1", "status": "COMPLETED", "type": "PROCESS"})
 
-    monkeypatch.setattr(uploader.requests, "Session", Session)
+    from framework.paramify.client import Client
+    from framework.paramify.pipelines import Pipelines
+
+    base_url = "https://paramify.example/api/v0"
+    pipelines = Pipelines(Client("synthetic-token", base_url, session=Session()))
     for _ in range(2):
         upload = uploader.upload_run(
-            run_dir, token="synthetic-token", base_url="https://paramify.example/api/v0", wait=False
+            run_dir, token="synthetic-token", base_url=base_url, wait=False, pipelines=pipelines,
         )
         assert upload["errors"] == 0, upload
     assert len(posts) == 2  # second upload uses the existing intake log

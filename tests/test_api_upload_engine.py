@@ -18,6 +18,7 @@ import requests
 
 from framework import api
 from framework.paramify import client as client_mod
+from framework.paramify import connection as connection_mod
 from framework.paramify.client import ApiError, Client, ErrorKind
 from framework.paramify_auth import BASE_URL_ENV, READ_TOKEN_ENV, UPLOAD_TOKEN_ENV
 from framework.sync import render
@@ -51,7 +52,7 @@ def fake(no_env, monkeypatch):
     f = FakeParamify()
     f.set_today(date.today())
     monkeypatch.setenv(UPLOAD_TOKEN_ENV, "tok")
-    monkeypatch.setattr(upload_mod, "Client", functools.partial(
+    monkeypatch.setattr(connection_mod, "Client", functools.partial(
         Client, session=f.session, sleep=lambda _s: None, retry_budget_s=3))
     return f
 
@@ -611,7 +612,7 @@ def test_token_and_base_url_arguments_reach_the_client(fake, root, tmp_path, mon
         seen.update(token=token, base_url=base_url)
         return Client(token, base_url, session=fake.session, sleep=lambda _s: None, retry_budget_s=3)
 
-    monkeypatch.setattr(upload_mod, "Client", spy)
+    monkeypatch.setattr(connection_mod, "Client", spy)
     api.upload_run(two_files(tmp_path), root, token="explicit-tok", base_url="https://arg.example.test")
     assert seen == {"token": "explicit-tok", "base_url": "https://arg.example.test"}
 
@@ -626,7 +627,7 @@ def test_token_argument_stands_in_for_a_missing_environment_token(no_env, root, 
         seen["token"] = token
         raise Stop
 
-    monkeypatch.setattr(upload_mod, "Client", spy)
+    monkeypatch.setattr(connection_mod, "Client", spy)
     with pytest.raises(Stop):
         api.upload_run(two_files(tmp_path), root, token="only-arg")
     assert seen["token"] == "only-arg"
@@ -848,7 +849,7 @@ def test_ok_is_errors_equal_zero_across_outcomes(fake, root, tmp_path, monkeypat
     for i, setup in enumerate(("held", "drop", "clean")):
         f = FakeParamify()
         f.set_today(date.today())
-        monkeypatch.setattr(upload_mod, "Client", functools.partial(
+        monkeypatch.setattr(connection_mod, "Client", functools.partial(
             Client, session=f.session, sleep=lambda _s: None, retry_budget_s=3))
         if setup == "held":
             f.fail_upload("a.json", 502)
