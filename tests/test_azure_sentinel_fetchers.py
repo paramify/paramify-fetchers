@@ -3314,3 +3314,96 @@ def test_retry_wait_reads_the_service_hint():
     assert wait(Resp(429, {}, {"Retry-After": "Wed, 21 Oct 2015 07:28:00 GMT"}), 0) == 0.0
     assert wait(Resp(429, {}, {"Retry-After": "9999"}), 0) == azure_rest.MAX_RETRY_WAIT
     assert wait(Resp(503, {}), 3) == 8.0
+
+
+# --- analytics rules: does a match reach automation? ---
+
+def _automation(name="a", on="Incidents", when="Created", enabled=True, conditions=(), expires=None):
+    logic = {"isEnabled": enabled, "triggersOn": on, "triggersWhen": when, "conditions": list(conditions)}
+    if expires:
+        logic["expirationTimeUtc"] = iso(expires)
+    raw = {"name": name, "properties": {"displayName": name, "triggeringLogic": logic,
+                                        "actions": [{"order": 1, "actionType": "RunPlaybook"}]}}
+    return MODS["sentinel_analytics_rules"].automation_rule_record(raw, NOW)
+
+
+def _rule_ids(operator, *names):
+    return {"conditionType": "Property", "conditionProperties": {
+        "propertyName": "IncidentRelatedAnalyticRuleIds", "operator": operator,
+        "propertyValues": [f"{SI_A.upper()}/alertRules/{n}" for n in names]}}
+
+
+SEVERITY = {"conditionType": "Property", "conditionProperties": {
+    "propertyName": "IncidentSeverity", "operator": "Equals", "propertyValues": ["High"]}}
+
+
+@pytest.mark.parametrize("automation, rule, expected", [
+    (_automation(), {"name": "r1", "kind": "Scheduled", "creates_incidents": True}, True),
+    # An incident trigger can't run for a rule that raises alerts only; an alert trigger can.
+    (_automation(), {"name": "r1", "kind": "Scheduled", "creates_incidents": False}, False),
+    (_automation(on="Alerts"), {"name": "r1", "kind": "Scheduled", "creates_incidents": False}, True),
+    # Fusion and Microsoft incident creation rules always raise incidents.
+    (_automation(), {"name": "f", "kind": "Fusion", "creates_incidents": None}, True),
+    (_automation(), {"name": "r1", "kind": "Scheduled", "creates_incidents": None}, None),
+    # A rule-id condition settles it, matched by the rule's name and without case; other conditions depend on data.
+    (_automation(conditions=[_rule_ids("Contains", "r1", "r2")]), {"name": "R1", "kind": "Scheduled", "creates_incidents": True}, True),
+    (_automation(conditions=[_rule_ids("Contains", "r2")]), {"name": "r1", "kind": "Scheduled", "creates_incidents": True}, False),
+    (_automation(conditions=[_rule_ids("NotContains", "r1")]), {"name": "r1", "kind": "Scheduled", "creates_incidents": True}, False),
+    (_automation(conditions=[_rule_ids("NotContains", "r2")]), {"name": "r1", "kind": "Scheduled", "creates_incidents": True}, True),
+    (_automation(conditions=[SEVERITY]), {"name": "r1", "kind": "Scheduled", "creates_incidents": True}, None),
+    (_automation(conditions=[SEVERITY, _rule_ids("Contains", "r2")]), {"name": "r1", "kind": "Scheduled", "creates_incidents": True}, False),
+    # Disabled, expired or update-triggered rules don't run when a rule matches.
+    (_automation(enabled=False), {"name": "r1", "kind": "Scheduled", "creates_incidents": True}, False),
+    (_automation(expires=NOW - timedelta(days=1)), {"name": "r1", "kind": "Scheduled", "creates_incidents": True}, False),
+    (_automation(when="Updated"), {"name": "r1", "kind": "Scheduled", "creates_incidents": True}, False),
+])
+def test_an_automation_rule_applies_to_an_analytics_rule(automation, rule, expected):
+    assert MODS["sentinel_analytics_rules"].applies_to(automation, rule) is expected
+
+
+def test_reach_takes_the_surest_automation_rule_and_names_them():
+    ar = MODS["sentinel_analytics_rules"]
+    rule = {"name": "r1", "kind": "Scheduled", "creates_incidents": True}
+    maybe = _automation("by severity", conditions=[SEVERITY])
+    sure = _automation("catch-all")
+    assert ar.automation_reach(rule, [maybe]) == {"reaches_automation": None, "automation_rules": [],
+                                                  "automation_rules_possibly": ["by severity"]}
+    assert ar.automation_reach(rule, [maybe, sure])["reaches_automation"] is True
+    assert ar.automation_reach(rule, [])["reaches_automation"] is False
+
+
+def test_reach_totals_and_verdict():
+    ar = MODS["sentinel_analytics_rules"]
+
+    def ws(sure, maybe, never):
+        return {"rules_reaching_automation": sure, "rules_possibly_reaching_automation": maybe,
+                "rules_not_reaching_automation": never}
+    assert ar.reach_totals([ws(3, 0, 0), ws(2, 0, 0)])["all_enabled_rules_reach_automation"] is True
+    assert ar.reach_totals([ws(3, 1, 0)])["all_enabled_rules_reach_automation"] is None
+    assert ar.reach_totals([ws(3, 1, 1)])["all_enabled_rules_reach_automation"] is False
+    assert ar.reach_totals([ws(0, 0, 0)])["all_enabled_rules_reach_automation"] is None
+    unread = ar.reach_totals([ws(3, 0, 0), ws(None, None, None)])
+    assert unread == {"rules_reaching_automation": None, "rules_possibly_reaching_automation": None,
+                      "rules_not_reaching_automation": None, "all_enabled_rules_reach_automation": None}
+
+
+def test_analytics_rules_read_automation_rules_for_reach(azure, tmp_path):
+    # The fixture's only active automation rule runs on new incidents of High severity: a data-dependent condition.
+    code, ev = run("sentinel_analytics_rules", tmp_path)
+    ws = ws_a(ev)
+    assert code == 0 and ws["automation_rules_read"] == 2
+    enabled = [r for r in ws["rules"] if r["enabled"] is True]
+    assert {r["reaches_automation"] for r in enabled} <= {None, False}
+    assert ev["summary"]["rules_reaching_automation"] == 0
+    assert ev["summary"]["all_enabled_rules_reach_automation"] in (None, False)
+
+
+def test_a_refused_automation_listing_leaves_reach_unknown_and_is_noted(azure, tmp_path):
+    azure.arm[(f"{SI_A}/automationRules", "2025-09-01")] = Resp(403, {"error": {"code": "AuthorizationFailed", "message": "no"}})
+    code, ev = run("sentinel_analytics_rules", tmp_path)
+    ws = ws_a(ev)
+    assert code == 0 and ws["automation_rules_read"] is None
+    assert all(r["reaches_automation"] is None for r in ws["rules"])
+    assert any("automation rule listing failed" in n for n in ws["notes"])
+    assert ev["summary"]["rules_reaching_automation"] is None
+    assert ev["summary"]["all_enabled_rules_reach_automation"] is None
