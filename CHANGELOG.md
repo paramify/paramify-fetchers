@@ -26,13 +26,16 @@ schemas and the `paramify` CLI — not the internal code.
   changeset and fails, writing no evidence, if one is missing, empty or can't be read. A linked changeset is then in
   scope only if a file it changed (or renamed from) is under an included path, read from the changeset read the
   fetcher already makes and paged to the end of its change list when that read didn't list every file; one whose
-  changed files can't all be read stays in scope. Others are left out under `results.excluded`, as `not_included`, or as `not_readable` when the
-  identity can't read them (TF14098, 401 or 403), which no longer fails the run. Each entry names the work items that
-  link it. `changed_before_approval`, `approved_by_change_author` and `first_linked_change` use in-scope changesets
-  only; an item whose changesets were all left out has none to check, as an item linked to nothing, and doesn't hold
-  the summary's change-order lists unknown. New: `results.changeset_inclusion_checks`, `results.excluded`, and in the
-  summary `changeset_inclusion_patterns`, `in_scope_changesets`, `not_included_changesets` and
-  `not_readable_changesets`. Unset, a refused changeset still fails the run and the evidence only gains these keys.
+  changed files can't all be read stays in scope. Others are left out under `results.excluded`, as `not_included`,
+  or as `not_readable` when the identity can't read them (TF14098, 401 or 403), which no longer fails the run. After a
+  refused changeset, every included path is read again at the end of the changeset reads, and one that no longer reads
+  fails the run without evidence, so access lost mid-run can't pass as changesets outside the paths. Each entry names
+  the work items that link it. `changed_before_approval`, `approved_by_change_author` and `first_linked_change` use
+  in-scope changesets only; an item whose changesets were all left out has none to check, as an item linked to
+  nothing, and doesn't hold the summary's change-order lists unknown. New: `results.changeset_inclusion_checks`,
+  `results.changeset_inclusion_recheck`, `results.excluded`, and in the summary `changeset_inclusion_patterns`,
+  `in_scope_changesets`, `not_included_changesets`, `not_readable_changesets` and `changeset_inclusions_rechecked`.
+  Unset, a refused changeset still fails the run and the evidence only gains these keys.
 
 ### Added
 

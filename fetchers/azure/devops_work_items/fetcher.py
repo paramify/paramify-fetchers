@@ -286,13 +286,14 @@ def check_included_path(client: DevOpsClient, path: str, found: Dict[str, Any]) 
     found["readable"] = True
 
 
-def check_inclusions(client: DevOpsClient, collector: DevOpsCollector, scope: ChangesetScope) -> List[Dict[str, Any]]:
+def check_inclusions(client: DevOpsClient, collector: DevOpsCollector, scope: ChangesetScope,
+                     operation: str = "tfvc.inclusion_check") -> List[Dict[str, Any]]:
     """Each included path's read check, so a changeset refused later can be told apart from lost access."""
     out, done = [], {}
     for pattern, path in scope.checks():
         if tfvc_key(path) not in done:
             found = done[tfvc_key(path)] = {"readable": False, "latest_changeset": None}
-            collector.guard(f"tfvc.inclusion_check({path})", partial(check_included_path, client, path, found))
+            collector.guard(f"{operation}({path})", partial(check_included_path, client, path, found))
         out.append({"pattern": pattern, "path": path, **done[tfvc_key(path)]})
     return out
 
@@ -803,7 +804,7 @@ def ids_of(items: Iterable[Dict[str, Any]]) -> List[Any]:
 
 def summarize(items: List[Dict[str, Any]], projects: List[Dict[str, Any]], listed: bool, selection: Selection,
               days: int, changesets: Optional[Dict[int, Optional[Dict[str, Any]]]] = None,
-              left_out: Optional[Dict[int, str]] = None) -> Dict[str, Any]:
+              left_out: Optional[Dict[int, str]] = None, rechecked: bool = False) -> Dict[str, Any]:
     """Counts read null when a project's items couldn't be listed; approval figures when an item's history couldn't."""
     queried = listed and all(p["work_items"] is not None for p in projects)
     left_out = left_out or {}
@@ -870,6 +871,7 @@ def summarize(items: List[Dict[str, Any]], projects: List[Dict[str, Any]], liste
         "in_scope_changesets": known(sum(1 for c in (changesets or {}).values() if c)),
         "not_included_changesets": known(sum(1 for r in left_out.values() if r == NOT_INCLUDED), included),
         "not_readable_changesets": known(sum(1 for r in left_out.values() if r == NOT_READABLE), included),
+        "changeset_inclusions_rechecked": rechecked if included else None,
         "change_items_linked_changes_checked": known(len(checked), history),
         "change_items_changed_before_approval": known(
             ids_of(i for i in change if i["changed_before_approval"] and not i["emergency_type"]), every),
@@ -922,6 +924,14 @@ def collect(client: DevOpsClient, collector: DevOpsCollector) -> Tuple[Dict[str,
 
     changesets, left_out = read_changesets(client, collector, (c for i in items for c in i["links"]["changesets"]
                                                                if isinstance(c, int)), scope)
+    recheck = None
+    if NOT_READABLE in left_out.values():
+        # A refusal can also be access lost mid-run, so every included path must still read at the end.
+        recheck = check_inclusions(client, collector, scope, "tfvc.inclusion_recheck")
+        if not all(c["readable"] for c in recheck):
+            collector.withhold("an included TFVC path no longer reads, so a refused changeset can't be told from "
+                               "lost access")
+            return {}, {}
     for item in items:
         link_changes(item, changesets, left_out)
     items.sort(key=lambda i: (str(i["project"]), str(i["id"]).zfill(12)))
@@ -943,9 +953,10 @@ def collect(client: DevOpsClient, collector: DevOpsCollector) -> Tuple[Dict[str,
         "work_items": items,
         "changesets": [c for _, c in sorted(changesets.items()) if c],
         "changeset_inclusion_checks": checks,
+        "changeset_inclusion_recheck": recheck,
         "excluded": excluded,
     }
-    return results, summarize(items, projects, listed, selection, days, changesets, left_out)
+    return results, summarize(items, projects, listed, selection, days, changesets, left_out, recheck is not None)
 
 
 if __name__ == "__main__":

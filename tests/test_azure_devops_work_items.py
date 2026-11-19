@@ -1183,6 +1183,42 @@ def test_included_paths_are_read_first_and_a_refused_changeset_is_left_out(tmp_p
     assert (read["maxChangeCount"], read["includeSourceRename"]) == (100, "true")
 
 
+def test_a_refused_changeset_has_the_included_paths_read_again_at_the_end(tmp_path, monkeypatch):
+    include(monkeypatch)
+    fake = scoped(FakeADO(), {501: [change(f"{INCLUDED}/a.cs")], 502: err(500, TF14098.format(502))})
+    code, evidence, status, fake, _ = run(tmp_path, fake)
+    assert code == 0 and status is None
+    assert evidence["results"]["changeset_inclusion_recheck"] == [
+        {"pattern": f"path:{INCLUDED}", "path": INCLUDED, "readable": True, "latest_changeset": 900}]
+    assert evidence["summary"]["changeset_inclusions_rechecked"] is True
+    paths = [path for _, path, _, _ in fake.calls]
+    checks = [n for n, path in enumerate(paths) if path == "/contoso/_apis/tfvc/changesets"]
+    assert len(checks) == 2 and checks[1] > paths.index("/contoso/_apis/tfvc/changesets/502")
+
+
+@pytest.mark.parametrize("lost", ["path", "latest"])
+def test_a_recheck_that_no_longer_reads_withholds_the_evidence(tmp_path, monkeypatch, lost):
+    include(monkeypatch)
+    fake = scoped(FakeADO(), {501: [change(f"{INCLUDED}/a.cs")], 502: err(500, TF14098.format(502))})
+    if lost == "path":  # the path itself answers as missing the second time
+        route = ("GET", "/contoso/_apis/tfvc/changesets")
+        refusal = err(404, f"VS403405: The item {INCLUDED} does not exist on the server, or you do not have "
+                           "permission to access it.", "ItemNotFoundException")
+    else:  # its latest changeset is refused the second time
+        route, refusal = ("GET", "/contoso/_apis/tfvc/changesets/900"), err(500, TF14098.format(900))
+    first, seen = fake.routes[route], []
+
+    def answer(params, body):
+        seen.append(1)
+        if len(seen) > 1:
+            return refusal
+        return first(params, body) if callable(first) else first
+    fake.routes[route] = answer
+    code, status, fake = run_without_evidence(tmp_path, fake)
+    assert code == 1 and status["code"] == "not_authorized" and "tfvc.inclusion_recheck" in status["error"]
+    assert not (tmp_path / "azure_devops_work_items_contoso.json").exists()
+
+
 def test_a_changeset_with_no_file_under_an_included_path_is_not_included(tmp_path, monkeypatch):
     include(monkeypatch)
     fake = scoped(FakeADO(), {501: [change("$/ProjectA/Production2/app.cs"), change("$/ProjectB/Production/a.cs")],
@@ -1198,6 +1234,8 @@ def test_a_changeset_with_no_file_under_an_included_path_is_not_included(tmp_pat
     assert (s["in_scope_changesets"], s["not_included_changesets"], s["not_readable_changesets"]) == (1, 1, 0)
     assert s["change_items_changed_before_approval"] == [102] and s["change_items_linked_changes_checked"] == 1
     assert s["finished_change_items_without_linked_change"] == [103]
+    # Nothing was refused, so the paths aren't read again.
+    assert evidence["results"]["changeset_inclusion_recheck"] is None and s["changeset_inclusions_rechecked"] is False
 
 
 def outside(count, start=0):
@@ -1325,6 +1363,7 @@ def test_without_inclusions_the_evidence_only_gains_the_new_keys(tmp_path):
     assert code == 0
     results, s = evidence["results"], evidence["summary"]
     assert (results["changeset_inclusion_checks"], results["excluded"]) == ([], [])
+    assert results["changeset_inclusion_recheck"] is None and s["changeset_inclusions_rechecked"] is None
     assert results["selection"]["changeset_inclusions"] == [] and s["changeset_inclusion_patterns"] == []
     assert (s["in_scope_changesets"], s["not_included_changesets"], s["not_readable_changesets"]) == (2, None, None)
     tfvc = [(path, params) for _, path, params, _ in fake.calls if "/tfvc/" in path]
