@@ -2054,3 +2054,12 @@ def test_status_exits_2_for_a_manifest_that_does_not_exist(monkeypatch, tmp_path
     monkeypatch.setattr(api, "paramify_status", lambda *a, **k: pytest.fail("no manifest to read"))
     result = runner.invoke(app, ["status", str(tmp_path / "no-such.yaml")])
     assert result.exit_code == 2
+
+
+def test_scripts_sync_refuses_a_missing_default_manifest(tmp_path, monkeypatch):
+    """Read as empty, the default manifest scoped the sweep to nothing; the
+    message points at the way out instead."""
+    monkeypatch.setattr(api, "find_repo_root", lambda *a, **k: tmp_path)
+    result = runner.invoke(app, ["scripts", "sync", "--dry-run", "--json"])
+    assert result.exit_code == 1
+    assert "--all" in json.loads(result.output)["errors"][0]

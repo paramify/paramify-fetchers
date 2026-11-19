@@ -1796,9 +1796,14 @@ def scripts_sync_cmd(
     include = None
     if not all_fetchers:
         mpath = _resolve_optional_manifest(root, manifest, json_out) or (root / _DEFAULT_MANIFEST)
-        # The default manifest is allowed to be absent — an empty include set
-        # then means "every fetcher", which is what --all asks for anyway. A
-        # name the user actually typed has already had to resolve.
+        if not mpath.is_file():
+            # Read as empty, it would scope the sweep to nothing.
+            msg = f"no manifest at {mpath}: name one, or pass --all to sync every fetcher"
+            if json_out:
+                typer.echo(json.dumps({"ok": False, "errors": [msg]}, indent=2))
+            else:
+                _err(msg)
+            raise typer.Exit(1)
         m = api.read_manifest(mpath)
         entries = (m.get("run") or {}).get("fetchers") or []
         include = {e.get("use") for e in entries if e.get("use")}

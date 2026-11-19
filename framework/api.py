@@ -68,6 +68,7 @@ from framework.issue_reports import (
 from framework.issue_reports import read_index as read_issue_report_index
 from framework.issue_reports import record_outputs as record_issue_reports
 from framework.paramify.client import base_url_error
+from framework.paramify.connection import settings as paramify_settings
 from framework.paramify_auth import (
     BASE_URL_ENV,
     READ_TOKEN_ENV,
@@ -1832,7 +1833,8 @@ def sync_validators(
     Scope precedence: explicit `reference_ids` > `manifest_path`'s fetchers'
     sets > whole registry. Create-or-skip; associates on create only; `update`
     opt-in patches existing. Fires sync_start / sync_validator / sync_complete.
-    Raises ValueError for setup errors; returns the syncer summary otherwise.
+    Raises ValueError for setup errors. A rejected token mid-sweep stops it: the
+    summary's `stopped` says why, and the lock still records what was created.
     """
     syncer = _load_paramify_validator_syncer(root)
     validators = syncer.collect_validators(root, manifest_path, reference_ids)
@@ -2460,12 +2462,10 @@ def scripts_sync_preflight(
     ``include`` restricts the fetcher count to those names (a manifest's
     fetchers); ``None`` counts every discovered fetcher.
     """
-    uploader = _load_paramify_scripts_uploader(root)
-    uploader.load_dotenv()
+    load_dotenv()
     config_path = _upload_config(root, config_path)
-    config = uploader.load_config(str(config_path)) if config_path else {}
-    paramify_cfg = config.get("paramify") or {}
-    base_url, base_url_source = resolve_base_url(paramify_cfg.get("base_url"))
+    config = (yaml_io.load_path(Path(config_path)) or {}) if config_path else {}
+    resolved = paramify_settings(config)
 
     errors: List[str] = []
     fetcher_count = 0
@@ -2478,25 +2478,18 @@ def scripts_sync_preflight(
         scope = "in the manifest " if include is not None else ""
         errors.append(f"No fetchers {scope}with an evidence_set and a readable entry file to sync")
 
-    url_error = uploader._base_url_error(base_url)
-    if url_error:
-        errors.append(url_error)
-
-    token, token_source = resolve_upload_token()
-    token_present = bool(token)
     # A token is required to write; dry-run still wants one to diff the tenant,
     # but tolerates its absence (it then reports every fetcher as a create).
-    if not token_present and not dry_run:
-        errors.append(_missing_token_error())
+    errors.extend(resolved.errors(need_token=not dry_run))
 
     return {
         "ok": not errors,
-        "base_url": base_url,
-        "base_url_source": base_url_source,
-        "base_url_label": describe_base_url(base_url),
+        "base_url": resolved.base_url,
+        "base_url_source": resolved.base_url_source,
+        "base_url_label": describe_base_url(resolved.base_url),
         "fetcher_count": fetcher_count,
-        "token_present": token_present,
-        "token_source": token_source,
+        "token_present": bool(resolved.token),
+        "token_source": resolved.token_source,
         "dry_run": dry_run,
         "errors": errors,
     }
@@ -2516,14 +2509,16 @@ def scripts_sync(
     """Sync fetcher entry scripts to Paramify and associate them to evidence sets.
 
     Fires sync_start / sync_item / sync_complete so front-ends can render
-    progress. Raises ValueError for setup errors; returns the uploader summary.
+    progress. Raises ValueError for setup errors, and ApiError when the workspace's
+    scripts cannot be read at all; a rejected token mid-sweep stops it, with the
+    summary's `stopped` saying why.
 
     ``include`` restricts the sweep to those fetcher names (a manifest's
     fetchers); ``None`` syncs every discovered fetcher.
     """
     uploader = _load_paramify_scripts_uploader(root)
     config_path = _upload_config(root, config_path)
-    config = uploader.load_config(str(config_path)) if config_path else {}
+    config = (yaml_io.load_path(Path(config_path)) or {}) if config_path else {}
     return uploader.sync_scripts(
         root,
         config=config,
