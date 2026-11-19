@@ -649,12 +649,13 @@ def test_to_pins_a_release_and_to_main_returns(main_repo, stubs, tmp_path):
     assert result.exit_code == 1 and "before paramify update existed" in doc["errors"][0]
 
 
-def test_notice_names_what_is_waiting(main_repo):
+def test_notice_names_what_is_waiting(main_repo, monkeypatch):
+    monkeypatch.setattr(up, "_background_fetch", lambda root: None)
     up.fetch(main_repo)
-    info = up.check_for_update(main_repo, fetch=False)
+    info = up.check_for_update(main_repo)
     assert (info["channel"], info["update_available"], info["waiting"]) == ("branch", True, "1 new commit on main")
     _git(main_repo, "switch", "-q", "--detach", "v0.1.0-beta")
-    info = up.check_for_update(main_repo, fetch=False)
+    info = up.check_for_update(main_repo)
     assert (info["channel"], info["waiting"]) == ("release", "0.3.0-beta is out")
 
 
@@ -692,7 +693,7 @@ def test_container_env_never_touches_git(repo, monkeypatch):
     assert result.exit_code == 2 and doc["update_available"] is None
     human = runner.invoke(app, ["update"])
     assert "docker compose -f deploy/docker-compose.yml build" in human.stdout
-    assert api.check_for_update(repo) is None
+    assert up.check_for_update(repo) is None
 
 
 def test_a_copy_without_git_counts_as_a_container(tmp_path, git_env):
@@ -819,7 +820,7 @@ def test_notice_is_due_once_a_day(repo):
 
 def test_notice_stays_out_of_json_and_pipes(repo, monkeypatch):
     called = []
-    monkeypatch.setattr(api, "check_for_update", lambda root: called.append(root))
+    monkeypatch.setattr(up, "check_for_update", lambda root: called.append(root))
     monkeypatch.setattr("sys.stdout.isatty", lambda: True)
     monkeypatch.setattr("sys.stderr.isatty", lambda: True)
     monkeypatch.setattr("sys.argv", ["paramify", "list", "--json"])
@@ -989,9 +990,28 @@ def test_a_blocked_plan_says_so(main_repo, stubs):
 
 
 def test_rollback_refusal_is_one_rule(main_repo):
-    assert up.rollback_refusal(main_repo) == "nothing to roll back to: no update has been recorded here " \
-                                             "(or it was already rolled back)"
+    assert "nothing to roll back to" in up.rollback_refusal(main_repo)
     up.write_state(main_repo, {"previous": {"sha": "a" * 40, "after": "b" * 40}})
     assert "has moved since the update" in up.rollback_refusal(main_repo)
     up.write_state(main_repo, {"previous": {"sha": "a" * 40, "after": _sha(main_repo)}})
     assert up.rollback_refusal(main_repo) is None
+
+
+def test_a_move_that_went_partway_keeps_a_record_of_where_it_left_the_clone(main_repo):
+    up.write_state(main_repo, {"previous": {"sha": "old", "after": "older"}})
+    pos = up.position(main_repo)
+    _git(main_repo, "fetch", "-q", "origin")
+    with pytest.raises(up.UpdateError):
+        with up.recorded_move(main_repo, pos, "f" * 40):
+            _git(main_repo, "switch", "-q", "--detach", "origin/main")  # the switch went through...
+            raise up.UpdateError("...and then the merge failed")
+    prev = up.read_state(main_repo)["previous"]
+    assert (prev["sha"], prev["after"]) == (pos["sha"], _sha(main_repo))
+    assert up.rollback_refusal(main_repo) is None  # so --rollback goes back one step, not two
+
+
+def test_rollback_json_names_its_target_like_an_update(main_repo, stubs):
+    _run("--yes", "--json")
+    result, doc = _run("--rollback", "--yes", "--json")
+    assert result.exit_code == 0, result.stdout
+    assert set(doc["target"]) >= {"sha", "branch", "label"} and doc["target"]["label"].startswith("main @ ")

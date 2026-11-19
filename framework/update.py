@@ -161,9 +161,9 @@ def list_releases(root: Path) -> List[Release]:
 FETCH_ARGS = ("fetch", "--tags", "--quiet", REMOTE)
 
 
-def fetch(root: Path, timeout: float = 90) -> None:
+def fetch(root: Path) -> None:
     """Bring in the remote's branches and release tags."""
-    git(root, *FETCH_ARGS, timeout=timeout)
+    git(root, *FETCH_ARGS, timeout=90)
 
 
 def current_branch(root: Path) -> Optional[str]:
@@ -215,7 +215,7 @@ def is_container(root: Path) -> bool:
     return bool(os.environ.get(CONTAINER_ENV)) or not (Path(root) / ".git").exists()
 
 
-def container_advice(root: Path) -> dict:
+def container_advice() -> dict:
     """What to tell someone who runs `update` where it can't work."""
     return {
         "ok": False,
@@ -295,6 +295,11 @@ def _refuse_own_commits(root: Path, branch: str, upstream: str, then: str) -> No
             f"{branch} has {mine} commit{'s' if mine != 1 else ''} that {upstream} does not, so update "
             f"can't fast-forward it. {then}"
         )
+
+
+def is_current(target: "Target", pos: dict) -> bool:
+    """Nothing to do: the clone is at the target, on the target's branch."""
+    return target.sha == pos["sha"] and target.branch == pos["branch"]
 
 
 def choose_target(root: Path, pos: dict, releases: Sequence[Release], to: Optional[str] = None) -> Target:
@@ -800,7 +805,7 @@ def locate(root: Path, to: Optional[str] = None, *, fetched: bool = True) -> dic
     target = choose_target(root, pos, list_releases(root), to=to)
     doc: Dict[str, Any] = {
         "current": {**pos, "label": describe(pos)}, "target": target.to_json(), "channel": target.channel,
-        "fetched": fetched, "up_to_date": target.sha == pos["sha"] and target.branch == pos["branch"],
+        "fetched": fetched, "up_to_date": is_current(target, pos),
     }
     if doc["up_to_date"]:
         doc["state"] = "up_to_date"
@@ -822,14 +827,20 @@ def locate(root: Path, to: Optional[str] = None, *, fetched: bool = True) -> dic
 def assess(root: Path, located: dict, python: str = sys.executable) -> dict:
     """The slow half: check the manifests on the target's own code, then say
     which breaking changes touch this clone, what is new, and what would stop
-    an unattended run (`stops`: manifests that would break, breaking changes
-    that touch, a Python too old). Returns `located` with those added."""
+    an unattended run (`stops`), as `state` (ready, or unrunnable when the
+    Python is too old) and `needs_allow_breaking`. Returns `located` with
+    those added."""
     target = Target(**located["target"])
     manifests = located["manifests"]
     check = check_target(root, target, manifests, python)
     rows = located["rows"]
     breaking = breaking_for(rows, manifests, check["has_local_fetchers"])
     new = [r for r in rows if r["tag"] != "breaking"]
+    stops = {
+        "breaks": [m["manifest"] for m in check["manifests"] if m["status"] == "breaks"],
+        "touching": [b["title"] for b in breaking if b["touches"]],
+        "python_required": check["python_required"],
+    }
     return {
         **located,
         "check": check,
@@ -840,11 +851,11 @@ def assess(root: Path, located: dict, python: str = sys.executable) -> dict:
         "tries": [h["try"] for h in new if h.get("try")],
         "used": len({u for m in manifests for u in m["uses"]}),
         "changelog": changelog_url(root, target),
-        "stops": {
-            "breaks": [m["manifest"] for m in check["manifests"] if m["status"] == "breaks"],
-            "touching": [b["title"] for b in breaking if b["touches"]],
-            "python_required": check["python_required"],
-        },
+        "stops": stops,
+        # Python too old for the target: shown, never applied. Breaking changes that touch this
+        # clone, or manifests that would break: asked twice, or --allow-breaking when unattended.
+        "state": "unrunnable" if stops["python_required"] else "ready",
+        "needs_allow_breaking": bool(stops["breaks"] or stops["touching"]),
     }
 
 
@@ -953,7 +964,7 @@ def install_command(root: Path, extras: Optional[List[str]], python: str = sys.e
 
 
 def environment() -> dict:
-    """The interpreter the reinstall targets, for the plan and the step line."""
+    """The interpreter the reinstall targets, as --json reports it."""
     venv = sys.prefix != sys.base_prefix
     return {
         "python": sys.executable,
@@ -1011,17 +1022,24 @@ def write_state(root: Path, state: dict) -> None:
 @contextmanager
 def recorded_move(root: Path, pos: dict, after_sha: str) -> Iterator[Optional[dict]]:
     """Record where the clone is before the body moves it to `after_sha`, so a
-    move cut short can still be rolled back. If the body raises, the record it
-    replaced is put back. Yields that replaced record, for a caller that undoes
-    the move later (forget_previous(root, replaced))."""
+    move cut short can still be rolled back. If the body raises before the
+    clone moved, the record it replaced is put back; if the clone did move
+    (a switch that went through before a merge failed), the new record stays,
+    pointing at where it actually is. Yields the replaced record, for a caller
+    that undoes the move later (forget_previous(root, replaced))."""
     state = read_state(root)
     replaced = state.get("previous")
-    state["previous"] = {"branch": pos["branch"], "sha": pos["sha"], "after": after_sha, "describe": describe(pos)}
+    record = {"branch": pos["branch"], "sha": pos["sha"], "after": after_sha, "describe": describe(pos)}
+    state["previous"] = record
     write_state(root, state)
     try:
         yield replaced
     except BaseException:
-        forget_previous(root, replaced)
+        now = position(root)
+        if (now["sha"], now["branch"]) == (pos["sha"], pos["branch"]):
+            forget_previous(root, replaced)
+        else:
+            forget_previous(root, {**record, "after": now["sha"]})
         raise
 
 
@@ -1067,7 +1085,7 @@ def update_status(root: Path) -> dict:
     """
     pos = position(root)
     target = choose_target(root, pos, list_releases(root))
-    available = target.sha != pos["sha"]
+    available = not is_current(target, pos)
     if not available:
         waiting = None
     elif target.channel == "branch":
@@ -1090,7 +1108,7 @@ def _background_fetch(root: Path) -> None:
     )
 
 
-def check_for_update(root: Path, *, now: Optional[float] = None, fetch: bool = True) -> Optional[dict]:
+def check_for_update(root: Path, *, now: Optional[float] = None) -> Optional[dict]:
     """update_status for a quiet notice: never slow, never an error.
 
     Fetches from origin at most once a day, in the background (the time is kept
@@ -1105,7 +1123,7 @@ def check_for_update(root: Path, *, now: Optional[float] = None, fetch: bool = T
         state = read_state(root)
         cache = state.get("update_check") or {}
         last_fetch = cache.get("fetched_at")
-        if fetch and (last_fetch is None or now - float(last_fetch) >= CHECK_INTERVAL):
+        if last_fetch is None or now - float(last_fetch) >= CHECK_INTERVAL:
             try:
                 _background_fetch(root)
             except OSError:

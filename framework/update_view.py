@@ -363,5 +363,5 @@ def fail(text: str) -> RenderableType:
     return Padding(t, (0, 0, 0, 2), expand=False)
 
 
-def note(text: str, cmd: Optional[str] = None) -> Text:
-    return line((text, "dim"), (cmd or "", "cyan"))
+def note(text: str) -> Text:
+    return line((text, "dim"))

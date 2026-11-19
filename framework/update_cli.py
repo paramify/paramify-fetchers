@@ -123,7 +123,7 @@ def update_cmd(
     root = api.find_repo_root()
 
     if up.is_container(root):
-        advice = up.container_advice(root)
+        advice = up.container_advice()
         if check:
             if json_out:
                 _emit({**advice, "update_available": None}, 2)
@@ -227,9 +227,9 @@ def _update(run: _Run, root: Path, *, to: Optional[str], expect: Optional[str], 
         run.console.print()
 
     stops = plan["stops"]
-    if stops["python_required"]:
+    if plan["state"] == "unrunnable":
         run.fail(f"{target['label']} needs Python {stops['python_required']}; make a venv with a newer Python first")
-    if (yes or run.json) and not allow_breaking and (stops["breaks"] or stops["touching"]):
+    if (yes or run.json) and not allow_breaking and plan["needs_allow_breaking"]:
         run.fail(f"stopped: {view.stop_reasons(stops)}. Read them above, then rerun with --allow-breaking "
                  f"(or without --yes)")
     question = f"Update {target['label']}?" if target["branch"] == pos["branch"] else f"Switch to {target['label']}?"
@@ -338,8 +338,9 @@ def _rollback(run: _Run, root: Path, yes: bool) -> NoReturn:
     manifests = up.user_manifests(root)
     label = prev.get("describe") or prev["sha"][:7]
     current = {**pos, "label": up.describe(pos)}
-    run.doc.update(current=current, target=prev, direction="rollback")
-    run.show(view.header({"current": current, "target": {"label": label}, "direction": "rollback"}))
+    target = {"sha": prev["sha"], "branch": prev.get("branch"), "label": label}
+    run.doc.update(current=current, target=target, direction="rollback")
+    run.show(view.header({"current": current, "target": target, "direction": "rollback"}))
     _confirmed(run, f"Go back to {label}?", yes, "rolling back")
     if not run.json:
         run.console.print()
@@ -377,7 +378,7 @@ def maybe_notice(subcommand: Optional[str]) -> None:
         root = api.find_repo_root()
         if not up.notice_due(root):
             return
-        info = api.check_for_update(root)
+        info = up.check_for_update(root)
         up.mark_notice(root)
         if not info or not info["update_available"]:
             return
