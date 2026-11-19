@@ -1,7 +1,7 @@
 name: azure_activity_log_alerts
-version: 0.3.1
+version: 0.4.0
 description: >-
-  Shows which security-relevant control-plane operations and App Service changes an enabled activity log alert covers, and whether those alerts reach a person.
+  Shows which security-relevant control-plane operations, App Service changes and changes to protected log storage an enabled activity log alert covers, and whether those alerts reach a person.
 category: azure
 
 config_schema:
@@ -154,3 +154,16 @@ evidence_set:
     - change_operations_total — Number of App Service changes in change_operation_coverage; always 4
     - all_change_operations_covered — True if every App Service change is marked true; false if any is marked false; null if none is false but some are only possibly covered
     - uncovered_change_operations — List of the App Service changes marked false in change_operation_coverage
+
+    Does a person get alerted to attempts to alter protected log storage?
+    - log_storage_protection_coverage — For each change that would let immutable log storage be altered or removed, true if an alert that reaches a person fires on it (on any attempt, including one Azure denies); null if only an alert that might reach a person does; false otherwise:
+      - delete_immutability_policy (Microsoft.Storage/storageAccounts/blobServices/containers/immutabilityPolicies/delete)
+      - change_immutability_policy (containers/immutabilityPolicies/write)
+      - clear_legal_hold (containers/clearLegalHold/action)
+      - delete_blob_container (containers/delete)
+      - delete_storage_account (Microsoft.Storage/storageAccounts/delete)
+    - log_storage_protection_operations_covered — Number of those changes marked true in log_storage_protection_coverage
+    - log_storage_protection_operations_possibly_covered — Number marked null in log_storage_protection_coverage
+    - log_storage_protection_operations_total — Number of changes in log_storage_protection_coverage; always 5
+    - all_log_storage_protection_operations_covered — True if every change is marked true; false if any is marked false; null if none is false but some are only possibly covered
+    - uncovered_log_storage_protection_operations — List of the changes marked false in log_storage_protection_coverage
