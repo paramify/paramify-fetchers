@@ -1,5 +1,5 @@
 """delivery provider, plan side: routing (stack, channel, artifact request), batch
-attribution from artifact notes, and the WAF pre-check. One test per row of the
+attribution from artifact notes, and which files are sent. One test per row of the
 spec's delivery diff tables, plus observe against the in-process fake API."""
 from __future__ import annotations
 
@@ -26,7 +26,6 @@ from framework.paramify.resources import (
 )
 from framework.paramify.version import FLAG_OFF, Capability
 from framework.sync.model import UNKNOWN, Plan, Ref, SyncContext
-from framework.sync.providers import waf
 from framework.sync.providers.delivery import DIRECT, DeliveryProvider, EntryObserved
 from framework.sync.providers.delivery_routing import (
     DirectRoute,
@@ -595,42 +594,13 @@ def test_files_zero_sendable_files_plans_no_batch(tmp_path):
     assert a.summary == "nothing to send: 1 file skipped"
 
 
-def test_files_waf_match_dropped(tmp_path):
-    bad = write_file(tmp_path, "bad.json", payload={"cmd": "cd ../etc"})
+def test_files_holding_waf_strings_are_sent(tmp_path):
+    # CVE text often holds these; the upload routes are exempt from the WAF's body rules,
+    # so the plan sends the file and only a real 403 drops it.
+    bad = write_file(tmp_path, "cve.json", payload={"desc": "cd ../etc; /bin/bash; /etc/passwd; <script>x</script>"})
     a = plan_one(entry(tmp_path, files=("a.json", bad)), observed(evidence()))
-    assert a.verb == "deliver"
-    assert [f["original_file_name"] for f in a.payload["files"]] == ["a.json"]
-    [drop] = a.payload["dropped"]
-    assert drop["original_file_name"] == "bad.json"
-    assert drop["reason"].startswith("blocked by the production WAF") and "'../'" in drop["reason"]
-
-
-def test_all_files_dropped_creates_no_batch(tmp_path):
-    bad = write_file(tmp_path, "bad.json", payload={"html": "<script>x</script>"})
-    a = plan_one(entry(tmp_path, files=(bad,)), observed(evidence(CH_P)))
-    assert a.verb == "refuse" and a.summary == "every file was dropped"
-    assert a.fix and len(a.payload["dropped"]) == 1
-
-
-def test_waf_in_payload_mode_scans_only_the_payload(tmp_path):
-    body = {"schema_version": "1.0", "metadata": {"fetcher_name": "aws_x", "src": "/bin/sh"}, "payload": {"k": 1}}
-    (tmp_path / "m.json").write_text(json.dumps(body))
-    f = DeliveryFile(tmp_path / "m.json", "m.json", "t", note(entry="aws_x"), "evidence", None)
-    p = provider()
-    assert p.desired(SyncContext(None, {"artifact_payload": "payload"})) == []
-    [a] = p.diff([entry(tmp_path, files=(f,))], {"aws_x": observed(evidence())})
-    assert a.payload["dropped"] == []
-    [b] = provider().diff([entry(tmp_path, files=(f,))], {"aws_x": observed(evidence())})
-    assert b.verb == "refuse"
-
-
-def test_waf_scan_signatures_and_note():
-    assert [s for s, _ in waf.SIGNATURES] == ["../", "/etc/passwd", "/bin/sh", "/bin/bash", "<script"]
-    assert all(rule for _, rule in waf.SIGNATURES)
-    assert waf.scan(b'{"a": "/bin/bash -c x; /bin/sh"}', "fetcher=x") == ["/bin/sh", "/bin/bash"]
-    assert waf.scan(b"{}", "target=../x") == ["../"]
-    assert waf.scan(b"{}", "", title="a<script") == ["<script"]
-    assert waf.scan(b"$( && rm -rf <b>", "") == []
+    assert a.verb == "deliver" and "dropped" not in a.payload
+    assert [f["original_file_name"] for f in a.payload["files"]] == ["a.json", "cve.json"]
 
 
 # ---- a set created in this run ----------------------------------------------
@@ -648,22 +618,20 @@ def test_set_created_in_same_run_targets_ref(tmp_path):
 # ---- offline ----------------------------------------------------------------
 
 def test_offline_plan_has_unknown_routing(tmp_path):
-    bad = write_file(tmp_path, "bad.json", payload={"p": "/etc/passwd"})
     skipped = write_file(tmp_path, "c.json", skip="not envelope-wrapped")
-    e = entry(tmp_path, files=("a.json", bad, skipped))
+    e = entry(tmp_path, files=("a.json", "b.json", skipped))
     p = provider()
     obs = p.observe([e], None)
     assert obs == {"aws_x": UNKNOWN}
     [a] = p.diff([e], obs)
     assert a.verb == "deliver"
     assert a.changes == {"stack": UNKNOWN, "channel": UNKNOWN, "target": UNKNOWN}
-    assert [f["original_file_name"] for f in a.payload["files"]] == ["a.json"]
-    assert [d["original_file_name"] for d in a.payload["dropped"]] == ["bad.json"]
+    assert [f["original_file_name"] for f in a.payload["files"]] == ["a.json", "b.json"]
     assert [s["original_file_name"] for s in a.payload["skipped"]] == ["c.json"]
     json.dumps(Plan([a]).to_json())
-    all_bad = entry(tmp_path, key="k2", use="k2", files=(bad,))
-    [r] = p.diff([all_bad], {"k2": UNKNOWN})
-    assert r.verb == "refuse"
+    all_skipped = entry(tmp_path, key="k2", use="k2", files=(skipped,))
+    [r] = p.diff([all_skipped], {"k2": UNKNOWN})
+    assert r.verb == "noop"
 
 
 # ---- observe against the fake API -------------------------------------------
@@ -851,11 +819,12 @@ def test_observe_stale_recorded_batch_is_ignored(tmp_path):
     assert a.verb == "deliver" and a.payload["resume_batch_id"] is None
 
 
-@pytest.mark.parametrize("bad", ["../", "/etc/passwd", "/bin/sh", "/bin/bash", "<script"])
-def test_every_signature_drops(tmp_path, bad):
-    f = write_file(tmp_path, "x.json", payload={"v": f"a {bad} b"})
+@pytest.mark.parametrize("text", ["../", "/etc/passwd", "/bin/sh", "/bin/bash", "<script"])
+def test_former_waf_signatures_are_sent(tmp_path, text):
+    # These used to be dropped before the upload; the WAF exempts the upload routes.
+    f = write_file(tmp_path, "x.json", payload={"v": f"a {text} b"})
     a = plan_one(entry(tmp_path, files=("a.json", f)), observed(evidence()))
-    assert [d["original_file_name"] for d in a.payload["dropped"]] == ["x.json"]
+    assert [f["original_file_name"] for f in a.payload["files"]] == ["a.json", "x.json"]
 
 
 # ---- direct delivery --------------------------------------------------------

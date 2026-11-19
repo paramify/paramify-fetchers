@@ -85,7 +85,7 @@ RichLog:focus {
     padding: 0 1;
 }
 #app-header-left { width: auto; }
-#app-header-crumb { width: 1fr; text-align: center; color: #7DCFFF; }
+#app-header-crumb { width: 1fr; min-width: 6; height: 1; text-wrap: nowrap; text-overflow: ellipsis; text-align: center; color: #7DCFFF; }
 #app-header-clock { width: auto; color: $text-muted; }
 
 #app-footer {
@@ -469,3 +469,23 @@ ModalScreen {
     margin-top: 0;
 }
 
+/* ---- update: the quiet notice, and the screen that applies it ---- */
+UpdateNotice {
+    width: auto;
+    height: 1;
+    padding: 0 1;
+    text-wrap: nowrap;
+}
+#welcome-update { width: 100%; text-align: center; padding: 0; }
+
+#update-root { padding: 1 2; }
+#update-title { padding-bottom: 1; }
+#update-body { height: 1fr; }
+#update-header { padding-bottom: 1; }
+#update-check { height: auto; padding-bottom: 1; }
+.update-heading { height: auto; }
+#update-fetchers { height: auto; max-height: 10; margin-bottom: 1; }
+#update-breaking, #update-new, #update-rest { height: auto; padding-bottom: 1; }
+#update-result { height: auto; padding-top: 1; }
+#update-buttons { height: auto; padding-top: 1; }
+#update-buttons Button { margin-right: 2; }

@@ -1,10 +1,21 @@
 name: azure_aks_cluster_configuration
-version: 0.5.0
+version: 0.7.0
 description: >-
   Shows whether each AKS cluster's API server is private or IP-restricted, who can sign in, and whether it has network policy, auto-upgrade, Defender and Azure Monitor.
 category: azure
 
 config_schema:
+  expected_autoscaling_pools:
+    type: string
+    required: false
+    env: AZURE_AKS_EXPECTED_AUTOSCALING_POOLS
+    description: >
+      Comma-separated node pools that must have the cluster autoscaler on, as pool (checked in every in-scope cluster)
+      or cluster/pool (checked only in that cluster, since pool names are unique only within a cluster). Leave out pools
+      that are deliberately a fixed size. A listed pool that isn't in its cluster, or whose cluster isn't in the
+      subscription, is reported missing; a pool at zero nodes stays expected and is judged like any other. There is no
+      default: while it is unset, the expected-pool fields are null. An entry not in that form fails the run as
+      bad_config.
   resource_exclusions:
     type: patterns
     prefixes: [rg, location, id]
@@ -63,6 +74,7 @@ ksis:
   - KSI-IAM-ELP   # Kubernetes RBAC + Entra-integrated Azure RBAC, local admin accounts disabled
   - KSI-IAM-SNU   # workload identity and the OIDC issuer
   - KSI-SVC-EIS   # cluster and node-OS auto-upgrade channels
+  - KSI-CNA-OFA   # node pools with the cluster autoscaler
 
 evidence_set:
   reference_id: EVD-AZURE-AKS-CONFIG
@@ -90,6 +102,17 @@ evidence_set:
     Which clusters and node pools were checked?
     - total_clusters — Number of in-scope AKS clusters, including clusters still provisioning or in a failed state; every count below about clusters is out of this total; null when the cluster list could not be read, as is every count below
     - total_agent_pools — Number of node pools (agent pools) across the in-scope clusters; null when the cluster list could not be read
+    - autoscaling_agent_pools — Number of node pools with the cluster autoscaler enabled; a cluster that scales with node auto-provisioning instead adds nodes without the cluster autoscaler on its pools, so its pools do not count here; null when the cluster list could not be read
+    - expected_autoscaling_pools — Number of expected pool checks: each cluster/pool entry once, and each pool entry once per in-scope cluster; null while expected_autoscaling_pools is not set or the cluster list could not be read, as are the fields below
+    - expected_autoscaling_pools_missing — Number of expected pools not found in their cluster, including those whose bound cluster isn't in the subscription
+    - expected_autoscaling_pools_missing_names — List of the missing expected pools, each as cluster/pool
+    - expected_autoscaling_pools_not_autoscaling — Number of expected pools that exist but don't have the cluster autoscaler on
+    - expected_autoscaling_pools_not_autoscaling_names — List of those pools, each as cluster/pool
+    - expected_autoscaling_pools_at_zero_nodes — Number of expected pools that exist with zero nodes; they stay expected and are judged on their autoscaler like any other
+    - all_expected_pools_autoscaling — True if every expected pool exists and has the cluster autoscaler on; false if any is missing or not autoscaling, or nothing was checked
+    - node_os_auto_upgrade_clusters — Number of clusters whose node OS upgrade channel replaces or patches node images automatically (SecurityPatch or NodeImage); Unmanaged and None do not, and an enabled channel does not show that updates were applied
+    - node_os_unmanaged_clusters — Number of clusters on the Unmanaged node OS channel, which leaves node images alone but lets the node OS install its own updates (on Ubuntu, nightly security updates with no automatic reboot); counted apart, never as automatic and never as unpatched
+    - node_os_upgrade_channel_unknown_clusters — Number of clusters for which Azure returned no node OS upgrade channel; counted apart, never as automatic
     - kubernetes_versions — List of the distinct Kubernetes versions the clusters are set to run (the requested version, which an upgrade in progress may not have reached yet), sorted; null when the cluster list could not be read
     - provider_registration_status — Whether the AKS provider (Microsoft.ContainerService) is registered on the subscription: registered, not_registered or unknown
 

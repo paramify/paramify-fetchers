@@ -10,8 +10,78 @@ schemas and the `paramify` CLI — not the internal code.
 
 ## [Unreleased]
 
+### Changed
+
+- **`azure_aks_cluster_configuration` 0.7.0: autoscaling for expected pools.** A new `expected_autoscaling_pools`
+  setting lists the node pools that must have the cluster autoscaler on, as `pool` (every cluster) or `cluster/pool`.
+  Missing pools and pools without the autoscaler are counted and named, a pool at zero nodes stays expected, and
+  `all_expected_pools_autoscaling` gives one verdict. Each pool now records `min_count`. Unset, the fields stay null.
+
 ### Added
 
+- **One-line install.** `curl -fsSL https://raw.githubusercontent.com/paramify/paramify-fetchers/main/install.sh |
+  bash` clones the repo to `~/paramify-fetchers`, installs the CLI and TUI into the clone's `.venv`, and links
+  `paramify` into `~/.local/bin`. In a terminal it shows a spinner and elapsed time for each step, offers to add
+  `~/.local/bin` to your shell profile and to open the TUI, and installs with uv when uv is on your `PATH`.
+  `PARAMIFY_DIR`, `PARAMIFY_REF`, `PARAMIFY_EXTRAS` and `PARAMIFY_REPO_URL` change the defaults. It finds a Python
+  3.11 or later even when `python3` is older (as on macOS), has uv provide one when none is installed, rebuilds a
+  `.venv` left on an older Python, names the install command for your OS when git or Python is missing, refuses a
+  directory that is not a clone, and leaves an existing clone's code alone. A CI job shellchecks it and runs it end to
+  end. The README's manual install now covers uv, choosing a Python 3.11+ explicitly, and the errors an older Python
+  causes.
+- **`paramify update`** brings a clone up to date: a clone on `main` is fast-forwarded to `origin/main`, a clone
+  pinned to a release moves to the newest release, and `--to main` / `--to vX.Y.Z-beta` switch between them. Before it
+  moves it runs the target's own `paramify validate` on each manifest in a temporary worktree and shows which of your
+  fetchers change (with versions), the breaking changes that touch this clone and a few highlights. It reinstalls only
+  when `pyproject.toml` changed. Also `--check` (exit 0/1/2), `--rollback`, `--yes`, `--allow-breaking`, `--json`, `--expect <sha>` (move
+  only to the commit a plan showed), and
+  a once-a-day notice (`PARAMIFY_NO_UPDATE_CHECK=1` turns it off). See `docs/versioning_guide.md`.
+- **The TUI shows when an update is waiting and applies it.** A quiet `↑ 12 new commits on main · press U` line
+  in the header and on the welcome screen (it gives way first when the header is short of room); `U` opens the plan
+  `paramify update` shows, with Apply (a second confirmation when breaking changes touch this clone) and Roll back.
+  The update runs as a subprocess, so the running TUI never loads half-replaced code.
+- **Update notes**, `releases/unreleased.yaml` and `releases/<version>.yaml`: the short rows `paramify update` shows
+  instead of the CHANGELOG. Add a row with the change; format in `releases/README.md`.
+- Manifest: `concurrency` on a fetcher entry (1 to 32, default 1) runs up to that many of its targets at once. Each
+  concurrent target writes to its own staging directory, moved into the run directory in target order, so results,
+  envelopes and `_run_metadata.json` keep target order and a file name two targets share still fails the later one
+  with `output_overwritten`. Live output lines start with the target. `paramify validate` notes a `concurrency` that
+  has no effect (a fetcher without targets, or fewer than two).
+- **`azure_endpoint_availability` fetcher.** Reads Application Insights availability tests and their hourly
+  results, and Standard load balancers' data-path (VipAvailability) and health-probe (DipAvailability)
+  availability with measurement coverage, each judged against an availability target once one is set (none by
+  default) and only when every hour was measured; items that cannot be judged are counted apart, so one new or
+  unread test never leaves the verdict on the others unknown. A load balancer's data path is read only when it has
+  load-balancing rules and its health probe only when it has probes, so outbound-only load balancers are counted
+  apart instead of reading as unmeasured. Reads classic ping test URLs from their XML, and honours location:
+  exclusions. Reports whether tests check the status code and content. Unread results leave verdicts null rather
+  than 0.
+- **Summary counts for database encryption, AKS autoscaling and node OS patching.**
+  `azure_postgresql_configuration` and `azure_mysql_configuration` 0.3.0 add `customer_managed_key_servers` and
+  `data_encryption_unknown_servers` from each server's data encryption type (AzureKeyVault or SystemManaged); a
+  server with no type is counted apart, never as platform-managed. `azure_aks_cluster_configuration` 0.6.0 adds
+  `autoscaling_agent_pools`, `node_os_auto_upgrade_clusters` (SecurityPatch or NodeImage),
+  `node_os_unmanaged_clusters` (Unmanaged, where the node OS may still install its own updates, counted apart) and
+  `node_os_upgrade_channel_unknown_clusters`, null like the other counts when the cluster list can't be read.
+- **`azure_flexible_server_backups` fetcher.** Reads Azure Database for PostgreSQL and MySQL flexible servers: each
+  server's newest completed automatic backup against a window (manual, on-demand backups reported apart, and backups
+  whose labels match no known value counted as unknown, never automatic), backup retention against an optional minimum
+  authorized period (unknown retention counted apart), geo-redundant backup, stopped servers, and servers created by point-in-time restore within an
+  optional restore-test interval. One API version that serves both the server and backup lists is used. Read replicas are counted, not judged. Unread
+  backup lists leave verdicts null rather than 0.
+- **`azure_velero_backups` fetcher.** Reads Velero backup storage locations in Azure Blob Storage, from Azure APIs
+  only: each backup's phase, schedule, completion time and expiry, missed runs of configured expected schedules,
+  schedules past the recovery point objective, each restore's result, and whether the backup
+  storage is geo-replicated and encrypted with a customer-managed key. Missed runs come from the gaps between
+  Completed backups, with 10% grace, and only over the part of the lookback the backups are kept for, so a backup
+  Velero deleted at the end of its retention is not a missed run. A listed schedule is judged against its own
+  interval. Failed backups, incomplete snapshots and restores with errors are counted in full and again as
+  current (unresolved) failures. A failed scheduled backup resolves through a later success of its schedule,
+  and any failure through its own retry (`<name><retry_suffix>`) when a retry suffix is set; a failed restore resolves
+  only through its own retry, since storage doesn't record which backup a restore used. No failure is excluded by
+  name or label, and labelled validation backups are counted, still judged. Blob reads go only
+  to endpoints Resource Manager returned for in-scope accounts in the target subscription, with redirects refused,
+  retry dropped connections, and parse XML with defusedxml. Unread locations leave counts null rather than 0.
 - **`wiz_inventory`**, the Wiz cloud resource inventory, as a pipeline fetcher (`kind: inventory`, `id_scheme:
   wiz-resource-id`). One record per resource from `cloudResourcesV2` under `payload.data`, keyed by the Wiz resource
   id, with its cloud ID (`external_id`), account, region, type, IPs, OS, image, environment and owner, and internet
@@ -29,6 +99,17 @@ schemas and the `paramify` CLI — not the internal code.
   `approval: MANUAL` on one (the pipeline waits for someone to approve each batch). It also refuses a registry
   validator that targets a pipeline evidence set, since a failing validator means the batch never approves.
   Validator sync leaves pipeline sets out of an explicit `reference_ids` list.
+- **`paramify env`** prints what a manifest needs from the environment: only the variables it reads, grouped by
+  tool, each with a short note and whether it is required, Paramify's upload token first, so you know what to set in
+  your secret manager; `--json` lists them for a script (with the fetchers that read each, and whether it is set),
+  never a value. It lists what a run reads: the manifest's
+  `${env:}` references (a remapped secret, one token per target, a config value, `run.platforms`) and passthrough
+  variables; a required secret the manifest doesn't map yet is listed apart with the `set-secret` command that maps
+  it. For local testing, `--write` appends what `.env` (or `--path`) lacks and never
+  changes, reorders or prints an existing line; a CRLF file stays CRLF and a symlinked `.env` stays a link. It ends
+  with the required variables that still have no value. When a `.env` exists in the repo root, `run` and `doctor`
+  fill unset or empty variables from it; a variable set in the environment always wins, and a run never needs the
+  file. See [`docs/cli_guide.md`](docs/cli_guide.md#what-a-manifest-needs-paramify-env).
 
 ### Breaking
 
@@ -80,6 +161,18 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **NIST CMVP category: cryptographic module validation status.**
+  `nist_cmvp_module_validation_status` reads the public CMVP certificate page
+  for each certificate number in its `certificates` config and reports whether
+  the module is currently validated: the page is for that number, Status is
+  Active, the standard is FIPS 140-2 or FIPS 140-3, and the sunset date has not
+  passed. Anything else is not validated, with a reason (`historical`,
+  `revoked`, `sunset_passed`, `status_unknown` or `not_found`). A certificate
+  the run could not check (`parse_error` or `fetch_error`) has `validated:
+  null`, the summary's verdict counts are null, and the run exits 1. HTTP 429
+  is retried with `Retry-After` and reported as `rate_limited` if it persists.
+  Maps to KSI-SVC-SIN and KSI-SVC-VRI. No credential.
+
 - **`pipeline:` block in `fetcher.yaml`.** A fetcher whose output feeds a Paramify
   pipeline declares `pipeline: {type, id_scheme}` (`asset_id_field` for a
   scan-report pipeline). `kind: issue_report` may declare `vulnerability` or
@@ -92,8 +185,7 @@ schemas and the `paramify` CLI — not the internal code.
 - **Pipeline files upload as the full envelope, and the result says whether the
   pipeline ran.** `paramify upload` sends an inventory (or any pipeline) file as
   the whole envelope even when `artifact_payload: payload` is set, because
-  Paramify's inventory pipeline reads `payload.data`; the WAF scan reads the same
-  bytes. When the batch is approved on submit, the entry says `APPROVED: pipeline
+  Paramify's inventory pipeline reads `payload.data`. When the batch is approved on submit, the entry says `APPROVED: pipeline
   runs now` and where to look (Monitoring → Inventory); when it waits for a
   person it says `SUBMITTED: waiting for approval; the pipeline has not run`. The
   entry result in `--json` gains `pipeline: {type, approved}`. A file sent direct
@@ -190,6 +282,28 @@ schemas and the `paramify` CLI — not the internal code.
   `change_before_approval_field` `true`, and the new
   `summary.changes_recorded_before_approval_field` counts these changes.
 
+- **`github_image_signing` 0.1.0 shows whether GitHub Actions signs and
+  verifies container images with cosign.** It reads the workflow files on
+  each default branch and records every `cosign sign` step with the kind of
+  key it uses (a key management service, keyless or other), whether the
+  command names the image by digest, whether it skips the transparency log,
+  and whether the step can be skipped or fail without failing the run
+  (an `if`, `continue-on-error`, or `|| true` in the script). It records
+  every `cosign verify` step and what it checks against, and lists the
+  verify steps that cannot fail the run. It lists the workflows that mention
+  cosign without a cosign command in the file, where signing happens
+  somewhere the file does not show, and the workflows that call a reusable
+  workflow, whose signing it does not read. For each workflow that signs, it
+  reads the runs in the window by outcome and the latest successful run,
+  leaving out pull request runs, which it counts apart. The summary lists the repositories that sign
+  without verifying. It needs Contents for the files and Actions for the
+  runs; with `include_runs: false` it reads the files only and every run
+  figure is null. It reads workflow files, not the registry, and copies no
+  script text into the evidence. KSI-SVC-VRI. Not yet run against a live
+  organization. The workflow file reader and the newest-first run walk moved
+  from `github_actions_security` and `github_workflow_runs` into the shared
+  GitHub client so that the three fetchers use one copy; their evidence is
+  unchanged.
 - **`wiz_vulnerability_findings` 0.4.0: SLA columns.** After the 43 legacy
   columns (unchanged, so existing intake presets keep mapping), the CSV adds the
   Wiz fields Paramify's remediation SLAs depend on: `Is Internet Reachable` and
@@ -412,6 +526,20 @@ schemas and the `paramify` CLI — not the internal code.
   - Needs read on the workspace's logs (Reader, or a custom role with
     `workspaces/query/read` on the four tables, plus `IdentityInfo` when `groups`
     is set). Maps to KSI-IAM-APM, KSI-SVC-SIN, KSI-IAM-SNU and KSI-MLA-LET.
+- **`azure_aks_workload_security`** (`EVD-AZURE-AKS-WORKLOAD-SECURITY`): workload security
+  read from each AKS cluster's Kubernetes API with a Microsoft Entra token, with no
+  kubectl and no stored kubeconfig. For every workload (pods grouped by the Deployment,
+  StatefulSet, DaemonSet or Job that runs them) it records each container's effective
+  security context: non-root, privilege escalation, read-only root filesystem, dropped and
+  added capabilities, privileged, seccomp profile, plus host namespaces and host path
+  volumes. For every namespace it records the Pod Security Admission levels and network
+  policy coverage, including default-deny policies and workloads no policy selects, and
+  for the cluster whether a network policy engine enforces those policies at all.
+  System namespaces (`AKS_SYSTEM_NAMESPACES`) and Windows workloads are listed but not
+  judged. Needs Azure Kubernetes Service Cluster User Role and Azure Kubernetes Service
+  RBAC Reader on the cluster, Entra integration, and a network path to the API server; a
+  list that cannot be read leaves its counts null and fails the run. No environment
+  variables, images, secrets or logs are read.
 - **`checkov_bicep` 0.3.0: the TFVC source signs in with Entra when no token is set.**
   Before, `source_type: tfvc` authenticated only with the `tfvc_token` PAT.
   - With no `tfvc_token`, the fetcher gets an Entra token for Azure DevOps from
@@ -1827,6 +1955,20 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **`paramify upload` no longer drops a file for holding `../`, `/etc/passwd`, `/bin/sh`, `/bin/bash` or
+  `<script`.** It checked every file for these strings and dropped a match before sending it, with `blocked by the
+  production WAF: '…'`. The WAF has exempted the upload routes from those rules since 2026-10-29, so the check only
+  dropped good files, often findings whose CVE text holds one of the strings. Every file is now sent. If the WAF does
+  refuse one (a 403 with no request id), the upload still drops only that file, names it `blocked by the production
+  WAF`, and sends the rest. `--no-waf-check`, added for this on 2026-11-17, is still accepted but does nothing, and
+  the upload says so.
+
+- **`aws_ecr_image_scanning` 0.4.0 runs on boto3.** One Python process replaces a shell script that started
+  the AWS CLI and several `jq` processes per repository. It reads eight repositories at a time and requests the
+  largest page each API allows, so an enhanced scan with many findings takes a tenth of the requests, and a BASIC
+  scan is read in one. The output, its file name and the IAM actions are unchanged. It needs the `aws` extra
+  (boto3), which the Docker image already installs.
+
 - `qualys_vmdr_vulnerability_findings` uses the v6 host detection and v4 KnowledgeBase endpoints in place of v2,
   which Qualys has scheduled for end of life. Requests, parameters and the report columns are unchanged.
 
@@ -2714,6 +2856,37 @@ schemas and the `paramify` CLI — not the internal code.
     solutions are unread, and `sentinel_onboarded` is null while any are unread
     and none is known to have Sentinel; before, it read false.
 
+- **Every secret has a description, and settings the fetcher defaults are no longer required.** 19 secret env vars
+  across datadog, crowdstrike, okta, knowbe4, sentinelone, github, gitlab, rippling, checkov, paramify and splunk
+  had no `description`, so `paramify describe` and the TUI said nothing about what they were or where to get them.
+  Each now says both, with the same wording wherever fetchers share a variable. Four were declared required though
+  the fetcher runs without them; they are now `required: false`, so `paramify validate` stops demanding them and the
+  runner skips them when a manifest leaves them out:
+  - Datadog `base_url` (`DATADOG_BASE_URL`, default `https://api.ddog-gov.com`) on all 13 fetchers.
+  - Datadog `incidents_lookback_days` (`DATADOG_INCIDENTS_LOOKBACK_DAYS`, default 90) on `datadog_incidents_list`
+    and `datadog_incident_timelines`, and `signals_lookback_days` (`DATADOG_SIGNALS_LOOKBACK_DAYS`, default 30) on
+    `datadog_siem_signals`. They stay under `secrets`, so manifests that map them keep working unchanged.
+  - Checkov `clone_token` (`GIT_CLONE_TOKEN`) on `checkov_terraform` and `checkov_kubernetes`, which clone a public
+    repo without it (`checkov_bicep` already declared it optional).
+
+  No fetcher's output changes, so no fetcher version moves.
+
+- **`paramify run` stops its running fetchers on Ctrl-C or SIGTERM.** Each fetcher runs in its own session, so before,
+  an interrupted run left it running and writing into the run directory. The runner now kills the fetcher's process
+  group before exiting, and a run with `concurrency` starts none of its queued targets. `paramify run` turns SIGTERM
+  into exit code 143 so it reaches the same cleanup.
+
+- **Jira fetchers: a scoped API token sent to the site URL now gives the fix,
+  not a generic `auth_failed`.** Jira answers `401 Unauthorized; scope does not
+  match` on every call when a scoped token is used with
+  `JIRA_BASE_URL=https://<site>.atlassian.net`. The run now stops with
+  `bad_config` and names the gateway URL to use
+  (`https://api.atlassian.com/ex/jira/<cloudId>`, or the Government Cloud
+  gateway) and the site's `_edge/tenant_info` link that gives the cloudId.
+  Through the gateway, the same answer is reported as `not_authorized`, a
+  missing scope. `fetchers/jira/README.md` now lists all four Jira fetchers that
+  need no admin access. New sections say how to run without Jira admin access
+  and how to read this error.
 - **Disk, Key Vault, storage and SQL Managed Instance fetchers: an unread list
   gives null counts, not 0.** When a list the run needs is refused (403),
   throttled or times out, every total, count and percentage built from it is

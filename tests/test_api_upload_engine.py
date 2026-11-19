@@ -18,6 +18,7 @@ import requests
 
 from framework import api
 from framework.paramify import client as client_mod
+from framework.paramify import connection as connection_mod
 from framework.paramify.client import ApiError, Client, ErrorKind
 from framework.paramify_auth import BASE_URL_ENV, READ_TOKEN_ENV, UPLOAD_TOKEN_ENV
 from framework.sync import render
@@ -51,7 +52,7 @@ def fake(no_env, monkeypatch):
     f = FakeParamify()
     f.set_today(date.today())
     monkeypatch.setenv(UPLOAD_TOKEN_ENV, "tok")
-    monkeypatch.setattr(upload_mod, "Client", functools.partial(
+    monkeypatch.setattr(connection_mod, "Client", functools.partial(
         Client, session=f.session, sleep=lambda _s: None, retry_budget_s=3))
     return f
 
@@ -109,9 +110,9 @@ def test_dry_run_makes_no_http_calls(no_env, root, tmp_path, monkeypatch):
 def test_dry_run_counts_a_refusal_as_an_error(no_env, root, tmp_path):
     run = tmp_path / "run-1"
     run.mkdir()
-    bad = env(fetcher="x")
-    bad["payload"] = {"cmd": "/bin/sh -c x"}
-    build(run, {"a.json": bad}, [inv("x", ["a.json"])])
+    # A pipeline entry sent direct is refused: a direct upload builds nothing.
+    body = env(fetcher="x", pipeline={"type": "inventory", "id_scheme": "x-id"}, inventory={"complete": True})
+    build(run, {"a.json": body}, [inv("x", ["a.json"])], {"x": {"use": "x", "delivery": "direct"}})
     out = api.upload_run(run, root, dry_run=True)
     assert out["ok"] is False and out["errors"] == 1
     assert out["entries"]["x"]["state"] == "refused"
@@ -496,11 +497,10 @@ def test_no_tags_turns_tags_off(fake, root, tmp_path):
 def test_skips_and_drops_are_counted_and_reported_per_file(fake, root, tmp_path):
     run = tmp_path / "run-1"
     run.mkdir()
-    bad = env(fetcher="x")
-    bad["payload"] = {"cmd": "/bin/sh -c x"}
-    build(run, {"a.json": env(fetcher="x"), "b.json": bad,
+    build(run, {"a.json": env(fetcher="x"), "b.json": env(fetcher="x"),
                 "c.json": env(fetcher="x", inventory={"complete": False})},
           [inv("x", ["a.json", "b.json", "c.json"])])
+    fake.fail_upload("b.json", 403, "<html>403 Forbidden</html>")  # the WAF: a bare 403, no requestId
     events: List[Dict[str, Any]] = []
     out = api.upload_run(run, root, on_event=events.append)
     # A drop is not an error: `dropped` counts it, and ok == (errors == 0).
@@ -510,6 +510,19 @@ def test_skips_and_drops_are_counted_and_reported_per_file(fake, root, tmp_path)
                                            ("c.json", "skipped_failed")]
     drop = next(e for e in events if e["event"] == "upload_file" and e["file"] == "b.json")
     assert drop["reason"].startswith("blocked by the production WAF")
+
+
+def test_cve_text_with_waf_strings_is_uploaded(fake, root, tmp_path):
+    run = tmp_path / "run-1"
+    run.mkdir()
+    cve = env(fetcher="x")
+    cve["payload"] = {"cve": "fixed in ../lib; spawns /bin/bash; <script> in PoC"}
+    build(run, {"a.json": env(fetcher="x"), "b.json": cve}, [inv("x", ["a.json", "b.json"])])
+    events: List[Dict[str, Any]] = []
+    out = api.upload_run(run, root, on_event=events.append)
+    assert (out["uploaded"], out["dropped"], out["errors"]) == (2, 0, 0)
+    assert sorted(file_events(events)) == [("a.json", "uploaded"), ("b.json", "uploaded")]
+    assert out["plan"]["notes"] == []
 
 
 def test_preflight_stays_offline_and_keeps_its_shape(no_env, root, tmp_path, monkeypatch):
@@ -526,17 +539,15 @@ def test_preflight_stays_offline_and_keeps_its_shape(no_env, root, tmp_path, mon
 def test_render_plan_groups_by_provider_and_totals(no_env, root, tmp_path):
     run = tmp_path / "run-1"
     run.mkdir()
-    bad = env(fetcher="y", ref="EVD-Y")
-    bad["payload"] = {"cmd": "/bin/sh -c x"}
-    build(run, {"a.json": env(fetcher="x"), "b.json": bad}, [inv("x", ["a.json"]), inv("y", ["b.json"], fetcher="y")])
+    skipped = env(fetcher="y", ref="EVD-Y", inventory={"complete": False})
+    build(run, {"a.json": env(fetcher="x"), "b.json": skipped},
+          [inv("x", ["a.json"]), inv("y", ["b.json"], fetcher="y")])
     lines = render.render_plan(api.plan_upload(run, root, online=False))
     assert lines[0] == "evidence_sets"
     assert "  noop EVD-X: evidence set EVD-X: state unknown (offline)" in lines
     assert lines.index("delivery") > lines.index("evidence_sets")
-    i = lines.index("  refuse y: every file was dropped")
-    assert lines[i + 1].startswith("    ! dropped b.json: blocked by the production WAF")
-    assert lines[i + 2].startswith("    → fix: remove the strings")
-    assert lines[-1] == "1 deliver · 0 noop · 1 refuse"  # offline plans no tag actions
+    assert "  noop y: nothing to send: 1 file skipped" in lines
+    assert lines[-1] == "1 deliver · 1 noop · 0 refuse"  # offline plans no tag actions
     assert not any("\x1b" in line for line in lines)
 
 
@@ -601,7 +612,7 @@ def test_token_and_base_url_arguments_reach_the_client(fake, root, tmp_path, mon
         seen.update(token=token, base_url=base_url)
         return Client(token, base_url, session=fake.session, sleep=lambda _s: None, retry_budget_s=3)
 
-    monkeypatch.setattr(upload_mod, "Client", spy)
+    monkeypatch.setattr(connection_mod, "Client", spy)
     api.upload_run(two_files(tmp_path), root, token="explicit-tok", base_url="https://arg.example.test")
     assert seen == {"token": "explicit-tok", "base_url": "https://arg.example.test"}
 
@@ -616,7 +627,7 @@ def test_token_argument_stands_in_for_a_missing_environment_token(no_env, root, 
         seen["token"] = token
         raise Stop
 
-    monkeypatch.setattr(upload_mod, "Client", spy)
+    monkeypatch.setattr(connection_mod, "Client", spy)
     with pytest.raises(Stop):
         api.upload_run(two_files(tmp_path), root, token="only-arg")
     assert seen["token"] == "only-arg"
@@ -822,14 +833,14 @@ def test_every_file_dropped_at_apply_fails_the_entry_and_counts_one_error(fake, 
     assert (out["dropped"], out["errors"], out["ok"]) == (2, 1, False)
 
 
-def test_dry_run_counts_plan_time_drops_as_dropped(no_env, root, tmp_path):
+def test_dry_run_drops_nothing_for_waf_strings(no_env, root, tmp_path):
     run = tmp_path / "run-1"
     run.mkdir()
-    bad = env(fetcher="x")
-    bad["payload"] = {"cmd": "/bin/sh -c x"}
-    build(run, {"a.json": env(fetcher="x"), "b.json": bad}, [inv("x", ["a.json", "b.json"])])
+    cve = env(fetcher="x")
+    cve["payload"] = {"cmd": "/bin/sh -c x"}
+    build(run, {"a.json": env(fetcher="x"), "b.json": cve}, [inv("x", ["a.json", "b.json"])])
     out = api.upload_run(run, root, dry_run=True)
-    assert (out["errors"], out["dropped"], out["ok"]) == (0, 1, True)
+    assert (out["errors"], out["dropped"], out["ok"]) == (0, 0, True)
 
 
 def test_ok_is_errors_equal_zero_across_outcomes(fake, root, tmp_path, monkeypatch):
@@ -838,7 +849,7 @@ def test_ok_is_errors_equal_zero_across_outcomes(fake, root, tmp_path, monkeypat
     for i, setup in enumerate(("held", "drop", "clean")):
         f = FakeParamify()
         f.set_today(date.today())
-        monkeypatch.setattr(upload_mod, "Client", functools.partial(
+        monkeypatch.setattr(connection_mod, "Client", functools.partial(
             Client, session=f.session, sleep=lambda _s: None, retry_budget_s=3))
         if setup == "held":
             f.fail_upload("a.json", 502)
