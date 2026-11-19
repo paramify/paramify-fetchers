@@ -975,8 +975,8 @@ def doctor_cmd(
         else:
             typer.echo(
                 f"  {bad_mark} API token not set — "
-                f"{style.env(api.UPLOAD_TOKEN_ENV)} {style.dim('(or')} "
-                f"{style.env(api.READ_TOKEN_ENV)}{style.dim(')')}"
+                f"{style.env(paramify_auth.UPLOAD_TOKEN_ENV)} {style.dim('(or')} "
+                f"{style.env(paramify_auth.READ_TOKEN_ENV)}{style.dim(')')}"
             )
         # Shown whether or not the token resolved: the destination is the other
         # half of "am I about to do the right thing", and stage-vs-production is
@@ -1427,7 +1427,7 @@ def run_cmd(
         if not readiness["token_present"]:
             typer.echo(
                 f"Note: no Paramify API token set, so `paramify upload` will need one "
-                f"({api.UPLOAD_TOKEN_ENV}). Collecting anyway.\n",
+                f"({paramify_auth.UPLOAD_TOKEN_ENV}). Collecting anyway.\n",
                 err=print_run_dir,
             )
 
