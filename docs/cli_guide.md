@@ -25,12 +25,13 @@ paramify manifest set-secret okta_phishing_resistant_mfa org_url OKTA_ORG_URL
 # Keep going until it says the manifest is runnable.
 
 # 3. Set your credentials and run
-paramify env --write                  # adds the variables the manifest reads to .env
-$EDITOR .env                          # fill in OKTA_API_TOKEN, OKTA_ORG_URL, ...
+paramify env                          # lists the variables the manifest reads
+# In production your secret manager sets them; to try it locally:
+paramify env --write                  # adds them to .env, then fill in OKTA_API_TOKEN, ...
 paramify validate manifest.yaml
 paramify run     manifest.yaml         # evidence → ./evidence/run-<timestamp>/
 
-# 4. Upload to Paramify (PARAMIFY_UPLOAD_API_TOKEN in .env; see uploaders/paramify_evidence/README.md)
+# 4. Upload to Paramify (PARAMIFY_UPLOAD_API_TOKEN; see uploaders/paramify_evidence/README.md)
 paramify upload                                  # push the latest run
 ```
 
@@ -51,7 +52,7 @@ paramify describe <fetcher>    # one fetcher's config / secrets / target fields
 paramify ksi                   # FedRAMP KSI coverage
 paramify doctor   [manifest]   # preflight: Python, CLIs/packages, manifest, upload
 paramify manifests             # discovered run manifests (manifests/*.yaml)
-paramify env      [-m manifest] # the .env a manifest needs; --write adds what is missing
+paramify env      [-m manifest] # the variables a manifest needs; --write adds them to .env for testing
 paramify validate <manifest>   # validate a manifest without running
 paramify run      <manifest>   # run it
 paramify runs                  # past runs under an output dir (newest first)
@@ -206,16 +207,19 @@ Every `manifest` subcommand also accepts `--json` and returns a stable
 `{"ok", "path", "errors"}` object. Thus an agent can build a manifest step by
 step and read `errors` to find what is still missing.
 
-## Generate the `.env`
+## What a manifest needs: `paramify env`
 
 `paramify env` prints the environment variables a manifest reads, grouped by
 tool, each with a one-line note saying what it is and whether it is required.
-Paramify's own upload token comes first.
+Paramify's own upload token comes first. Use it to know what to put in your
+secret manager, which is where these belong in production: the runner reads
+its own environment, wherever the values come from. For local testing,
+`--write` puts them in a `.env` file instead. A run never needs `.env`.
 
 ```bash
 paramify env                          # print what ./manifest.yaml needs (writes nothing)
 paramify env -m manifests/prod.yaml   # another manifest
-paramify env --write                  # append the missing variables to ./.env
+paramify env --write                  # for local testing: append the missing variables to ./.env
 ```
 
 - It lists what a run actually reads: the `${env:}` references the manifest
@@ -234,9 +238,11 @@ paramify env --write                  # append the missing variables to ./.env
   credentials, and a default written out would override a later one.
 - It ends with the required variables that still have no value, in the file
   or exported in your shell.
-- `run` and `doctor` read `.env` in the repo root (a value you export still
-  wins). `--path` merges into another file instead, such as one your CI or a
-  secret manager loads; nothing here reads that one for you.
+- When there is a `.env` in the repo root, `run` and `doctor` fill any
+  variable that is unset or empty from it; a variable set in the environment
+  (by your secret manager, CI or shell) always wins, and without the file
+  nothing changes. The deploy image never contains one (`.dockerignore`).
+  `--path` merges into another file instead; nothing here reads that one for you.
 
 ## Collect, then upload
 

@@ -31,12 +31,16 @@ schemas and the `paramify` CLI — not the internal code.
   causes.
 - **`paramify env`** prints the `.env` a manifest needs: only the variables it reads, grouped by tool, each with a
   short note and whether it is required, Paramify's upload token first. It lists what a run reads: the manifest's
+- **`paramify env`** prints what a manifest needs from the environment: only the variables it reads, grouped by
+  tool, each with a short note and whether it is required, Paramify's upload token first, so you know what to set in
+  your secret manager. It lists what a run reads: the manifest's
   `${env:}` references (a remapped secret, one token per target, a config value, `run.platforms`) and passthrough
   variables; a required secret the manifest doesn't map yet is listed apart with the `set-secret` command that maps
-  it. `--write` appends what `.env` (or `--path`) lacks and never
+  it. For local testing, `--write` appends what `.env` (or `--path`) lacks and never
   changes, reorders or prints an existing line; a CRLF file stays CRLF and a symlinked `.env` stays a link. It ends
-  with the required variables that still have no value. `run` and `doctor` now fill unset or empty variables from
-  `.env` in the repo root (a non-empty export wins). See [`docs/cli_guide.md`](docs/cli_guide.md#generate-the-env).
+  with the required variables that still have no value. When a `.env` exists in the repo root, `run` and `doctor`
+  fill unset or empty variables from it; a variable set in the environment always wins, and a run never needs the
+  file. See [`docs/cli_guide.md`](docs/cli_guide.md#what-a-manifest-needs-paramify-env).
 - Manifest: `concurrency` on a fetcher entry (1 to 32, default 1) runs up to that many of its targets at once. Each
   concurrent target writes to its own staging directory, moved into the run directory in target order, so results,
   envelopes and `_run_metadata.json` keep target order and a file name two targets share still fails the later one

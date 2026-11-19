@@ -1391,15 +1391,16 @@ def validate_cmd(
 @app.command("env")
 def env_cmd(
     manifest: Optional[str] = typer.Option(None, "--manifest", "-m", help=f"Manifest to read (default: {_DEFAULT_MANIFEST})"),
-    write: bool = typer.Option(False, "--write", help="Add the missing variables to the .env file (existing lines are never changed)"),
+    write: bool = typer.Option(False, "--write", help="For local testing: add the missing variables to .env (existing lines are never changed)"),
     path: Optional[Path] = typer.Option(
         None, "--path",
         help="Another file to merge into (default: .env in the repo root, the one run and doctor read)"),
 ):
-    """Print the .env a manifest needs, grouped by tool. Prints by default.
+    """Print the environment variables a manifest needs, grouped by tool.
 
-    Only the variables its fetchers read. With --write, appends the ones the
-    file lacks; a value already there is never changed or shown.
+    Only the variables a run reads: set them in your secret manager, or, for
+    local testing, add them to .env with --write (a value already there is
+    never changed or shown). A run never needs .env; the environment wins.
     """
     root = api.find_repo_root()
     mpath = _resolve_manifest_arg(root, manifest or _DEFAULT_MANIFEST, False)
