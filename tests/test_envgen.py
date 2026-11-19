@@ -576,3 +576,13 @@ def test_a_note_does_not_stop_at_an_abbreviation():
         "Okta org base URL, no trailing slash (e.g. https://your-org.okta.com)."
     assert envgen._first_sentence("Read-only token. Create it in Settings.") == "Read-only token."
     assert envgen._first_sentence("Ends here") == "Ends here"
+
+
+def test_the_mapping_command_names_a_manifest_under_the_current_folder_relatively(tmp_path, monkeypatch):
+    (tmp_path / "manifests").mkdir()
+    m = tmp_path / "manifests" / "m.yaml"
+    m.write_text(yaml.safe_dump({"run": {"fetchers": [{"use": "okta_least_privilege"}]}}))
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(api, "find_repo_root", lambda start=None: ROOT)
+    out = CliRunner().invoke(cli.app, ["env", "--manifest", str(m), "--path", str(tmp_path / ".env")])
+    assert "paramify manifest set-secret -f manifests/m.yaml okta_least_privilege api_token OKTA_API_TOKEN" in out.stdout

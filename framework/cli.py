@@ -1428,18 +1428,20 @@ def env_cmd(
     if res["unmapped"]:
         typer.echo(style.warn("A run stops on these secrets whatever .env holds, until the manifest maps "
                               "each one:"))
+        here = Path.cwd().resolve()
+        shown = mpath.resolve().relative_to(here) if mpath.resolve().is_relative_to(here) else mpath
         for u in res["unmapped"]:
             if u["malformed"]:
                 typer.echo(f"  {u['fetcher']} {u['secret']}: not a valid reference; write it as "
-                           f"${{env:{u['env']}}} (uppercase letters, digits and _) in {mpath}")
+                           f"${{env:{u['env']}}} (uppercase letters, digits and _) in {shown}")
             elif not u["per_target"]:
-                typer.echo(f"  paramify manifest set-secret -f {mpath} {u['fetcher']} {u['secret']} {u['env']}")
+                typer.echo(f"  paramify manifest set-secret -f {shown} {u['fetcher']} {u['secret']} {u['env']}")
             elif u["target"] is None:
-                typer.echo(f"  paramify manifest add-target -f {mpath} {u['fetcher']} <field>=<value> ... "
+                typer.echo(f"  paramify manifest add-target -f {shown} {u['fetcher']} <field>=<value> ... "
                            f"--secret {u['secret']}={u['env']}")
             else:
                 typer.echo(f"  {u['fetcher']} target {u['target']}: add  {u['secret']}: ${{env:{u['env']}}}  "
-                           f"under its secrets: in {mpath}")
+                           f"under its secrets: in {shown}")
 
 
 @app.command("run")
