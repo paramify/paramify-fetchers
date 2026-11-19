@@ -97,7 +97,7 @@ def test_an_entry_opens_on_the_platform_list_it_inherits_and_saving_it_unchanged
     (text, labels), still_open, entry, platform = _edit(tmp_path)
     assert text == BOUNDARY_LINES
     assert any("inherits platforms.azure (3 patterns) until edited here" in lb for lb in labels)
-    assert any("rg:, location: or id: patterns" in lb for lb in labels)
+    assert any("rg:, location:, id: or tag: patterns" in lb for lb in labels)
     assert not still_open and entry == {} and platform["resource_exclusions"] == BOUNDARY
 
 
