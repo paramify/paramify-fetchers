@@ -86,9 +86,7 @@ def group_of(resource_id: str) -> Optional[str]:
 
 
 class TagIndex:
-    """Answers "what are this id's own tags?", reading each subscription the first time one of its ids is asked about.
-    An id the index doesn't hold, such as a key vault key or a storage container, takes its nearest parent resource's
-    tags; None when neither is held or the subscription couldn't be read (its failure is kept in `failures`)."""
+    """An id's own tags (else its nearest held parent's), read once per subscription; None if neither can be read."""
 
     def __init__(self, loader: Optional[Callable[[str], Dict[str, Entry]]] = None):
         self._loader = loader or load_subscription
