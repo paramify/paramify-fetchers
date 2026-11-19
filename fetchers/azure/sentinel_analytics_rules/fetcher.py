@@ -6,6 +6,7 @@ import logging
 import os
 import re
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -17,6 +18,7 @@ from azure_rest import (  # noqa: E402
     SI_PREVIEW_API,
     int_config,
     iso_duration_days,
+    parse_time,
     run_workspaces,
 )
 from sentinel_ingestion import (  # noqa: E402
@@ -373,6 +375,87 @@ def is_fusion(rule: Dict[str, Any]) -> bool:
     return rule.get("kind") == "Fusion" or rule.get("alert_rule_template_name") == FUSION_TEMPLATE
 
 
+# --- automation reach ---
+
+# Rule kinds that always raise incidents, whatever incidentConfiguration says.
+INCIDENT_KINDS = frozenset({"Fusion", INCIDENT_CREATION})
+RULE_ID_PROPERTIES = frozenset({"incidentrelatedanalyticruleids", "alertanalyticruleids"})
+IN_OPERATORS = frozenset({"equals", "contains"})
+NOT_IN_OPERATORS = frozenset({"notequals", "notcontains"})
+
+
+def _rule_key(value: Any) -> str:
+    """The analytics rule's name (its id's last segment), case-folded, as automation conditions name it by id."""
+    return str(value or "").rstrip("/").rsplit("/", 1)[-1].lower()
+
+
+def automation_rule_record(raw: Dict[str, Any], now: datetime) -> Dict[str, Any]:
+    """An automation rule as the reach check needs it: active, what triggers it, and its conditions with values."""
+    props = raw.get("properties") or {}
+    logic = props.get("triggeringLogic") or {}
+    expiry = parse_time(logic.get("expirationTimeUtc"))
+    conditions = []
+    for c in logic.get("conditions") or []:
+        cp = c.get("conditionProperties") or {}
+        conditions.append({"type": c.get("conditionType"), "property": cp.get("propertyName"),
+                           "operator": cp.get("operator"), "values": [_rule_key(v) for v in cp.get("propertyValues") or []]})
+    return {
+        "name": raw.get("name"),
+        "display_name": props.get("displayName"),
+        "active": logic.get("isEnabled") is True and not (expiry is not None and expiry <= now),
+        "triggers_on": logic.get("triggersOn"),
+        "triggers_when": logic.get("triggersWhen"),
+        "conditions": conditions,
+        "actions": sorted({a.get("actionType") or "unknown" for a in props.get("actions") or []}),
+    }
+
+
+def applies_to(automation: Dict[str, Any], rule: Dict[str, Any]) -> Optional[bool]:
+    """Whether an automation rule runs when this analytics rule matches: True, False, or None when that depends on the
+    alert's own data (a condition on severity, title, entities and so on), which no configuration read can settle."""
+    if not automation["active"] or (automation["triggers_when"] or "").lower() != "created":
+        return False
+    on = (automation["triggers_on"] or "").lower()
+    if on == "incidents":
+        creates = True if rule.get("kind") in INCIDENT_KINDS else rule.get("creates_incidents")
+        if creates is False:
+            return False
+        maybe = creates is None
+    elif on == "alerts":
+        maybe = False
+    else:
+        return False
+    key = _rule_key(rule.get("name"))
+    for c in automation["conditions"]:
+        prop, op = (c["property"] or "").lower(), (c["operator"] or "").lower()
+        if (c["type"] or "").lower() == "property" and prop in RULE_ID_PROPERTIES and op in IN_OPERATORS | NOT_IN_OPERATORS:
+            if (key in c["values"]) != (op in IN_OPERATORS):
+                return False
+        else:
+            maybe = True
+    return None if maybe else True
+
+
+def automation_reach(rule: Dict[str, Any], automations: List[Dict[str, Any]]) -> Dict[str, Any]:
+    verdicts = [(a, applies_to(a, rule)) for a in automations]
+    sure = sorted(a["display_name"] or a["name"] or "" for a, v in verdicts if v is True)
+    maybe = sorted(a["display_name"] or a["name"] or "" for a, v in verdicts if v is None)
+    return {"reaches_automation": True if sure else None if maybe else False,
+            "automation_rules": sure, "automation_rules_possibly": maybe}
+
+
+def reach_summary(rules: List[Dict[str, Any]], automations_read: bool) -> Dict[str, Any]:
+    enabled = [r for r in rules if r.get("enabled") is True]
+    if not automations_read:
+        return {"rules_reaching_automation": None, "rules_possibly_reaching_automation": None,
+                "rules_not_reaching_automation": None}
+    return {
+        "rules_reaching_automation": sum(1 for r in enabled if r["reaches_automation"] is True),
+        "rules_possibly_reaching_automation": sum(1 for r in enabled if r["reaches_automation"] is None),
+        "rules_not_reaching_automation": sum(1 for r in enabled if r["reaches_automation"] is False),
+    }
+
+
 def rule_summary(rules: List[Dict[str, Any]]) -> Dict[str, Any]:
     enabled = [r for r in rules if r.get("enabled") is True]
     by_kind: Dict[str, int] = {}
@@ -495,6 +578,15 @@ def collect(client, ws: Dict[str, Any], collector) -> Dict[str, Any]:
     ingested = {r["ParamifySourceTable"]: r.get("LastIngested") for r in rows if r.get("ParamifySourceTable")} if rows is not None else None
 
     rules = merge_rules(stable, preview) if stable is not None else None
+    automations = None
+    try:
+        now = datetime.now(timezone.utc)
+        automations = [automation_rule_record(a, now) for a in client.list(f"{path}/automationRules", SI_API)]
+    except Exception as exc:  # noqa: BLE001 — the rules are still evidence; without automation rules reach is unknown
+        notes.append(f"automation rule listing failed, so whether each rule reaches automation is unknown: {exc}")
+    for r in rules or []:
+        r.update(automation_reach(r, automations) if automations is not None
+                 else {"reaches_automation": None, "automation_rules": None, "automation_rules_possibly": None})
     products: Optional[Dict[str, Any]] = {}
     if rules is not None and templates is not None:
         templates = templates + preview_templates(client, path, rules, templates, notes)
@@ -532,6 +624,8 @@ def collect(client, ws: Dict[str, Any], collector) -> Dict[str, Any]:
         **({"confirmed_alert_connections": sorted(confirmed)} if confirmed else {}),
         "rules": rules,
         **(rule_summary(rules) if rules is not None else {}),
+        **(reach_summary(rules, automations is not None) if rules is not None else {}),
+        "automation_rules_read": len(automations) if automations is not None else None,
         **covered,
         **({"enabled_rules_quiet": quiet} if rules is not None and listed_tables is not None else {}),
         **({"enabled_rules_confirmed_quiet": (
@@ -580,6 +674,22 @@ def summarize(workspaces: List[Dict[str, Any]]) -> Dict[str, Any]:
         "ingesting_tables_not_read": _total(collected, "ingesting_tables_not_read"),
         "ingesting_tables_read_only_by_templates": _total(collected, "ingesting_tables_read_only_by_templates"),
         "enabled_rules_tables_unknown": _total(collected, "enabled_rules_tables_unknown"),
+        **reach_totals(collected),
+    }
+
+
+def reach_totals(collected: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Totals over every workspace read; unknown (null) when any workspace's automation rules couldn't be read."""
+    fields = ("rules_reaching_automation", "rules_possibly_reaching_automation",
+              "rules_not_reaching_automation")
+    known = bool(collected) and all(w.get(fields[0]) is not None for w in collected)
+    totals = {f: sum(w[f] for w in collected) if known else None for f in fields}
+    sure, maybe, never = (totals[f] for f in fields)
+    enabled = None if not known else sure + maybe + never
+    return {
+        **totals,
+        "all_enabled_rules_reach_automation": (
+            None if not known or not enabled else False if never else None if maybe else True),
     }
 
 

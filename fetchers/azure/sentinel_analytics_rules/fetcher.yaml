@@ -1,9 +1,9 @@
 name: azure_sentinel_analytics_rules
-version: 0.4.0
+version: 0.5.0
 description: >-
   Lists each Sentinel workspace's detection rules with their queries,
-  suppression and the log tables each reads, flagging arriving logs no enabled
-  rule reads and rules with no recent logs.
+  suppression and log tables, flagging arriving logs no enabled rule reads,
+  rules with no recent logs and rules reaching no automation.
 category: azure
 
 supports_targets: true
@@ -129,6 +129,7 @@ evidence_set:
     - GET Microsoft.SecurityInsights/alertRules (per workspace; stable and preview APIs) — every analytics rule with its query and suppression, including kinds only the preview returns, such as NRT
     - GET Microsoft.SecurityInsights/alertRuleTemplates (per workspace, stable API) — templates available and in use, and the data types each template lists
     - GET Microsoft.SecurityInsights/alertRuleTemplates/{name} (preview API, only for a template a rule uses that the stable listing lacks, such as an NRT rule's) — that template's data types
+    - GET Microsoft.SecurityInsights/automationRules (per workspace, stable API) — each active automation rule's trigger and conditions, to work out which analytics rules it runs for; a failed listing is noted and leaves the reach fields null, never "no automation"
     - GET Microsoft.OperationalInsights/workspaces/tables (per workspace) — the workspace's table and column names, to find the tables each query reads
     - GET Microsoft.OperationalInsights/workspaces/savedSearches (per workspace) — the workspace's function names (parsers), so a name a query reads that is neither a listed table nor a function counts as a table the workspace never provisioned
     - KQL union * summarized by table (per workspace) — each table's last ingestion time in the window
@@ -162,3 +163,9 @@ evidence_set:
     - enabled_rules_quiet — Number of the rules in enabled_rules_missing_data that are quiet incident-creation rules, across all Sentinel workspaces; equal to it when every rule missing data is quiet. A rule is quiet when its product sent no alert in the window while a data connection that sends that product's alerts has alerts enabled: the product's own connection or, for Entra ID Protection and Defender for Identity, Endpoint, Office 365 and Cloud Apps, Defender XDR's (which doesn't carry Defender for Cloud or IoT alerts); so does a connection named in confirmed_alert_connections. Null when enabled_rules_missing_data is null, or when a workspace's data connectors couldn't be read and an incident-creation rule there missing data isn't quiet through the connections that were
     - enabled_rules_confirmed_quiet — Number of the quiet rules in enabled_rules_quiet that are quiet only because confirmed_alert_connections names their product's connection, not because the API shows it; each such rule carries confirmed_by_configuration true and a reason saying so. Present only when confirmed_alert_connections is set and a workspace's rules and tables were read; counted over the workspaces enabled_rules_quiet counts, and null when none was measured or one's enabled_rules_quiet is null
     - enabled_rules_tables_unknown — Number of enabled analytics rules whose tables can't be worked out (Fusion, ML and threat intelligence rules, and rules whose query reads only through parser functions or wildcards and whose template lists no data types; when the workspace's saved searches can't be read, also rules whose query reads only tables the workspace doesn't list); null if on every workspace the rule list or the table list couldn't be read
+
+    Does a match reach automation?
+    - rules_reaching_automation — Number of enabled analytics rules an active automation rule runs for when they match: one triggered when an incident (for a rule that creates incidents) or an alert is created, with no conditions, or only conditions naming analytics rules by id that include this one; null if any workspace's automation rules couldn't be read
+    - rules_possibly_reaching_automation — Number of enabled analytics rules an automation rule might run for: its other conditions (severity, title, entities and so on) depend on each alert's data, or the rule's incident setting is unknown; null as above
+    - rules_not_reaching_automation — Number of enabled analytics rules no active automation rule runs for; null as above
+    - all_enabled_rules_reach_automation — True if every enabled analytics rule is in rules_reaching_automation; false if any reaches none; null if none reaches none but some only possibly do, if there are no enabled rules, or if automation rules couldn't be read

@@ -12,6 +12,13 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **`azure_sentinel_analytics_rules` 0.5.0: does a match reach automation?** The fetcher now lists each workspace's
+  automation rules and marks every analytics rule `reaches_automation`: true when an active automation rule triggered
+  on a new incident (for a rule that creates incidents) or a new alert runs for it with no conditions, or only
+  rule-id conditions that include it; null when other conditions make it depend on each alert's data; false
+  otherwise. `rules_reaching_automation`, `rules_possibly_reaching_automation`,
+  `rules_not_reaching_automation` (enabled rules only) and `all_enabled_rules_reach_automation` summarize it. The
+  counts are named outside the `enabled_rules_*` run of keys so validators that read those keys in order still match. A refused automation listing is noted and leaves them null.
 - **`azure_aks_cluster_configuration` 0.7.0: autoscaling for expected pools.** A new `expected_autoscaling_pools`
   setting lists the node pools that must have the cluster autoscaler on, as `pool` (every cluster) or `cluster/pool`.
   Missing pools and pools without the autoscaler are counted and named, a pool at zero nodes stays expected, and
