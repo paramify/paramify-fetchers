@@ -84,8 +84,9 @@ The collector publishes the final CSV atomically only after all reads succeed.
 It stages files beside `EVIDENCE_DIR`; use a writable output subdirectory within
 the destination filesystem so the final rename stays atomic. Interrupted staging
 files never appear in the report directory.
-It refuses a report when Inspector ECR is disabled, no selected images exist, or
-any selected image lacks ACTIVE coverage with a last scan timestamp. Findings
+It refuses a report when Inspector ECR is disabled, when no images match the
+scope, or when any selected image lacks ACTIVE coverage with a last scan
+timestamp; each condition has its own error. Findings
 whose images disappeared or changed scope during collection also block a report;
 the evidence lists these under `findings_missing_from_inventory`. Use the evidence
 fetcher to diagnose those conditions; narrow the scope only when the
@@ -96,6 +97,16 @@ Zero findings also fail by default. `allow_empty: true` permits a header-only
 report after all scope and coverage checks pass. It does not override missing
 coverage or failed collection. Confirm the tenant's intake handling of an empty
 report before using this option.
+
+A scope that matches no images also fails by default. `allow_no_images: true`
+permits it, for example for a tag no image carries yet. It requires
+`allow_empty: true`, since a report with no images is header-only; setting it
+alone fails before any AWS request. A misspelled tag, too narrow a push window,
+or a usage filter Inspector cannot match look the same as a legitimately empty
+scope, so compare `summary.repository_image_count` (images in the selected
+repositories) with `summary.image_count` (images matching the scope) in the
+evidence. Both counts are also logged. With `close_cycle: after_run`, an empty
+report closes the target's open issues.
 
 Keep `close_cycle: never` while validating the integration. Closing a cycle can
 resolve issues absent from its inputs; tag movement, suppression, deletion and
