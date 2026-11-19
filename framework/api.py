@@ -4155,7 +4155,11 @@ def generate_env(root: Path, manifest: Mapping[str, Any], write: bool = False, p
     """The .env a manifest needs, merged with the one at `path` (default
     env_file(root)) without changing anything already in it.
 
-    Returns {"text", "added", "already_set", "missing_values", "unmapped", "path"}. `text`
+    Returns {"text", "added", "already_set", "missing_values", "variables",
+    "unmapped", "path"}. `variables` is every variable the manifest needs:
+    {name, tool, required, default, note, fetchers (who reads it; empty for
+    Paramify's upload token), set (has a value in the file or environment)};
+    never a value. `text`
     is what is added (the whole file when there was none), never existing
     content, so printing it cannot leak a value. `missing_values` names required
     variables that would still be empty: empty in the file and not exported
@@ -4177,6 +4181,9 @@ def generate_env(root: Path, manifest: Mapping[str, Any], write: bool = False, p
     text, result = envgen.merged(existing, groups)
     if write and result.text:
         _atomic_write(target, text)
+    variables = [{"name": v.name, "tool": g.title, "required": v.required, "default": v.default, "note": v.note,
+                  "fetchers": list(v.fetchers), "set": v.name in result.has_value}
+                 for g in groups for v in g.vars]
     return {"text": result.text, "added": result.added, "already_set": result.already_set,
-            "missing_values": result.missing, "path": str(path),
+            "missing_values": result.missing, "path": str(path), "variables": variables,
             "unmapped": [vars(u) for u in unmapped]}

@@ -1395,20 +1395,27 @@ def env_cmd(
     path: Optional[Path] = typer.Option(
         None, "--path",
         help="Another file to merge into (default: .env in the repo root, the one run and doctor read)"),
+    json_out: bool = typer.Option(False, "--json", help="Emit the variables as JSON (names, never values)"),
 ):
     """Print the environment variables a manifest needs, grouped by tool.
 
-    Only the variables a run reads: set them in your secret manager, or, for
-    local testing, add them to .env with --write (a value already there is
-    never changed or shown). A run never needs .env; the environment wins.
+    Only the variables a run reads: set them in your secret manager (--json
+    lists them for a script), or, for local testing, add them to .env with
+    --write (a value already there is never changed or shown). A run never
+    needs .env; the environment wins.
     """
     root = api.find_repo_root()
-    mpath = _resolve_manifest_arg(root, manifest or _DEFAULT_MANIFEST, False)
+    mpath = _resolve_manifest_arg(root, manifest or _DEFAULT_MANIFEST, json_out)
     try:
         data = api.read_manifest(mpath, must_exist=True)
     except Exception as e:  # noqa: BLE001 — a setup error, reported as one line
-        _fail(mpath, f"could not read {mpath}: {e}", False)
+        _fail(mpath, f"could not read {mpath}: {e}", json_out)
     res = api.generate_env(root, data, write=write, path=path)
+    if json_out:
+        doc = {k: v for k, v in res.items() if k != "text"}
+        typer.echo(json.dumps({"ok": True, "manifest": str(mpath), "written": write and bool(res["added"]), **doc},
+                              indent=2))
+        return
     typer.echo(res["text"], nl=False)
     if res["text"]:
         typer.echo("")

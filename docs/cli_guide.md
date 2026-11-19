@@ -219,8 +219,14 @@ its own environment, wherever the values come from. For local testing,
 ```bash
 paramify env                          # print what ./manifest.yaml needs (writes nothing)
 paramify env -m manifests/prod.yaml   # another manifest
+paramify env --json                   # the same as JSON, for a script that fills your secret manager
 paramify env --write                  # for local testing: append the missing variables to ./.env
 ```
+
+`--json` gives one entry per variable (`name`, `tool`, `required`, `default`,
+`note`, the `fetchers` that read it, and whether it is `set` in the
+environment or the file) plus `unmapped`, the required secrets the manifest
+doesn't map yet. It never contains a value.
 
 - It lists what a run actually reads: the `${env:}` references the manifest
   maps its secrets to (`set-secret ... OKTA_PROD_TOKEN`, a token per target),

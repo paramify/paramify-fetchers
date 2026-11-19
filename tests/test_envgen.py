@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from unittest import mock
 
@@ -526,3 +527,45 @@ def test_resolve_reads_the_environment_it_is_given():
         assert resolve("${env:SET_IN_THE_SHELL}", {"SET_IN_THE_SHELL": "given"}) == "given"
         with pytest.raises(UnsetSecretError):
             resolve("${env:SET_IN_THE_SHELL}", {})
+
+
+# --------------------------------------------------------------------------- #
+# --json: what to put in a secret manager, never a value
+# --------------------------------------------------------------------------- #
+
+def test_json_lists_each_variable_with_who_needs_it_and_never_a_value(tmp_path, monkeypatch):
+    monkeypatch.delenv("OKTA_ORG_URL", raising=False)
+    monkeypatch.setenv("OKTA_API_TOKEN", "exported-secret")
+    m = tmp_path / "m.yaml"
+    m.write_text(yaml.safe_dump({"run": {"fetchers": [wired("okta_least_privilege"), wired("okta_authenticators"),
+                                                      {"use": "github_access_review"}]}}))
+    env = tmp_path / ".env"
+    env.write_text("OKTA_ORG_URL=https://file-value.example\n")
+    out = CliRunner().invoke(cli.app, ["env", "--manifest", str(m), "--path", str(env), "--json"])
+    assert out.exit_code == 0, out.output
+    assert "exported-secret" not in out.stdout and "file-value" not in out.stdout
+    doc = json.loads(out.stdout)
+    by_name = {v["name"]: v for v in doc["variables"]}
+    token = by_name["OKTA_API_TOKEN"]
+    assert (token["tool"], token["required"], token["set"]) == ("Okta", True, True)  # set in the environment
+    assert token["fetchers"] == ["okta_least_privilege", "okta_authenticators"]
+    assert by_name["OKTA_ORG_URL"]["set"] is True  # set in the file
+    assert by_name["PARAMIFY_UPLOAD_API_TOKEN"]["fetchers"] == []  # the upload needs it, not a fetcher
+    assert doc["unmapped"] == [{"fetcher": "github_access_review", "secret": "token", "env": "GITHUB_TOKEN",
+                                "per_target": True, "target": None, "malformed": False}]
+    assert doc["ok"] is True and doc["written"] is False and "text" not in doc
+    assert env.read_text() == "OKTA_ORG_URL=https://file-value.example\n"
+
+
+def test_json_with_write_says_what_it_wrote(tmp_path):
+    m = tmp_path / "m.yaml"
+    m.write_text(yaml.safe_dump(manifest("okta_least_privilege")))
+    env = tmp_path / ".env"
+    doc = json.loads(CliRunner().invoke(cli.app, ["env", "-m", str(m), "--path", str(env), "--write", "--json"]).stdout)
+    assert doc["written"] is True and "OKTA_API_TOKEN" in doc["added"]
+    assert "OKTA_API_TOKEN=" in env.read_text()
+
+
+def test_json_reports_an_unreadable_manifest_as_json(tmp_path):
+    out = CliRunner().invoke(cli.app, ["env", "-m", str(tmp_path / "nope.yaml"), "--json"])
+    assert out.exit_code == 1 and json.loads(out.stdout)["ok"] is False

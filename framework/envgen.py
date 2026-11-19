@@ -32,6 +32,7 @@ class EnvVar:
     note: str
     required: bool
     default: Optional[str] = None
+    fetchers: List[str] = field(default_factory=list)  # who reads it; empty for Paramify's own (the upload)
 
 
 @dataclass
@@ -45,11 +46,13 @@ class EnvGroup:
 class EnvPlan:
     """One merge into a .env: the text to append (the whole file when there
     was none, never existing content), and the names it adds, finds already
-    set, and still finds empty (in the file and in the environment)."""
+    set, and still finds empty (required ones, in the file and in the
+    environment), and every name that has a value in either."""
     text: str
     added: List[str]
     already_set: List[str]
     missing: List[str]
+    has_value: List[str]  # every name with a value in the file or the environment
 
 
 _PLACEHOLDER = re.compile(r"^\s*#\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=")
@@ -135,9 +138,11 @@ def env_groups(
     by_cat: Dict[str, EnvGroup] = {}
     unmapped: List[Unmapped] = []
 
-    def add(cat: str, name: str, description: Optional[str], fallback: str, required: bool) -> None:
+    def add(cat: str, name: str, description: Optional[str], fallback: str, required: bool, who: str) -> None:
         existing = seen.get(name)
         if existing is not None:
+            if who not in existing.fetchers:
+                existing.fetchers.append(who)
             if required and not existing.required:
                 existing.required = True
                 existing.note = _note(description, fallback, True, None)
@@ -149,7 +154,7 @@ def env_groups(
                 (spec.display_name if spec and spec.display_name else cat),
                 _first_sentence(spec.description if spec else None),
             )
-        var = EnvVar(name, _note(description, fallback, required, None), required)
+        var = EnvVar(name, _note(description, fallback, required, None), required, fetchers=[who])
         seen[name] = var
         g.vars.append(var)
 
@@ -159,7 +164,7 @@ def env_groups(
             if s.required:
                 unmapped.append(Unmapped(fname, s.name, s.env, per_target=s.per_target, target=target))
         elif (env := env_var_name(value)) is not None:
-            add(cat, env, s.description, f"{s.name.replace('_', ' ')} for {fname}", s.required)
+            add(cat, env, s.description, f"{s.name.replace('_', ' ')} for {fname}", s.required, fname)
         elif is_env_ref_attempt(value):
             unmapped.append(Unmapped(fname, s.name, s.env, per_target=s.per_target, target=target, malformed=True))
 
@@ -185,12 +190,13 @@ def env_groups(
             fdef = merged.schema.get(field_name)
             required = bool(fdef and fdef.required and field_name not in merged.values)
             where = entry.use if field_name in entry.config else f"the {pcat} fetchers"
-            add(cat, env, fdef.description if fdef else None, f"{field_name.replace('_', ' ')} for {where}", required)
+            add(cat, env, fdef.description if fdef else None, f"{field_name.replace('_', ' ')} for {where}", required,
+                entry.use)
 
         passthrough = set(spec.passthrough_env if spec else []) | set(platform_cfg.passthrough_env if platform_cfg else [])
         passthrough -= {fdef.env for fdef in merged.schema.values() if fdef.type == patterns.TYPE and fdef.env}
         for env in sorted(passthrough):
-            add(cat, env, None, f"Passed through to the {cat} fetchers when set", False)
+            add(cat, env, None, f"Passed through to the {cat} fetchers when set", False, entry.use)
 
     groups.extend(sorted(by_cat.values(), key=lambda g: g.title.lower()))
     return groups, unmapped
@@ -277,9 +283,10 @@ def plan(existing: str, groups: Sequence[EnvGroup], environ: Optional[Mapping[st
             out = out[1:]
         text = "\n".join(out) + "\n"
     values = {**have, **assigned(text)}
-    missing = [v.name for g in groups for v in g.vars
-               if v.required and not values.get(v.name, "").strip() and not environ.get(v.name, "").strip()]
-    return EnvPlan(text, added, already, missing)
+    has_value = [v.name for g in groups for v in g.vars
+                 if values.get(v.name, "").strip() or environ.get(v.name, "").strip()]
+    missing = [v.name for g in groups for v in g.vars if v.required and v.name not in has_value]
+    return EnvPlan(text, added, already, missing, has_value)
 
 
 def merged(existing: str, groups: Sequence[EnvGroup], environ: Optional[Mapping[str, str]] = None) -> Tuple[str, EnvPlan]:

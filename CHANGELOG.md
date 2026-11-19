@@ -33,7 +33,8 @@ schemas and the `paramify` CLI — not the internal code.
   short note and whether it is required, Paramify's upload token first. It lists what a run reads: the manifest's
 - **`paramify env`** prints what a manifest needs from the environment: only the variables it reads, grouped by
   tool, each with a short note and whether it is required, Paramify's upload token first, so you know what to set in
-  your secret manager. It lists what a run reads: the manifest's
+  your secret manager; `--json` lists them for a script (with the fetchers that read each, and whether it is set),
+  never a value. It lists what a run reads: the manifest's
   `${env:}` references (a remapped secret, one token per target, a config value, `run.platforms`) and passthrough
   variables; a required secret the manifest doesn't map yet is listed apart with the `set-secret` command that maps
   it. For local testing, `--write` appends what `.env` (or `--path`) lacks and never
