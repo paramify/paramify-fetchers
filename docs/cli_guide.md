@@ -216,7 +216,6 @@ Paramify's own upload token comes first.
 paramify env                          # print what ./manifest.yaml needs (writes nothing)
 paramify env -m manifests/prod.yaml   # another manifest
 paramify env --write                  # append the missing variables to ./.env
-paramify env --write --path ~/secrets/fetchers.env
 ```
 
 - It reads the names from the manifest itself. A secret mapped with
@@ -231,6 +230,9 @@ paramify env --write --path ~/secrets/fetchers.env
   `AWS_ACCESS_KEY_ID=` would hide the ambient credentials.
 - It ends with the required variables that still have no value, in the file
   or exported in your shell.
+- `run` and `doctor` read `.env` in the repo root (a value you export still
+  wins). `--path` merges into another file instead, such as one your CI or a
+  secret manager loads; nothing here reads that one for you.
 
 ## Collect, then upload
 

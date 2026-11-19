@@ -3,16 +3,21 @@ tool, with a note on each, and never overwriting what the customer already has.
 
 Names the fetchers declare come from the same place the runner reads them:
 secrets through `contract.effective_secrets` (so category-level credentials such
-as AWS or Azure are included) and config fields that name an `env`. Nothing here
-reads or prints an existing value.
+as AWS or Azure are included) and config fields that name an `env`. A file's
+values are read with python-dotenv, as every run reads them. Nothing here prints
+an existing value, touches a file, or scans the fetcher tree: the caller
+(framework.api) passes the discovered fetchers in and does the writing.
 """
 
 from __future__ import annotations
 
+import io
+import os
 import re
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
+
+from dotenv import dotenv_values
 
 from framework import paramify_auth
 from framework.contract import effective_secrets, platform_for
@@ -34,49 +39,29 @@ class EnvGroup:
 
 
 @dataclass
-class EnvLine:
-    """One line of an existing .env: its text exactly as written, and the
-    variable it assigns (None for comments, blanks and anything unparseable)."""
+class EnvPlan:
+    """One merge into a .env: the text to append (the whole file when there
+    was none, never existing content), and the names it adds, finds already
+    set, and still finds empty (in the file and in the environment)."""
     text: str
-    name: Optional[str] = None
-    value: Optional[str] = None
+    added: List[str]
+    already_set: List[str]
+    missing: List[str]
 
 
-_ASSIGN = re.compile(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$")
 _ENV_REF = re.compile(r"\$\{env:([A-Za-z_][A-Za-z0-9_]*)\}")
 _PLACEHOLDER = re.compile(r"^\s*#\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=")
 
 
-def parse(text: str) -> List[EnvLine]:
-    """Parse .env text into lines that keep their original text."""
-    out: List[EnvLine] = []
-    for raw in text.splitlines():
-        m = _ASSIGN.match(raw)
-        if not m:
-            out.append(EnvLine(raw))
-            continue
-        value = m.group(2)
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
-            value = value[1:-1]
-        elif " #" in value:
-            value = value.split(" #", 1)[0].rstrip()
-        out.append(EnvLine(raw, m.group(1), value))
-    return out
-
-
 def assigned(text: str) -> Dict[str, str]:
-    """{name: value} for every variable the text assigns (last one wins)."""
-    return {ln.name: ln.value or "" for ln in parse(text) if ln.name}
+    """{name: value} as python-dotenv reads `text`, which is how runs read it."""
+    return {k: v or "" for k, v in dotenv_values(stream=io.StringIO(text)).items()}
 
 
 def _first_sentence(text: Optional[str]) -> str:
     flat = " ".join((text or "").split())
     m = re.match(r"(.+?[.!?])(?:\s|$)", flat)
     return m.group(1) if m else flat
-
-
-def _flat(text: Optional[str]) -> str:
-    return " ".join((text or "").split())
 
 
 def _note(description: Optional[str], fallback: str, required: bool, default: Optional[str]) -> str:
@@ -94,15 +79,14 @@ def _note(description: Optional[str], fallback: str, required: bool, default: Op
 
 
 def _paramify_group() -> EnvGroup:
+    default = paramify_auth.DEFAULT_BASE_URL
     return EnvGroup(
         "Paramify",
         "Where evidence is uploaded. Create the API token in Paramify under Settings.",
         [
-            EnvVar(paramify_auth.UPLOAD_TOKEN_ENV,
-                   "Paramify API token used to upload evidence - required", True, None),
-            EnvVar(paramify_auth.BASE_URL_ENV,
-                   f"Paramify API address - optional (default {paramify_auth.DEFAULT_BASE_URL})",
-                   False, paramify_auth.DEFAULT_BASE_URL),
+            EnvVar(paramify_auth.UPLOAD_TOKEN_ENV, _note("Paramify API token used to upload evidence", "", True, None),
+                   True, None),
+            EnvVar(paramify_auth.BASE_URL_ENV, _note("Paramify API address", "", False, default), False, default),
         ],
     )
 
@@ -118,26 +102,25 @@ def _refs(value: Any) -> List[str]:
     return []
 
 
-def env_groups(
-    root: Path,
-    entries: Sequence[Union[str, Mapping[str, Any]]],
-    manifest_platforms: Optional[Mapping[str, Any]] = None,
-) -> List[EnvGroup]:
-    """Variables the given fetchers need, by tool. Paramify comes first; names
-    seen twice appear once, and one place that requires a variable makes it
+def manifest_for(names: Sequence[str]) -> dict:
+    """A manifest that runs these fetchers, for a caller that has only names."""
+    return {"run": {"fetchers": [{"use": n} for n in names]}}
+
+
+def env_groups(fetchers: Mapping[str, Any], platforms: Mapping[str, Any], manifest: Mapping[str, Any]) -> List[EnvGroup]:
+    """Variables a manifest needs, by tool. Paramify comes first; names seen
+    twice appear once, and one place that requires a variable makes it
     required. Unknown fetcher names are skipped (validation reports them).
 
-    Each entry is a fetcher name or a manifest entry (`{"use": ..., ...}`). For
-    a manifest entry, the variables its `${env:}` references name win: a secret
-    mapped to OKTA_PROD_TOKEN, or one token per target, gives those names, not
-    the fetcher's declared default. Any other reference in the entry (a config
-    value, a target field) is included as required. `manifest_platforms` is the
-    manifest's `run.platforms` block: its config references are required, its
-    `auth.passthrough_env` names optional."""
-    from framework import api  # late: api imports this module
-
-    found = api.discover(root)
-    fetchers, platforms = found["fetchers"], found["platforms"]
+    The manifest's own `${env:}` references win: a secret mapped to
+    OKTA_PROD_TOKEN, or one token per target, gives those names, not the
+    fetcher's declared default. Any other reference in an entry (a config
+    value, a target field) is required. In `run.platforms`, config references
+    are required and `auth.passthrough_env` names optional.
+    """
+    run = manifest.get("run") or {}
+    entries = [e for e in run.get("fetchers") or [] if isinstance(e, Mapping) and e.get("use")]
+    blocks: Mapping[str, Any] = run["platforms"] if isinstance(run.get("platforms"), Mapping) else {}
     groups: List[EnvGroup] = [_paramify_group()]
     seen: Dict[str, EnvVar] = {v.name: v for v in groups[0].vars}
     by_cat: Dict[str, EnvGroup] = {}
@@ -161,11 +144,9 @@ def env_groups(
         seen[name] = var
         g.vars.append(var)
 
-    blocks: Mapping[str, Any] = manifest_platforms if isinstance(manifest_platforms, Mapping) else {}
     used_cats = set()
-    for item in entries:
-        entry: Mapping[str, Any] = item if isinstance(item, Mapping) else {"use": item}
-        fname = entry.get("use")
+    for entry in entries:
+        fname = entry["use"]
         f = fetchers.get(fname) if isinstance(fname, str) else None
         if f is None:
             continue
@@ -229,13 +210,6 @@ def _block(g: EnvGroup, vars_: Sequence[EnvVar], header: bool = True) -> List[st
 _PREAMBLE = "# Generated by `paramify env`. Fill in the blank values; existing values are never changed."
 
 
-def render(groups: Sequence[EnvGroup]) -> str:
-    out: List[str] = [_PREAMBLE]
-    for g in groups:
-        out += ["", *_block(g, g.vars)]
-    return "\n".join(out) + "\n"
-
-
 _HEADER = re.compile(r"^# --- (.+?)(?: \(continued\))? ---\s*$")
 
 
@@ -259,11 +233,13 @@ def _continued(g: EnvGroup, vars_: Sequence[EnvVar], existing: str) -> List[str]
     return [f"# --- {g.title} (continued) ---", *_block(g, vars_, header=False)]
 
 
-def plan(existing: str, groups: Sequence[EnvGroup]) -> Tuple[str, List[str], List[str]]:
-    """(text to append, names added, names already set). Never touches `existing`."""
-    lines = parse(existing)
-    have = {ln.name: ln.value for ln in lines if ln.name}
-    placeholders = {m.group(1) for ln in lines if not ln.name and (m := _PLACEHOLDER.match(ln.text))}
+def plan(existing: str, groups: Sequence[EnvGroup], environ: Optional[Mapping[str, str]] = None) -> EnvPlan:
+    """What merging `groups` into `existing` (LF line endings) adds. Never
+    changes `existing`. A required variable is missing when it is empty both
+    in the file (as it will be) and in `environ` (default os.environ)."""
+    environ = os.environ if environ is None else environ
+    have = assigned(existing)
+    placeholders = {m.group(1) for line in existing.splitlines() if (m := _PLACEHOLDER.match(line))}
     added: List[str] = []
     already: List[str] = []
     out: List[str] = []
@@ -271,39 +247,34 @@ def plan(existing: str, groups: Sequence[EnvGroup]) -> Tuple[str, List[str], Lis
         fresh = []
         for v in g.vars:
             if v.name in have:
-                if (have[v.name] or "").strip():
+                if have[v.name].strip():
                     already.append(v.name)
             elif v.name not in placeholders or v.required:
                 fresh.append(v)
         if fresh:
-            # Judged against what is already written plus what this call has appended.
             so_far = existing + "\n".join(out)
             out += ["", *_block(g, fresh, header=False)] if _is_last_section(so_far, g.title) else [
                 "", *_continued(g, fresh, so_far)]
             added += [v.name for v in fresh]
-    if not out:
-        return "", added, already
-    if not existing:
-        out = [_PREAMBLE, *out]
-    elif out[0] == "":
-        out = out[1:] if existing.endswith("\n\n") else out
-    return "\n".join(out) + "\n", added, already
+    text = ""
+    if out:
+        if not existing:
+            out = [_PREAMBLE, *out]
+        elif out[0] == "" and existing.endswith("\n\n"):
+            out = out[1:]
+        text = "\n".join(out) + "\n"
+    values = {**have, **assigned(text)}
+    missing = [v.name for g in groups for v in g.vars
+               if v.required and not values.get(v.name, "").strip() and not environ.get(v.name, "").strip()]
+    return EnvPlan(text, added, already, missing)
 
 
-def merge_into(path: Path, groups: Sequence[EnvGroup]) -> dict:
-    """Append the variables `path` lacks, under their group; write atomically.
-    Existing lines are left exactly as they are."""
-    from framework import api
-
-    path = Path(path)
-    target = path.resolve() if path.is_symlink() else path  # write the file, keep the link
-    existing = ""
-    if target.is_file():
-        with target.open(newline="") as fh:  # as written: a CRLF file stays CRLF
-            existing = fh.read()
-    addition, added, already = plan(existing.replace("\r\n", "\n"), groups)
-    if addition:
-        newline = "\r\n" if "\r\n" in existing else "\n"
-        sep = newline if existing and not existing.endswith("\n") else ""
-        api._atomic_write(target, existing + sep + addition.replace("\n", newline))
-    return {"added": added, "already_set": already, "path": str(path)}
+def merged(existing: str, groups: Sequence[EnvGroup], environ: Optional[Mapping[str, str]] = None) -> Tuple[str, EnvPlan]:
+    """`existing` exactly as written, with what `plan` adds appended in the
+    file's own line endings (a CRLF file stays CRLF)."""
+    result = plan(existing.replace("\r\n", "\n"), groups, environ)
+    if not result.text:
+        return existing, result
+    newline = "\r\n" if "\r\n" in existing else "\n"
+    sep = newline if existing and not existing.endswith("\n") else ""
+    return existing + sep + result.text.replace("\n", newline), result

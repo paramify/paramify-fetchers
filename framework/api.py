@@ -4113,9 +4113,14 @@ def shared_config_state(
     }
 
 
+def env_file(root: Path) -> Path:
+    """The .env that `run` and `doctor` read, and `paramify env` writes by default."""
+    return Path(root) / ".env"
+
+
 def refresh_env(root: Path) -> List[str]:
-    """Copy into os.environ each <root>/.env value whose variable is unset or
-    empty here. Returns the names it filled.
+    """Copy into os.environ each `.env` value (env_file) whose variable is
+    unset or empty here. Returns the names it filled.
 
     A run resolves ${env:...} from os.environ, so without this a value kept
     only in `.env` (the file `paramify env --write` makes) reaches a run only
@@ -4125,47 +4130,44 @@ def refresh_env(root: Path) -> List[str]:
     non-empty export always wins; an empty .env value is never copied.
     Called by `run` and `doctor` before they read anything.
     """
-    from dotenv import dotenv_values
+    from framework import envgen
 
-    path = Path(root) / ".env"
+    path = env_file(root)
+    # The words python-dotenv itself accepts; the demo's offline guard sets it.
     disabled = os.environ.get("PYTHON_DOTENV_DISABLED", "").casefold() in {"1", "true", "t", "yes", "y"}
-    if disabled or not path.is_file():  # disabled as load_dotenv is: the demo's offline guard sets it
+    if disabled or not path.is_file():
         return []
     filled = []
-    for name, value in dotenv_values(path).items():
+    for name, value in envgen.assigned(path.read_text()).items():
         if value and not (os.environ.get(name) or "").strip():
             os.environ[name] = value
             filled.append(name)
     return filled
 
 
-def generate_env(
-    root: Path, fetchers: Sequence[Any], write: bool = False, path: Optional[Path] = None,
-    manifest_platforms: Optional[Mapping[str, Any]] = None,
-) -> dict:
-    """The .env the given fetchers need, merged with the one at `path`
-    (default <root>/.env) without changing anything already in it. Each of
-    `fetchers` is a fetcher name or a manifest entry; an entry's own ${env:}
-    references name its variables, as do `manifest_platforms` (the manifest's
-    `run.platforms`; see envgen.env_groups).
+def generate_env(root: Path, manifest: Mapping[str, Any], write: bool = False, path: Optional[Path] = None) -> dict:
+    """The .env a manifest needs, merged with the one at `path` (default
+    env_file(root)) without changing anything already in it. A caller with
+    only fetcher names passes envgen.manifest_for(names).
 
     Returns {"text", "added", "already_set", "missing_values", "path"}. `text`
     is what is added (the whole file when there was none), never existing
     content, so printing it cannot leak a value. `missing_values` names required
     variables that would still be empty: empty in the file and not exported
-    (non-empty) in this process's environment. Writes only when `write` is set.
+    (non-empty) in this process's environment. Writes only when `write` is set:
+    atomically, through a symlinked .env to its file, keeping CRLF line endings.
     """
     from framework import envgen
 
-    path = Path(path) if path else Path(root) / ".env"
-    groups = envgen.env_groups(root, fetchers, manifest_platforms)
-    existing = path.read_text() if path.is_file() else ""
-    addition, added, already = envgen.plan(existing, groups)
-    if write:
-        envgen.merge_into(path, groups)
-    sep = "\n" if existing and not existing.endswith("\n") else ""
-    values = envgen.assigned(existing + sep + addition)
-    missing = [v.name for g in groups for v in g.vars
-               if v.required and not values.get(v.name, "").strip() and not os.environ.get(v.name, "").strip()]
-    return {"text": addition, "added": added, "already_set": already,
-            "missing_values": missing, "path": str(path)}
+    path = Path(path) if path else env_file(root)
+    target = path.resolve() if path.is_symlink() else path
+    existing = ""
+    if target.is_file():
+        with target.open(newline="") as fh:
+            existing = fh.read()
+    found = discover(root)
+    text, result = envgen.merged(existing, envgen.env_groups(found["fetchers"], found["platforms"], manifest))
+    if write and result.text:
+        _atomic_write(target, text)
+    return {"text": result.text, "added": result.added, "already_set": result.already_set,
+            "missing_values": result.missing, "path": str(path)}

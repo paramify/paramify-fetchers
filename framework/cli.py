@@ -1392,7 +1392,9 @@ def validate_cmd(
 def env_cmd(
     manifest: Optional[str] = typer.Option(None, "--manifest", "-m", help=f"Manifest to read (default: {_DEFAULT_MANIFEST})"),
     write: bool = typer.Option(False, "--write", help="Add the missing variables to the .env file (existing lines are never changed)"),
-    path: Optional[Path] = typer.Option(None, "--path", help="The .env file (default: .env in the repo root)"),
+    path: Optional[Path] = typer.Option(
+        None, "--path",
+        help="Another file to merge into (default: .env in the repo root, the one run and doctor read)"),
 ):
     """Print the .env a manifest needs, grouped by tool. Prints by default.
 
@@ -1405,9 +1407,7 @@ def env_cmd(
         data = api.read_manifest(mpath, must_exist=True)
     except Exception as e:  # noqa: BLE001 — a setup error, reported as one line
         _fail(mpath, f"could not read {mpath}: {e}", False)
-    entries = [e for e in (data.get("run") or {}).get("fetchers") or [] if isinstance(e, dict) and e.get("use")]
-    res = api.generate_env(root, entries, write=write, path=path,
-                           manifest_platforms=(data.get("run") or {}).get("platforms"))
+    res = api.generate_env(root, data, write=write, path=path)
     typer.echo(res["text"], nl=False)
     if res["text"]:
         typer.echo("")
