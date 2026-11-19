@@ -12,6 +12,38 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **Azure resource exclusions take `tag:` patterns, and every adopter gains `resource_inclusions`.**
+  `resource_exclusions` accepts `tag:<name>=<value glob>` beside `rg:`, `location:` and `id:`, so "everything except
+  what's tagged `Scope=Out`" needs no inclusion list. A pattern list keeps a double-quoted run whole. `manifest
+  exclude` never edits `resource_inclusions`. Versions: `azure_aks_workload_security`, `azure_endpoint_availability`,
+  `azure_flexible_server_backups` and `azure_velero_backups` 0.1.0 → 0.2.0; `azure_backup_vault_protection`,
+  `azure_bastion_configuration`, `azure_defender_vulnerability_findings`, `azure_firewall_configuration`,
+  `azure_resource_locks`, `azure_service_availability`, `azure_service_health_advisories` and `azure_zone_redundancy`
+  0.1.1 → 0.2.0; `azure_ai_hub_configuration`, `azure_api_management_configuration`, `azure_app_gateway_backend_tls`,
+  `azure_app_gateway_tls_listeners`, `azure_container_registry_configuration`,
+  `azure_container_workloads_configuration`, `azure_cosmosdb_configuration`,
+  `azure_databricks_workspace_configuration`, `azure_ddos_protection`, `azure_front_door_waf_policies`,
+  `azure_function_app_configuration`, `azure_log_analytics_deletion_rights`, `azure_log_analytics_query_audit`,
+  `azure_log_storage_immutability`, `azure_sentinel_automation_rules`, `azure_service_log_records`,
+  `azure_sql_encryption_status`, `azure_sql_server_configuration` and `azure_virtual_wan_configuration` 0.2.1 → 0.3.0;
+  `azure_ai_services_configuration`, `azure_app_gateway_waf` and `azure_monitor_fired_alerts` 0.2.2 → 0.3.0;
+  `azure_data_services_configuration`, `azure_disk_encryption_status`, `azure_managed_identity_configuration`,
+  `azure_managed_redis_configuration`, `azure_mysql_configuration`, `azure_network_flow_logs`,
+  `azure_postgresql_configuration`, `azure_rbac_custom_roles`, `azure_redis_cache_configuration` and
+  `azure_vpn_gateway_configuration` 0.3.0 → 0.4.0; `azure_activity_log_alerts`, `azure_alert_rules`,
+  `azure_app_service_deployments`, `azure_app_service_plans`, `azure_change_provenance`,
+  `azure_log_analytics_workspaces`, `azure_residual_resources`, `azure_sentinel_incidents`,
+  `azure_vm_hardening_status` and `azure_vnet_egress_routing` 0.3.1 → 0.4.0; `azure_app_service_backups` and
+  `azure_private_endpoint_configuration` 0.3.2 → 0.4.0; `azure_sentinel_analytics_rules` and
+  `azure_sql_managed_instance_encryption` 0.4.0 → 0.5.0; `azure_backup_recovery_status`, `azure_defender_assessments`,
+  `azure_policy_assignments`, `azure_private_dns_zone_configuration`, `azure_resource_diagnostic_settings`,
+  `azure_resource_inventory` and `azure_sentinel_data_sources` 0.4.1 → 0.5.0; `azure_rbac_role_assignments` 0.4.3 →
+  0.5.0; `azure_key_vault_configuration`, `azure_sql_managed_instance_backups`,
+  `azure_sql_managed_instance_configuration` and `azure_storage_encryption_status` 0.5.0 → 0.6.0;
+  `azure_app_service_configuration` and `azure_policy_compliance` 0.5.1 → 0.6.0; `azure_network_security_groups` 0.6.0
+  → 0.7.0; `azure_dns_configuration`, `azure_front_door_tls`, `azure_front_door_waf_coverage` and
+  `azure_key_vault_key_rotation` 0.6.1 → 0.7.0; `azure_aks_cluster_configuration` 0.7.0 → 0.8.0;
+  `azure_front_door_origins` 0.8.1 → 0.9.0.
 - **`azure_aks_cluster_configuration` 0.7.0: autoscaling for expected pools.** A new `expected_autoscaling_pools`
   setting lists the node pools that must have the cluster autoscaler on, as `pool` (every cluster) or `cluster/pool`.
   Missing pools and pools without the autoscaler are counted and named, a pool at zero nodes stays expected, and

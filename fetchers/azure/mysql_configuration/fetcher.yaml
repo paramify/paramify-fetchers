@@ -1,5 +1,5 @@
 name: azure_mysql_configuration
-version: 0.3.0
+version: 0.4.0
 description: >-
   Shows whether each MySQL flexible server requires encrypted connections, accepts only current TLS versions, logs connections, blocks public access, and has geo-redundant backups and a standby.
 category: azure
@@ -7,7 +7,7 @@ category: azure
 config_schema:
   resource_exclusions:
     type: patterns
-    prefixes: [rg, location, id]
+    prefixes: [rg, location, id, tag]
     bare: false
     required: false
     env: AZURE_RESOURCE_EXCLUSIONS
@@ -16,8 +16,9 @@ config_schema:
       case-insensitive glob patterns listed in the manifest, each with a
       prefix: rg:<resource group> (read from the resource id), location:<region>
       (the region's name without spaces, such as eastus2; a resource with no
-      location never matches one) or id:<resource id> (also matches that
-      resource's child resources). * matches any run of characters and ? one
+      location never matches one), id:<resource id> (also matches that
+      resource's child resources) or tag:<name>=<value> (the resource's own
+      tags; see resource_inclusions). * matches any run of characters and ? one
       character. A matching MySQL flexible server is listed under excluded with the
       pattern and left out of every count and verdict; its server
       parameters are not read. A pattern
@@ -25,6 +26,37 @@ config_schema:
       fetcher that has this field; fetchers without it ignore it. Each item is a
       pattern, or a pattern with a reason. Empty: every
       resource is in scope.
+
+  resource_inclusions:
+    type: patterns
+    prefixes: [rg, location, id, tag]
+    bare: false
+    exclusion: false
+    required: false
+    env: AZURE_RESOURCE_INCLUSIONS
+    description: >
+      Resources in the authorization boundary, the only ones left in scope:
+      tag:<name>=<value> (the resource's own tags; tag:<name> matches any value;
+      double-quote a name or value holding a space, comma, = or :), or rg:,
+      location: and id: patterns as in resource_exclusions, which still win.
+      Tags never pass down from a resource group or a parent resource; a key
+      vault key, a storage container or a diagnostic setting goes with the
+      resource it belongs to. A grant, lock or policy on a resource group or the
+      subscription stays while it holds an in-scope resource; one on a
+      management group always stays. A resource no pattern matches is listed
+      under excluded as not_included (1000 of each kind; the rest are counted in
+      not_included_<kind>s_not_listed) and left out of every count and verdict;
+      the summary adds resource_inclusion_patterns,
+      resource_inclusion_patterns_unmatched and not_included_<kind>s. tag:
+      patterns read every resource's tags once from Resource Graph: a failed
+      read fails the run and writes no evidence, a resource Resource Graph
+      doesn't return (deleted, or newer than the read) stays in scope and is
+      counted in scope_not_found_resources, and a record with no id or
+      subscription is counted in scope_unknown_<kind>s and fails the run. A
+      pattern without a prefix fails the run. Set it once under
+      platforms.azure.config; manifest exclude never edits it. Each item is a
+      pattern, or a pattern with a reason. Empty: every resource not excluded is
+      in scope.
 
 supports_targets: true
 
@@ -82,7 +114,7 @@ evidence_set:
     Summary fields:
 
     Which resources are left out of scope?
-    - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every server is in scope
+    - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location:, id: or tag:); empty when none are set, so every server is in scope
     - resource_exclusion_patterns_unmatched — List of configured patterns that matched no MySQL server, such as a mistyped name; null if the server list couldn't be read
     - excluded_mysql_servers — Number of servers left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, gets no parameter reads, and no other count includes it; null if the server list couldn't be read
     - in_scope_mysql_servers — Number of servers read and in scope; null if the server list couldn't be read, and 0 means there are none or the patterns took out every server, which a check can catch by requiring more than 0

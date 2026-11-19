@@ -513,7 +513,7 @@ def test_describe_shows_what_a_patterns_field_takes_and_not_its_env_var(monkeypa
     monkeypatch.chdir(REPO_ROOT)
     out = runner.invoke(app, ["describe", "azure_key_vault_configuration"]).output
     [line] = [ln for ln in out.splitlines() if "resource_exclusions" in ln and "patterns" in ln]
-    assert "takes=rg:, location: or id: patterns" in line and "AZURE_RESOURCE_EXCLUSIONS" not in line
+    assert "takes=rg:, location:, id: or tag: patterns" in line and "AZURE_RESOURCE_EXCLUSIONS" not in line
 
 
 def test_the_tui_detail_shows_a_list_as_its_patterns():

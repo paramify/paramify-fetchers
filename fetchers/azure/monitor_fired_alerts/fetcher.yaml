@@ -1,5 +1,5 @@
 name: azure_monitor_fired_alerts
-version: 0.2.2
+version: 0.3.0
 description: >-
   Lists every Azure Monitor alert fired in the last 30 days, who acknowledged and closed it and when, and how often each alert rule fired.
 category: azure
@@ -18,7 +18,7 @@ output:
 config_schema:
   resource_exclusions:
     type: patterns
-    prefixes: [rg, location, id]
+    prefixes: [rg, location, id, tag]
     bare: false
     required: false
     env: AZURE_RESOURCE_EXCLUSIONS
@@ -27,8 +27,9 @@ config_schema:
       case-insensitive glob patterns listed in the manifest, each with a
       prefix: rg:<resource group> (read from the resource id), location:<region>
       (the region's name without spaces, such as eastus2; a resource with no
-      location never matches one) or id:<resource id> (also matches that
-      resource's child resources). * matches any run of characters and ? one
+      location never matches one), id:<resource id> (also matches that
+      resource's child resources) or tag:<name>=<value> (the resource's own
+      tags; see resource_inclusions). * matches any run of characters and ? one
       character. A fired alert whose target resource (or its resource group)
       matches, and an alert rule whose own resource group or id matches, are
       listed under excluded with the pattern and left out of every count. An
@@ -43,6 +44,37 @@ config_schema:
       every Azure fetcher that has this field; fetchers without it ignore it.
       Each item is a pattern, or a pattern with a reason. Empty: every resource
       is in scope.
+
+  resource_inclusions:
+    type: patterns
+    prefixes: [rg, location, id, tag]
+    bare: false
+    exclusion: false
+    required: false
+    env: AZURE_RESOURCE_INCLUSIONS
+    description: >
+      Resources in the authorization boundary, the only ones left in scope:
+      tag:<name>=<value> (the resource's own tags; tag:<name> matches any value;
+      double-quote a name or value holding a space, comma, = or :), or rg:,
+      location: and id: patterns as in resource_exclusions, which still win.
+      Tags never pass down from a resource group or a parent resource; a key
+      vault key, a storage container or a diagnostic setting goes with the
+      resource it belongs to. A grant, lock or policy on a resource group or the
+      subscription stays while it holds an in-scope resource; one on a
+      management group always stays. A resource no pattern matches is listed
+      under excluded as not_included (1000 of each kind; the rest are counted in
+      not_included_<kind>s_not_listed) and left out of every count and verdict;
+      the summary adds resource_inclusion_patterns,
+      resource_inclusion_patterns_unmatched and not_included_<kind>s. tag:
+      patterns read every resource's tags once from Resource Graph: a failed
+      read fails the run and writes no evidence, a resource Resource Graph
+      doesn't return (deleted, or newer than the read) stays in scope and is
+      counted in scope_not_found_resources, and a record with no id or
+      subscription is counted in scope_unknown_<kind>s and fails the run. A
+      pattern without a prefix fails the run. Set it once under
+      platforms.azure.config; manifest exclude never edits it. Each item is a
+      pattern, or a pattern with a reason. Empty: every resource not excluded is
+      in scope.
 
 target_schema:
   subscription_id:
@@ -127,7 +159,7 @@ evidence_set:
     - rules_fired_not_listed — Number of alert rules that fired an alert in the window but aren't in the subscription's rule lists: in another subscription, deleted, a kind the fetcher doesn't list (such as Prometheus rule groups or classic alert rules), or its provider isn't registered; built-in rules (rule type builtin) aren't counted; null if the alert list wasn't read or a rule list failed
 
     Which alerts and rules are left out of scope?
-    - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every alert and rule is in scope
+    - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location:, id: or tag:); empty when none are set, so every alert and rule is in scope
     - resource_exclusion_patterns_unmatched — List of configured patterns that matched no alert's target resource and no alert rule, such as a mistyped name; null if the alert list or a rule list wasn't read
     - excluded_alerts — Number of fired alerts left out of scope because a pattern matched their target resource's resource group or id; each is listed under excluded with the pattern and target_id, its history isn't read, and no other count includes it; null if the alert list wasn't read
     - excluded_alert_rules — Number of alert rules left out of scope because a pattern matched their own resource group or id; their alerts on in-scope resources still count; null if a rule list wasn't read

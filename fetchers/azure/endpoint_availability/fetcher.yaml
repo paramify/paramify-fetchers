@@ -1,5 +1,5 @@
 name: azure_endpoint_availability
-version: 0.1.0
+version: 0.2.0
 description: >-
   Shows whether customer-facing endpoints are tested for availability from outside and how available they were, and whether Standard load balancers kept their data path and backend health probes up.
 category: azure
@@ -35,12 +35,43 @@ config_schema:
       outside that range fails the run as bad_config and leaves it unset.
   resource_exclusions:
     type: patterns
-    prefixes: [rg, location, id]
+    prefixes: [rg, location, id, tag]
     bare: false
     required: false
     env: AZURE_RESOURCE_EXCLUSIONS
     description: >
       Patterns that take availability tests or load balancers out of scope, as for the other Azure fetchers.
+
+  resource_inclusions:
+    type: patterns
+    prefixes: [rg, location, id, tag]
+    bare: false
+    exclusion: false
+    required: false
+    env: AZURE_RESOURCE_INCLUSIONS
+    description: >
+      Resources in the authorization boundary, the only ones left in scope:
+      tag:<name>=<value> (the resource's own tags; tag:<name> matches any value;
+      double-quote a name or value holding a space, comma, = or :), or rg:,
+      location: and id: patterns as in resource_exclusions, which still win.
+      Tags never pass down from a resource group or a parent resource; a key
+      vault key, a storage container or a diagnostic setting goes with the
+      resource it belongs to. A grant, lock or policy on a resource group or the
+      subscription stays while it holds an in-scope resource; one on a
+      management group always stays. A resource no pattern matches is listed
+      under excluded as not_included (1000 of each kind; the rest are counted in
+      not_included_<kind>s_not_listed) and left out of every count and verdict;
+      the summary adds resource_inclusion_patterns,
+      resource_inclusion_patterns_unmatched and not_included_<kind>s. tag:
+      patterns read every resource's tags once from Resource Graph: a failed
+      read fails the run and writes no evidence, a resource Resource Graph
+      doesn't return (deleted, or newer than the read) stays in scope and is
+      counted in scope_not_found_resources, and a record with no id or
+      subscription is counted in scope_unknown_<kind>s and fails the run. A
+      pattern without a prefix fails the run. Set it once under
+      platforms.azure.config; manifest exclude never edits it. Each item is a
+      pattern, or a pattern with a reason. Empty: every resource not excluded is
+      in scope.
 
 target_schema:
   subscription_id:

@@ -1,5 +1,5 @@
 name: azure_service_health_advisories
-version: 0.1.1
+version: 0.2.0
 description: >-
   Lists the Microsoft service issues, planned maintenance, health and security
   advisories reported to the subscription, with their status, recommended
@@ -23,7 +23,7 @@ config_schema:
       above 0 fails the run as bad_config.
   resource_exclusions:
     type: patterns
-    prefixes: [rg, location, id]
+    prefixes: [rg, location, id, tag]
     bare: false
     required: false
     env: AZURE_RESOURCE_EXCLUSIONS
@@ -31,8 +31,9 @@ config_schema:
       Resources outside the authorization boundary, to leave out of scope, as
       case-insensitive glob patterns listed in the manifest, each with a
       prefix: rg:<resource group> (read from the resource id), location:<region>
-      (the region's name without spaces, such as eastus2) or id:<resource id>
-      (also matches that resource's child resources). * matches any run of
+      (the region's name without spaces, such as eastus2), id:<resource id>
+      (also matches that resource's child resources) or tag:<name>=<value> (the
+      resource's own tags; see resource_inclusions). * matches any run of
       characters and ? one character. The patterns apply to the resources an
       event names: a matching resource is listed under excluded with the pattern
       and the event, and left out of every count. An event whose every named
@@ -41,6 +42,37 @@ config_schema:
       without one of these prefixes fails the run. Set it once under
       platforms.azure.config for every Azure fetcher that has this field;
       fetchers without it ignore it. Each item is a pattern, or a pattern with a reason. Empty: every resource is
+      in scope.
+
+  resource_inclusions:
+    type: patterns
+    prefixes: [rg, location, id, tag]
+    bare: false
+    exclusion: false
+    required: false
+    env: AZURE_RESOURCE_INCLUSIONS
+    description: >
+      Resources in the authorization boundary, the only ones left in scope:
+      tag:<name>=<value> (the resource's own tags; tag:<name> matches any value;
+      double-quote a name or value holding a space, comma, = or :), or rg:,
+      location: and id: patterns as in resource_exclusions, which still win.
+      Tags never pass down from a resource group or a parent resource; a key
+      vault key, a storage container or a diagnostic setting goes with the
+      resource it belongs to. A grant, lock or policy on a resource group or the
+      subscription stays while it holds an in-scope resource; one on a
+      management group always stays. A resource no pattern matches is listed
+      under excluded as not_included (1000 of each kind; the rest are counted in
+      not_included_<kind>s_not_listed) and left out of every count and verdict;
+      the summary adds resource_inclusion_patterns,
+      resource_inclusion_patterns_unmatched and not_included_<kind>s. tag:
+      patterns read every resource's tags once from Resource Graph: a failed
+      read fails the run and writes no evidence, a resource Resource Graph
+      doesn't return (deleted, or newer than the read) stays in scope and is
+      counted in scope_not_found_resources, and a record with no id or
+      subscription is counted in scope_unknown_<kind>s and fails the run. A
+      pattern without a prefix fails the run. Set it once under
+      platforms.azure.config; manifest exclude never edits it. Each item is a
+      pattern, or a pattern with a reason. Empty: every resource not excluded is
       in scope.
 
 supports_targets: true
@@ -143,7 +175,7 @@ evidence_set:
     - sensitive_event_details_not_authorized — Number of sensitive events whose details were refused (403) because the optional action is not granted; their summary and updates read null
 
     Which resources are left out of scope?
-    - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
+    - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location:, id: or tag:); empty when none are set, so every resource is in scope
     - resource_exclusion_patterns_unmatched — List of configured patterns that matched no resource an event names, such as a mistyped name; null while any event's resource list is unread, or when the events could not all be read, since a pattern may match a resource that wasn't read
     - excluded_impacted_resources — Number of distinct resources named by events that a pattern took out by resource group, region or id; each is listed under excluded with the pattern, once for each event that names it, and no other count includes them; null while any event's resource list is unread, or when the events could not all be read
     - excluded_events — Number of events left out because a pattern took out every resource they name; each is listed under excluded; null when the events could not all be read

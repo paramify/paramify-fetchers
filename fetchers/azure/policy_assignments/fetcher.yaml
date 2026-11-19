@@ -1,5 +1,5 @@
 name: azure_policy_assignments
-version: 0.4.1
+version: 0.5.0
 description: >-
   Lists every Azure Policy assignment and exemption in effect on the subscription, showing which assignments actually enforce, which only audit, and what each exemption waives and until when.
 category: azure
@@ -35,15 +35,17 @@ target_schema:
 config_schema:
   resource_exclusions:
     type: patterns
-    prefixes: [rg, location, id]
+    prefixes: [rg, location, id, tag]
     bare: false
     required: false
     env: AZURE_RESOURCE_EXCLUSIONS
     description: >
       Resources outside the authorization boundary, to leave out of scope, as
       case-insensitive glob patterns listed in the manifest, each with a
-      prefix: rg:<resource group>, location:<region> or id:<resource id> (also
-      matches that resource's child resources). * matches any run of characters and
+      prefix: rg:<resource group>, location:<region>, id:<resource id> (also
+      matches that resource's child resources) or tag:<name>=<value> (the
+      resource's own tags; see resource_inclusions). * matches any run of
+      characters and
       ? one character. Only policy exemptions follow them: an exemption follows the
       scope it was made at, matched through its own id, so rg: takes out one made in
       that resource group or on a resource in it and id: one made on that resource
@@ -53,6 +55,37 @@ config_schema:
       and left out of every exemption count and each assignment's exemption_count.
       Policy assignments are not affected. A pattern without one of these prefixes
       fails the run. Each item is a pattern, or a pattern with a reason.
+
+  resource_inclusions:
+    type: patterns
+    prefixes: [rg, location, id, tag]
+    bare: false
+    exclusion: false
+    required: false
+    env: AZURE_RESOURCE_INCLUSIONS
+    description: >
+      Resources in the authorization boundary, the only ones left in scope:
+      tag:<name>=<value> (the resource's own tags; tag:<name> matches any value;
+      double-quote a name or value holding a space, comma, = or :), or rg:,
+      location: and id: patterns as in resource_exclusions, which still win.
+      Tags never pass down from a resource group or a parent resource; a key
+      vault key, a storage container or a diagnostic setting goes with the
+      resource it belongs to. A grant, lock or policy on a resource group or the
+      subscription stays while it holds an in-scope resource; one on a
+      management group always stays. A resource no pattern matches is listed
+      under excluded as not_included (1000 of each kind; the rest are counted in
+      not_included_<kind>s_not_listed) and left out of every count and verdict;
+      the summary adds resource_inclusion_patterns,
+      resource_inclusion_patterns_unmatched and not_included_<kind>s. tag:
+      patterns read every resource's tags once from Resource Graph: a failed
+      read fails the run and writes no evidence, a resource Resource Graph
+      doesn't return (deleted, or newer than the read) stays in scope and is
+      counted in scope_not_found_resources, and a record with no id or
+      subscription is counted in scope_unknown_<kind>s and fails the run. A
+      pattern without a prefix fails the run. Set it once under
+      platforms.azure.config; manifest exclude never edits it. Each item is a
+      pattern, or a pattern with a reason. Empty: every resource not excluded is
+      in scope.
 
 secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
 
@@ -83,7 +116,7 @@ evidence_set:
     Summary fields:
 
     Which exemptions are left out of scope?
-    - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every exemption is in scope
+    - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location:, id: or tag:); empty when none are set, so every exemption is in scope
     - resource_exclusion_patterns_unmatched — List of configured patterns that matched no exemption, such as a mistyped name or any location: pattern, since exemptions carry no region, or null when the exemptions could not be read
     - excluded_policy_exemptions — Number of exemptions left out of scope because a pattern matched the resource group or id of the scope they were made at (a resource group, or a resource and its group); exemptions made at the subscription or a management group stay, and each excluded one is listed under excluded with the pattern; null when the exemptions could not be read. Policy assignments are never left out
     - in_scope_policy_exemptions — Number of exemptions read and in scope; null when the exemptions could not be read
