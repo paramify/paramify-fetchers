@@ -641,6 +641,8 @@ def test_scan_configuration_failure_is_not_basic_scanning(tmp_path):
     assert result.returncode == 1
     evidence = json.loads(files[0].read_text())["results"]
     assert evidence["registry_scanning"]["scan_type"] is None
+    # Not read, so unknown: [] would claim the registry has no rules.
+    assert evidence["registry_scanning"]["rules"] is None
     assert evidence["repositories"][0]["scan_frequency"] is None
 
 
