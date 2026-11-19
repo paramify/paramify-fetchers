@@ -2824,6 +2824,21 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- **Every secret has a description, and settings the fetcher defaults are no longer required.** 19 secret env vars
+  across datadog, crowdstrike, okta, knowbe4, sentinelone, github, gitlab, rippling, checkov, paramify and splunk
+  had no `description`, so `paramify describe` and the TUI said nothing about what they were or where to get them.
+  Each now says both, with the same wording wherever fetchers share a variable. Four were declared required though
+  the fetcher runs without them; they are now `required: false`, so `paramify validate` stops demanding them and the
+  runner skips them when a manifest leaves them out:
+  - Datadog `base_url` (`DATADOG_BASE_URL`, default `https://api.ddog-gov.com`) on all 13 fetchers.
+  - Datadog `incidents_lookback_days` (`DATADOG_INCIDENTS_LOOKBACK_DAYS`, default 90) on `datadog_incidents_list`
+    and `datadog_incident_timelines`, and `signals_lookback_days` (`DATADOG_SIGNALS_LOOKBACK_DAYS`, default 30) on
+    `datadog_siem_signals`. They stay under `secrets`, so manifests that map them keep working unchanged.
+  - Checkov `clone_token` (`GIT_CLONE_TOKEN`) on `checkov_terraform` and `checkov_kubernetes`, which clone a public
+    repo without it (`checkov_bicep` already declared it optional).
+
+  No fetcher's output changes, so no fetcher version moves.
+
 - **`paramify run` stops its running fetchers on Ctrl-C or SIGTERM.** Each fetcher runs in its own session, so before,
   an interrupted run left it running and writing into the run directory. The runner now kills the fetcher's process
   group before exiting, and a run with `concurrency` starts none of its queued targets. `paramify run` turns SIGTERM
