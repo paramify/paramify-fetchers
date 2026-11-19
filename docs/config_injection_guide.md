@@ -118,7 +118,9 @@ paramify validate scope.yaml
 </details>
 
 Front Door and DNS `scope_exclusions` take different patterns, so set them on
-each fetcher. The TUI edits an entry's lists too (`e`), one
+each fetcher. `azure_devops_work_items` takes `changeset_inclusions` the other
+way round: `path:$/ProjectA/Production` names a TFVC path whose linked
+changesets are in scope, set with `manifest set-config`. The TUI edits an entry's lists too (`e`), one
 `pattern  # reason` per line. Each evidence file records the patterns and
 reasons its fetcher received in
 [`metadata.config_patterns`](envelope_guide.md#2-read-its-envelope).

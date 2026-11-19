@@ -8,6 +8,7 @@ import re
 import sys
 from collections import Counter
 from datetime import datetime, timedelta, timezone
+from fnmatch import fnmatchcase
 from functools import partial
 from pathlib import Path
 from typing import (
@@ -36,6 +37,7 @@ from devops_rest import (  # noqa: E402
     parse_time,
     run_org,
 )
+from scope_exclusions import excluded_item, parse_patterns  # noqa: E402
 
 NAME = "azure_devops_work_items"
 TYPES_ENV = "AZURE_DEVOPS_WORK_ITEM_TYPES"
@@ -50,6 +52,7 @@ APPROVAL_SOURCE_ENV = "AZURE_DEVOPS_APPROVAL_SOURCE"
 APPROVAL_FIELD_FROM_ENV = "AZURE_DEVOPS_APPROVAL_FIELD_FROM"
 APPROVAL_BEFORE_FIELD_ENV = "AZURE_DEVOPS_APPROVAL_BEFORE_FIELD"
 EMERGENCY_TYPES_ENV = "AZURE_DEVOPS_EMERGENCY_TYPES"
+INCLUSIONS_ENV = "AZURE_DEVOPS_CHANGESET_INCLUSIONS"
 DEFAULT_TYPES = ("Change Request",)
 DEFAULT_TAGS = ("Security",)
 DEFAULT_LOOKBACK_DAYS = 90
@@ -74,6 +77,13 @@ UPDATES_PAGE = 200
 DONE_CATEGORIES = frozenset({"completed", "removed"})
 CATEGORY_ORDER = {"proposed": 0, "inprogress": 1, "resolved": 2, "completed": 3, "removed": 4}
 REJECTED = re.compile(r"reject", re.IGNORECASE)
+# A changeset read returns at most 100 changes; the rest are paged from its change list.
+CHANGES_PAGE = 100
+MAX_CHANGE_PAGES = 500
+NOT_INCLUDED, NOT_READABLE = "not_included", "not_readable"
+NOT_READABLE_DETAIL = ("not readable; the included paths were readable this run, so it is outside them or in a "
+                       "sub-folder the app can't read")
+GLOB_CHARS = re.compile(r"[*?\[]")
 
 SCOPE_WORK = "Work Items (Read)"
 SCOPE_CODE = "Code (Read)"
@@ -216,6 +226,114 @@ def call(collector: DevOpsCollector, operation: str, scope: str, fn: Callable[[]
                 exc.args = (f"{exc} [{hint}]",)
             raise
     return collector.guard(operation, scoped, default)
+
+
+def tfvc_key(path: Any) -> str:
+    # TFVC compares server paths without case; "$/" (the whole collection) reads "$".
+    return str(path or "").replace('"', "").strip().lower().rstrip("/")
+
+
+def literal_path(glob: str) -> str:
+    """The folder a path glob starts under: the glob itself without wildcards, else the folder before the first."""
+    found = GLOB_CHARS.search(glob)
+    if not found:
+        return "$/" if glob.rstrip("/") == "$" else glob.rstrip("/")
+    head = glob[:found.start()]
+    return head[:head.rfind("/")] if head.rfind("/") > 1 else "$/"
+
+
+class ChangesetScope:
+    """changeset_inclusions: path:<TFVC server path> globs, each taking in that path and everything under it."""
+
+    def __init__(self, patterns: Iterable[str] = ()):
+        self.patterns = list(patterns)
+        self.globs: List[str] = []
+        bad = []
+        for pattern in self.patterns:
+            kind, sep, glob = pattern.partition(":")
+            glob = glob.replace('"', "").strip()
+            if not sep or kind.strip().lower() != "path" or not glob.startswith("$/"):
+                bad.append(pattern)
+            self.globs.append(glob)
+        if bad:
+            raise ValueError(f"{INCLUSIONS_ENV} patterns {bad} need path: and a TFVC server path starting $/, such "
+                             f"as path:$/ProjectA/Production")
+        self._keys = [tfvc_key(g) for g in self.globs]
+
+    @classmethod
+    def from_env(cls) -> "ChangesetScope":
+        return cls(parse_patterns(os.environ.get(INCLUSIONS_ENV)))
+
+    def __bool__(self) -> bool:
+        return bool(self.patterns)
+
+    def includes(self, path: Any) -> bool:
+        """Whether a server path is an included path or under one, at folder boundaries."""
+        key = tfvc_key(path)
+        return bool(key) and any(fnmatchcase(key, k) or fnmatchcase(key, f"{k}/*") for k in self._keys)
+
+    def checks(self) -> List[Tuple[str, str]]:
+        """(pattern, path to read) for each pattern; a glob's path is the folder before its first wildcard."""
+        return [(p, literal_path(g)) for p, g in zip(self.patterns, self.globs)]
+
+
+def check_included_path(client: DevOpsClient, path: str, found: Dict[str, Any]) -> None:
+    """Reads the path's latest changeset; none, a refusal or a 404 (ADO's answer for an unreadable path) is denial."""
+    try:
+        body = client.get("_apis/tfvc/changesets", params={"searchCriteria.itemPath": path, "$top": 1})
+        listed = [c.get("changesetId") for c in (body.get("value") if isinstance(body, dict) else None) or []
+                  if isinstance(c, dict)]
+        if not listed or not isinstance(listed[0], int):
+            raise PermissionError(f"included TFVC path {path} listed no changeset, so it is empty or can't be read")
+        found["latest_changeset"] = listed[0]
+        client.get(f"_apis/tfvc/changesets/{listed[0]}")
+    except DevOpsError as exc:
+        if exc.status == 404 or exc.failure_code == "not_authorized":
+            raise PermissionError(f"included TFVC path {path} is missing or can't be read ({SCOPE_CODE} needed): "
+                                  f"{exc}") from exc
+        raise
+    found["readable"] = True
+
+
+def check_inclusions(client: DevOpsClient, collector: DevOpsCollector, scope: ChangesetScope) -> List[Dict[str, Any]]:
+    """Each included path's read check, so a changeset refused later can be told apart from lost access."""
+    out, done = [], {}
+    for pattern, path in scope.checks():
+        if tfvc_key(path) not in done:
+            found = done[tfvc_key(path)] = {"readable": False, "latest_changeset": None}
+            collector.guard(f"tfvc.inclusion_check({path})", partial(check_included_path, client, path, found))
+        out.append({"pattern": pattern, "path": path, **done[tfvc_key(path)]})
+    return out
+
+
+def access_refused(exc: DevOpsError) -> bool:
+    return exc.code == "TF14098" or exc.status in (401, 403)
+
+
+def changed_paths(changes: Any) -> List[str]:
+    """Each change's server path, and a rename's source path."""
+    out = []
+    for change in changes if isinstance(changes, list) else []:
+        if isinstance(change, dict):
+            out += [p for p in ((change.get("item") or {}).get("path"), change.get("sourceServerItem")) if p]
+    return out
+
+
+def changes_included(client: DevOpsClient, cid: int, scope: ChangesetScope) -> Optional[bool]:
+    """Pages a changeset's change list for an included path; None when the list can't be read to its end."""
+    skip, last = 0, None
+    for _ in range(MAX_CHANGE_PAGES):
+        body = client.get(f"_apis/tfvc/changesets/{cid}/changes", params={"$top": CHANGES_PAGE, "$skip": skip})
+        page = (body.get("value") if isinstance(body, dict) else body) or []
+        paths = changed_paths(page)
+        if any(scope.includes(p) for p in paths):
+            return True
+        if len(page) < CHANGES_PAGE:
+            return False
+        if paths == last:  # $skip ignored: the rest can't be reached
+            return None
+        skip, last = skip + len(page), paths
+    return None
 
 
 def wiql_text(value: str) -> str:
@@ -467,6 +585,7 @@ class Selection(NamedTuple):
     field_from: Optional[datetime] = None
     before_field: str = HISTORY
     emergency_types: Sequence[str] = ()
+    changeset_inclusions: Sequence[str] = ()
 
 
 def query(types: Dict[str, Dict[str, Any]], pname: str, selection: Selection, days: int) -> str:
@@ -598,27 +717,60 @@ def collect_project(client: DevOpsClient, collector: DevOpsCollector, project: D
     return record, items
 
 
-def read_changesets(client: DevOpsClient, collector: DevOpsCollector,
-                    ids: Iterable[int]) -> Dict[int, Optional[Dict[str, Any]]]:
+def read_changeset(client: DevOpsClient, collector: DevOpsCollector, cid: int, scope: ChangesetScope,
+                   left_out: Dict[int, str]) -> Optional[Dict[str, Any]]:
+    """The changeset's date and authors, or None with its id in left_out when the inclusions leave it out."""
+    def read():
+        try:
+            return client.get(f"_apis/tfvc/changesets/{cid}", params={
+                "maxChangeCount": CHANGES_PAGE, "includeSourceRename": "true"} if scope else None)
+        except DevOpsError as exc:
+            if scope and access_refused(exc):
+                left_out[cid] = NOT_READABLE
+                return None
+            raise
+
+    body = call(collector, f"tfvc.changesets.get({cid})", SCOPE_CODE, read)
+    if not isinstance(body, dict):
+        return None
+    if scope:
+        changes = body.get("changes")
+        included = any(scope.includes(p) for p in changed_paths(changes))
+        if not included and (body.get("hasMoreChanges") or len(changes or []) >= CHANGES_PAGE):
+            included = call(collector, f"tfvc.changesets.changes({cid})", SCOPE_CODE,
+                            partial(changes_included, client, cid, scope)) is not False
+        if not included:
+            left_out[cid] = NOT_INCLUDED
+            return None
+    return {
+        "id": cid,
+        "created_date": iso(when(body.get("createdDate"))),
+        "author": person(body.get("author")),
+        "checked_in_by": person(body.get("checkedInBy")),
+    }
+
+
+def read_changesets(client: DevOpsClient, collector: DevOpsCollector, ids: Iterable[int],
+                    scope: Optional[ChangesetScope] = None) -> Tuple[Dict[int, Optional[Dict[str, Any]]], Dict[int, str]]:
+    """In-scope changesets by id (None when unread), and the ids left out with their reason."""
+    scope = scope or ChangesetScope()
     out: Dict[int, Optional[Dict[str, Any]]] = {}
+    left_out: Dict[int, str] = {}
     for cid in sorted(set(ids)):
-        body = call(collector, f"tfvc.changesets.get({cid})", SCOPE_CODE,
-                    partial(client.get, f"_apis/tfvc/changesets/{cid}"))
-        out[cid] = None if not isinstance(body, dict) else {
-            "id": cid,
-            "created_date": iso(when(body.get("createdDate"))),
-            "author": person(body.get("author")),
-            "checked_in_by": person(body.get("checkedInBy")),
-        }
-    return out
+        record = read_changeset(client, collector, cid, scope, left_out)
+        if cid not in left_out:
+            out[cid] = record
+    return out, left_out
 
 
-def link_changes(item: Dict[str, Any], changesets: Dict[int, Optional[Dict[str, Any]]]) -> None:
-    """When the item's linked changesets were made, against when it was approved and by whom."""
-    linked = [changesets.get(c) for c in item["links"]["changesets"] if isinstance(c, int)]
+def link_changes(item: Dict[str, Any], changesets: Dict[int, Optional[Dict[str, Any]]],
+                 left_out: Optional[Dict[int, str]] = None) -> None:
+    """When the item's in-scope linked changesets were made, against when it was approved and by whom."""
+    ids = [c for c in item["links"]["changesets"] if c not in (left_out or {})]
+    linked = [changesets.get(c) for c in ids if isinstance(c, int)]
     known = [c for c in linked if c]
     # Git commits and pull requests aren't read, so an item linked to one can't be checked.
-    complete = bool(linked) and len(known) == len(item["links"]["changesets"]) and \
+    complete = bool(linked) and len(known) == len(ids) and \
         not item["links"]["commits"] and not item["links"]["pull_requests"]
     approval = item["approval"]
     item["first_linked_change"] = min((c["created_date"] for c in known if c["created_date"]), default=None)
@@ -633,8 +785,10 @@ def undefined_states(items: Iterable[Dict[str, Any]]) -> List[str]:
     return sorted({f"{i['type']}: {i['state']}" for i in items if i["state_category"] is None})
 
 
-def has_change(item: Dict[str, Any]) -> bool:
-    return any(item["links"][k] for k in ("changesets", "commits", "pull_requests"))
+def has_change(item: Dict[str, Any], left_out: Optional[Dict[int, str]] = None) -> bool:
+    """Linked to a changeset, commit or pull request; with left_out, to a changeset not left out of scope."""
+    return any(c not in (left_out or {}) for c in item["links"]["changesets"]) or \
+        any(item["links"][k] for k in ("commits", "pull_requests"))
 
 
 def refused(item: Dict[str, Any]) -> bool:
@@ -648,9 +802,12 @@ def ids_of(items: Iterable[Dict[str, Any]]) -> List[Any]:
 
 
 def summarize(items: List[Dict[str, Any]], projects: List[Dict[str, Any]], listed: bool, selection: Selection,
-              days: int) -> Dict[str, Any]:
+              days: int, changesets: Optional[Dict[int, Optional[Dict[str, Any]]]] = None,
+              left_out: Optional[Dict[int, str]] = None) -> Dict[str, Any]:
     """Counts read null when a project's items couldn't be listed; approval figures when an item's history couldn't."""
     queried = listed and all(p["work_items"] is not None for p in projects)
+    left_out = left_out or {}
+    included = bool(selection.changeset_inclusions)
 
     def known(value: Any, ok: bool = True) -> Any:
         return value if queried and ok else None
@@ -664,8 +821,8 @@ def summarize(items: List[Dict[str, Any]], projects: List[Dict[str, Any]], liste
     # An open item may still be waiting on its approval, and a refused one was never meant to get one.
     needing = [i for i in judged_finished if i["approval_required"] and not refused(i)]
     needing_approved = sum(1 for i in needing if i["approval"])
-    # Approved items with linked changes, and those whose every linked change was read.
-    linked = [i for i in change if i["approval"] and has_change(i)]
+    # Approved items with in-scope linked changes, and those whose every one was read.
+    linked = [i for i in change if i["approval"] and has_change(i, left_out)]
     checked = [i for i in linked if i["changed_before_approval"] is not None]
     every = history and len(checked) == len(linked)
     field_missing = [p.get("approval_field_types_missing") for p in projects]
@@ -681,6 +838,7 @@ def summarize(items: List[Dict[str, Any]], projects: List[Dict[str, Any]], liste
         "approval_field_from": iso(selection.field_from),
         "approval_before_field": selection.before_field if selection.field_from else None,
         "emergency_types": list(selection.emergency_types),
+        "changeset_inclusion_patterns": list(selection.changeset_inclusions),
         "projects_collected": sum(1 for p in projects if p["work_items"] is not None),
         "work_item_types_missing": known(sorted({t for p in projects for t in p["work_item_types_missing"] or []})),
         "work_items_total": known(len(items)),
@@ -709,6 +867,9 @@ def summarize(items: List[Dict[str, Any]], projects: List[Dict[str, Any]], liste
             history and all(i["approval"]["set_by"] for i in field_approved)),
         "change_items_with_linked_changes": known(sum(1 for i in change if has_change(i))),
         "finished_change_items_without_linked_change": known(ids_of(i for i in finished if not has_change(i))),
+        "in_scope_changesets": known(sum(1 for c in (changesets or {}).values() if c)),
+        "not_included_changesets": known(sum(1 for r in left_out.values() if r == NOT_INCLUDED), included),
+        "not_readable_changesets": known(sum(1 for r in left_out.values() if r == NOT_READABLE), included),
         "change_items_linked_changes_checked": known(len(checked), history),
         "change_items_changed_before_approval": known(
             ids_of(i for i in change if i["changed_before_approval"] and not i["emergency_type"]), every),
@@ -736,6 +897,13 @@ def collect(client: DevOpsClient, collector: DevOpsCollector) -> Tuple[Dict[str,
                           emergency_types(types))
     if not selection.types and not selection.tags:
         raise ValueError(f"{TYPES_ENV} and {TAGS_ENV} are both empty, so no work item is selected")
+    scope = ChangesetScope.from_env()
+    selection = selection._replace(changeset_inclusions=scope.patterns)
+    checks = check_inclusions(client, collector, scope)
+    if not all(c["readable"] for c in checks):
+        # A refused changeset can't be told from lost access to included code, so nothing is judged.
+        collector.withhold("an included TFVC path couldn't be read, so no changeset's scope is known")
+        return {}, {}
     now = datetime.now(timezone.utc)
     listed_projects = list_projects(client, collector)
     listed = not any(f["operation"] == "core.projects.list" for f in collector.failures)
@@ -752,11 +920,15 @@ def collect(client: DevOpsClient, collector: DevOpsCollector) -> Tuple[Dict[str,
         projects.append(done[0])
         items += done[1]
 
-    changesets = read_changesets(client, collector, (c for i in items for c in i["links"]["changesets"]
-                                                     if isinstance(c, int)))
+    changesets, left_out = read_changesets(client, collector, (c for i in items for c in i["links"]["changesets"]
+                                                               if isinstance(c, int)), scope)
     for item in items:
-        link_changes(item, changesets)
+        link_changes(item, changesets, left_out)
     items.sort(key=lambda i: (str(i["project"]), str(i["id"]).zfill(12)))
+    excluded = [excluded_item("changeset", None, None, reason, id=cid,
+                              work_items=ids_of(i for i in items if cid in i["links"]["changesets"]),
+                              **({"detail": NOT_READABLE_DETAIL} if reason == NOT_READABLE else {}))
+                for cid, reason in sorted(left_out.items())]
     results = {
         "window": {"start": iso(now - timedelta(days=days)), "end": iso(now), "lookback_days": days},
         "selection": {"work_item_types": selection.types, "work_item_tags": selection.tags,
@@ -765,12 +937,15 @@ def collect(client: DevOpsClient, collector: DevOpsCollector) -> Tuple[Dict[str,
                       "approval_source": selection.approval_source, "approval_field": selection.approval_field,
                       "approval_field_from": iso(selection.field_from),
                       "approval_before_field": selection.before_field if selection.field_from else None,
-                      "emergency_types": list(selection.emergency_types)},
+                      "emergency_types": list(selection.emergency_types),
+                      "changeset_inclusions": list(selection.changeset_inclusions)},
         "projects": projects,
         "work_items": items,
         "changesets": [c for _, c in sorted(changesets.items()) if c],
+        "changeset_inclusion_checks": checks,
+        "excluded": excluded,
     }
-    return results, summarize(items, projects, listed, selection, days)
+    return results, summarize(items, projects, listed, selection, days, changesets, left_out)
 
 
 if __name__ == "__main__":

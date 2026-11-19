@@ -16,6 +16,20 @@ schemas and the `paramify` CLI — not the internal code.
   setting lists the node pools that must have the cluster autoscaler on, as `pool` (every cluster) or `cluster/pool`.
   Missing pools and pools without the autoscaler are counted and named, a pool at zero nodes stays expected, and
   `all_expected_pools_autoscaling` gives one verdict. Each pool now records `min_count`. Unset, the fields stay null.
+- **`azure_devops_work_items` 0.4.0: TFVC changeset inclusions.** A new `changeset_inclusions` pattern list
+  (`AZURE_DEVOPS_CHANGESET_INCLUSIONS`, `path:<TFVC server path>` patterns with a reason each, edited like the Front
+  Door and DNS lists) names the TFVC paths whose linked changesets are in scope. A pattern takes in its path and
+  everything under it, without regard to case; `*` and `?` are globs. Set, each run first reads every included path's
+  latest changeset and fails, writing no evidence, if one is missing, empty or can't be read. A linked changeset is
+  then in scope only if a file it changed (or renamed from) is under an included path, read from the changeset read
+  the fetcher already makes and paged when it changed more than 100 files; one whose change list can't be read to its
+  end stays in scope. Others are left out under `results.excluded`, as `not_included`, or as `not_readable` when the
+  identity can't read them (TF14098, 401 or 403), which no longer fails the run. Each entry names the work items that
+  link it. `changed_before_approval`, `approved_by_change_author` and `first_linked_change` use in-scope changesets
+  only; an item whose changesets were all left out has none to check, as an item linked to nothing, and doesn't hold
+  the summary's change-order lists unknown. New: `results.changeset_inclusion_checks`, `results.excluded`, and in the
+  summary `changeset_inclusion_patterns`, `in_scope_changesets`, `not_included_changesets` and
+  `not_readable_changesets`. Unset, a refused changeset still fails the run and the evidence only gains these keys.
 
 ### Added
 
