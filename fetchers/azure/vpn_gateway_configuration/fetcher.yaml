@@ -1,5 +1,5 @@
 name: azure_vpn_gateway_configuration
-version: 0.3.0
+version: 0.4.0
 description: >-
   Shows each VPN gateway's type, SKU and point-to-site setup, and whether each site-to-site or VNet-to-VNet connection uses IKEv2 and strong IPsec algorithms.
 category: azure
@@ -7,7 +7,7 @@ category: azure
 config_schema:
   resource_exclusions:
     type: patterns
-    prefixes: [rg, location, id]
+    prefixes: [rg, location, id, tag]
     bare: false
     required: false
     env: AZURE_RESOURCE_EXCLUSIONS
@@ -16,8 +16,9 @@ config_schema:
       case-insensitive glob patterns listed in the manifest, each with a
       prefix: rg:<resource group> (read from the resource id), location:<region>
       (the region's name without spaces, such as eastus2; a resource with no
-      location never matches one) or id:<resource id> (also matches that
-      resource's child resources). * matches any run of characters and ? one
+      location never matches one), id:<resource id> (also matches that
+      resource's child resources) or tag:<name>=<value> (the resource's own
+      tags; see resource_inclusions). * matches any run of characters and ? one
       character. A matching virtual network gateway, connection or local network
       gateway is listed under excluded with the pattern and left out of
       every count and verdict. A connection also leaves with the gateway
@@ -29,6 +30,37 @@ config_schema:
       fetcher that has this field; fetchers without it ignore it. Each item is a
       pattern, or a pattern with a reason. Empty: every
       resource is in scope.
+
+  resource_inclusions:
+    type: patterns
+    prefixes: [rg, location, id, tag]
+    bare: false
+    exclusion: false
+    required: false
+    env: AZURE_RESOURCE_INCLUSIONS
+    description: >
+      Resources in the authorization boundary, the only ones left in scope:
+      tag:<name>=<value> (the resource's own tags; tag:<name> matches any value;
+      double-quote a name or value holding a space, comma, = or :), or rg:,
+      location: and id: patterns as in resource_exclusions, which still win.
+      Tags never pass down from a resource group or a parent resource; a key
+      vault key, a storage container or a diagnostic setting goes with the
+      resource it belongs to. A grant, lock or policy on a resource group or the
+      subscription stays while it holds an in-scope resource; one on a
+      management group always stays. A resource no pattern matches is listed
+      under excluded as not_included (1000 of each kind; the rest are counted in
+      not_included_<kind>s_not_listed) and left out of every count and verdict;
+      the summary adds resource_inclusion_patterns,
+      resource_inclusion_patterns_unmatched and not_included_<kind>s. tag:
+      patterns read every resource's tags once from Resource Graph: a failed
+      read fails the run and writes no evidence, a resource Resource Graph
+      doesn't return (deleted, or newer than the read) stays in scope and is
+      counted in scope_not_found_resources, and a record with no id or
+      subscription is counted in scope_unknown_<kind>s and fails the run. A
+      pattern without a prefix fails the run. Set it once under
+      platforms.azure.config; manifest exclude never edits it. Each item is a
+      pattern, or a pattern with a reason. Empty: every resource not excluded is
+      in scope.
 
 supports_targets: true
 
@@ -87,7 +119,7 @@ evidence_set:
     Summary fields:
 
     Which resources are left out of scope?
-    - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
+    - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location:, id: or tag:); empty when none are set, so every resource is in scope
     - resource_exclusion_patterns_unmatched — List of configured patterns that matched no virtual network gateway, connection or local network gateway, such as a mistyped name; null when the resource group list, or any resource group's gateway, connection or local network gateway list, could not be read
     - excluded_virtual_network_gateways — Number of virtual network gateways left out of scope because a pattern matched; each is listed under excluded with the pattern, and no other count includes it; null when the resource group list could not be read
     - excluded_connections — Number of connections left out of scope because a pattern matched, or because their own gateway (the first one) was excluded, which names that gateway in matched_id; a connection to an excluded second gateway or local network gateway stays in scope with its verdict; null when the resource group list could not be read

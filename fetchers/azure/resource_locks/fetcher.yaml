@@ -1,5 +1,5 @@
 name: azure_resource_locks
-version: 0.1.1
+version: 0.2.0
 description: >-
   Shows every management lock in the subscription and whether each log workspace, backup vault, key vault and storage account is locked against deletion.
 category: azure
@@ -44,7 +44,7 @@ config_schema:
       matches no resource is reported in the log and in protected_resource_types_unmatched.
   resource_exclusions:
     type: patterns
-    prefixes: [rg, location, id]
+    prefixes: [rg, location, id, tag]
     bare: false
     required: false
     env: AZURE_RESOURCE_EXCLUSIONS
@@ -53,9 +53,41 @@ config_schema:
       as case-insensitive glob patterns listed in the manifest, each with
       a prefix: rg:<resource group> (read from the resource id),
       location:<region> (the region's name without spaces, such as
-      usgovvirginia; a resource with no location never matches one) or
-      id:<resource id> (also matches that resource's child resources). *
+      usgovvirginia; a resource with no location never matches one),
+      id:<resource id> (also matches that resource's child resources) or
+      tag:<name>=<value> (the resource's own tags; see resource_inclusions). *
       matches any run of characters and ? one character. A matching resource is listed under excluded with the pattern and left out of every count and judgement; locks are never excluded. A pattern that matches nothing is reported; a bare pattern fails the run.
+
+  resource_inclusions:
+    type: patterns
+    prefixes: [rg, location, id, tag]
+    bare: false
+    exclusion: false
+    required: false
+    env: AZURE_RESOURCE_INCLUSIONS
+    description: >
+      Resources in the authorization boundary, the only ones left in scope:
+      tag:<name>=<value> (the resource's own tags; tag:<name> matches any value;
+      double-quote a name or value holding a space, comma, = or :), or rg:,
+      location: and id: patterns as in resource_exclusions, which still win.
+      Tags never pass down from a resource group or a parent resource; a key
+      vault key, a storage container or a diagnostic setting goes with the
+      resource it belongs to. A grant, lock or policy on a resource group or the
+      subscription stays while it holds an in-scope resource; one on a
+      management group always stays. A resource no pattern matches is listed
+      under excluded as not_included (1000 of each kind; the rest are counted in
+      not_included_<kind>s_not_listed) and left out of every count and verdict;
+      the summary adds resource_inclusion_patterns,
+      resource_inclusion_patterns_unmatched and not_included_<kind>s. tag:
+      patterns read every resource's tags once from Resource Graph: a failed
+      read fails the run and writes no evidence, a resource Resource Graph
+      doesn't return (deleted, or newer than the read) stays in scope and is
+      counted in scope_not_found_resources, and a record with no id or
+      subscription is counted in scope_unknown_<kind>s and fails the run. A
+      pattern without a prefix fails the run. Set it once under
+      platforms.azure.config; manifest exclude never edits it. Each item is a
+      pattern, or a pattern with a reason. Empty: every resource not excluded is
+      in scope.
 
 secrets: []          # DefaultAzureCredential only - see _categories/azure.yaml
 

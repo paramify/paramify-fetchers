@@ -143,7 +143,7 @@ def test_platform_config_reaches_every_fetcher_that_declares_the_field():
         {"pattern": "rg:rg-out", "reason": "Outside the boundary"}, "location:regioneast"]})
     for fetcher in adopters:
         field = fetcher.config_schema["resource_exclusions"]
-        assert (field.type, field.prefixes, field.bare, field.env) == ("patterns", ("rg", "location", "id"), False, ENV)
+        assert (field.type, field.prefixes, field.bare, field.env) == ("patterns", ("rg", "location", "id", "tag"), False, ENV)
         env: dict = {}
         _apply_config(env, fetcher, platforms.get("azure"), platform, ManifestEntry(use=fetcher.name))
         assert env[ENV] == "rg:rg-out,location:regioneast", fetcher.name
