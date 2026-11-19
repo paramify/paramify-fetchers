@@ -30,7 +30,7 @@ config_schema:
       Azure role at an in-scope scope (the subscription or wider, a group or
       resource no pattern matches, or a user-assigned identity kept this way),
       since whoever controls it reaches into the boundary through it; it
-      carries kept_by_identity_rule, the pattern it was kept despite. If the
+      carries kept_by_identity_rule, the pattern it was kept despite, or not_included when no inclusion took it in. If the
       role-assignment list couldn't be read, every identity a pattern
       matches stays this way, since what it reaches is unknown.
       Excluded identities get no federated-credential or

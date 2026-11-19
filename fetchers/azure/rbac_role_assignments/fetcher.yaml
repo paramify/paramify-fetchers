@@ -40,7 +40,7 @@ config_schema:
       grant at an in-scope scope or on another identity kept this way (or the
       identity couldn't be read): whoever holds it can act as the identity
       inside the boundary. Such a grant
-      carries kept_by_identity_rule, the pattern it was kept despite. A grant made on a
+      carries kept_by_identity_rule, the pattern it was kept despite (null when it was only not included). A grant made on a
       whole matching resource group still leaves even when the group holds such
       an identity, so don't exclude a resource group that holds managed
       identities with roles inside the boundary. Each grant still takes its
