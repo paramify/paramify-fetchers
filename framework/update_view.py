@@ -365,3 +365,8 @@ def fail(text: str) -> RenderableType:
 
 def note(text: str) -> Text:
     return line((text, "dim"))
+
+
+def offline(remote: str) -> Text:
+    """Said when the fetch failed: the plan is still real, but possibly stale."""
+    return note(f"couldn't reach {remote}, so this compares against what this clone last fetched")

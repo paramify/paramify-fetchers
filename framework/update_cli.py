@@ -142,9 +142,6 @@ def update_cmd(
     _update(run, root, to=to, expect=expect, yes=yes, allow_breaking=allow_breaking)
 
 
-OFFLINE = f"couldn't reach {up.REMOTE}, so this compares against what this clone last fetched"
-
-
 # --------------------------------------------------------------------------- #
 # --check
 # --------------------------------------------------------------------------- #
@@ -163,7 +160,7 @@ def _check(run: _Run, root: Path) -> NoReturn:
     else:
         run.show(view.ok(f"Up to date: {info['current']}."))
     if not fetched:
-        run.show(view.note(OFFLINE))
+        run.show(view.offline(up.REMOTE))
     raise typer.Exit(code)
 
 
@@ -187,7 +184,7 @@ def _update(run: _Run, root: Path, *, to: Optional[str], expect: Optional[str], 
         if not fetched:
             s.warn(f"offline ({why})")
     if not fetched:
-        run.show(view.note(OFFLINE))
+        run.show(view.offline(up.REMOTE))
     try:
         located = up.locate(root, to, fetched=fetched)
     except up.UpdateError as e:
