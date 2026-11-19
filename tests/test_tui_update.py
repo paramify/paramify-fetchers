@@ -363,11 +363,12 @@ def test_a_plan_with_errors_shows_them_and_cannot_be_applied():
     _run(body)
 
 
-def test_u_key_opens_the_screen_with_the_plan(monkeypatch):
+@pytest.mark.parametrize("key", ["U", "u"])
+def test_u_key_opens_the_screen_with_the_plan(monkeypatch, key):
     monkeypatch.setattr(api, "update_plan", lambda root: _plan())
 
     async def body(app, pilot):
-        await pilot.press("U")
+        await pilot.press(key)
         await pilot.pause()
         await app.workers.wait_for_complete()
         await pilot.pause()
