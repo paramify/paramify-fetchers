@@ -91,6 +91,8 @@ def project_mysql_server(server) -> dict:
         "delegated_subnet_resource_id": model_attr(network, "delegated_subnet_resource_id"),
         "backup_retention_days": model_attr(backup, "backup_retention_days"),
         "geo_redundant_backup": model_attr(backup, "geo_redundant_backup"),
+        # SystemManaged or AzureKeyVault; None when Azure returned no data_encryption block.
+        "data_encryption_type": model_attr(model_attr(server, "data_encryption"), "type"),
         "high_availability_mode": model_attr(high_availability, "mode"),
         "high_availability_state": model_attr(high_availability, "state"),
     }
@@ -184,6 +186,12 @@ def server_record(server: dict, configurations: list[dict]) -> dict:
         # --- durability ---
         "backup_retention_days": server.get("backup_retention_days"),
         "geo_redundant_backup": server.get("geo_redundant_backup"),
+        "data_encryption_type": server.get("data_encryption_type"),
+        # Unknown (None) when no type was returned: counted apart, never as platform-managed.
+        "customer_managed_key": (
+            str(server["data_encryption_type"]).lower() == "azurekeyvault"
+            if server.get("data_encryption_type") else None
+        ),
         "geo_redundant_backup_enabled": (
             str(server.get("geo_redundant_backup") or "").lower() == GEO_REDUNDANT_ENABLED
         ),
@@ -218,6 +226,8 @@ def summarize(servers: list[dict]) -> dict:
             1 for s in servers if s["geo_redundant_backup_enabled"]
         ),
         "high_availability_servers": sum(1 for s in servers if s["high_availability_enabled"]),
+        "customer_managed_key_servers": sum(1 for s in servers if s["customer_managed_key"] is True),
+        "data_encryption_unknown_servers": sum(1 for s in servers if s["customer_managed_key"] is None),
         "total_configuration_parameters": sum(
             s["total_configuration_parameters"] for s in servers
         ),

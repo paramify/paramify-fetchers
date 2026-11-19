@@ -15,7 +15,7 @@ import json
 import sys
 import time
 from pathlib import Path
-from urllib.parse import parse_qs, urlencode, urlparse
+from urllib.parse import parse_qs, quote, urlencode, urlparse
 
 import pytest
 import requests
@@ -320,7 +320,11 @@ def test_every_fetcher_follows_the_shape(name):
     assert spec["evidence_set"]["reference_id"].startswith("EVD-GITHUB-")
     declared = {f["env"] for f in spec.get("config_schema", {}).values()}
     assert {env for env, _ in getattr(m, "CONFIG", {}).values()} <= declared
-    assert len(spec["evidence_set"]["instructions"].split()) <= 80
+    instructions = spec["evidence_set"]["instructions"]
+    if "\nCommands Executed:\n" not in instructions:
+        # Old-style prose instructions stay short. Those in the Script/Access/Commands/Output/Summary format are
+        # held to that format by test_fetcher_text_follows_the_format, which lists every summary field.
+        assert len(instructions.split()) <= 80
 
 
 @pytest.mark.parametrize("api_url,graphql", [
@@ -1004,6 +1008,91 @@ def test_two_factor_is_unknown_to_a_non_owner(fake, monkeypatch, tmp_path):
     assert not any(q.get("filter") == "2fa_disabled" for _, q in f.calls)
 
 
+def managed_routes(members=("ana_acme", "bo_acme")):
+    """An Enterprise Managed Users organization as measured: requirement off, every member listed as 2fa_disabled."""
+    routes = org_settings_routes()
+    routes[f"orgs/{ORG}/members"] = lambda q: (200, [{"login": m} for m in members])
+    return routes
+
+
+def test_managed_user_accounts_make_the_two_factor_fields_not_applicable(fake, monkeypatch, tmp_path):
+    f = fake(managed_routes())
+    code, ev, _ = run_fetcher("org_security_settings", monkeypatch, tmp_path)
+    s = ev["summary"]
+    assert code == 0 and s["managed_user_accounts"] is True and "identity provider" in s["two_factor_note"]
+    assert s["two_factor_required"] is None and s["members_without_two_factor"] is None
+    assert ev["members_without_two_factor"] is None and ev["organization"]["two_factor_requirement_enabled"] is None
+    assert ev["metadata"]["managed_user_accounts"] == "auto" and ev["metadata"]["managed_user_accounts_source"] == "detected"
+    assert not any(q.get("filter") == "2fa_disabled" for _, q in f.calls)
+    # The rest of the file is unchanged.
+    assert s["actions_default_token_permissions"] == "write" and s["repositories_without_security_configuration"] == ["b", "c"]
+
+
+def test_one_personal_login_means_not_managed(fake, monkeypatch, tmp_path):
+    routes = org_settings_routes()
+    routes[f"orgs/{ORG}/members"] = lambda q: (200, [{"login": "nofa"}]) if q.get("filter") == "2fa_disabled" \
+        else (200, [{"login": "ana_acme"}, {"login": "nofa"}])
+    fake(routes)
+    code, ev, _ = run_fetcher("org_security_settings", monkeypatch, tmp_path)
+    s = ev["summary"]
+    assert code == 0 and s["managed_user_accounts"] is False and "two_factor_note" not in s
+    assert s["two_factor_required"] is False and s["members_without_two_factor"] == 1
+
+
+@pytest.mark.parametrize("members_route", [[], (403, {"message": "Resource not accessible by integration"})])
+def test_an_empty_or_unreadable_member_list_proves_nothing(fake, monkeypatch, tmp_path, members_route):
+    routes = org_settings_routes()
+    routes[f"orgs/{ORG}/members"] = lambda q: (200, [{"login": "nofa"}]) if q.get("filter") == "2fa_disabled" \
+        else (members_route if isinstance(members_route, tuple) else (200, members_route))
+    fake(routes)
+    code, ev, status = run_fetcher("org_security_settings", monkeypatch, tmp_path)
+    s = ev["summary"]
+    assert s["managed_user_accounts"] is None and "two_factor_note" not in s
+    assert s["two_factor_required"] is False and s["members_without_two_factor"] == 1  # collected as before
+    assert code == 0  # a refused list leaves detection unknown and does not fail the run
+    assert ev["metadata"]["api_failures"] == []
+
+
+def test_a_server_error_on_the_member_list_still_fails(fake, monkeypatch, tmp_path):
+    routes = org_settings_routes()
+    routes[f"orgs/{ORG}/members"] = lambda q: (200, [{"login": "nofa"}]) if q.get("filter") == "2fa_disabled" \
+        else FAILING
+    fake(routes)
+    code, ev, _ = run_fetcher("org_security_settings", monkeypatch, tmp_path)
+    assert code == 1 and ev["summary"]["managed_user_accounts"] is None
+
+
+def test_managed_user_accounts_can_be_stated(fake, monkeypatch, tmp_path):
+    routes = org_settings_routes()
+    routes[f"orgs/{ORG}/members"] = lambda q: (200, [{"login": "nofa"}])  # would detect as not managed
+    f = fake(routes)
+    code, ev, _ = run_fetcher("org_security_settings", monkeypatch, tmp_path, GITHUB_MANAGED_USER_ACCOUNTS="true")
+    assert code == 0 and ev["summary"]["managed_user_accounts"] is True and ev["summary"]["two_factor_required"] is None
+    assert ev["metadata"]["managed_user_accounts_source"] == "configured"
+    assert not any(q.get("role") == "all" for p, q in f.calls if p.endswith("/members"))  # no detection call
+    fake(managed_routes())
+    code, ev, _ = run_fetcher("org_security_settings", monkeypatch, tmp_path, GITHUB_MANAGED_USER_ACCOUNTS="false")
+    assert code == 0 and ev["summary"]["managed_user_accounts"] is False
+    assert ev["summary"]["members_without_two_factor"] == 2  # stated false: GitHub's answer is reported as is
+
+
+def test_a_bad_managed_user_accounts_value_fails_as_bad_config(fake, monkeypatch, tmp_path):
+    fake(org_settings_routes())
+    code, ev, status = run_fetcher("org_security_settings", monkeypatch, tmp_path, GITHUB_MANAGED_USER_ACCOUNTS="maybe")
+    assert code == 1
+    assert "managed_user_accounts must be auto, true or false" in json.dumps(ev["metadata"]["api_failures"])
+
+
+def test_managed_detection_for_a_non_owner_leaves_two_factor_unknown(fake, monkeypatch, tmp_path):
+    routes = managed_routes()
+    org = routes[f"orgs/{ORG}"]
+    org.pop("two_factor_requirement_enabled")
+    fake(routes)
+    code, ev, _ = run_fetcher("org_security_settings", monkeypatch, tmp_path)
+    assert code == 0 and ev["summary"]["managed_user_accounts"] is True
+    assert ev["summary"]["two_factor_required"] is None and ev["summary"]["members_without_two_factor"] is None
+
+
 # --- access_review --------------------------------------------------------------
 
 def access_routes():
@@ -1106,6 +1195,122 @@ def test_access_review_needs_owner_reads(fake, monkeypatch, tmp_path):
     fake(routes)
     code, ev, status = run_fetcher("access_review", monkeypatch, tmp_path)
     assert code == 1 and "members=read" in status["error"] and "repositories" not in ev
+
+
+def scoped_access_routes():
+    """access_routes plus a team with no grant, a team nested under platform, and a role held only outside scope."""
+    routes = access_routes()
+    o = f"orgs/{ORG}"
+    routes[f"{o}/teams"] = [{"slug": "platform", "privacy": "closed"},
+                            {"slug": "platform-oncall", "privacy": "closed", "parent": {"slug": "platform"}},
+                            {"slug": "marketing", "privacy": "closed"}]
+    routes[f"{o}/teams/platform-oncall/members"] = [{"login": "dev"}]
+    routes[f"{o}/teams/marketing/members"] = [{"login": "ads"}]
+    roles = routes[f"{o}/organization-roles"]["roles"]
+    roles.append({"id": 4, "name": "billing_viewer", "source": "Organization", "base_role": None, "permissions": []})
+    routes[f"{o}/organization-roles/4/users"] = [{"login": "ads", "assignment": "direct", "inherited_from": []}]
+    routes[f"{o}/organization-roles/4/teams"] = [{"slug": "marketing", "assignment": "direct"}]
+    routes[f"{o}/organization-roles/1/users"] = [{"login": "boss", "assignment": "direct", "inherited_from": []}]
+    return routes
+
+
+def test_access_review_is_organization_wide_by_default(fake, monkeypatch, tmp_path):
+    fake(scoped_access_routes())
+    code, ev, _ = run_fetcher("access_review", monkeypatch, tmp_path)
+    assert code == 0 and {t["team"] for t in ev["teams"]} == {"platform", "platform-oncall", "marketing"}
+    assert "billing_viewer" in ev["summary"]["organization_role_holders"] and ev["members"] == ["boss", "dev"]
+    assert ev["metadata"]["scoped_to_repositories"] is False and ev["metadata"]["teams_left_out"] == 0
+
+
+def test_scope_to_repositories_keeps_only_teams_and_roles_that_reach_them(fake, monkeypatch, tmp_path):
+    f = fake(scoped_access_routes())
+    code, ev, _ = run_fetcher("access_review", monkeypatch, tmp_path, GITHUB_SCOPE_TO_REPOSITORIES="true")
+    assert code == 0
+    assert {t["team"] for t in ev["teams"]} == {"platform", "platform-oncall"}  # nested team inherits the grant
+    assert f"orgs/{ORG}/teams/marketing/members" not in {p for p, _ in f.calls}
+    holders = ev["summary"]["organization_role_holders"]
+    # security_manager is held by boss, who has access; all_repo_admin has a base role; billing_viewer reaches nothing.
+    assert set(holders) == {"security_manager", "all_repo_admin"}
+    assert "ads" not in json.dumps({k: v for k, v in ev.items() if k != "metadata"})
+    m = ev["metadata"]
+    assert m["scoped_to_repositories"] is True and m["teams_left_out"] == 1 and m["organization_roles_left_out"] == 2
+    assert ev["summary"]["owners"] == ["boss"] and ev["members"] == ["boss", "dev"]  # owners and members stay
+    assert "_logins" not in json.dumps(ev)
+
+
+def test_scope_follows_the_repositories_filter(fake, monkeypatch, tmp_path):
+    routes = scoped_access_routes()
+    routes[f"repos/{ORG}/infra/teams"] = [{"slug": "marketing", "permission": "pull"}]
+    routes[f"repos/{ORG}/app/teams"] = []
+    routes[f"repos/{ORG}/app"], routes[f"repos/{ORG}/infra"] = repo("app"), repo("infra")
+    fake(routes)
+    code, ev, _ = run_fetcher("access_review", monkeypatch, tmp_path, GITHUB_REPOSITORIES="app",
+                              GITHUB_SCOPE_TO_REPOSITORIES="true")
+    # marketing is granted on infra only; platform reaches app through its organization-wide admin role.
+    assert code == 0 and {t["team"] for t in ev["teams"]} == {"platform", "platform-oncall"}
+    assert ev["metadata"]["teams_left_out"] == 1
+    fake(routes)
+    code, ev, _ = run_fetcher("access_review", monkeypatch, tmp_path, GITHUB_REPOSITORIES="infra",
+                              GITHUB_SCOPE_TO_REPOSITORIES="true")
+    assert code == 0 and {t["team"] for t in ev["teams"]} == {"marketing", "platform", "platform-oncall"}
+
+
+def test_scope_is_not_applied_when_a_repository_is_unread(fake, monkeypatch, tmp_path):
+    routes = scoped_access_routes()
+    routes[f"repos/{ORG}/infra/teams"] = FAILING
+    fake(routes)
+    code, ev, _ = run_fetcher("access_review", monkeypatch, tmp_path, GITHUB_SCOPE_TO_REPOSITORIES="true")
+    assert code == 1 and ev["metadata"]["scoped_to_repositories"] is None
+    assert {t["team"] for t in ev["teams"]} == {"platform", "platform-oncall", "marketing"}  # nothing left out
+    assert ev["metadata"]["teams_left_out"] == 0 and ev["metadata"]["organization_roles_left_out"] == 0
+
+
+def test_a_team_holding_an_organization_wide_role_stays_in_scope(fake, monkeypatch, tmp_path):
+    routes = scoped_access_routes()
+    routes[f"repos/{ORG}/app/teams"] = routes[f"repos/{ORG}/infra/teams"] = []  # no direct grant to any team
+    fake(routes)
+    code, ev, _ = run_fetcher("access_review", monkeypatch, tmp_path, GITHUB_SCOPE_TO_REPOSITORIES="true")
+    # platform holds all_repo_admin (base role admin): it reaches every repository, so it and its nested team stay.
+    assert code == 0 and {t["team"] for t in ev["teams"]} == {"platform", "platform-oncall"}
+
+
+def test_scope_is_not_applied_when_requested_roles_are_unread(fake, monkeypatch, tmp_path):
+    routes = scoped_access_routes()
+    routes[f"orgs/{ORG}/organization-roles"] = FAILING
+    fake(routes)
+    code, ev, _ = run_fetcher("access_review", monkeypatch, tmp_path, GITHUB_SCOPE_TO_REPOSITORIES="true")
+    assert code == 1 and ev["metadata"]["scoped_to_repositories"] is None
+    assert {t["team"] for t in ev["teams"]} == {"platform", "platform-oncall", "marketing"}
+
+
+def test_scope_without_organization_roles_is_bad_config(fake, monkeypatch, tmp_path):
+    # platform reaches every repository only through all_repo_admin: with the roles unread, scoping would drop it and
+    # still claim to be complete. So the combination is refused before anything is read.
+    routes = scoped_access_routes()
+    routes[f"repos/{ORG}/app/teams"] = routes[f"repos/{ORG}/infra/teams"] = []
+    f = fake(routes)
+    code, ev, status = run_fetcher("access_review", monkeypatch, tmp_path, GITHUB_SCOPE_TO_REPOSITORIES="true",
+                                   GITHUB_INCLUDE_ORGANIZATION_ROLES="false")
+    assert code == 1 and status["code"] == "bad_config" and "include_organization_roles" in status["error"]
+    assert "teams" not in ev and ev["metadata"].get("scoped_to_repositories") is None
+    # run() reads the organization and its repository list before collect; collect itself reads nothing.
+    assert not any(k in p for p, _ in f.calls for k in ("/members", "/teams", "/collaborators", "organization-roles",
+                                                         "outside_collaborators", "invitations"))
+
+
+def test_roles_switched_off_without_scope_still_runs(fake, monkeypatch, tmp_path):
+    f = fake(scoped_access_routes())
+    code, ev, _ = run_fetcher("access_review", monkeypatch, tmp_path, GITHUB_INCLUDE_ORGANIZATION_ROLES="false")
+    assert code == 0 and ev["organization_roles"] is None and ev["metadata"]["scoped_to_repositories"] is False
+    assert {t["team"] for t in ev["teams"]} == {"platform", "platform-oncall", "marketing"}
+    assert not any("organization-roles" in p for p, _ in f.calls)
+
+
+def test_the_member_list_can_be_left_out(fake, monkeypatch, tmp_path):
+    fake(access_routes())
+    code, ev, _ = run_fetcher("access_review", monkeypatch, tmp_path, GITHUB_INCLUDE_MEMBERS="false")
+    assert code == 0 and ev["members"] is None and ev["summary"]["members_total"] == 2
+    assert ev["summary"]["owners"] == ["boss"]
 
 
 # --- non_user_credentials ------------------------------------------------------------
@@ -2923,3 +3128,849 @@ def test_workflow_run_configuration_errors(fake, monkeypatch, tmp_path, env):
     fake(runs_routes())
     code, _, status = run_fetcher("workflow_runs", monkeypatch, tmp_path, **env)
     assert code == 1 and status["code"] == "bad_config"
+
+
+# --- image_signing -------------------------------------------------------------------
+
+SIGNING = MODS["image_signing"]
+# A key reference as cosign writes one for a key management service: a name, never key material.
+KMS_KEY = "azurekms://example-vault.vault.azure.net/image-signing"
+IMAGE = "registry.example/app"
+
+
+def workflow(*steps, job=None, env=None):
+    """A workflow file with one job, `promote`."""
+    return yaml.safe_dump({"on": "push", **({"env": env} if env else {}),
+                           "jobs": {"promote": {"runs-on": "ubuntu-latest", **(job or {}), "steps": list(steps)}}})
+
+
+def script(text, **step):
+    return {"run": text, **step}
+
+
+def signing_steps(text, **kw):
+    return SIGNING.analyse("f.yml", workflow(script(text), **kw))["signing_steps"]
+
+
+@pytest.mark.parametrize("command,env,kind,reference", [
+    (f"cosign sign --key {KMS_KEY} {IMAGE}@sha256:0123456789ab", None, "azure_key_vault", KMS_KEY),
+    (f"cosign sign --key={KMS_KEY} {IMAGE}", None, "azure_key_vault", KMS_KEY),
+    (f"cosign sign --key awskms:///alias/image-signing {IMAGE}", None, "aws_kms", "awskms:///alias/image-signing"),
+    (f"cosign sign --key gcpkms://projects/p/locations/global/keyRings/r/cryptoKeys/k {IMAGE}", None, "gcp_kms",
+     "gcpkms://projects/p/locations/global/keyRings/r/cryptoKeys/k"),
+    (f"cosign sign --key hashivault://image-signing {IMAGE}", None, "hashicorp_vault", "hashivault://image-signing"),
+    (f"cosign sign --key k8s://signing/image-signing {IMAGE}", None, "kubernetes_secret", "k8s://signing/image-signing"),
+    (f"cosign sign --key cosign.key {IMAGE}", None, "other", None),
+    (f"cosign sign --key env://COSIGN_PRIVATE_KEY {IMAGE}", None, "environment_variable", None),
+    (f'cosign sign --key "$SIGNING_KEY" {IMAGE}', {"SIGNING_KEY": "env://COSIGN_PRIVATE_KEY"}, "environment_variable", None),
+    (f"cosign sign --sk {IMAGE}", None, "other", None),
+    (f"cosign sign --yes {IMAGE}", None, "keyless", None),
+    # A key named through the workflow's own env is followed, in each way a script can spell it.
+    (f'cosign sign --key "$SIGNING_KEY" {IMAGE}', {"SIGNING_KEY": KMS_KEY}, "azure_key_vault", KMS_KEY),
+    (f"cosign sign --key ${{SIGNING_KEY}} {IMAGE}", {"SIGNING_KEY": KMS_KEY}, "azure_key_vault", KMS_KEY),
+    (f"cosign sign --key ${{{{ env.SIGNING_KEY }}}} {IMAGE}", {"SIGNING_KEY": KMS_KEY}, "azure_key_vault", KMS_KEY),
+    # Not followed: a value that only exists when the workflow runs is never guessed.
+    (f'cosign sign --key "$SIGNING_KEY" {IMAGE}', None, "other", None),
+    (f"cosign sign --key ${{{{ secrets.SIGNING_KEY }}}} {IMAGE}", None, "other", None),
+    (f"cosign sign --key ${{{{ vars.SIGNING_KEY }}}} {IMAGE}", None, "other", None),
+    # The service is known from the scheme, but a reference built from an expression is not a name to record.
+    (f"cosign sign --key azurekms://${{{{ vars.VAULT }}}}/image-signing {IMAGE}", None, "azure_key_vault", None),
+])
+def test_the_signing_key_is_classified_and_only_a_plain_reference_is_kept(command, env, kind, reference):
+    [step] = signing_steps(command, env=env)
+    assert (step["key"], step["key_reference"]) == (kind, reference)
+
+
+def test_step_env_overrides_job_env_overrides_workflow_env():
+    other = "awskms:///alias/other"
+    text = workflow(script(f'cosign sign --key "$K" {IMAGE}', env={"K": KMS_KEY}), script(f'cosign sign --key "$K" {IMAGE}'),
+                    job={"env": {"K": other}}, env={"K": "cosign.key"})
+    first, second = SIGNING.analyse("f.yml", text)["signing_steps"]
+    assert (first["key"], second["key"], second["key_reference"]) == ("azure_key_vault", "aws_kms", other)
+
+
+@pytest.mark.parametrize("text,signs,verifies,others", [
+    (f"cosign sign {IMAGE}", 1, 0, []),
+    (f"/usr/local/bin/cosign sign {IMAGE}", 1, 0, []),
+    (f"docker run gcr.io/projectsigstore/cosign sign {IMAGE}", 1, 0, []),
+    (f"cosign --verbose sign {IMAGE}", 1, 0, []),
+    (f"cosign sign \\\n  --key cosign.key \\\n  {IMAGE}", 1, 0, []),
+    (f"cosign sign {IMAGE}\ncosign sign {IMAGE}-worker", 2, 0, []),
+    (f"cosign sign {IMAGE} && cosign verify --key cosign.pub {IMAGE}", 1, 1, []),
+    (f"cosign verify --key cosign.pub {IMAGE} | jq .", 0, 1, []),
+    # Not image signing: other subcommands are recorded as what they are.
+    ("cosign sign-blob --key cosign.key release.tar.gz", 0, 0, ["sign-blob"]),
+    ("cosign verify-blob --key cosign.pub release.tar.gz", 0, 0, ["verify-blob"]),
+    (f"cosign verify-attestation --key cosign.pub {IMAGE}", 0, 0, ["verify-attestation"]),
+    (f"cosign attest --predicate sbom.json {IMAGE}", 0, 0, ["attest"]),
+    # Not commands at all.
+    (f"# cosign sign {IMAGE}", 0, 0, []),
+    (f"  # cosign sign {IMAGE}", 0, 0, []),
+    (f"make build  # then cosign sign {IMAGE}", 0, 0, []),
+    (f'echo "run cosign sign {IMAGE} by hand"', 0, 0, []),
+    (f"printf 'cosign sign {IMAGE}'", 0, 0, []),
+    (f"mycosign sign {IMAGE}", 0, 0, []),
+    (f"cosign-helper sign {IMAGE}", 0, 0, []),
+    ("cosign version", 0, 0, []),
+    ("cosign signature-of something", 0, 0, []),
+])
+def test_cosign_commands_are_found_in_a_script_and_nothing_else_is(text, signs, verifies, others):
+    row = SIGNING.analyse("f.yml", workflow(script(text)))
+    assert (len(row["signing_steps"]), len(row["verification_steps"]),
+            [s["command"] for s in row["other_cosign_steps"]]) == (signs, verifies, others)
+
+
+def test_a_flag_of_the_next_command_is_not_read_as_this_ones():
+    [step] = signing_steps(f"cosign sign {IMAGE} && cosign verify --key {KMS_KEY} {IMAGE}@sha256:0123456789ab")
+    assert (step["key"], step["names_digest"]) == ("keyless", False)
+
+
+@pytest.mark.parametrize("target,by_digest", [
+    (f"{IMAGE}@sha256:0123456789ab", True), (f"{IMAGE}@${{{{ steps.push.outputs.digest }}}}", True),
+    (f'"{IMAGE}@$DIGEST"', True), (f"{IMAGE}@${{DIGEST}}", True),
+    # A tag, a variable or an address with a user in it is not evidence of a digest.
+    (f"{IMAGE}:1.4.2", False), ('"$IMAGE"', False), ("user@registry.example/app:1.4.2", False),
+])
+def test_a_digest_is_recorded_only_when_the_command_names_one(target, by_digest):
+    assert signing_steps(f"cosign sign --yes {target}")[0]["names_digest"] is by_digest
+
+
+@pytest.mark.parametrize("flags,skipped", [("--tlog-upload=false", True), ("--tlog-upload false", True),
+                                           ("--tlog-upload=FALSE", True), ("--tlog-upload=true", False), ("", False)])
+def test_signing_without_the_transparency_log_is_recorded(flags, skipped):
+    assert signing_steps(f"cosign sign {flags} {IMAGE}")[0]["skips_transparency_log"] is skipped
+
+
+@pytest.mark.parametrize("flags,checks,skips", [
+    ("--key cosign.pub", "key", False),
+    ("--certificate-identity-regexp '^https://github.com/acme/' --certificate-oidc-issuer https://token.example",
+     "certificate_identity", False),
+    ("", "unspecified", False), ("--key cosign.pub --insecure-ignore-tlog", "key", True),
+])
+def test_what_a_verify_step_checks_against(flags, checks, skips):
+    [step] = SIGNING.analyse("f.yml", workflow(script(f"cosign verify {flags} {IMAGE}")))["verification_steps"]
+    assert (step["checks"], step["skips_transparency_log"]) == (checks, skips)
+
+
+@pytest.mark.parametrize("step,job,conditional,continues", [
+    ({}, {}, False, False),
+    ({"if": "github.ref == 'refs/heads/main'"}, {}, True, False),
+    ({}, {"if": "github.event_name == 'push'"}, True, False),
+    ({"continue-on-error": True}, {}, False, True),
+    ({}, {"continue-on-error": True}, False, True),
+    ({"continue-on-error": "${{ matrix.experimental }}"}, {}, False, True),   # an expression can turn it on
+    ({"continue-on-error": False}, {"continue-on-error": "false"}, False, False),
+])
+def test_a_step_that_can_be_skipped_or_fail_quietly_is_marked(step, job, conditional, continues):
+    [row] = SIGNING.analyse("f.yml", workflow(script(f"cosign sign {IMAGE}", **step), job=job))["signing_steps"]
+    assert (row["conditional"], row["continue_on_error"]) == (conditional, continues)
+
+
+def test_a_step_is_located_by_job_number_and_name():
+    text = workflow({"uses": "actions/checkout@v4"}, script(f"cosign sign {IMAGE}", name="Sign the image"),
+                    script(f"cosign sign {IMAGE}"))
+    named, unnamed = SIGNING.analyse("promote.yml", text)["signing_steps"]
+    assert (named["job"], named["step_number"], named["step"]) == ("promote", 2, "Sign the image")
+    assert (unnamed["step_number"], unnamed["step"]) == (3, None)
+
+
+def test_the_installer_and_reusable_workflows_are_noted_because_their_signing_is_not_read():
+    text = yaml.safe_dump({"on": "push", "jobs": {
+        "setup": {"runs-on": "ubuntu-latest", "steps": [{"uses": "Sigstore/Cosign-Installer@v3"},
+                                                        script("./scripts/sign-images.sh")]},
+        "sign": {"uses": "acme/platform/.github/workflows/sign.yml@main"}}})
+    row = SIGNING.analyse("f.yml", text)
+    assert row["installs_cosign"] is True and row["signing_steps"] == []
+    assert row["reusable_workflows_called"] == ["acme/platform/.github/workflows/sign.yml@main"]
+
+
+def test_workflows_that_call_a_reusable_workflow_are_listed_in_the_summary(fake, monkeypatch, tmp_path):
+    caller = yaml.safe_dump({"on": "push", "jobs": {"sign": {"uses": "acme/platform/.github/workflows/sign.yml@main"}}})
+    fake(signing_routes({"app": {"release.yml": caller, "ci.yml": PLAIN}, "site": {"ci.yml": PLAIN}}))
+    code, ev, _ = run_fetcher("image_signing", monkeypatch, tmp_path)
+    s = ev["summary"]
+    # The shared workflow may sign, but nothing here shows it: the repository is not counted as signing.
+    assert code == 0 and s["repositories_signing"] == []
+    assert s["workflows_calling_reusable_workflows"] == ["app:.github/workflows/release.yml"]
+    assert s["workflows_mentioning_cosign_without_a_cosign_command"] == []
+
+
+def test_pull_request_runs_of_a_signing_workflow_are_not_counted_as_signing(fake, monkeypatch, tmp_path):
+    """GitHub's docker-publish starter runs on pull requests too, with the sign step skipped and the run a success."""
+    publish = yaml.safe_dump({"on": {"push": {"branches": ["main"]}, "pull_request": {"branches": ["main"]}},
+                              "jobs": {"build": {"runs-on": "ubuntu-latest", "steps": [
+                                  {"uses": "sigstore/cosign-installer@v3"},
+                                  script(f"cosign sign --yes {IMAGE}@${{{{ steps.build.outputs.digest }}}}",
+                                         **{"if": "github.event_name != 'pull_request'"})]}}})
+    pr = wf_run(3, 1, "docker-publish.yml", fork=True)
+    target = {**wf_run(2, 2, "docker-publish.yml"), "event": "pull_request_target"}
+    failed_push = wf_run(1, 3, "docker-publish.yml", conclusion="failure")
+    fake(signing_routes({"app": {"docker-publish.yml": publish}},
+                        runs={("app", "docker-publish.yml"): [pr, target, failed_push]}))
+    code, ev, _ = run_fetcher("image_signing", monkeypatch, tmp_path)
+    s = ev["summary"]
+    assert code == 0
+    assert (s["signing_workflow_runs"], s["signing_workflow_runs_successful"],
+            s["signing_workflow_pull_request_runs"]) == (1, 0, 2)
+    assert s["signing_workflows_without_successful_run"] == ["app:.github/workflows/docker-publish.yml"]
+    assert s["latest_successful_signing_run"] is None
+    [w] = ev["repositories"][0]["workflows"]
+    assert w["runs"]["by_outcome"] == {"failure": 1} and w["runs"]["latest_outcome"] == "failure"
+
+
+@pytest.mark.parametrize("text,error", [("jobs: [unclosed", None), ("- a list\n- not a workflow", "not a mapping"),
+                                        ("", "not a mapping")])
+def test_a_file_github_cannot_run_is_reported_not_guessed_at(text, error):
+    row = SIGNING.analyse("f.yml", text)
+    assert row["parsed"] is False and row["signing_steps"] == [] and (error is None or row["error"] == error)
+
+
+@pytest.mark.parametrize("doc", [{"jobs": ["a", "b"]}, {"jobs": {"a": "text"}}, {"jobs": {"a": {"steps": "text"}}},
+                                 {"jobs": {"a": {"steps": [None, "text", {"run": 7}, {"run": None, "name": 3}]}}},
+                                 {"env": ["x"], "jobs": {"a": {"env": "x", "steps": [{"env": 3, "run": "cosign sign i"}]}}}])
+def test_odd_shapes_in_a_workflow_file_do_not_break_the_read(doc):
+    row = SIGNING.analyse("f.yml", yaml.safe_dump(doc))
+    assert row["parsed"] is True and len(row["signing_steps"]) <= 1
+
+
+NOT_COPIED = "TEXT-THAT-MUST-STAY-IN-THE-WORKFLOW"
+PROMOTE = workflow(
+    {"uses": "sigstore/cosign-installer@v3"},
+    script(f"cosign sign --tlog-upload=false --key {KMS_KEY} {IMAGE}@${{{{ steps.push.outputs.digest }}}}\n"
+           f"notes={NOT_COPIED}", name="Sign the image", env={"NOTES": NOT_COPIED}),
+    script(f"cosign verify --key {KMS_KEY} {IMAGE}@sha256:0123456789ab", name="Verify the signature"))
+RELEASE = workflow(script(f"cosign sign --yes {IMAGE}:latest", **{"if": "github.ref == 'refs/heads/main'",
+                                                                  "continue-on-error": True}))
+PLAIN = workflow(script("make test"))
+SIGNING_FILES = {"app": {"image-promote.yml": PROMOTE, "ci.yml": PLAIN},
+                 "site": {"release.yml": RELEASE},
+                 "docs": {"broken.yml": "jobs: [unclosed", "lint.yml": PLAIN},
+                 "tools": {}}
+
+
+def runs_path(name, file):
+    return f"repos/{ORG}/{name}/actions/workflows/{quote(file, safe='')}/runs"
+
+
+def signing_routes(files=None, runs=None, refused=()):
+    files = SIGNING_FILES if files is None else files
+    routes = org_routes([repo(n) for n in files])
+    for n, tree in files.items():
+        routes[f"repos/{ORG}/{n}/.workflows"] = tree or None
+        for f in tree:
+            path = runs_path(n, f)
+            routes[path] = ((403, {"message": "Resource not accessible by integration"}) if (n, f) in refused
+                            else paged(path, "workflow_runs", (runs or {}).get((n, f), [])))
+    return routes
+
+
+def run_calls(fake_github):
+    return sorted({path for path, _ in fake_github.calls if "/actions/workflows/" in path})
+
+
+def test_image_signing_verdicts(fake, monkeypatch, tmp_path, assert_summary_documented):
+    newest = wf_run(5, 1, "image-promote.yml")
+    runs = {("app", "image-promote.yml"): [wf_run(6, 0.5, "image-promote.yml", conclusion=None, status="in_progress"),
+                                           newest, wf_run(4, 2, "image-promote.yml", conclusion="failure"),
+                                           wf_run(3, 3, "image-promote.yml"), wf_run(1, 40, "image-promote.yml")],
+            ("site", "release.yml"): [wf_run(9, 2, "release.yml", conclusion="failure")]}
+    github = fake(signing_routes(runs=runs))
+    code, ev, _ = run_fetcher("image_signing", monkeypatch, tmp_path)
+    assert code == 0 and ev["metadata"]["partial_failure"] is False
+    assert_summary_documented("github/image_signing", ev["summary"])
+    assert ev["summary"] == {
+        "repositories_total": 4,
+        "workflow_files": 5,
+        "workflow_files_unparsed": ["docs:.github/workflows/broken.yml"],
+        "repositories_signing": ["app", "site"],
+        "signing_workflows": ["app:.github/workflows/image-promote.yml", "site:.github/workflows/release.yml"],
+        "signing_steps": 2,
+        "signing_steps_by_key": {"azure_key_vault": 1, "aws_kms": 0, "gcp_kms": 0, "hashicorp_vault": 0,
+                                 "kubernetes_secret": 0, "environment_variable": 0, "keyless": 1, "other": 0},
+        "signing_steps_naming_a_digest": 1,
+        "signing_steps_skipping_transparency_log": 1,
+        "signing_steps_conditional": ["site:.github/workflows/release.yml:promote:1"],
+        "signing_steps_continue_on_error": ["site:.github/workflows/release.yml:promote:1"],
+        "signing_steps_discarding_failure": [],
+        "verification_workflows": ["app:.github/workflows/image-promote.yml"],
+        "verification_steps": 1,
+        "verification_steps_not_enforced": [],
+        "repositories_signing_without_verification": ["site"],
+        "workflows_calling_reusable_workflows": [],
+        "workflows_mentioning_cosign_without_a_cosign_command": [],
+        "runs_read": True,
+        "signing_workflow_runs": 5,                     # run 1 is outside the window
+        "signing_workflow_runs_successful": 2,
+        "signing_workflow_pull_request_runs": 0,
+        "signing_workflows_without_successful_run": ["site:.github/workflows/release.yml"],
+        "latest_successful_signing_run": newest["created_at"],
+        "not_collected": [],
+    }
+    # Runs are read only for the workflows that sign.
+    assert run_calls(github) == [runs_path("app", "image-promote.yml"), runs_path("site", "release.yml")]
+    app = next(r for r in ev["repositories"] if r["repository"] == "app")
+    promote = next(w for w in app["workflows"] if w["file"] == "image-promote.yml")
+    assert promote["installs_cosign"] is True and promote["signing_steps"] == [{
+        "job": "promote", "step": "Sign the image", "step_number": 2, "command": "sign", "names_digest": True,
+        "conditional": False, "continue_on_error": False, "failure_discarded": False, "key": "azure_key_vault",
+        "key_reference": KMS_KEY,
+        "skips_transparency_log": True}]
+    assert promote["runs"] == {"read": True, "pull_request_runs": 0, "total": 4, "successful": 2,
+                               "by_outcome": {"failure": 1, "in_progress": 1, "success": 2},
+                               "latest_run_at": runs[("app", "image-promote.yml")][0]["created_at"],
+                               "latest_outcome": "in_progress", "latest_success_at": newest["created_at"]}
+    assert next(w for w in app["workflows"] if w["file"] == "ci.yml")["runs"] is None
+
+
+def test_no_script_text_or_env_value_reaches_the_evidence(fake, monkeypatch, tmp_path):
+    """Only what is derived from a cosign command is written: a script can hold anything."""
+    fake(signing_routes())
+    _, ev, _ = run_fetcher("image_signing", monkeypatch, tmp_path)
+    written = json.dumps(ev)
+    assert NOT_COPIED not in written and "display_title" not in written and "never collected" not in written
+    assert "make test" not in written and "steps.push.outputs" not in written
+
+
+def test_with_runs_turned_off_no_run_is_read_and_no_run_figure_is_given(fake, monkeypatch, tmp_path):
+    github = fake(signing_routes())
+    code, ev, _ = run_fetcher("image_signing", monkeypatch, tmp_path, GITHUB_IMAGE_SIGNING_INCLUDE_RUNS="false")
+    s = ev["summary"]
+    assert code == 0 and run_calls(github) == [] and ev["metadata"]["since"] is None
+    assert (s["runs_read"], s["signing_workflow_runs"], s["signing_workflow_runs_successful"],
+            s["signing_workflows_without_successful_run"], s["latest_successful_signing_run"]) == (None,) * 5
+    # What the files say is still reported in full.
+    assert (s["signing_steps"], s["repositories_signing_without_verification"]) == (2, ["site"])
+    assert all(w["runs"] is None for r in ev["repositories"] for w in r.get("workflows", []))
+
+
+def test_unreadable_runs_are_unknown_not_zero_and_the_files_are_still_reported(fake, monkeypatch, tmp_path):
+    runs = {("app", "image-promote.yml"): [wf_run(5, 1, "image-promote.yml")]}
+    fake(signing_routes(runs=runs, refused=[("site", "release.yml")]))
+    code, ev, status = run_fetcher("image_signing", monkeypatch, tmp_path)
+    s = ev["summary"]
+    assert code == 1 and ev["metadata"]["partial_failure"] is True and status["code"] == "not_authorized"
+    assert (s["runs_read"], s["signing_workflow_runs"], s["signing_workflow_runs_successful"],
+            s["signing_workflows_without_successful_run"], s["latest_successful_signing_run"]) == (False, None, None,
+                                                                                                None, None)
+    assert (s["signing_steps"], s["verification_steps"], s["not_collected"]) == (2, 1, [])
+    site = next(r for r in ev["repositories"] if r["repository"] == "site")
+    assert site["workflows"][0]["runs"] == {"read": False}
+
+
+def test_more_runs_than_the_cap_fails_rather_than_cutting_the_history(fake, monkeypatch, tmp_path):
+    runs = {("app", "image-promote.yml"): [wf_run(i, 1, "image-promote.yml") for i in range(9, 0, -1)]}
+    fake(signing_routes(runs=runs))
+    code, ev, status = run_fetcher("image_signing", monkeypatch, tmp_path, GITHUB_IMAGE_SIGNING_MAX_RUNS="5")
+    assert code == 1 and status["code"] == "partial_failure" and "GITHUB_IMAGE_SIGNING_MAX_RUNS" in status["error"]
+    assert ev["summary"]["runs_read"] is False and ev["summary"]["signing_workflow_runs"] is None
+
+
+def test_no_signing_anywhere_is_a_complete_answer(fake, monkeypatch, tmp_path):
+    github = fake(signing_routes({"docs": {"lint.yml": PLAIN}, "tools": {}}))
+    code, ev, _ = run_fetcher("image_signing", monkeypatch, tmp_path)
+    s = ev["summary"]
+    assert code == 0 and run_calls(github) == []
+    assert (s["repositories_signing"], s["signing_steps"], s["runs_read"], s["signing_workflow_runs"],
+            s["signing_workflows_without_successful_run"], s["latest_successful_signing_run"]) == ([], 0, True, 0, [], None)
+
+
+def test_a_signing_workflow_that_never_ran_in_the_window_is_named(fake, monkeypatch, tmp_path):
+    fake(signing_routes({"site": {"release.yml": RELEASE}}))
+    code, ev, _ = run_fetcher("image_signing", monkeypatch, tmp_path)
+    s = ev["summary"]
+    assert code == 0 and (s["signing_workflow_runs"], s["signing_workflows_without_successful_run"]) == (
+        0, ["site:.github/workflows/release.yml"])
+
+
+@pytest.mark.parametrize("steps", [
+    [{"uses": "sigstore/cosign-installer@v3"}, script("./scripts/sign-images.sh")],
+    [script('make cosign-sign IMAGE="${IMAGE}" DIGEST="${DIGEST}"')],     # signing behind a make target
+    [script("cosign version")],
+])
+def test_cosign_used_in_a_way_the_file_does_not_show_is_listed_not_counted(fake, monkeypatch, tmp_path, steps):
+    fake(signing_routes({"app": {"promote.yml": workflow(*steps)}, "docs": {"lint.yml": PLAIN}}))
+    _, ev, _ = run_fetcher("image_signing", monkeypatch, tmp_path)
+    s = ev["summary"]
+    assert s["workflows_mentioning_cosign_without_a_cosign_command"] == ["app:.github/workflows/promote.yml"]
+    assert (s["repositories_signing"], s["signing_steps"]) == ([], 0)
+
+
+def test_a_comment_about_cosign_is_not_a_mention():
+    row = SIGNING.analyse("f.yml", workflow(script("# cosign sign would go here\nmake build")))
+    assert row["mentions_cosign"] is False
+
+
+def test_a_workflow_file_name_is_escaped_in_the_runs_path(fake, monkeypatch, tmp_path):
+    github = fake(signing_routes({"app": {"image promote#1.yml": RELEASE}}))
+    code, ev, _ = run_fetcher("image_signing", monkeypatch, tmp_path)
+    assert code == 0 and run_calls(github) == [f"repos/{ORG}/app/actions/workflows/image%20promote%231.yml/runs"]
+
+
+def test_a_workflow_file_with_no_readable_content_makes_its_repository_unknown(fake, monkeypatch, tmp_path):
+    routes = signing_routes({"app": {"image-promote.yml": PROMOTE}, "site": {"release.yml": RELEASE}})
+
+    def graphql(query, variables):
+        status, body = gql_repos(routes, query, variables)
+        for node in body["data"].values():
+            for entry in (node.get("object") or {}).get("entries", []):
+                if entry["name"] == "release.yml":
+                    entry["object"] = {"text": None, "isBinary": False, "isTruncated": True}
+        return status, body
+    routes["graphql"] = graphql
+    github = fake(routes)
+    code, ev, status = run_fetcher("image_signing", monkeypatch, tmp_path)
+    s = ev["summary"]
+    assert code == 1 and status["code"] == "partial_failure" and ev["metadata"]["partial_failure"] is True
+    assert (s["not_collected"], s["repositories_total"], s["repositories_signing"]) == (["site"], 2, ["app"])
+    assert s["repositories_signing_without_verification"] == [] and run_calls(github) == [runs_path("app", "image-promote.yml")]
+    assert next(r for r in ev["repositories"] if r["repository"] == "site") == {"repository": "site", "collected": False}
+
+
+def test_a_failed_read_of_the_workflow_files_leaves_no_figures(fake, monkeypatch, tmp_path):
+    routes = signing_routes()
+    routes["graphql"] = (200, {"errors": [{"type": "FORBIDDEN", "message": "Resource not accessible"}]})
+    github = fake(routes)
+    code, ev, status = run_fetcher("image_signing", monkeypatch, tmp_path)
+    assert code == 1 and status["code"] == "not_authorized" and ev["summary"] == {} and run_calls(github) == []
+
+
+@pytest.mark.parametrize("env", [{"GITHUB_IMAGE_SIGNING_DAYS_BACK": "0"}, {"GITHUB_IMAGE_SIGNING_DAYS_BACK": "367"},
+                                 {"GITHUB_IMAGE_SIGNING_MAX_RUNS": "0"}, {"GITHUB_IMAGE_SIGNING_INCLUDE_RUNS": "maybe"},
+                                 {"GITHUB_IMAGE_SIGNING_DAYS_BACK": "0", "GITHUB_IMAGE_SIGNING_INCLUDE_RUNS": "false"}])
+def test_image_signing_configuration_errors(fake, monkeypatch, tmp_path, env):
+    github = fake(signing_routes())
+    monkeypatch.setenv("GITHUB_ORG", ORG)
+    monkeypatch.setenv("GITHUB_TOKEN", "test-token")
+    monkeypatch.setenv("GITHUB_API_URL", API)
+    monkeypatch.setenv("EVIDENCE_DIR", str(tmp_path))
+    monkeypatch.setenv("FETCHER_STATUS_FILE", str(tmp_path / "status.json"))
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    assert gc.run(SIGNING.NAME, SIGNING.collect, SIGNING.CONFIG) == 1
+    assert json.loads((tmp_path / "status.json").read_text())["code"] == "bad_config"
+    assert not any(path == "graphql" or "/actions/" in path for path, _ in github.calls)
+
+
+def test_a_repository_that_only_verifies_is_not_counted_as_signing(fake, monkeypatch, tmp_path):
+    verify_only = workflow(script(f"cosign verify --key {KMS_KEY} {IMAGE}@sha256:0123456789ab"))
+    github = fake(signing_routes({"deploy": {"deploy.yml": verify_only}, "site": {"release.yml": RELEASE}}))
+    code, ev, _ = run_fetcher("image_signing", monkeypatch, tmp_path)
+    s = ev["summary"]
+    assert code == 0 and s["verification_workflows"] == ["deploy:.github/workflows/deploy.yml"]
+    assert (s["repositories_signing"], s["repositories_signing_without_verification"]) == (["site"], ["site"])
+    assert run_calls(github) == [runs_path("site", "release.yml")]
+
+
+# Shapes taken from public workflow files, where the first version of this fetcher went wrong.
+@pytest.mark.parametrize("text,signs,verifies", [
+    # GitHub's own starter workflow: the command comes after a pipe from echo.
+    ('echo "${TAGS}" | xargs -I {} cosign sign --yes {}@${DIGEST}', 1, 0),
+    (f'echo "Signing {IMAGE}" && cosign sign --yes {IMAGE}', 1, 0),
+    ('for tag in $TAGS; do\n  cosign sign \\\n  -a "sha=${GITHUB_SHA}" \\\n  -y \\\n  "$tag"@${DIGEST}\ndone', 1, 0),
+    (f"test $# -gt 0 && cosign sign {IMAGE}", 1, 0),                  # $# is not a comment
+    (f"cosign.exe sign {IMAGE}", 1, 0),
+    (f"if ! cosign verify --key cosign.pub {IMAGE}; then exit 1; fi", 0, 1),
+    (f'bash -c "cosign sign {IMAGE} && cosign verify --key cosign.pub {IMAGE}"', 1, 1),
+    # A separator or a # inside quotes is text.
+    (f'echo "first; cosign sign {IMAGE}"', 0, 0),
+    (f"echo 'next | cosign sign {IMAGE}'", 0, 0),
+    (f'printf "%s\\n" "see # cosign sign {IMAGE}"', 0, 0),
+    (f"cosign sign {IMAGE} # then cosign verify {IMAGE}", 1, 0),
+    (f'make cosign-sign IMAGE="{IMAGE}"', 0, 0),
+])
+def test_commands_are_split_the_way_a_shell_splits_them(text, signs, verifies):
+    row = SIGNING.analyse("f.yml", workflow(script(text)))
+    assert (len(row["signing_steps"]), len(row["verification_steps"])) == (signs, verifies)
+
+
+def test_the_starter_workflow_line_is_read_in_full():
+    [step] = signing_steps('echo "${TAGS}" | xargs -I {} cosign sign --yes {}@${DIGEST}')
+    assert (step["key"], step["names_digest"], step["failure_discarded"]) == ("keyless", True, False)
+
+
+def test_an_expression_or_a_quoted_pattern_does_not_cut_a_command_short():
+    [sign] = signing_steps(f"cosign sign --key ${{{{ inputs.key || 'cosign.key' }}}} --tlog-upload=false {IMAGE}")
+    assert (sign["key"], sign["skips_transparency_log"]) == ("other", True)
+    text = f"cosign verify --certificate-identity-regexp '^https://github.com/(acme|example)/' --insecure-ignore-tlog {IMAGE}"
+    [verify] = SIGNING.analyse("f.yml", workflow(script(text)))["verification_steps"]
+    assert (verify["checks"], verify["skips_transparency_log"]) == ("certificate_identity", True)
+
+
+@pytest.mark.parametrize("tail,discarded", [
+    ("|| true", True), ("|| :", True), ('|| echo "signing failed"', True), ("||true", True),
+    ("|| exit 1", False), ("|| { echo failed; exit 1; }", False), ("&& true", False), ("; true", False), ("", False),
+    ("| tee sign.log", False),
+])
+def test_a_failure_the_script_throws_away_is_marked(tail, discarded):
+    [step] = signing_steps(f"cosign sign --yes {IMAGE} {tail}")
+    assert step["failure_discarded"] is discarded
+
+
+def test_a_verify_step_that_cannot_fail_the_run_is_listed_as_not_enforced(fake, monkeypatch, tmp_path):
+    text = workflow(script(f"cosign sign --yes {IMAGE} || true", name="sign"),
+                    script(f"cosign verify --key cosign.pub {IMAGE} || true", name="soft verify"),
+                    script(f"cosign verify --key cosign.pub {IMAGE}", name="warn only", **{"continue-on-error": True}),
+                    script(f"cosign verify --key cosign.pub {IMAGE}", name="real verify"))
+    fake(signing_routes({"app": {"promote.yml": text}}))
+    code, ev, _ = run_fetcher("image_signing", monkeypatch, tmp_path)
+    s = ev["summary"]
+    at = "app:.github/workflows/promote.yml:promote"
+    assert code == 0 and (s["verification_steps"], s["verification_steps_not_enforced"]) == (3, [f"{at}:2", f"{at}:3"])
+    assert s["signing_steps_discarding_failure"] == [f"{at}:1"] and s["signing_steps_continue_on_error"] == []
+
+
+def test_no_workflow_shape_can_break_the_read():
+    """Random documents built from the keys a workflow uses, with values of every YAML type."""
+    import random
+    rng = random.Random(20261113)
+    keys = ["jobs", "steps", "run", "uses", "env", "if", "continue-on-error", "name", "on", "a", "promote"]
+    leaves = [None, True, False, 0, 7, 1.5, "", "text", "cosign sign img", "cosign verify img || true", "${{ x }}",
+              "sigstore/cosign-installer@v3", "echo \"unclosed", "it's # cosign", "\\", "$(", "`", "'", '"', "&&", "||"]
+
+    def value(depth):
+        roll = rng.random()
+        if depth > 4 or roll < 0.35:
+            return rng.choice(leaves)
+        if roll < 0.7:
+            return {rng.choice(keys): value(depth + 1) for _ in range(rng.randint(0, 4))}
+        return [value(depth + 1) for _ in range(rng.randint(0, 4))]
+    for _ in range(3000):
+        doc = {"jobs": value(0), "env": value(3)} if rng.random() < 0.8 else value(0)
+        row = SIGNING.analyse("f.yml", yaml.safe_dump(doc))
+        assert isinstance(row["signing_steps"], list) and isinstance(row["parsed"], bool)
+
+
+@pytest.mark.parametrize("text", ["", "'", '"', "\\", "${{", "${{ a", "a ${{ b }} c", "# only a comment", "a\\\nb", "||", "&&;|&",
+                                  "cosign sign 'unclosed", 'cosign sign "a\\"b" img', "x" * 20000 + " cosign sign img"])
+def test_the_splitter_ends_on_any_script(text):
+    assert isinstance(SIGNING.commands(text), list) and SIGNING.segments(text)[-1][1] == ""
+
+
+def test_two_commands_in_one_quoted_string_keep_their_own_flags():
+    text = f'bash -c "cosign sign {IMAGE} && cosign verify --key {KMS_KEY} {IMAGE}@sha256:0123456789ab"'
+    row = SIGNING.analyse("f.yml", workflow(script(text)))
+    [sign], [verify] = row["signing_steps"], row["verification_steps"]
+    assert (sign["key"], sign["key_reference"], sign["names_digest"]) == ("keyless", None, False)
+    assert (verify["checks"], verify["names_digest"]) == ("key", True)
+
+
+# --- exclude_repositories, optional titles, messages and branch names -------------------------
+
+def test_excluded_repositories_are_left_out_without_regard_to_case(fake):
+    client = client_for(fake, org_routes([repo("app"), repo("Compliance-Repo"), repo("site")]))
+    seen = {}
+    repos = gc.list_repos(client, client.get(f"orgs/{ORG}"), [], False, ["compliance-repo", "typo-repo"], seen)
+    assert [r["name"] for r in repos] == ["app", "site"]
+    assert seen == {"repositories_excluded": ["Compliance-Repo"], "exclude_repositories_unmatched": ["typo-repo"]}
+    assert client.codes == []  # an unmatched name is reported, not a failure
+
+
+def test_an_excluded_archived_repository_counts_as_matched(fake):
+    client = client_for(fake, org_routes([repo("app"), repo("old", archived=True)]))
+    seen = {}
+    repos = gc.list_repos(client, client.get(f"orgs/{ORG}"), [], False, ["old"], seen)
+    assert [r["name"] for r in repos] == ["app"]
+    assert seen["repositories_excluded"] == ["old"] and seen["exclude_repositories_unmatched"] == []
+
+
+def test_exclusion_is_recorded_in_the_evidence(fake, monkeypatch, tmp_path):
+    fake(runs_routes())
+    code, ev, _ = run_fetcher("workflow_runs", monkeypatch, tmp_path, GITHUB_EXCLUDE_REPOSITORIES="SITE, nope")
+    assert code == 0
+    assert [r["repository"] for r in ev["repositories"]] == ["app"]
+    m = ev["metadata"]
+    assert m["exclude_repositories"] == ["SITE", "nope"]
+    assert m["repositories_excluded"] == ["site"] and m["exclude_repositories_unmatched"] == ["nope"]
+
+
+def test_without_an_exclusion_the_metadata_carries_no_exclusion_counts(fake, monkeypatch, tmp_path):
+    monkeypatch.delenv("GITHUB_EXCLUDE_REPOSITORIES", raising=False)
+    fake(runs_routes())
+    _, ev, _ = run_fetcher("workflow_runs", monkeypatch, tmp_path)
+    assert ev["metadata"]["exclude_repositories"] is None
+    assert "repositories_excluded" not in ev["metadata"] and "exclude_repositories_unmatched" not in ev["metadata"]
+
+
+def test_an_unread_repository_list_leaves_the_exclusion_unknown_not_empty(fake, monkeypatch, tmp_path):
+    routes = runs_routes()
+    routes[f"orgs/{ORG}/repos"] = (500, {"message": "boom"})
+    fake(routes)
+    code, ev, _ = run_fetcher("workflow_runs", monkeypatch, tmp_path, GITHUB_EXCLUDE_REPOSITORIES="site")
+    assert code == 1 and ev["metadata"]["partial_failure"] is True
+    assert ev["metadata"]["repositories_excluded"] is None
+    assert ev["metadata"]["exclude_repositories_unmatched"] is None
+
+
+def test_repositories_and_exclude_repositories_together_fail_as_bad_config(fake, monkeypatch, tmp_path):
+    fake(runs_routes())
+    monkeypatch.setenv("GITHUB_ORG", ORG)
+    monkeypatch.setenv("GITHUB_TOKEN", "test-token")
+    monkeypatch.setenv("GITHUB_API_URL", API)
+    monkeypatch.setenv("EVIDENCE_DIR", str(tmp_path))
+    monkeypatch.setenv("FETCHER_STATUS_FILE", str(tmp_path / "status.json"))
+    monkeypatch.setenv("GITHUB_REPOSITORIES", "app")
+    monkeypatch.setenv("GITHUB_EXCLUDE_REPOSITORIES", "site")
+    m = MODS["workflow_runs"]
+    assert gc.run(m.NAME, m.collect, m.CONFIG) == 1
+    status = json.loads((tmp_path / "status.json").read_text())
+    assert "not both" in json.dumps(status) and "bad_config" in json.dumps(status)
+
+
+def test_inventory_ignores_the_exclusion_and_names_it(fake, monkeypatch, tmp_path):
+    repos = [repo("app", id=1), repo("site", id=3)]
+    fake(inv_routes(repos=repos, values=[]))
+    code, ev, _ = run_fetcher("repository_inventory", monkeypatch, tmp_path, GITHUB_EXCLUDE_REPOSITORIES="site")
+    assert code == 0 and sorted(r["name"] for r in ev["data"]) == ["app", "site"]
+    assert "exclude_repositories" in ev["metadata"]["filters_ignored"]
+    assert ev["metadata"]["exclude_repositories"] is None
+
+
+def _pr_case():
+    pulls = [pr(1, 2)]
+    reviews = {1: [review("lead", "APPROVED", 3)]}
+    runs = {1: [check("ci", "success", 3)]}
+    commits = [{"sha": "m1"}, {"sha": "d1", "commit": {"message": "hotfix for X\nbody", "committer": {"date": ago(1)}},
+                               "author": {"login": "admin"}}]
+    return pr_routes(pulls, reviews, runs, commits=commits, associated={"d1": []})
+
+
+def test_pr_titles_and_push_messages_are_included_by_default(fake, monkeypatch, tmp_path):
+    for env in ("GITHUB_PR_INCLUDE_TITLES", "GITHUB_PR_INCLUDE_COMMIT_MESSAGES"):
+        monkeypatch.delenv(env, raising=False)
+    fake(_pr_case())
+    code, ev, _ = run_fetcher("pull_request_checks", monkeypatch, tmp_path)
+    r = ev["repositories"][0]
+    assert code == 0 and "title" in r["pull_requests"][0] and r["direct_pushes"][0]["message"] == "hotfix for X"
+    assert ev["metadata"]["include_titles"] is True and ev["metadata"]["include_commit_messages"] is True
+
+
+@pytest.mark.parametrize("titles,messages", [("false", "true"), ("true", "false"), ("false", "false")])
+def test_pr_titles_and_push_messages_can_be_left_out_independently(fake, monkeypatch, tmp_path, titles, messages):
+    fake(_pr_case())
+    code, ev, _ = run_fetcher("pull_request_checks", monkeypatch, tmp_path,
+                              GITHUB_PR_INCLUDE_TITLES=titles, GITHUB_PR_INCLUDE_COMMIT_MESSAGES=messages)
+    assert code == 0
+    r = ev["repositories"][0]
+    p, push = r["pull_requests"][0], r["direct_pushes"][0]
+    assert ("title" in p) is (titles == "true")
+    assert ("message" in push) is (messages == "true")
+    assert "hotfix for X" not in json.dumps(ev) if messages == "false" else True
+    # The findings do not depend on either field.
+    assert push["sha"] == "d1" and p["number"] == 1 and r["merged_without_approval"] == []
+    assert ev["summary"]["direct_pushes"] == 1 and ev["summary"]["merged_pull_requests"] == 1
+    assert ev["metadata"]["include_titles"] is (titles == "true")
+    assert ev["metadata"]["include_commit_messages"] is (messages == "true")
+
+
+def test_a_bad_true_false_value_fails_as_bad_config(fake, monkeypatch, tmp_path):
+    fake(_pr_case())
+    monkeypatch.setenv("GITHUB_PR_INCLUDE_TITLES", "maybe")
+    monkeypatch.setenv("GITHUB_ORG", ORG)
+    monkeypatch.setenv("GITHUB_TOKEN", "test-token")
+    monkeypatch.setenv("GITHUB_API_URL", API)
+    monkeypatch.setenv("EVIDENCE_DIR", str(tmp_path))
+    monkeypatch.setenv("FETCHER_STATUS_FILE", str(tmp_path / "status.json"))
+    m = MODS["pull_request_checks"]
+    assert gc.run(m.NAME, m.collect, m.CONFIG) == 1
+    assert "bad_config" in (tmp_path / "status.json").read_text()
+
+
+def test_branch_names_are_included_by_default(fake, monkeypatch, tmp_path):
+    monkeypatch.delenv("GITHUB_WORKFLOW_RUNS_INCLUDE_BRANCH_NAMES", raising=False)
+    fake(runs_routes({"app": [wf_run(2, 1), wf_run(1, 1, branch="feature-secret-name")]}))
+    _, ev, _ = run_fetcher("workflow_runs", monkeypatch, tmp_path)
+    by = {r["id"]: r for r in ev["repositories"][0]["runs"]}
+    assert by[1]["head_branch"] == "feature-secret-name" and ev["metadata"]["include_branch_names"] is True
+
+
+def test_branch_names_can_be_left_out_and_on_default_branch_still_holds(fake, monkeypatch, tmp_path):
+    runs = {"app": [wf_run(3, 1), wf_run(2, 1, branch="feature-secret-name", conclusion="failure"),
+                    wf_run(1, 1, conclusion="failure", fork=True)]}
+    fake(runs_routes(runs))
+    code, ev, _ = run_fetcher("workflow_runs", monkeypatch, tmp_path, GITHUB_WORKFLOW_RUNS_INCLUDE_BRANCH_NAMES="false")
+    assert code == 0
+    by = {r["id"]: r for r in ev["repositories"][0]["runs"]}
+    assert all("head_branch" not in x for x in by.values())
+    assert "feature-secret-name" not in json.dumps(ev)
+    assert by[3]["on_default_branch"] is True and by[2]["on_default_branch"] is False
+    assert by[1]["on_default_branch"] is False  # a fork's main is still not the default branch
+    assert ev["summary"]["default_branch_runs"] == 1 and ev["summary"]["default_branch_runs_failed"] == 0
+    assert ev["metadata"]["include_branch_names"] is False
+    assert ev["repositories"][0]["default_branch"] == "main"  # the repository's default branch is kept
+
+
+# --- audit_log: the repository filters apply to the events ---------------------------------
+
+def _audit_scope_events():
+    return [audit_event("repo.access", 1, repo=f"{ORG}/app"),
+            audit_event("protected_branch.policy_override", 2, repo=f"{ORG}/Out-Of-Scope"),
+            audit_event("repo.create", 3, repository=f"{ORG}/out-of-scope"),          # the newer field name
+            audit_event("org.add_member", 4, user="newbie"),                           # names no repository
+            audit_event("workflows.completed_workflow_run", 5, repo=f"{ORG}/out-of-scope")]
+
+
+def _audit_scope_routes():
+    routes = audit_routes(_audit_scope_events())
+    routes[f"orgs/{ORG}/repos"] = [repo("app"), repo("out-of-scope")]
+    routes[f"orgs/{ORG}"]["public_repos"] = 2
+    routes[f"repos/{ORG}/app"] = routes[f"repos/{ORG}/App"] = repo("app")  # GitHub resolves names in any case
+    return routes
+
+
+def test_audit_log_without_a_filter_keeps_every_event(fake, monkeypatch, tmp_path):
+    for env in ("GITHUB_REPOSITORIES", "GITHUB_EXCLUDE_REPOSITORIES"):
+        monkeypatch.delenv(env, raising=False)
+    fake(_audit_scope_routes())
+    code, ev, _ = run_fetcher("audit_log", monkeypatch, tmp_path)
+    m = ev["metadata"]
+    assert code == 0 and ev["summary"]["events_total"] == 5 and m["events_read"] == 5
+    assert m["repository_filter_applied"] is False and m["events_outside_repository_filter"] == 0
+
+
+def test_audit_log_leaves_out_an_excluded_repositorys_events(fake, monkeypatch, tmp_path):
+    fake(_audit_scope_routes())
+    code, ev, _ = run_fetcher("audit_log", monkeypatch, tmp_path, GITHUB_EXCLUDE_REPOSITORIES="OUT-of-scope")
+    m, s = ev["metadata"], ev["summary"]
+    assert code == 0 and m["repositories_excluded"] == ["out-of-scope"]
+    assert m["repository_filter_applied"] is True and m["events_read"] == 5
+    assert m["events_outside_repository_filter"] == 3 and s["events_total"] == 2
+    assert "out-of-scope" not in json.dumps(ev["security_events"]).lower()
+    assert s["by_family"] == {"org": 1, "repo": 1}  # the organization-wide event is kept
+    assert "workflows.completed_workflow_run" not in s["by_action"]
+
+
+def test_audit_log_with_an_allow_list_keeps_listed_repositories_and_organization_events(fake, monkeypatch, tmp_path):
+    fake(_audit_scope_routes())
+    code, ev, _ = run_fetcher("audit_log", monkeypatch, tmp_path, GITHUB_REPOSITORIES="App")
+    m, s = ev["metadata"], ev["summary"]
+    assert code == 0 and m["repository_filter_applied"] is True
+    assert m["events_outside_repository_filter"] == 3 and s["events_total"] == 2
+    assert sorted(e["action"] for e in ev["security_events"]) == ["org.add_member", "repo.access"]
+
+
+def test_audit_log_truncation_is_judged_on_the_events_read_not_the_events_kept(fake, monkeypatch, tmp_path):
+    fake(_audit_scope_routes())
+    code, ev, status = run_fetcher("audit_log", monkeypatch, tmp_path, GITHUB_EXCLUDE_REPOSITORIES="out-of-scope",
+                                   GITHUB_AUDIT_MAX_EVENTS="4")
+    assert code == 1 and status["code"] == "partial_failure" and ev["metadata"]["truncated"] is True
+    assert ev["metadata"]["events_read"] == 4
+
+
+@pytest.mark.parametrize("event,allow,exclude,kept", [
+    ({"repo": "acme/app"}, set(), {"app"}, False),
+    ({"repo": "acme/App"}, set(), {"app"}, False),
+    ({"repo": "acme/app"}, {"app"}, set(), True),
+    ({"repo": "acme/other"}, {"app"}, set(), False),
+    ({"repository": "acme/other"}, set(), {"app"}, True),
+    ({}, {"app"}, set(), True),
+    ({"repo": None}, set(), {"app"}, True),
+    ({"repo": 7}, set(), {"app"}, True),          # not a name: kept rather than guessed at
+    ({"repo": "app"}, set(), {"app"}, False),     # no owner prefix
+])
+def test_audit_event_repository_scope(event, allow, exclude, kept):
+    assert MODS["audit_log"].in_repository_scope(event, allow, exclude) is kept
+
+
+# --- access_review: an organization with no invitation list -------------------------------
+
+NO_INVITATIONS = (404, {"message": "Not Found"}, {"X-Accepted-GitHub-Permissions": "members=read"})
+APP_TOKEN = {"GITHUB_TOKEN": "ghs_test"}            # an App installation token: permissions only, no user
+USER_TOKEN = {"GITHUB_TOKEN": "github_pat_test"}    # a personal token: also bound by its user's role
+
+
+def no_invitations_routes(user=None):
+    routes = access_routes()
+    routes[f"orgs/{ORG}/invitations"] = NO_INVITATIONS
+    if user:
+        routes["user"] = {"login": user}
+    return routes
+
+
+def invitation_failed(ev):
+    return f"GET orgs/{ORG}/invitations" in [f["operation"] for f in ev["metadata"]["api_failures"]]
+
+
+def test_invitations_read_normally_are_marked_available(fake, monkeypatch, tmp_path):
+    fake(access_routes())
+    code, ev, _ = run_fetcher("access_review", monkeypatch, tmp_path)
+    assert code == 0 and ev["metadata"]["pending_invitations_available"] is True
+    assert ev["summary"]["pending_invitations"] == 1
+
+
+def test_an_app_token_404_on_invitations_with_teams_and_outsiders_readable_is_unavailable(fake, monkeypatch, tmp_path):
+    f = fake(no_invitations_routes())
+    code, ev, status = run_fetcher("access_review", monkeypatch, tmp_path, **APP_TOKEN)
+    assert code == 0 and ev["metadata"]["partial_failure"] is False and ev["metadata"]["api_failures"] == []
+    assert ev["metadata"]["pending_invitations_available"] is False
+    assert ev["pending_invitations"] is None and ev["summary"]["pending_invitations"] is None  # unknown, never zero
+    assert ev["summary"]["members_total"] == 2 and ev["summary"]["teams_total"] == 1  # the rest is collected
+    assert "user" not in {p for p, _ in f.calls}  # an installation token has no user to ask about
+
+
+def test_a_404_on_invitations_when_teams_are_unreadable_stays_a_failure(fake, monkeypatch, tmp_path):
+    # A token without members: read gets the same 404, and cannot list teams either.
+    routes = no_invitations_routes()
+    routes[f"orgs/{ORG}/teams"] = (403, {"message": "Resource not accessible by integration"})
+    fake(routes)
+    code, ev, _ = run_fetcher("access_review", monkeypatch, tmp_path, **APP_TOKEN)
+    operations = [f["operation"] for f in ev["metadata"]["api_failures"]]
+    assert code == 1 and invitation_failed(ev) and f"GET orgs/{ORG}/teams" in operations
+
+
+def test_a_404_on_invitations_when_outside_collaborators_are_unreadable_stays_a_failure(fake, monkeypatch, tmp_path):
+    routes = no_invitations_routes()
+    routes[f"orgs/{ORG}/outside_collaborators"] = (403, {"message": "Resource not accessible by integration"})
+    fake(routes)
+    code, ev, _ = run_fetcher("access_review", monkeypatch, tmp_path, **APP_TOKEN)
+    assert code == 1 and invitation_failed(ev)
+
+
+@pytest.mark.parametrize("answer", [(403, {"message": "Resource not accessible by integration"}),
+                                    (500, {"message": "Server Error"})])
+def test_any_other_invitations_error_stays_a_failure(fake, monkeypatch, tmp_path, answer):
+    routes = access_routes()
+    routes[f"orgs/{ORG}/invitations"] = answer
+    fake(routes)
+    code, ev, _ = run_fetcher("access_review", monkeypatch, tmp_path, **APP_TOKEN)
+    assert code == 1 and ev["metadata"]["pending_invitations_available"] is None
+    assert invitation_failed(ev) and ev["pending_invitations"] is None
+
+
+def test_an_earlier_failure_is_kept_when_invitations_are_unavailable(fake, monkeypatch, tmp_path):
+    routes = no_invitations_routes()
+    routes[f"orgs/{ORG}/teams/platform/members"] = FAILING
+    fake(routes)
+    code, ev, _ = run_fetcher("access_review", monkeypatch, tmp_path, **APP_TOKEN)
+    operations = [f["operation"] for f in ev["metadata"]["api_failures"]]
+    assert code == 1 and not invitation_failed(ev) and len(operations) == 1
+    assert ev["metadata"]["pending_invitations_available"] is False
+
+
+def test_an_owners_personal_token_404_on_invitations_is_unavailable(fake, monkeypatch, tmp_path):
+    fake(no_invitations_routes(user="boss"))  # boss is in the role=admin list
+    code, ev, _ = run_fetcher("access_review", monkeypatch, tmp_path, **USER_TOKEN)
+    assert code == 0 and ev["metadata"]["pending_invitations_available"] is False and not invitation_failed(ev)
+
+
+@pytest.mark.parametrize("token", [USER_TOKEN, {"GITHUB_TOKEN": "some-other-kind-of-token"}])
+def test_a_non_owners_token_404_on_invitations_stays_a_failure(fake, monkeypatch, tmp_path, token):
+    # Not measured whether a non-owner gets this 404 on an ordinary organization, so it is not read as "none".
+    fake(no_invitations_routes(user="dev"))  # dev is a member, not an owner
+    code, ev, _ = run_fetcher("access_review", monkeypatch, tmp_path, **token)
+    assert code == 1 and invitation_failed(ev) and ev["metadata"]["pending_invitations_available"] is None
+
+
+def test_a_token_whose_user_cannot_be_read_stays_a_failure(fake, monkeypatch, tmp_path):
+    routes = no_invitations_routes()
+    routes["user"] = (403, {"message": "Resource not accessible by personal access token"})
+    fake(routes)
+    code, ev, _ = run_fetcher("access_review", monkeypatch, tmp_path, **USER_TOKEN)
+    assert code == 1 and invitation_failed(ev) and ev["metadata"]["pending_invitations_available"] is None
+
+
+def test_a_token_with_no_readable_user_route_stays_a_failure(fake, monkeypatch, tmp_path):
+    routes = no_invitations_routes()
+    routes["user"] = (404, {"message": "Not Found"})
+    fake(routes)
+    code, ev, _ = run_fetcher("access_review", monkeypatch, tmp_path, **USER_TOKEN)
+    assert code == 1 and invitation_failed(ev)

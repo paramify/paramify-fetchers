@@ -1,5 +1,5 @@
 name: azure_vpn_gateway_configuration
-version: 0.2.1
+version: 0.3.0
 description: >-
   Shows each VPN gateway's type, SKU and point-to-site setup, and whether each site-to-site or VNet-to-VNet connection uses IKEv2 and strong IPsec algorithms.
 category: azure
@@ -99,8 +99,8 @@ evidence_set:
     Which gateways and connections were checked?
     - total_gateways — Number of in-scope virtual network gateways, VPN and ExpressRoute
     - vpn_gateways — Number of those whose gateway type is Vpn
-    - active_active_gateways — Number of gateways with active-active mode on
-    - p2s_enabled_gateways — Number of gateways with point-to-site on, which needs a client address pool; the list call returns a placeholder block for gateways that never set it up
+    - active_active_gateways — Number of Vpn-type gateways with active-active mode on; ExpressRoute gateways are not counted
+    - p2s_enabled_gateways — Number of Vpn-type gateways with point-to-site on, which needs a client address pool; the list call returns a placeholder block for gateways that never set it up
     - total_connections — Number of in-scope connections of every type
     - ipsec_connections — Number of connections of type IPsec or VNet-to-VNet, the tunnels the checks below cover
     - total_local_network_gateways — Number of in-scope local network gateways

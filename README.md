@@ -62,6 +62,7 @@ If you have a question about this repo, ask DeepWiki. It answers in plain Englis
   <tr>
     <td align="center" width="128"><a href="fetchers/sophos/"><img src="fetchers/logos/sophos.png" alt="Sophos" width="48" height="48"></a><br><sub>Sophos</sub></td>
     <td align="center" width="128"><a href="fetchers/cornerstone/"><img src="fetchers/logos/cornerstone.png" alt="Cornerstone" width="48" height="48"></a><br><sub>Cornerstone</sub></td>
+    <td align="center" width="128"><a href="fetchers/nist_cmvp/"><picture><source media="(prefers-color-scheme: dark)" srcset="fetchers/logos/nist_cmvp-dark.svg"><img src="fetchers/logos/nist_cmvp.svg" alt="NIST CMVP" width="48" height="48"></picture></a><br><sub>NIST CMVP</sub></td>
   </tr>
 </table>
 
@@ -101,9 +102,8 @@ More integrations are in progress. To ask for a new platform or fetcher, post in
 You do not need credentials. The bundled `demo_hello` fetcher writes synthetic evidence, so you can watch a full run before you connect a real service.
 
 ```bash
-git clone https://github.com/paramify/paramify-fetchers.git && cd paramify-fetchers
-python -m venv .venv && source .venv/bin/activate
-pip install -e .
+curl -fsSL https://raw.githubusercontent.com/paramify/paramify-fetchers/main/install.sh | bash
+cd ~/paramify-fetchers
 paramify run examples/demo.yaml                    # synthetic evidence, no credentials
 paramify evidence evidence/run-*/demo_hello.json   # read what it wrote
 ```
@@ -114,20 +114,99 @@ paramify evidence evidence/run-*/demo_hello.json   # read what it wrote
 
 ## Install
 
-**Prerequisites:** Python 3.11 or later.
+```bash
+curl -fsSL https://raw.githubusercontent.com/paramify/paramify-fetchers/main/install.sh | bash
+```
+
+You need git and Python 3.11 or later. If you have [uv](https://docs.astral.sh/uv/) but no Python, the [install script](install.sh) uses uv to get one. The script:
+
+1. Clones the repo to `~/paramify-fetchers`.
+2. Installs the CLI and the TUI into a virtualenv at `.venv` inside the clone, with uv if you have it.
+3. Links `paramify` into `~/.local/bin`, and asks before adding that folder to your shell profile.
+4. Offers to open the TUI.
+
+Running it again reinstalls into the same clone without changing its code. Without a terminal (CI or another script), it asks nothing and only prints what to do.
+
+> [!TIP]
+> Run `paramify` commands from inside the clone: `cd ~/paramify-fetchers` first.
+
+<details>
+<summary><b>Options:</b> another directory, a release tag, or the Azure, GCP and OCI SDKs</summary>
+
+<br>
+
+Set these environment variables for `bash`:
+
+| Variable | Default | Sets |
+|---|---|---|
+| `PARAMIFY_DIR` | `~/paramify-fetchers` | Where to clone |
+| `PARAMIFY_REF` | `main` | The branch or release tag to clone |
+| `PARAMIFY_EXTRAS` | `all` | The pip extras, such as `all,azure`. Leave it empty for the headless CLI only. |
+| `PARAMIFY_REPO_URL` | this repo | The repo to clone, such as your fork |
+
+For example, this clones a release tag to another directory and adds the Azure SDKs:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/paramify/paramify-fetchers/main/install.sh \
+  | PARAMIFY_DIR=~/src/paramify-fetchers PARAMIFY_REF=v0.6.0-beta PARAMIFY_EXTRAS=all,azure bash
+```
+
+</details>
+
+<details>
+<summary><b>Install without the script</b></summary>
+
+<br>
+
+You need **Python 3.11 or later**. Most install problems come from building the virtualenv with an older Python. On macOS, `python3` is often the system's 3.9, even when a newer Python is installed as `python3.12`.
+
+**With [uv](https://docs.astral.sh/uv/) (recommended).** uv downloads Python 3.12 if your machine doesn't have it, so the Python you already have doesn't matter:
 
 ```bash
 git clone https://github.com/paramify/paramify-fetchers.git
 cd paramify-fetchers
-python -m venv .venv && source .venv/bin/activate
-pip install -e '.[all]'      # '[all]' bundles the TUI; use `pip install -e .` for the headless CLI only
+uv venv --seed --python 3.12     # .venv on Python 3.12, downloaded if needed
+uv pip install -e '.[all]'       # '[all]' bundles the TUI; use -e . for the headless CLI only
+source .venv/bin/activate
 ```
+
+**With pip.** Check your Python first with `python3 --version`. If it's older than 3.11, install a newer one (`brew install python@3.12` on macOS, or `sudo apt install python3.12 python3.12-venv` on Debian or Ubuntu). Then use that versioned command, such as `python3.12`, instead of `python3`:
+
+```bash
+git clone https://github.com/paramify/paramify-fetchers.git
+cd paramify-fetchers
+python3 -m venv .venv            # or python3.12 -m venv .venv
+source .venv/bin/activate
+python --version                 # must say 3.11 or later
+pip install -e '.[all]'          # '[all]' bundles the TUI; use -e . for the headless CLI only
+```
+
+</details>
+
+<details>
+<summary><b>Troubleshooting</b></summary>
+
+<br>
+
+- **`File "setup.py" or "setup.cfg" not found. Directory cannot be installed in editable mode`**, or **`requires a different Python: 3.9.6 not in '>=3.11'`**
+  The `.venv` was built with an older Python. The first message comes from the old pip that Python 3.9 ships with. Remove the virtualenv with `rm -rf .venv`, then create it again with a newer Python. The install script does this for you.
+- **`ensurepip is not available`** or **`No module named venv`**
+  On Debian or Ubuntu, install the venv package for your Python, such as `sudo apt install python3.12-venv`.
+- **`command not found: paramify`**
+  `~/.local/bin` isn't on your `PATH` (open a new terminal if the script just added it), or, after a manual install, the virtualenv isn't active. Run `source .venv/bin/activate` in the clone, or run `.venv/bin/paramify` directly.
+
+</details>
+
+### Platform requirements
 
 Each platform has its own requirements:
 
 - Most fetchers call a CLI, such as `aws`, `jq`, `curl` or `kubectl`. Install only the CLIs for the platforms that you use.
-- Azure, GCP and Oracle Cloud use the official SDKs, not a CLI. Install them with `pip install -e '.[azure]'`, `pip install -e '.[gcp]'` or `pip install -e '.[oci]'`. These extras are only needed for those platforms, so `[all]` does not include them. Azure signs in with `DefaultAzureCredential` and GCP with Application Default Credentials, so neither one needs a key file. For a collector limited to one explicit Azure subscription, see the [Azure read scope guide](docs/azure_read_scope.md). OCI uses an API signing key that the runner injects as a secret, or an instance or resource principal where it is deployed; see [`fetchers/oci/README.md`](fetchers/oci/README.md).
+- The checkov fetchers call the `checkov` CLI. Install it in its own environment with `pipx install checkov`, not with pip in this one: it pins exact versions of libraries other fetchers use. See [`fetchers/checkov/README.md`](fetchers/checkov/README.md).
+- Azure, GCP and Oracle Cloud use the official SDKs, not a CLI. Add them with the install script's `PARAMIFY_EXTRAS` variable (`PARAMIFY_EXTRAS=all,azure`, `all,gcp` or `all,oci`), or with `.venv/bin/pip install -e '.[azure]'` (or `[gcp]`, `[oci]`) inside the clone. These extras are only needed for those platforms, so `[all]` does not include them. Azure signs in with `DefaultAzureCredential` and GCP with Application Default Credentials, so neither one needs a key file. For a collector limited to one explicit Azure subscription, see the [Azure read scope guide](docs/azure_read_scope.md). OCI uses an API signing key that the runner injects as a secret, or an instance or resource principal where it is deployed; see [`fetchers/oci/README.md`](fetchers/oci/README.md).
 - Most platforms have a credential setup guide at `fetchers/<category>/README.md`. Select a logo under [Supported services](#supported-services) to open its folder.
+
+To update later, run `paramify update`. It brings your clone up to date with `main`, or with the newest release if you pinned one, after checking your manifests against the new code and telling you which of your fetchers change. See the [versioning guide](docs/versioning_guide.md).
 
 ---
 

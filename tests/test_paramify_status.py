@@ -17,6 +17,7 @@ import pytest
 from framework import api
 from framework import validators as registry
 from framework.contract import Validator
+from tests.paramify_fake import reads_through
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -278,7 +279,7 @@ def raw_api(monkeypatch, tmp_path):
             return _Resp(json.loads((FIXTURES / "synthetic_solution_capabilities.json").read_text()))
         raise AssertionError(f"unexpected GET {url}")
 
-    monkeypatch.setattr("requests.get", fake_get)
+    monkeypatch.setattr("framework.paramify.client.requests.Session", lambda: reads_through(fake_get))
     return seen
 
 

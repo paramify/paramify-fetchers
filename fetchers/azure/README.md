@@ -1,7 +1,7 @@
 # Azure
 
 Azure fetchers pull evidence from your Azure subscriptions, Microsoft Entra ID and
-Azure DevOps with Microsoft's Python SDKs and REST APIs. All 102 fetchers are
+Azure DevOps with Microsoft's Python SDKs and REST APIs. All 104 fetchers are
 read-only and sign in with azure-identity's `DefaultAzureCredential`, so no key file
 or stored secret is required. Install the SDKs with `pip install -e '.[azure]'` (see
 [Install](../../README.md#install)).
@@ -68,6 +68,7 @@ otherwise.
 
 | Access | Needed by | If it is missing |
 |---|---|---|
+| Azure Kubernetes Service Cluster User Role and Azure Kubernetes Service RBAC Reader on each cluster, and a network path to its API server | `azure_aks_workload_security` | The cluster's workload fields read null and the run fails |
 | A custom role with `Microsoft.Web/sites/host/listkeys/action` and `Microsoft.Web/sites/config/list/action` | `azure_function_app_configuration` | Access keys and app settings read `not_authorized` per app; the run succeeds |
 | `Microsoft.Web/sites/config/list/action` (optional) | `azure_app_service_backups` | The custom backup configuration reads `not_authorized`; the run succeeds |
 | Key Vault Reader (RBAC vaults), or an access policy with key List and Get Rotation Policy (optional) | `azure_key_vault_key_rotation` | The vault reports `data_plane_status: inaccessible`; rotation policies still come from the management plane |
@@ -239,8 +240,8 @@ Identity and access:
 | `azure_entra_authentication_policy` | Allowed sign-in methods (weak and phishing-resistant flagged), registration campaign, security defaults, password protection, the Entra ID licence tier, the CAs trusted for certificate sign-in (expired, without a CRL), and whether the users X.509 targets are matched to certificates or still reached by weaker methods |
 | `azure_entra_conditional_access_policies` | Conditional Access policies: state (on, report-only, off), included and excluded users, groups, roles and apps, conditions, grant and session controls |
 | `azure_entra_mfa_status` | Each user's enabled state, last sign-in and MFA capability, with coverage for admins, members and guests |
-| `azure_entra_privileged_roles` | Activated directory roles and their holders, with Global Administrators counted and tenant-wide admin roles flagged |
-| `azure_entra_pim_assignments` | PIM for directory roles: who is eligible for each role, active assignments marked permanent, time-bound or activated, and each privileged role's activation rules (MFA or authentication context, justification, approval and approvers, maximum hours), with roles that allow permanent assignments flagged |
+| `azure_entra_privileged_roles` | Activated directory roles and their holders, with Global Administrators counted, tenant-wide admin roles flagged, and holders checked against an optional approved list |
+| `azure_entra_pim_assignments` | PIM for directory roles: who is eligible for each role, active assignments marked permanent, time-bound or activated, and each privileged role's activation rules (MFA or authentication context, justification, approval and approvers, maximum hours), with roles that allow permanent assignments flagged and eligible holders checked against an optional approved list |
 | `azure_entra_dormant_identities` | Users and service principals holding a directory role or an Azure role in the subscription, with their last sign-in: dormant, never-used, guest and deleted identities flagged |
 | `azure_entra_emergency_accounts` | Users that Conditional Access MFA policies exclude and whether another policy still covers them, and each emergency account's exclusions, last sign-in, phishing-resistant methods (multi-factor certificates included) and the Sentinel or Azure Monitor alert rules that name it |
 | `azure_entra_groups` | Groups with their members and owners: kind, whether they can hold directory roles, and dynamic (paused flagged), assigned or synced membership, with groups that have no owner, only disabled owners, guests or disabled users flagged |
@@ -282,6 +283,7 @@ Compute, containers and apps:
 |---|---|
 | `azure_vm_hardening_status` | VMs and scale sets: Trusted Launch, encryption at host, managed disks, SSH-key-only Linux sign-in, source image |
 | `azure_aks_cluster_configuration` | AKS control planes: private cluster or authorized IP ranges, Kubernetes RBAC and Entra integration, local accounts, workload identity, network policy |
+| `azure_aks_workload_security` | AKS workloads read from each cluster's Kubernetes API: container security contexts (non-root, privilege escalation, read-only root filesystem, capabilities, privileged), host namespaces and host paths, Pod Security Admission levels per namespace, and network policies with default-deny and uncovered workloads |
 | `azure_container_registry_configuration` | Container registries: admin account, anonymous pull, network access and private endpoints |
 | `azure_container_workloads_configuration` | Container Apps environments, apps and jobs, and Container Instances: exposure, encryption between containers, identities, logging |
 | `azure_app_service_configuration` | Web apps: HTTPS-only, minimum TLS, FTP state, client certificates, App Service Authentication, managed identity, network access |

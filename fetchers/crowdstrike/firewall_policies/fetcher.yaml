@@ -21,8 +21,12 @@ output:
 secrets:
   - name: client_id
     env: CROWDSTRIKE_CLIENT_ID
+    description: >-
+      Client ID of a Falcon API client with READ on the scopes in
+      fetchers/crowdstrike/README.md (Support and resources → API clients and keys).
   - name: client_secret
     env: CROWDSTRIKE_CLIENT_SECRET
+    description: Client secret of the same Falcon API client. Falcon shows it once.
 
 config_schema:
   api_base_url:

@@ -5,34 +5,17 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "_shared"))
-from github_client import iso, now_epoch, run, to_epoch  # noqa: E402
+from github_client import iso, newest_since, now_epoch, run  # noqa: E402
 
 NAME = "github_workflow_runs"
 CONFIG = {
     "days_back": ("GITHUB_WORKFLOW_RUNS_DAYS_BACK", 30),
     "max_runs": ("GITHUB_MAX_WORKFLOW_RUNS", 2000),
     "max_artifacts": ("GITHUB_MAX_ARTIFACTS", 2000),
+    "include_branch_names": ("GITHUB_WORKFLOW_RUNS_INCLUDE_BRANCH_NAMES", True),
 }
 MAX_DAYS_BACK = 366
 FAILED = ("failure", "timed_out", "startup_failure")
-
-
-def newest_since(client, path, key, since, cap, what, env):
-    """Items of a newest-first list created since `since`. None on failure or when more than `cap` are in the window.
-
-    Walked page by page rather than filtered with `created=`: a filtered list stops at 1,000 results and then reports
-    an empty page and total_count 0 (measured), which would read as a quiet window.
-    """
-    seen = []
-    found = client.paginate_required(path, key=key,
-                                     until=lambda x: seen.append(x) or (to_epoch(x.get("created_at")) or since) < since
-                                     or len(seen) > cap)
-    if found is None:
-        return None
-    if len(seen) > cap and (to_epoch(seen[-1].get("created_at")) or since) >= since:
-        client.fail(f"GET {path}", "Truncated", f"more than {cap} {what} in the window; raise {env}", "partial_failure")
-        return None
-    return found
 
 
 def run_row(r, default_branch):
@@ -96,6 +79,12 @@ def collect(client, org, repos, config):
     since = now_epoch() - config["days_back"] * 86400
     records = [repo_record(client, org["login"], r, since, config) for r in repos]
     done = [r for r in records if r["collected"]]
+    if not config["include_branch_names"]:
+        # on_default_branch is worked out from the branch name before it is dropped, so it still says whether a run
+        # came from the default branch. The key is removed, not nulled, and metadata.include_branch_names says why.
+        for r in done:
+            for x in r["runs"]:
+                x.pop("head_branch", None)
     runs = [(r["repository"], x) for r in done for x in r["runs"]]
     on_default = [(repo, x) for repo, x in runs if x["on_default_branch"]]
     artifacts = [a for _, x in runs for a in x["artifacts"]]

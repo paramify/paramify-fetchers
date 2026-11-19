@@ -45,12 +45,37 @@ def resolve_upload_token(
     Returns (None, None) when neither is set — callers decide whether that is
     fatal, since a dry run does not need a token.
     """
+    return _first_token((UPLOAD_TOKEN_ENV, READ_TOKEN_ENV), env)
+
+
+def resolve_read_token(
+    env: Optional[Mapping[str, str]] = None,
+) -> Tuple[Optional[str], Optional[str]]:
+    """Resolve the token for reading the workspace. Returns (token, source_env_var).
+
+    The mirror of `resolve_upload_token`: prefers PARAMIFY_API_TOKEN, falls back
+    to PARAMIFY_UPLOAD_API_TOKEN.
+    """
+    return _first_token((READ_TOKEN_ENV, UPLOAD_TOKEN_ENV), env)
+
+
+def _first_token(
+    names: Tuple[str, ...], env: Optional[Mapping[str, str]],
+) -> Tuple[Optional[str], Optional[str]]:
     src = env if env is not None else os.environ
-    for name in (UPLOAD_TOKEN_ENV, READ_TOKEN_ENV):
+    for name in names:
         value = (src.get(name) or "").strip()
         if value:
             return value, name
     return None, None
+
+
+def missing_read_token_error() -> str:
+    """The missing-token error for a read: names the read-scope token first."""
+    return (
+        f"No Paramify API token: set {READ_TOKEN_ENV} (or {UPLOAD_TOKEN_ENV}) to a "
+        f"token with read scope on the workspace"
+    )
 
 
 def missing_token_error() -> str:
