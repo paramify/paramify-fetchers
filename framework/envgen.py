@@ -102,21 +102,31 @@ def _refs(value: Any) -> List[str]:
     return []
 
 
-def manifest_for(names: Sequence[str]) -> dict:
-    """A manifest that runs these fetchers, for a caller that has only names."""
-    return {"run": {"fetchers": [{"use": n} for n in names]}}
+@dataclass
+class Unmapped:
+    """A required secret the manifest doesn't map yet: the run stops on it
+    whatever .env holds, until `paramify manifest set-secret` maps it."""
+    fetcher: str
+    secret: str
+    env: str  # the fetcher's declared name, the usual choice
 
 
-def env_groups(fetchers: Mapping[str, Any], platforms: Mapping[str, Any], manifest: Mapping[str, Any]) -> List[EnvGroup]:
-    """Variables a manifest needs, by tool. Paramify comes first; names seen
-    twice appear once, and one place that requires a variable makes it
-    required. Unknown fetcher names are skipped (validation reports them).
+def env_groups(
+    fetchers: Mapping[str, Any], platforms: Mapping[str, Any], manifest: Mapping[str, Any],
+) -> Tuple[List[EnvGroup], List[Unmapped]]:
+    """The variables a run of this manifest reads, by tool, and the required
+    secrets it can't read yet because the manifest doesn't map them.
 
-    The manifest's own `${env:}` references win: a secret mapped to
-    OKTA_PROD_TOKEN, or one token per target, gives those names, not the
-    fetcher's declared default. Any other reference in an entry (a config
-    value, a target field) is required. In `run.platforms`, config references
-    are required and `auth.passthrough_env` names optional.
+    Read as the runner reads them (framework/runner/executor.py): a secret
+    through the `${env:}` reference the entry, or each of its targets, maps it
+    to; a config value through a `${env:}` reference in the entry or in
+    `run.platforms` (unset, it gives way to the next value down, so it is
+    required only when its field is required and has no default); and a
+    platform's `auth.passthrough_env`. A config field's own `env` name is not
+    here: the runner sets it for the fetcher from those values, and nothing
+    reads it from the shell. Paramify comes first; names seen twice appear
+    once, and one place that requires a variable makes it required. Unknown
+    fetcher names are skipped (validation reports them).
     """
     run = manifest.get("run") or {}
     entries = [e for e in run.get("fetchers") or [] if isinstance(e, Mapping) and e.get("use")]
@@ -124,12 +134,13 @@ def env_groups(fetchers: Mapping[str, Any], platforms: Mapping[str, Any], manife
     groups: List[EnvGroup] = [_paramify_group()]
     seen: Dict[str, EnvVar] = {v.name: v for v in groups[0].vars}
     by_cat: Dict[str, EnvGroup] = {}
+    unmapped: List[Unmapped] = []
 
-    def add(cat: str, name: str, description: Optional[str], fallback: str, required: bool, default) -> None:
+    def add(cat: str, name: str, description: Optional[str], fallback: str, required: bool) -> None:
         existing = seen.get(name)
         if existing is not None:
             if required and not existing.required:
-                existing.required, existing.default = True, None
+                existing.required = True
                 existing.note = _note(description, fallback, True, None)
             return
         spec = platforms.get(cat)
@@ -139,12 +150,19 @@ def env_groups(fetchers: Mapping[str, Any], platforms: Mapping[str, Any], manife
                 (spec.display_name if spec and spec.display_name else cat),
                 _first_sentence(spec.description if spec else None),
             )
-        default = None if default in (None, "") else str(default)
-        var = EnvVar(name, _note(description, fallback, required, default), required, default)
+        var = EnvVar(name, _note(description, fallback, required, None), required)
         seen[name] = var
         g.vars.append(var)
 
-    used_cats = set()
+    def add_config_refs(cat: str, config: Any, schema: Mapping[str, Any], where: str) -> None:
+        for key, value in (config.items() if isinstance(config, Mapping) else ()):
+            field_spec = schema.get(key)
+            required = bool(field_spec and field_spec.required and field_spec.default is None)
+            description = field_spec.description if field_spec else None
+            for env in _refs(value):
+                add(cat, env, description, f"{key.replace('_', ' ')} for {where}", required)
+
+    used: Dict[str, Mapping[str, Any]] = {}
     for entry in entries:
         fname = entry["use"]
         f = fetchers.get(fname) if isinstance(fname, str) else None
@@ -152,47 +170,36 @@ def env_groups(fetchers: Mapping[str, Any], platforms: Mapping[str, Any], manife
             continue
         cat = f.category or "other"
         spec = platform_for(f, platforms)
+        schema = {**(spec.config_schema if spec else {}), **f.config_schema}
+        used.setdefault(cat, schema)
         scopes = [entry, *(t for t in entry.get("targets") or [] if isinstance(t, Mapping))]
-        used_cats.add(cat)
-        raw = blocks.get(cat)
-        block: Mapping[str, Any] = raw if isinstance(raw, Mapping) else {}
-        set_here = {k for sc in (*scopes, block) for k in (sc.get("config") or {})}
         for s in effective_secrets(f, spec):
-            mapped = [r for sc in scopes for r in _refs((sc.get("secrets") or {}).get(s.name))]
-            for env in dict.fromkeys(mapped or [s.env]):
-                add(cat, env, s.description, f"{s.name.replace('_', ' ')} for {fname}", s.required, None)
-        fields = list((spec.config_schema if spec else {}).values()) + list(f.config_schema.values())
-        for c in fields:
-            if c.env and c.name not in set_here:
-                add(cat, c.env, c.description, f"{c.name.replace('_', ' ')} for {fname}",
-                    bool(c.required and c.default is None), c.default)
-        for sc in scopes:
-            for key, value in sc.items():
-                if key not in ("secrets", "targets"):
-                    for env in _refs(value):
-                        add(cat, env, None, f"Referenced by {fname} in the manifest", True, None)
+            mapped = list(dict.fromkeys(r for sc in scopes for r in _refs((sc.get("secrets") or {}).get(s.name))))
+            for env in mapped:
+                add(cat, env, s.description, f"{s.name.replace('_', ' ')} for {fname}", s.required)
+            if not mapped and s.required:
+                unmapped.append(Unmapped(fname, s.name, s.env))
+        add_config_refs(cat, entry.get("config"), schema, fname)
 
-    for cat in sorted(used_cats):
+    for cat, cat_schema in sorted(used.items()):
         pblock = blocks.get(cat)
         if not isinstance(pblock, Mapping):
             continue
-        for env in _refs(pblock.get("config")):
-            add(cat, env, None, f"Referenced by the {cat} platform config in the manifest", True, None)
+        add_config_refs(cat, pblock.get("config"), cat_schema, f"the {cat} fetchers")
         for env in (pblock.get("auth") or {}).get("passthrough_env") or []:
             if isinstance(env, str):
-                add(cat, env, None, f"Passed through to the {cat} fetchers", False, None)
+                add(cat, env, None, f"Passed through to the {cat} fetchers", False)
 
     groups.extend(sorted(by_cat.values(), key=lambda g: g.title.lower()))
-    return groups
+    return groups, unmapped
 
 
 def _var_line(v: EnvVar) -> str:
     if v.required:
         return f"{v.name}="
-    if v.default is not None:
-        return f"{v.name}={v.default}"
-    # Commented: an empty AWS_ACCESS_KEY_ID would hide the ambient credential chain.
-    return f"# {v.name}="
+    # Commented: an empty AWS_ACCESS_KEY_ID would hide the ambient credential chain, and a
+    # default written out would freeze today's default over a later one.
+    return f"# {v.name}={v.default or ''}"
 
 
 def _block(g: EnvGroup, vars_: Sequence[EnvVar], header: bool = True) -> List[str]:

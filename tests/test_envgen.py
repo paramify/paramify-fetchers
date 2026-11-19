@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import os
+from unittest import mock
 
+import pytest
 import yaml
 from typer.testing import CliRunner
 
@@ -13,15 +15,38 @@ ROOT = api.find_repo_root()
 FOUND = api.discover(ROOT)
 
 
+@pytest.fixture(autouse=True)
+def _environ_restored():
+    """refresh_env writes os.environ directly; no test leaves a variable behind."""
+    with mock.patch.dict(os.environ):
+        yield
+
+
+def wired(name):
+    """A manifest entry with every declared secret mapped to its declared variable, as adding
+    a fetcher in the TUI does."""
+    from framework.contract import effective_secrets, platform_for
+
+    f = FOUND["fetchers"][name]
+    secrets = {s.name: f"${{env:{s.env}}}" for s in effective_secrets(f, platform_for(f, FOUND["platforms"]))}
+    return {"use": name, "secrets": secrets}
+
+
 def manifest(*entries, platforms=None):
-    run = {"fetchers": [e if isinstance(e, dict) else {"use": e} for e in entries]}
+    """Names are wired (see `wired`); dicts are taken as written."""
+    run = {"fetchers": [e if isinstance(e, dict) else wired(e) if e in FOUND["fetchers"] else {"use": e}
+                        for e in entries]}
     if platforms:
         run["platforms"] = platforms
     return {"run": run}
 
 
-def groups_for(*entries, platforms=None):
+def needs(*entries, platforms=None):
     return envgen.env_groups(FOUND["fetchers"], FOUND["platforms"], manifest(*entries, platforms=platforms))
+
+
+def groups_for(*entries, platforms=None):
+    return needs(*entries, platforms=platforms)[0]
 
 
 def merge(env, groups):
@@ -53,21 +78,22 @@ def test_shared_variable_appears_once():
 
 
 def test_platform_level_credentials_are_included():
-    # AWS credentials live on the category, not the fetcher.
-    groups = groups_for("aws_iam_mfa_status") if "aws_iam_mfa_status" in api.discover(ROOT)["fetchers"] \
-        else groups_for(*[n for n, f in FOUND["fetchers"].items() if f.category == "aws"][:1])
-    assert "AWS_ACCESS_KEY_ID" in names(groups)
+    groups = groups_for("aws_config_inventory")  # AWS credentials live on the category, not the fetcher
     key = next(v for g in groups for v in g.vars if v.name == "AWS_ACCESS_KEY_ID")
     assert key.required is False
 
 
-def test_config_default_is_shown_as_optional():
-    groups = groups_for("okta_least_privilege")
-    var = next(v for g in groups for v in g.vars if v.name == "OKTA_KNOWN_SUPER_ADMINS")
-    assert var.required is False and var.default is None  # '' is no default
-    text = envgen.plan("", groups).text
-    assert "optional" in text
-    base = next(v for v in groups[0].vars if v.name == "PARAMIFY_API_BASE_URL")
+def test_a_config_fields_own_env_name_is_not_listed():
+    """The runner sets a config field's env for the fetcher from manifest values; nothing reads it
+    from the shell, so filling it in .env would do nothing."""
+    got = names(groups_for("okta_least_privilege", "aws_config_inventory"))
+    assert "OKTA_KNOWN_SUPER_ADMINS" not in got and "CONFIG_INVENTORY_AGGREGATOR" not in got
+
+
+def test_an_optional_default_is_written_commented_so_a_later_default_wins():
+    text = envgen.plan("", groups_for("okta_least_privilege")).text
+    assert "\n# PARAMIFY_API_BASE_URL=https://app.paramify.com/api/v0\n" in text
+    base = next(v for v in groups_for()[:1][0].vars if v.name == "PARAMIFY_API_BASE_URL")
     assert "optional (default https://app.paramify.com/api/v0)" in base.note
 
 
@@ -99,9 +125,8 @@ def test_merge_without_trailing_newline_keeps_bytes(tmp_path):
 
 
 def test_optional_without_default_is_commented_so_it_cannot_blank_ambient_credentials(tmp_path):
-    text = envgen.plan("", groups_for("okta_least_privilege")).text
-    assert "\n# OKTA_KNOWN_SUPER_ADMINS=" in text
-    assert "\nOKTA_API_TOKEN=\n" in text
+    text = envgen.plan("", groups_for("aws_config_inventory")).text
+    assert "\n# AWS_ACCESS_KEY_ID=\n" in text
 
 
 def test_missing_values_lists_empty_required(tmp_path, monkeypatch):
@@ -119,7 +144,7 @@ def test_missing_values_lists_empty_required(tmp_path, monkeypatch):
 def test_generate_env_write(tmp_path):
     env = tmp_path / ".env"
     out = api.generate_env(ROOT, manifest("okta_least_privilege"), write=True, path=env)
-    assert env.read_text() == out["text"] or env.read_text().endswith(out["text"])
+    assert env.read_text() == out["text"]
     assert "OKTA_API_TOKEN" in out["added"]
 
 
@@ -134,7 +159,7 @@ def test_already_set_means_what_python_dotenv_reads(tmp_path):
 
 def test_cli_prints_without_writing(tmp_path, monkeypatch):
     m = tmp_path / "m.yaml"
-    m.write_text(yaml.safe_dump({"run": {"fetchers": [{"use": "okta_least_privilege"}]}}))
+    m.write_text(yaml.safe_dump(manifest("okta_least_privilege")))
     env = tmp_path / ".env"
     out = CliRunner().invoke(cli.app, ["env", "--manifest", str(m), "--path", str(env)])
     assert out.exit_code == 0, out.output
@@ -144,6 +169,18 @@ def test_cli_prints_without_writing(tmp_path, monkeypatch):
     assert out.exit_code == 0, out.output
     assert "OKTA_API_TOKEN=" in env.read_text()
     assert "Still need a value" in out.stdout
+
+
+def test_a_required_secret_the_manifest_does_not_map_is_named_with_the_command(tmp_path):
+    m = tmp_path / "m.yaml"
+    m.write_text(yaml.safe_dump({"run": {"fetchers": [{"use": "okta_least_privilege"}]}}))
+    out = CliRunner().invoke(cli.app, ["env", "--manifest", str(m), "--path", str(tmp_path / ".env")])
+    assert out.exit_code == 0, out.output
+    assert "OKTA_API_TOKEN=" not in out.stdout.split("Not written")[0]  # a run would not read it
+    assert f"paramify manifest set-secret -f {m} okta_least_privilege api_token OKTA_API_TOKEN" in out.stdout
+    groups, unmapped = needs({"use": "okta_least_privilege"})
+    assert [(u.fetcher, u.secret, u.env) for u in unmapped] == [
+        ("okta_least_privilege", "api_token", "OKTA_API_TOKEN"), ("okta_least_privilege", "org_url", "OKTA_ORG_URL")]
 
 
 def test_cli_unknown_manifest_fails(tmp_path):
@@ -273,8 +310,8 @@ def test_a_config_value_that_references_a_variable_is_included():
     entry = {"use": "okta_least_privilege", "config": {"known_super_admins": "${env:OKTA_ADMINS}"},
              "secrets": {"api_token": "${env:OKTA_API_TOKEN}", "org_url": "${env:OKTA_ORG_URL}"}}
     okta = {v.name: v for v in groups_for(entry)[1].vars}
-    assert okta["OKTA_ADMINS"].required
-    assert "okta_least_privilege" in okta["OKTA_ADMINS"].note
+    assert "OKTA_ADMINS" in okta
+    assert not okta["OKTA_ADMINS"].required  # unset, the field falls back to its default
 
 
 def test_cli_reads_the_manifests_references(tmp_path):
@@ -291,8 +328,8 @@ def test_platform_config_references_and_passthrough_are_included():
                           "auth": {"passthrough_env": ["HTTPS_PROXY"]}},
                  "azure": {"config": {"x": "${env:NOT_USED_HERE}"}}}
     okta = {v.name: v for v in groups_for(entry, platforms=platforms)[1].vars}
-    assert okta["ADMINS_FROM_PLATFORM"].required
-    assert "OKTA_KNOWN_SUPER_ADMINS" not in okta  # set at the platform level
+    assert "ADMINS_FROM_PLATFORM" in okta and not okta["ADMINS_FROM_PLATFORM"].required
+    assert "OKTA_KNOWN_SUPER_ADMINS" not in okta
     assert not okta["HTTPS_PROXY"].required
     assert "NOT_USED_HERE" not in names(groups_for(entry, platforms=platforms))
 
@@ -371,3 +408,14 @@ def test_refresh_env_honours_python_dotenv_disabled(tmp_path, monkeypatch):
     monkeypatch.setenv("PYTHON_DOTENV_DISABLED", "1")
     assert api.refresh_env(tmp_path) == []
     assert "E_UNSET" not in os.environ
+
+
+def test_a_value_rotated_in_dotenv_reaches_the_next_run_but_an_export_still_wins(tmp_path, monkeypatch):
+    monkeypatch.setattr(api, "_FILLED_FROM_DOTENV", set())
+    monkeypatch.setenv("EXPORTED_TOKEN", "from-shell")
+    os.environ.pop("ROTATED_TOKEN", None)
+    (tmp_path / ".env").write_text("ROTATED_TOKEN=first\nEXPORTED_TOKEN=from-file\n")
+    api.refresh_env(tmp_path)
+    (tmp_path / ".env").write_text("ROTATED_TOKEN=second\nEXPORTED_TOKEN=from-file-2\n")
+    api.refresh_env(tmp_path)  # a long-lived process (the TUI) running again
+    assert (os.environ["ROTATED_TOKEN"], os.environ["EXPORTED_TOKEN"]) == ("second", "from-shell")

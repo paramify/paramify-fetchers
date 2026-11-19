@@ -39,7 +39,7 @@ from packaging.requirements import Requirement
 from packaging.specifiers import SpecifierSet
 from packaging.utils import canonicalize_name
 
-from framework import patterns, yaml_io
+from framework import envgen, patterns, yaml_io
 from framework import samples as _samples
 from framework.config_loader import discover_fetchers, discover_platforms
 from framework.contract import (
@@ -4127,37 +4127,43 @@ def refresh_env(root: Path) -> List[str]:
     when something else happened to load it first. And `load_dotenv` never
     overrides: a line still empty when it ran (`OKTA_API_TOKEN=`) leaves the
     variable set to "", so a value typed in later would never be read. A
-    non-empty export always wins; an empty .env value is never copied.
-    Called by `run` and `doctor` before they read anything.
+    non-empty export always wins; an empty .env value is never copied; a value
+    this function set earlier is refreshed. Called by `run` and `doctor`
+    before they read anything.
     """
-    from framework import envgen
 
     path = env_file(root)
-    # The words python-dotenv itself accepts; the demo's offline guard sets it.
+    # The words python-dotenv (1.2) accepts in its private _load_dotenv_disabled; the demo's offline guard sets it.
     disabled = os.environ.get("PYTHON_DOTENV_DISABLED", "").casefold() in {"1", "true", "t", "yes", "y"}
     if disabled or not path.is_file():
         return []
     filled = []
     for name, value in envgen.assigned(path.read_text()).items():
-        if value and not (os.environ.get(name) or "").strip():
+        if value and (name in _FILLED_FROM_DOTENV or not (os.environ.get(name) or "").strip()):
             os.environ[name] = value
+            _FILLED_FROM_DOTENV.add(name)
             filled.append(name)
     return filled
 
 
+# Names refresh_env set, as opposed to real exports: in a long-lived process (the TUI) they are
+# read again on every run, so a token rotated in .env is picked up.
+_FILLED_FROM_DOTENV: set = set()
+
+
 def generate_env(root: Path, manifest: Mapping[str, Any], write: bool = False, path: Optional[Path] = None) -> dict:
     """The .env a manifest needs, merged with the one at `path` (default
-    env_file(root)) without changing anything already in it. A caller with
-    only fetcher names passes envgen.manifest_for(names).
+    env_file(root)) without changing anything already in it.
 
-    Returns {"text", "added", "already_set", "missing_values", "path"}. `text`
+    Returns {"text", "added", "already_set", "missing_values", "unmapped", "path"}. `text`
     is what is added (the whole file when there was none), never existing
     content, so printing it cannot leak a value. `missing_values` names required
     variables that would still be empty: empty in the file and not exported
-    (non-empty) in this process's environment. Writes only when `write` is set:
+    (non-empty) in this process's environment. `unmapped` names the required
+    secrets the manifest doesn't map yet ({fetcher, secret, env}): the run
+    stops on those whatever .env holds. Writes only when `write` is set:
     atomically, through a symlinked .env to its file, keeping CRLF line endings.
     """
-    from framework import envgen
 
     path = Path(path) if path else env_file(root)
     target = path.resolve() if path.is_symlink() else path
@@ -4166,8 +4172,10 @@ def generate_env(root: Path, manifest: Mapping[str, Any], write: bool = False, p
         with target.open(newline="") as fh:
             existing = fh.read()
     found = discover(root)
-    text, result = envgen.merged(existing, envgen.env_groups(found["fetchers"], found["platforms"], manifest))
+    groups, unmapped = envgen.env_groups(found["fetchers"], found["platforms"], manifest)
+    text, result = envgen.merged(existing, groups)
     if write and result.text:
         _atomic_write(target, text)
     return {"text": result.text, "added": result.added, "already_set": result.already_set,
-            "missing_values": result.missing, "path": str(path)}
+            "missing_values": result.missing, "path": str(path),
+            "unmapped": [{"fetcher": u.fetcher, "secret": u.secret, "env": u.env} for u in unmapped]}

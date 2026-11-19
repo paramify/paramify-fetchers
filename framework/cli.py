@@ -1417,6 +1417,11 @@ def env_cmd(
         typer.echo(f"Not written (add --write). {len(res['added'])} would be added, {len(res['already_set'])} already set in {style.path(res['path'])}.")
     if res["missing_values"]:
         typer.echo(style.warn("Still need a value: " + ", ".join(res["missing_values"])))
+    if res["unmapped"]:
+        typer.echo(style.warn("The manifest doesn't map these required secrets yet, so a run stops on them "
+                              "whatever .env holds. Map each one:"))
+        for u in res["unmapped"]:
+            typer.echo(f"  paramify manifest set-secret -f {mpath} {u['fetcher']} {u['secret']} {u['env']}")
 
 
 @app.command("run")

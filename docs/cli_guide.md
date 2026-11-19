@@ -218,16 +218,19 @@ paramify env -m manifests/prod.yaml   # another manifest
 paramify env --write                  # append the missing variables to ./.env
 ```
 
-- It reads the names from the manifest itself. A secret mapped with
-  `set-secret ... OKTA_PROD_TOKEN`, a token per target, or a `${env:}` in a
-  config value gives those names. A secret the manifest has not mapped yet
-  gets the name the fetcher declares.
+- It lists what a run actually reads: the `${env:}` references the manifest
+  maps its secrets to (`set-secret ... OKTA_PROD_TOKEN`, a token per target),
+  `${env:}` references in config values, and a category's `passthrough_env`.
+  A required secret the manifest does not map yet is listed apart, with the
+  `paramify manifest set-secret` command that maps it: a run stops on it
+  whatever `.env` holds. A config field's own `env` name is not listed; the
+  runner sets it for the fetcher from the manifest.
 - `--write` only appends. A line already in the file is never changed,
   reordered or printed, so the output never shows a secret. New variables for a
   tool that already has a section go under a `(continued)` header.
-- Optional variables with a default are written with that default. Optional
-  ones without a default are written commented out, because an empty
-  `AWS_ACCESS_KEY_ID=` would hide the ambient credentials.
+- Optional variables are written commented out (with their default, if they
+  have one): an empty `AWS_ACCESS_KEY_ID=` would hide the ambient
+  credentials, and a default written out would override a later one.
 - It ends with the required variables that still have no value, in the file
   or exported in your shell.
 - `run` and `doctor` read `.env` in the repo root (a value you export still
