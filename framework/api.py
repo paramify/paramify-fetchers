@@ -39,7 +39,7 @@ from packaging.requirements import Requirement
 from packaging.specifiers import SpecifierSet
 from packaging.utils import canonicalize_name
 
-from framework import patterns, yaml_io
+from framework import envgen, patterns, yaml_io
 from framework import samples as _samples
 from framework.config_loader import discover_fetchers, discover_platforms
 from framework.contract import (
@@ -551,6 +551,7 @@ def doctor(
     that touches the network, and its results never gate `ok` — see
     framework/probe.py.
     """
+    refresh_env(root)  # judge secrets as `run` will see them, .env included
     py = sys.version_info
     python = {
         "version": f"{py.major}.{py.minor}.{py.micro}",
@@ -1635,6 +1636,7 @@ def run(
     errs = manifest_loader.schema_errors(manifest, root)
     if errs:
         raise ValueError("manifest schema invalid:\n  " + "\n  ".join(errs))
+    refresh_env(root)  # a value kept in .env reaches ${env:...}, whoever started the run
 
     fetchers = discover_fetchers(root)
     platforms = discover_platforms(root)
@@ -4183,3 +4185,79 @@ def shared_config_state(
         "conflict": len(runtime) > 1,
         "missing": missing,
     }
+
+
+def env_file(root: Path) -> Path:
+    """The .env that `run` and `doctor` read, and `paramify env` writes by default."""
+    return Path(root) / ".env"
+
+
+def refresh_env(root: Path) -> List[str]:
+    """Copy into os.environ each `.env` value (env_file) whose variable is
+    unset or empty here. Returns the names it filled.
+
+    A run resolves ${env:...} from os.environ, so without this a value kept
+    only in `.env` (the file `paramify env --write` makes) reaches a run only
+    when something else happened to load it first. And `load_dotenv` never
+    overrides: a line still empty when it ran (`OKTA_API_TOKEN=`) leaves the
+    variable set to "", so a value typed in later would never be read. A
+    non-empty export always wins; an empty .env value is never copied; a value
+    this function set earlier is refreshed. Called by `run` and `doctor`
+    before they read anything.
+    """
+
+    path = env_file(root)
+    # The words python-dotenv (1.2) accepts in its private _load_dotenv_disabled; the demo's offline guard sets it.
+    disabled = os.environ.get("PYTHON_DOTENV_DISABLED", "").casefold() in {"1", "true", "t", "yes", "y"}
+    if disabled or not path.is_file():
+        return []
+    filled = []
+    for name, value in envgen.assigned(path.read_text()).items():
+        if value and (name in _FILLED_FROM_DOTENV or not (os.environ.get(name) or "").strip()):
+            os.environ[name] = value
+            _FILLED_FROM_DOTENV.add(name)
+            filled.append(name)
+    return filled
+
+
+# Names refresh_env set, as opposed to real exports: in a long-lived process (the TUI) they are
+# read again on every run, so a token rotated in .env is picked up.
+_FILLED_FROM_DOTENV: set = set()
+
+
+def generate_env(root: Path, manifest: Mapping[str, Any], write: bool = False, path: Optional[Path] = None) -> dict:
+    """The .env a manifest needs, merged with the one at `path` (default
+    env_file(root)) without changing anything already in it.
+
+    Returns {"text", "added", "already_set", "missing_values", "variables",
+    "unmapped", "path"}. `variables` is every variable the manifest needs:
+    {name, tool, required, default, note, fetchers (who reads it; empty for
+    Paramify's upload token), set (has a value in the file or environment)};
+    never a value. `text`
+    is what is added (the whole file when there was none), never existing
+    content, so printing it cannot leak a value. `missing_values` names required
+    variables that would still be empty: empty in the file and not exported
+    (non-empty) in this process's environment. `unmapped` names the required
+    secrets the manifest doesn't map yet ({fetcher, secret, env, per_target,
+    target}): the run
+    stops on those whatever .env holds. Writes only when `write` is set:
+    atomically, through a symlinked .env to its file, keeping CRLF line endings.
+    """
+
+    path = Path(path) if path else env_file(root)
+    target = path.resolve() if path.is_symlink() else path
+    existing = ""
+    if target.is_file():
+        with target.open(newline="") as fh:
+            existing = fh.read()
+    found = discover(root)
+    groups, unmapped = envgen.env_groups(found["fetchers"], found["platforms"], manifest)
+    text, result = envgen.merged(existing, groups)
+    if write and result.text:
+        _atomic_write(target, text)
+    variables = [{"name": v.name, "tool": g.title, "required": v.required, "default": v.default, "note": v.note,
+                  "fetchers": list(v.fetchers), "set": v.name in result.has_value}
+                 for g in groups for v in g.vars]
+    return {"text": result.text, "added": result.added, "already_set": result.already_set,
+            "missing_values": result.missing, "path": str(path), "variables": variables,
+            "unmapped": [vars(u) for u in unmapped]}

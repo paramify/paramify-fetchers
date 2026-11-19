@@ -1399,6 +1399,62 @@ def validate_cmd(
         typer.echo(f"  {style.dim('NOTE')}   {note}")
 
 
+@app.command("env")
+def env_cmd(
+    manifest: Optional[str] = typer.Option(None, "--manifest", "-m", help=f"Manifest to read (default: {_DEFAULT_MANIFEST})"),
+    write: bool = typer.Option(False, "--write", help="For local testing: add the missing variables to .env (existing lines are never changed)"),
+    path: Optional[Path] = typer.Option(
+        None, "--path",
+        help="Another file to merge into (default: .env in the repo root, the one run and doctor read)"),
+    json_out: bool = typer.Option(False, "--json", help="Emit the variables as JSON (names, never values)"),
+):
+    """Print the environment variables a manifest needs, grouped by tool.
+
+    Only the variables a run reads: set them in your secret manager (--json
+    lists them for a script), or, for local testing, add them to .env with
+    --write (a value already there is never changed or shown). A run never
+    needs .env; the environment wins.
+    """
+    root = api.find_repo_root()
+    mpath = _resolve_manifest_arg(root, manifest or _DEFAULT_MANIFEST, json_out)
+    try:
+        data = api.read_manifest(mpath, must_exist=True)
+    except Exception as e:  # noqa: BLE001 — a setup error, reported as one line
+        _fail(mpath, f"could not read {mpath}: {e}", json_out)
+    res = api.generate_env(root, data, write=write, path=path)
+    if json_out:
+        doc = {k: v for k, v in res.items() if k != "text"}
+        typer.echo(json.dumps({"ok": True, "manifest": str(mpath), "written": write and bool(res["added"]), **doc},
+                              indent=2))
+        return
+    typer.echo(res["text"], nl=False)
+    if res["text"]:
+        typer.echo("")
+    if write:
+        typer.echo(f"Wrote {style.path(res['path'])}: {len(res['added'])} added, {len(res['already_set'])} already set.")
+    else:
+        typer.echo(f"Not written (add --write). {len(res['added'])} would be added, {len(res['already_set'])} already set in {style.path(res['path'])}.")
+    if res["missing_values"]:
+        typer.echo(style.warn("Still need a value: " + ", ".join(res["missing_values"])))
+    if res["unmapped"]:
+        typer.echo(style.warn("A run stops on these secrets whatever .env holds, until the manifest maps "
+                              "each one:"))
+        here = Path.cwd().resolve()
+        shown = mpath.resolve().relative_to(here) if mpath.resolve().is_relative_to(here) else mpath
+        for u in res["unmapped"]:
+            if u["malformed"]:
+                typer.echo(f"  {u['fetcher']} {u['secret']}: not a valid reference; write it as "
+                           f"${{env:{u['env']}}} (uppercase letters, digits and _) in {shown}")
+            elif not u["per_target"]:
+                typer.echo(f"  paramify manifest set-secret -f {shown} {u['fetcher']} {u['secret']} {u['env']}")
+            elif u["target"] is None:
+                typer.echo(f"  paramify manifest add-target -f {shown} {u['fetcher']} <field>=<value> ... "
+                           f"--secret {u['secret']}={u['env']}")
+            else:
+                typer.echo(f"  {u['fetcher']} target {u['target']}: add  {u['secret']}: ${{env:{u['env']}}}  "
+                           f"under its secrets: in {shown}")
+
+
 @app.command("run")
 def run_cmd(
     manifest: str = typer.Argument(..., help="Path to manifest yaml"),
