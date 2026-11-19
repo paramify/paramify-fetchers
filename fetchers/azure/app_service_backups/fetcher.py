@@ -735,7 +735,8 @@ def main() -> int:
 
     filename = f"azure_app_service_backups_{sanitize_for_filename(subscription_id or 'unknown')}.json"
     path = write_evidence(output_dir, filename, evidence)
-    logger.info("Evidence saved to %s (%d web apps)", path, len(apps))
+    if path:
+        logger.info("Evidence saved to %s (%d web apps)", path, len(apps))
 
     if not collector.ok:
         report_failure(failure_reason(collector.failures), classify_failure_code(collector.failures))

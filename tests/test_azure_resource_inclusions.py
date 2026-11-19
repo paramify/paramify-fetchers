@@ -325,7 +325,7 @@ def test_no_evidence_is_written_after_a_failed_index_read(tmp_path):
     failure = {"operation": f"resourcegraph.resources (tags in subscription {SUB_ID})", "type": "PermissionError",
                "message": "(403)"}
     evidence = {"metadata": {"partial_failure": True, "api_failures": [failure]}, "results": {}, "summary": {}}
-    assert not write_evidence(tmp_path, "unread.json", evidence).exists()
+    assert write_evidence(tmp_path, "unread.json", evidence) is None and not (tmp_path / "unread.json").exists()
     evidence["metadata"]["api_failures"] = [{**failure, "operation": "keyvault.vaults.list"}]
     assert write_evidence(tmp_path, "read.json", evidence).exists()
 
