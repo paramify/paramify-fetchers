@@ -1421,7 +1421,14 @@ def env_cmd(
         typer.echo(style.warn("The manifest doesn't map these required secrets yet, so a run stops on them "
                               "whatever .env holds. Map each one:"))
         for u in res["unmapped"]:
-            typer.echo(f"  paramify manifest set-secret -f {mpath} {u['fetcher']} {u['secret']} {u['env']}")
+            if not u["per_target"]:
+                typer.echo(f"  paramify manifest set-secret -f {mpath} {u['fetcher']} {u['secret']} {u['env']}")
+            elif u["target"] is None:
+                typer.echo(f"  paramify manifest add-target -f {mpath} {u['fetcher']} <field>=<value> ... "
+                           f"--secret {u['secret']}={u['env']}")
+            else:
+                typer.echo(f"  {u['fetcher']} target {u['target']}: add  {u['secret']}: ${{env:{u['env']}}}  "
+                           f"under its secrets: in {mpath}")
 
 
 @app.command("run")

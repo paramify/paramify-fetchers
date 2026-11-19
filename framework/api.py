@@ -4160,7 +4160,8 @@ def generate_env(root: Path, manifest: Mapping[str, Any], write: bool = False, p
     content, so printing it cannot leak a value. `missing_values` names required
     variables that would still be empty: empty in the file and not exported
     (non-empty) in this process's environment. `unmapped` names the required
-    secrets the manifest doesn't map yet ({fetcher, secret, env}): the run
+    secrets the manifest doesn't map yet ({fetcher, secret, env, per_target,
+    target}): the run
     stops on those whatever .env holds. Writes only when `write` is set:
     atomically, through a symlinked .env to its file, keeping CRLF line endings.
     """
@@ -4178,4 +4179,4 @@ def generate_env(root: Path, manifest: Mapping[str, Any], write: bool = False, p
         _atomic_write(target, text)
     return {"text": result.text, "added": result.added, "already_set": result.already_set,
             "missing_values": result.missing, "path": str(path),
-            "unmapped": [{"fetcher": u.fetcher, "secret": u.secret, "env": u.env} for u in unmapped]}
+            "unmapped": [vars(u) for u in unmapped]}

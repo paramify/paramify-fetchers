@@ -19,8 +19,9 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from dotenv import dotenv_values
 
-from framework import paramify_auth
+from framework import paramify_auth, patterns
 from framework.contract import effective_secrets, platform_for
+from framework.runner.executor import UNDECLARED_KEYS
 
 
 @dataclass
@@ -105,10 +106,14 @@ def _refs(value: Any) -> List[str]:
 @dataclass
 class Unmapped:
     """A required secret the manifest doesn't map yet: the run stops on it
-    whatever .env holds, until `paramify manifest set-secret` maps it."""
+    whatever .env holds. An entry-level secret is mapped with `paramify
+    manifest set-secret`; a per-target one under that target's `secrets:`
+    (`target` is its index, or None when the entry has no targets at all)."""
     fetcher: str
     secret: str
     env: str  # the fetcher's declared name, the usual choice
+    per_target: bool = False
+    target: Optional[int] = None
 
 
 def env_groups(
@@ -118,11 +123,12 @@ def env_groups(
     secrets it can't read yet because the manifest doesn't map them.
 
     Read as the runner reads them (framework/runner/executor.py): a secret
-    through the `${env:}` reference the entry, or each of its targets, maps it
-    to; a config value through a `${env:}` reference in the entry or in
+    through the `${env:}` reference it is mapped to, on the entry, or on each
+    target for a per_target secret (a literal value is passed as is and needs
+    nothing); a config value through a `${env:}` reference in the entry or in
     `run.platforms` (unset, it gives way to the next value down, so it is
-    required only when its field is required and has no default); and a
-    platform's `auth.passthrough_env`. A config field's own `env` name is not
+    required only when its field is required and has no default); and the
+    passthrough variables of the category and of `run.platforms`. A config field's own `env` name is not
     here: the runner sets it for the fetcher from those values, and nothing
     reads it from the shell. Paramify comes first; names seen twice appear
     once, and one place that requires a variable makes it required. Unknown
@@ -162,7 +168,11 @@ def env_groups(
             for env in _refs(value):
                 add(cat, env, description, f"{key.replace('_', ' ')} for {where}", required)
 
-    used: Dict[str, Mapping[str, Any]] = {}
+    def add_secret(cat: str, fname: str, s: Any, value: Any) -> None:
+        for env in dict.fromkeys(_refs(value)):
+            add(cat, env, s.description, f"{s.name.replace('_', ' ')} for {fname}", s.required)
+
+    used: Dict[str, Dict[str, Any]] = {}  # category -> (platform spec, merged config schema)
     for entry in entries:
         fname = entry["use"]
         f = fetchers.get(fname) if isinstance(fname, str) else None
@@ -171,24 +181,39 @@ def env_groups(
         cat = f.category or "other"
         spec = platform_for(f, platforms)
         schema = {**(spec.config_schema if spec else {}), **f.config_schema}
-        used.setdefault(cat, schema)
-        scopes = [entry, *(t for t in entry.get("targets") or [] if isinstance(t, Mapping))]
+        seen_cat = used.setdefault(cat, {"spec": spec, "schema": {}})
+        seen_cat["schema"].update(schema)
+        targets = [t if isinstance(t, Mapping) else {} for t in entry.get("targets") or []]
         for s in effective_secrets(f, spec):
-            mapped = list(dict.fromkeys(r for sc in scopes for r in _refs((sc.get("secrets") or {}).get(s.name))))
-            for env in mapped:
-                add(cat, env, s.description, f"{s.name.replace('_', ' ')} for {fname}", s.required)
-            if not mapped and s.required:
+            if s.per_target:
+                for i, t in enumerate(targets):
+                    value = (t.get("secrets") or {}).get(s.name)
+                    if value is None and s.required:
+                        unmapped.append(Unmapped(fname, s.name, s.env, per_target=True, target=i))
+                    add_secret(cat, fname, s, value)
+                if not targets and s.required:
+                    unmapped.append(Unmapped(fname, s.name, s.env, per_target=True))
+                continue
+            value = (entry.get("secrets") or {}).get(s.name)
+            if value is None and s.required:
                 unmapped.append(Unmapped(fname, s.name, s.env))
+            add_secret(cat, fname, s, value)
         add_config_refs(cat, entry.get("config"), schema, fname)
 
-    for cat, cat_schema in sorted(used.items()):
-        pblock = blocks.get(cat)
-        if not isinstance(pblock, Mapping):
-            continue
-        add_config_refs(cat, pblock.get("config"), cat_schema, f"the {cat} fetchers")
-        for env in (pblock.get("auth") or {}).get("passthrough_env") or []:
-            if isinstance(env, str):
-                add(cat, env, None, f"Passed through to the {cat} fetchers", False)
+    for cat, seen_cat in sorted(used.items()):
+        spec, cat_schema = seen_cat["spec"], seen_cat["schema"]
+        raw = blocks.get(cat)
+        pblock: Mapping[str, Any] = raw if isinstance(raw, Mapping) else {}
+        raw_config = pblock.get("config")
+        config: Mapping[str, Any] = raw_config if isinstance(raw_config, Mapping) else {}
+        # A key no fetcher here declares passes through unresolved (the runner skips it).
+        declared = {k: v for k, v in config.items() if k in cat_schema or k in UNDECLARED_KEYS}
+        add_config_refs(cat, declared, cat_schema, f"the {cat} fetchers")
+        pattern_envs = {fdef.env for fdef in cat_schema.values() if fdef.type == patterns.TYPE and fdef.env}
+        passthrough = [*(spec.passthrough_env if spec else []), *((pblock.get("auth") or {}).get("passthrough_env") or [])]
+        for env in dict.fromkeys(passthrough):
+            if isinstance(env, str) and env not in pattern_envs:
+                add(cat, env, None, f"Passed through to the {cat} fetchers when set", False)
 
     groups.extend(sorted(by_cat.values(), key=lambda g: g.title.lower()))
     return groups, unmapped

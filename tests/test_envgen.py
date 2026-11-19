@@ -419,3 +419,53 @@ def test_a_value_rotated_in_dotenv_reaches_the_next_run_but_an_export_still_wins
     (tmp_path / ".env").write_text("ROTATED_TOKEN=second\nEXPORTED_TOKEN=from-file-2\n")
     api.refresh_env(tmp_path)  # a long-lived process (the TUI) running again
     assert (os.environ["ROTATED_TOKEN"], os.environ["EXPORTED_TOKEN"]) == ("second", "from-shell")
+
+
+# --------------------------------------------------------------------------- #
+# Read as the runner reads: per-target secrets, literals, passthrough
+# --------------------------------------------------------------------------- #
+
+def test_a_per_target_secret_is_read_from_each_target_only():
+    entry = {"use": "github_access_review", "secrets": {"token": "${env:AT_THE_ENTRY}"},
+             "targets": [{"secrets": {"token": "${env:GH_ONE}"}}, {}]}
+    groups, unmapped = needs(entry)
+    got = names(groups)
+    assert "GH_ONE" in got and "AT_THE_ENTRY" not in got  # the runner never reads the entry's
+    assert [(u.secret, u.per_target, u.target) for u in unmapped] == [("token", True, 1)]
+    _, unmapped = needs({"use": "github_access_review"})
+    assert [(u.per_target, u.target) for u in unmapped] == [(True, None)]  # no targets at all
+
+
+def test_an_entry_secret_mapped_only_inside_a_target_is_unmapped():
+    entry = {"use": "okta_least_privilege", "secrets": {"org_url": "${env:OKTA_ORG_URL}"},
+             "targets": [{"secrets": {"api_token": "${env:IN_A_TARGET}"}}]}
+    groups, unmapped = needs(entry)
+    assert "IN_A_TARGET" not in names(groups)
+    assert [(u.secret, u.per_target) for u in unmapped] == [("api_token", False)]
+
+
+def test_a_literal_secret_needs_nothing():
+    entry = {"use": "okta_least_privilege",
+             "secrets": {"api_token": "${env:OKTA_API_TOKEN}", "org_url": "https://example.okta.com"}}
+    groups, unmapped = needs(entry)
+    assert unmapped == [] and "OKTA_ORG_URL" not in names(groups)
+
+
+def test_the_categorys_passthrough_variables_are_listed_as_optional():
+    groups, _ = needs({"use": "aws_config_inventory"})
+    aws = {v.name: v for g in groups for v in g.vars}
+    assert "AWS_PROFILE" in aws and not aws["AWS_PROFILE"].required
+
+
+def test_a_platform_key_no_fetcher_declares_is_not_listed():
+    platforms = {"okta": {"config": {"not_a_field": "${env:NOBODY_READS_THIS}"}}}
+    assert "NOBODY_READS_THIS" not in names(groups_for("okta_least_privilege", platforms=platforms))
+
+
+def test_cli_says_how_to_map_a_per_target_secret(tmp_path):
+    m = tmp_path / "m.yaml"
+    m.write_text(yaml.safe_dump({"run": {"fetchers": [
+        {"use": "github_access_review", "targets": [{"secrets": {"token": "${env:GH_ONE}"}}, {}]}]}}))
+    out = CliRunner().invoke(cli.app, ["env", "--manifest", str(m), "--path", str(tmp_path / ".env")])
+    assert out.exit_code == 0, out.output
+    assert "github_access_review target 1: add  token: ${env:GITHUB_TOKEN}" in out.stdout
