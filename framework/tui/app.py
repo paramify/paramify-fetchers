@@ -73,11 +73,11 @@ class FetcherApp(App):
         try:
             waiting = api.update_notice(self.root_path)
             if waiting:
-                self.call_from_thread(self._show_update_notice, waiting)
+                self.call_from_thread(self.show_update_notice, waiting)
         except Exception:
             return  # no notice, or the app is shutting down under us
 
-    def _show_update_notice(self, waiting: str) -> None:
+    def show_update_notice(self, waiting: Optional[str]) -> None:
         self.update_waiting = waiting
         for screen in self.screen_stack:
             for notice in screen.query(UpdateNotice):

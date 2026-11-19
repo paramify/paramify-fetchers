@@ -23,7 +23,7 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import Screen
 from textual.widgets import Button, Static
 
-from framework import api
+from framework import api, update
 from framework import update_view as view
 from framework.tui import palette
 from framework.tui.components.keys import BUTTON_ROW_BINDINGS, ButtonRowNav
@@ -57,17 +57,13 @@ class UpdateScreen(ButtonRowNav, Screen):
 
     @property
     def _ready(self) -> bool:
-        """A whole plan to show: not refused, not up to date, nothing in the way."""
-        return bool(self.plan.get("ok")) and self.plan.get("state") == "ready"
+        """A whole plan to show: assessed, whether or not it can be applied."""
+        return bool(self.plan.get("ok")) and self.plan.get("state") in ("ready", "unrunnable")
 
     @property
     def _actionable(self) -> bool:
-        """A plan Apply can carry out. A Python too old for the target is shown, not offered."""
-        return self._ready and not self._stops.get("python_required")
-
-    @property
-    def _stops(self) -> dict:
-        return self.plan.get("stops") or {"breaks": [], "touching": []}
+        """A plan Apply can carry out (an unrunnable one, a Python too old, is shown, not offered)."""
+        return bool(self.plan.get("ok")) and self.plan.get("state") == "ready"
 
     # -- layout ------------------------------------------------------------ #
 
@@ -114,8 +110,11 @@ class UpdateScreen(ButtonRowNav, Screen):
             return _errors_text(self._errors)
         if self.plan.get("up_to_date"):
             label = (self.plan.get("current") or {}).get("label") or "this clone"
-            return view.ok(f"Up to date: {label}.")
-        return view.header(self.plan)
+            return Group(view.ok(f"Up to date: {label}."), *self._offline())
+        return Group(view.header(self.plan), *self._offline())
+
+    def _offline(self) -> List[Text]:
+        return [view.offline(update.REMOTE)] if self.plan.get("fetched") is False else []
 
     def _check_text(self) -> view.Step:
         step = view.Step("check your manifests")
@@ -169,12 +168,11 @@ class UpdateScreen(ButtonRowNav, Screen):
     def _first_answer(self, yes: Optional[bool]) -> None:
         if not yes:
             return
-        stops = self._stops
-        if not (stops["touching"] or stops["breaks"]):
+        if not self.plan.get("needs_allow_breaking"):
             self._apply(False)
             return
         self.app.push_screen(
-            ConfirmModal(f"{view.stop_reasons(stops).capitalize()}. Apply anyway?"), self._second_answer
+            ConfirmModal(f"{view.stop_reasons(self.plan['stops']).capitalize()}. Apply anyway?"), self._second_answer
         )
 
     def _second_answer(self, yes: Optional[bool]) -> None:
@@ -220,12 +218,27 @@ class UpdateScreen(ButtonRowNav, Screen):
     def _finished(self, out: dict, done: str, what: str) -> None:
         self._busy = False
         result = self.query_one("#update-result", Static)
-        if out.get("ok"):
-            # The buttons stay off: the plan above is out of date now, and the code on disk is not what is running.
-            self.query_one("#update-close", Button).disabled = False
-            self.query_one("#update-close", Button).focus()
-            result.update(Text(f"{done} {_RESTART.format(what=what)}", style=palette.OK))
+        errors = out.get("errors") or ["the update failed"]
+        if not (out.get("ok") or out.get("switched")):
+            for button in self.query(Button):
+                button.disabled = False
+            result.update(_errors_text(errors))
             return
-        for button in self.query(Button):
-            button.disabled = False
-        result.update(_errors_text(out.get("errors") or ["the update failed"]))
+        # The code on disk changed, even when what followed failed: the plan above is out of
+        # date and isn't what is running, so Apply stays off and the TUI needs a restart.
+        restart = _RESTART.format(what=what)
+        close = self.query_one("#update-close", Button)
+        close.disabled = False
+        close.focus()
+        if what == "new":
+            self.app.show_update_notice(None)  # nothing is waiting any more
+        if out.get("ok"):
+            result.update(Text(f"{done} {restart}", style=palette.OK))
+            return
+        result.update(Group(_errors_text(errors), Text(restart, style=palette.MUTED)))
+        if what == "new":  # moved, then failed (a manifest, or a reinstall that couldn't be undone): offer the way back
+            found = self.query("#update-rollback")
+            if found:
+                found.first().disabled = False
+            else:
+                self.query_one("#update-buttons").mount(Button("Roll back", id="update-rollback"), before=close)

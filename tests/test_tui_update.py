@@ -72,6 +72,7 @@ PLAN = {
               "touching": ["An inventory fetcher needs a pipeline block in fetcher.yaml",
                            "Inventory records must carry asset_type"]},
     "state": "ready",
+    "needs_allow_breaking": True,
     "can_roll_back": False,
 }
 SHA = PLAN["target"]["sha"]
@@ -220,7 +221,7 @@ def test_apply_without_breaking_asks_once(monkeypatch):
     calls = []
     monkeypatch.setattr(api, "apply_update",
                         lambda root, expect, allow_breaking: calls.append((expect, allow_breaking)) or {"ok": True, "errors": []})
-    plan = _plan(breaking=[], stops={"breaks": [], "touching": [], "python_required": None})
+    plan = _plan(breaking=[], stops={"breaks": [], "touching": [], "python_required": None}, needs_allow_breaking=False)
 
     async def body(app, pilot):
         await app.push_screen(UpdateScreen(plan))
@@ -242,7 +243,8 @@ def test_failed_apply_shows_the_error_and_keeps_the_screen(monkeypatch):
 
     async def body(app, pilot):
         await app.push_screen(UpdateScreen(_plan(breaking=[], stops={"breaks": [], "touching": [],
-                                                                     "python_required": None})))
+                                                                     "python_required": None},
+                                                               needs_allow_breaking=False)))
         await pilot.pause()
         await pilot.click("#update-apply")
         await pilot.pause()
@@ -253,6 +255,42 @@ def test_failed_apply_shows_the_error_and_keeps_the_screen(monkeypatch):
         result = _text(app.screen.query_one("#update-result"))
         assert "local files are in the way" in result
         assert "Restart" not in result
+
+    _run(body)
+
+
+def test_an_apply_that_moved_then_failed_is_treated_as_moved(monkeypatch):
+    monkeypatch.setattr(api, "apply_update", lambda root, expect, allow_breaking: {
+        "ok": False, "switched": True,
+        "errors": ["you're on main, but 1 manifest fails on the new code. Fix what validate names, "
+                   "or go back with paramify update --rollback"]})
+    plan = _plan(breaking=[], stops={"breaks": [], "touching": [], "python_required": None}, needs_allow_breaking=False)
+
+    async def body(app, pilot):
+        app.show_update_notice("281 new commits on main")
+        await app.push_screen(UpdateScreen(plan))
+        await pilot.pause()
+        await pilot.click("#update-apply")
+        await pilot.pause()
+        await pilot.press("y")
+        await pilot.pause()
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        screen = app.screen
+        text = _text(screen.query_one("#update-result"))
+        assert "1 manifest fails" in text and "Restart the TUI" in text
+        assert screen.query_one("#update-apply", Button).disabled
+        assert not screen.query_one("#update-rollback", Button).disabled
+        assert app.update_waiting is None
+
+    _run(body)
+
+
+def test_an_offline_plan_says_it_may_be_stale():
+    async def body(app, pilot):
+        await app.push_screen(UpdateScreen(_plan(fetched=False)))
+        await pilot.pause()
+        assert "couldn't reach origin" in _text(app.screen.query_one("#update-header"))
 
     _run(body)
 
@@ -292,7 +330,7 @@ def test_a_blocked_plan_names_the_files_and_offers_no_apply():
 
 
 def test_a_python_too_old_for_the_target_is_shown_not_offered():
-    plan = _plan(stops={**PLAN["stops"], "python_required": ">=3.13"},
+    plan = _plan(stops={**PLAN["stops"], "python_required": ">=3.13"}, state="unrunnable",
                  check={**PLAN["check"], "python_required": ">=3.13"})
 
     async def body(app, pilot):
@@ -404,7 +442,7 @@ def test_the_header_picks_the_wording_that_fits(monkeypatch, width, shown):
 
 def test_alone_on_the_welcome_screen_the_notice_says_it_in_full(monkeypatch):
     async def body(app, pilot):
-        app._show_update_notice("12 new commits on main")
+        app.show_update_notice("12 new commits on main")
         await pilot.pause()
         assert _text(app.screen.query_one("#welcome-update")) == "↑ 12 new commits on main · press U"
 
@@ -519,7 +557,7 @@ def _late_notice_probe(width):
             header.set_crumb("manifests › prod › paramify")
             await pilot.pause()
             assert not app.screen.query_one(UpdateNotice).display  # nothing waiting yet
-            app._show_update_notice("12 new commits on main")
+            app.show_update_notice("12 new commits on main")
             for _ in range(3):
                 await pilot.pause()
             q = app.screen.query_one
