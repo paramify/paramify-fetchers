@@ -119,7 +119,8 @@ def test_breaking_changelog_entries_have_breaking_rows(path):
 @pytest.mark.parametrize("path", RELEASE_FILES, ids=lambda p: p.name)
 def test_whats_new_stays_short(path):
     rows = [h["title"] for h in _doc(path)["highlights"] if h["tag"] != "breaking"]
-    assert 3 <= len(rows) <= 5, f"{path.name} has {len(rows)} non-breaking rows; keep 3 to 5: {rows}"
+    assert 3 <= len(rows) <= update.MAX_NEW, (
+        f"{path.name} has {len(rows)} non-breaking rows; keep 3 to {update.MAX_NEW}: {rows}")
 
 
 @pytest.mark.parametrize("path", FILES, ids=lambda p: p.name)

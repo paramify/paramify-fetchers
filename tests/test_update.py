@@ -433,7 +433,7 @@ def test_update_on_a_tag_moves_to_the_newest_release(repo, stubs):
     assert (doc["channel"], doc["target"]["label"], doc["version"]) == ("release", "0.3.0-beta", "0.3.0-beta")
     assert [h["title"] for h in doc["highlights"]] == ["Gadgets for everyone", "demo_alpha reads more", "A nicer screen"]
     assert _head_tag(repo) == "v0.3.0-beta"
-    assert up.read_state(repo)["previous"]["tag"] == "v0.1.0-beta"
+    assert up.read_state(repo)["previous"]["describe"] == "0.1.0-beta"  # what --rollback names
 
 
 def test_nothing_to_do_when_the_branch_is_current(main_repo, stubs):
@@ -820,12 +820,20 @@ def test_notice_is_due_once_a_day(repo):
 def test_notice_stays_out_of_json_and_pipes(repo, monkeypatch):
     called = []
     monkeypatch.setattr(api, "check_for_update", lambda root: called.append(root))
+    monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+    monkeypatch.setattr("sys.stderr.isatty", lambda: True)
     monkeypatch.setattr("sys.argv", ["paramify", "list", "--json"])
     update_cli.maybe_notice("list")
-    monkeypatch.setattr("sys.argv", ["paramify", "list"])
-    update_cli.maybe_notice("list")  # pytest's stdout is not a tty
+    monkeypatch.setattr("sys.argv", ["paramify", "update"])
     update_cli.maybe_notice("update")
-    assert called == []
+    assert called == []  # a terminal, but JSON or update itself: no notice
+    monkeypatch.setattr("sys.argv", ["paramify", "list"])
+    update_cli.maybe_notice("list")
+    assert called == [repo]  # the control: a terminal and a plain command do ask
+    monkeypatch.setattr("sys.stdout.isatty", lambda: False)
+    up.write_state(repo, {})
+    update_cli.maybe_notice("list")
+    assert called == [repo]  # a pipe: no notice
 
 
 # --------------------------------------------------------------------------- #
@@ -933,6 +941,11 @@ def test_apply_with_expect_moves_to_that_commit(main_repo, stubs):
     result, doc = _run("--yes", "--json", "--expect", planned[:10])
     assert result.exit_code == 0, result.stdout
     assert _sha(main_repo) == planned
+
+
+def test_expect_takes_a_real_sha(main_repo, stubs):
+    result, doc = _run("--yes", "--json", "--expect", "a")
+    assert result.exit_code == 1 and "7 to 40 hex characters" in doc["errors"][0]
 
 
 def test_apply_with_expect_refuses_a_target_that_moved(main_repo, stubs):

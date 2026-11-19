@@ -11,6 +11,7 @@ Exit codes: 0 done (or nothing to do), 1 refused or failed. `--check` follows
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, NoReturn, Optional
@@ -193,6 +194,8 @@ def _update(run: _Run, root: Path, *, to: Optional[str], expect: Optional[str], 
         run.fail(str(e))
     run.doc.update(up.public(located))
     target, pos = located["target"], located["current"]
+    if expect is not None and not re.fullmatch(r"[0-9a-fA-F]{7,40}", expect):
+        run.fail(f"--expect takes a commit sha (7 to 40 hex characters), not {expect!r}")
     if expect and not target["sha"].startswith(expect.lower()):
         run.fail(f"{target['label']} has moved since the plan was made (it is at {target['sha'][:7]} now, "
                  f"not {expect[:7]}). Look at the new plan before applying it")

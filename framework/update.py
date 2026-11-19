@@ -1016,15 +1016,7 @@ def recorded_move(root: Path, pos: dict, after_sha: str) -> Iterator[Optional[di
     the move later (forget_previous(root, replaced))."""
     state = read_state(root)
     replaced = state.get("previous")
-    state["previous"] = {
-        "ref": pos["branch"] or pos["sha"],
-        "branch": pos["branch"],
-        "sha": pos["sha"],
-        "after": after_sha,
-        "tag": pos["tag"] if pos["exact"] else None,
-        "describe": describe(pos),
-        "at": int(time.time()),
-    }
+    state["previous"] = {"branch": pos["branch"], "sha": pos["sha"], "after": after_sha, "describe": describe(pos)}
     write_state(root, state)
     try:
         yield replaced
@@ -1118,12 +1110,9 @@ def check_for_update(root: Path, *, now: Optional[float] = None, fetch: bool = T
                 _background_fetch(root)
             except OSError:
                 pass
-            cache["fetched_at"] = now
-        info = update_status(root)
-        cache.update(latest=info["latest"], checked_at=now)
-        state["update_check"] = cache
-        write_state(root, state)
-        return info
+            state["update_check"] = {**cache, "fetched_at": now}
+            write_state(root, state)
+        return update_status(root)
     except Exception:  # noqa: BLE001 (a notice must never break a command)
         return None
 
