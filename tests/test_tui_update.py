@@ -395,6 +395,22 @@ def test_update_plan_reads_the_plan_in_this_process(monkeypatch, tmp_path):
 # The header at 80 columns with the notice showing
 # --------------------------------------------------------------------------- #
 
+@pytest.mark.parametrize(("width", "shown"), [(80, "↑ update · U"), (140, "↑ 12 new commits on main · press U")])
+def test_the_header_picks_the_wording_that_fits(monkeypatch, width, shown):
+    monkeypatch.setattr(api, "update_notice", lambda root: "12 new commits on main")
+    got = _header_probe(width)
+    assert got.notice and got.text == shown
+
+
+def test_alone_on_the_welcome_screen_the_notice_says_it_in_full(monkeypatch):
+    async def body(app, pilot):
+        app._show_update_notice("12 new commits on main")
+        await pilot.pause()
+        assert _text(app.screen.query_one("#welcome-update")) == "↑ 12 new commits on main · press U"
+
+    _run(body, size=(80, 30))
+
+
 @pytest.mark.parametrize("notice", ["12 new commits on main", None])
 def test_header_fits_at_80_columns(monkeypatch, notice):
     """Title, clock and (some of) the crumb always fit on the one header row; the notice gives way first."""
@@ -464,7 +480,7 @@ def _header_probe(first, then=None):
             q = app.screen.query_one
             return SimpleNamespace(header=header, clock=q("#app-header-clock").region,
                                    crumb=q("#app-header-crumb").region, notice=q(UpdateNotice).display,
-                                   right=header.region.right)
+                                   text=_text(q(UpdateNotice)), right=header.region.right)
 
     return asyncio.run(main())
 

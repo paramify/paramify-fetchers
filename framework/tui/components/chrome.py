@@ -27,46 +27,43 @@ class UpdateNotice(Static):
 
     The app fills every notice on the screen stack when its background check
     comes back, and a notice mounted later reads what the app already knows.
+    Alone (the welcome screen) it says it in full; in the header, the header
+    picks the wording that fits, or hides it.
     """
-
-    NARROW = 100  # below this many columns the notice shortens, so the crumb keeps its room
 
     def __init__(self, **kw) -> None:
         super().__init__("", **kw)
         self.display = False
+        self._waiting: Optional[str] = None
+        self.wording: Optional[str] = "long"  # "long", "short" or None (no room); the header sets it
 
     def on_mount(self) -> None:
-        self._waiting: Optional[str] = None
         self.set_waiting(getattr(self.app, "update_waiting", None))
 
     def set_waiting(self, waiting: Optional[str]) -> None:
         self._waiting = waiting
-        header = self.parent
-        if isinstance(header, AppHeader):
-            header.refit()  # in the header, whether there is room is the header's call
+        if isinstance(self.parent, AppHeader):
+            self.parent.refit()
         else:
-            self._draw()
+            self.redraw()
 
-    crowded = False  # set by the header when title, clock and crumb leave it no room
-
-    def _text(self) -> Optional[Text]:
-        waiting = getattr(self, "_waiting", None)
-        if not waiting:
+    def text(self, wording: str) -> Optional[Text]:
+        if not self._waiting:
             return None
-        narrow = self.app.size.width < self.NARROW
-        text = Text(no_wrap=True, overflow="ellipsis")
-        text.append("↑ ", style=f"{palette.ACCENT} bold")
-        text.append("update" if narrow else waiting, style=palette.MUTED)
-        text.append(f" · {UPDATE_KEY}" if narrow else f" · press {UPDATE_KEY}", style=palette.MUTED)
-        return text
+        short = wording == "short"
+        out = Text(no_wrap=True, overflow="ellipsis")
+        out.append("↑ ", style=f"{palette.ACCENT} bold")
+        out.append("update" if short else self._waiting, style=palette.MUTED)
+        out.append(f" · {UPDATE_KEY}" if short else f" · press {UPDATE_KEY}", style=palette.MUTED)
+        return out
 
-    def wanted_width(self) -> int:
-        text = self._text()
+    def width(self, wording: str) -> int:
+        text = self.text(wording)
         return text.cell_len + 2 if text else 0  # and its padding
 
-    def _draw(self) -> None:
-        text = self._text()
-        if text is None or self.crowded:
+    def redraw(self) -> None:
+        text = self.text(self.wording) if self.wording else None
+        if text is None:
             self.display = False
             return
         self.update(text)
@@ -97,9 +94,10 @@ class AppHeader(Horizontal):
     def on_resize(self, event) -> None:
         self.refit()
 
-    # When the row is short of room the update notice gives way first, then the crumb
-    # (down to CRUMB_MIN columns). Title and clock stay.
+    # When the row is short of room the update notice shortens, then gives way, then the
+    # crumb shrinks (down to CRUMB_MIN columns). Title and clock stay.
     CRUMB_MIN = 6
+    CRUMB_ROOM = 20  # the long notice only when the crumb keeps this much more besides
     _fit_pending = False
 
     def refit(self) -> None:
@@ -116,8 +114,9 @@ class AppHeader(Horizontal):
         notice = self.query_one(UpdateNotice)
         used = self.query_one("#app-header-left").outer_size.width + self.query_one("#app-header-clock").outer_size.width
         room = self.size.width - 2 - used - self.CRUMB_MIN  # 2: the header's own padding
-        notice.crowded = notice.wanted_width() > room
-        notice._draw()  # also re-picks its long or short wording for this width
+        notice.wording = ("long" if notice.width("long") <= room - self.CRUMB_ROOM
+                          else "short" if notice.width("short") <= room else None)
+        notice.redraw()
 
     def _tick(self) -> None:
         self.query_one("#app-header-clock", Static).update(datetime.now().strftime("%H:%M:%S"))

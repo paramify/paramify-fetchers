@@ -123,11 +123,8 @@ class UpdateScreen(ButtonRowNav, Screen):
         return step
 
     def _fetchers_title(self) -> Text:
-        yours = (self.plan.get("fetchers") or {}).get("yours") or []
-        title = Text("Your fetchers", style="bold")
-        title.append(f"   {len(yours)} changed" if yours else "   none of the fetchers you use changed",
-                     style="dim")
-        return title
+        fetchers = self.plan.get("fetchers") or {"yours": []}
+        return view.your_fetchers(fetchers, self.plan.get("used") or 0, self.plan.get("breaking") or [])[0]
 
     def _fetcher_rows(self) -> List[tuple]:
         broken = view.broken_patterns(self.plan.get("breaking") or [])
