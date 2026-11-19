@@ -206,6 +206,8 @@ Each platform has its own requirements:
 - Azure, GCP and Oracle Cloud use the official SDKs, not a CLI. Add them with the install script's `PARAMIFY_EXTRAS` variable (`PARAMIFY_EXTRAS=all,azure`, `all,gcp` or `all,oci`), or with `.venv/bin/pip install -e '.[azure]'` (or `[gcp]`, `[oci]`) inside the clone. These extras are only needed for those platforms, so `[all]` does not include them. Azure signs in with `DefaultAzureCredential` and GCP with Application Default Credentials, so neither one needs a key file. For a collector limited to one explicit Azure subscription, see the [Azure read scope guide](docs/azure_read_scope.md). OCI uses an API signing key that the runner injects as a secret, or an instance or resource principal where it is deployed; see [`fetchers/oci/README.md`](fetchers/oci/README.md).
 - Most platforms have a credential setup guide at `fetchers/<category>/README.md`. Select a logo under [Supported services](#supported-services) to open its folder.
 
+To update later, run `paramify update`. It brings your clone up to date with `main`, or with the newest release if you pinned one, after checking your manifests against the new code and telling you which of your fetchers change. See the [versioning guide](docs/versioning_guide.md).
+
 ---
 
 ## Use it
