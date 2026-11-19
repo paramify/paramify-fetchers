@@ -29,7 +29,6 @@ import json
 import logging
 import os
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Dict, List, Optional
 
@@ -39,7 +38,8 @@ from dotenv import load_dotenv
 # sys.path. Its position in the repo is fixed, so derive the root.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from framework import yaml_io  # noqa: E402
+from framework import upload_config  # noqa: E402
+from framework.clock import utc_now  # noqa: E402
 from framework.custom_tags import (  # noqa: E402
     ENTITY_VALIDATOR,
     build_tagger,
@@ -51,10 +51,6 @@ from framework.paramify.connection import open_workspace  # noqa: E402
 logger = logging.getLogger("paramify_validators_syncer")
 
 DEFAULT_LOCK_PATH = "./.paramify/validators-sync.lock.json"
-
-
-def _utc_now() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def build_payload(v: Dict) -> Dict:
@@ -87,18 +83,13 @@ def write_lock(lock_path: Path, mapping: Dict[str, str]) -> Optional[Path]:
         lock_path.parent.mkdir(parents=True, exist_ok=True)
         lock_path.write_text(
             json.dumps(
-                {"updated_at": _utc_now(), "validators": mapping}, indent=2, sort_keys=True
+                {"updated_at": utc_now(), "validators": mapping}, indent=2, sort_keys=True
             )
         )
         return lock_path
     except OSError as e:
         logger.warning("could not write lock %s (%s)", lock_path, e)
         return None
-
-
-def _emit(on_event: Optional[Callable[[dict], None]], event: dict) -> None:
-    if on_event is not None:
-        on_event(event)
 
 
 # --------------------------------------------------------------------------- #
@@ -125,6 +116,7 @@ def sync_validators(
     is available). Returns a summary dict; never raises for per-validator errors
     (those are isolated and counted), only for setup errors.
     """
+    on_event = on_event or (lambda _event: None)
     config = config or {}
     base_url, resources = open_workspace(config, base_url=base_url, token=token, client=client,
                                          dry_run=dry_run, log=logger)
@@ -153,7 +145,7 @@ def sync_validators(
         info = tagger.tag(ENTITY_VALIDATOR, validator_id, category)
         return info["tags"] if info["outcome"] in ("applied", "already") else []
 
-    _emit(on_event, {
+    on_event({
         "event": "sync_start",
         "base_url": base_url,
         "dry_run": dry_run,
@@ -186,7 +178,7 @@ def sync_validators(
 
     def add_result(r: Dict) -> None:
         results.append(r)
-        _emit(on_event, {"event": "sync_validator", **r})
+        on_event({"event": "sync_validator", **r})
 
     stopped: Optional[str] = None
 
@@ -309,7 +301,7 @@ def sync_validators(
         created, updated, skipped, associated, set_not_found, errors, assoc_errors,
         " (dry-run)" if dry_run else "",
     )
-    _emit(on_event, {"event": "sync_complete", **summary})
+    on_event({"event": "sync_complete", **summary})
     return summary
 
 
@@ -392,7 +384,11 @@ def main(argv=None) -> int:
         logger.info("No validators in scope — nothing to sync.")
         return 0
 
-    config: Dict = (yaml_io.load_path(Path(args.config)) or {}) if args.config else {}
+    try:
+        config = upload_config.load(args.config)
+    except (OSError, ValueError) as e:
+        logger.error("%s", e)
+        return 1
 
     try:
         summary = sync_validators(

@@ -2,19 +2,10 @@
 
 from __future__ import annotations
 
-import importlib.util
 import json
-from pathlib import Path
 
 from framework import api
 from framework.run_files import is_evidence_file
-
-_UPLOADER_PATH = (
-    Path(__file__).resolve().parent.parent / "uploaders" / "paramify_evidence" / "uploader.py"
-)
-_spec = importlib.util.spec_from_file_location("uploader_run_files_test", _UPLOADER_PATH)
-uploader = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(uploader)
 
 
 def test_reserved_and_underscore_files_are_not_evidence(tmp_path):
@@ -29,7 +20,7 @@ def test_uploader_and_api_readers_skip_state_file(tmp_path):
     envelope = {"metadata": {"evidence_set": {"reference_id": "EVD-X"}}, "data": {}}
     (tmp_path / "x.json").write_text(json.dumps(envelope))
     (tmp_path / "_upload_state.json").write_text(json.dumps(envelope))
-    assert [p.name for p in uploader.iter_evidence_files(tmp_path)] == ["x.json"]
+    assert api.upload_preflight(tmp_path, tmp_path, None, dry_run=True)["file_count"] == 1
     assert api.reference_ids_from_run(tmp_path) == {"EVD-X"}
     (tmp_path / "_upload_state.json").write_text(
         json.dumps({"metadata": {"evidence_set": {"reference_id": "EVD-STATE"}}})

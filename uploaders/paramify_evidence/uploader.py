@@ -17,7 +17,6 @@ import sys
 from pathlib import Path
 from typing import Callable, Dict, Optional
 
-import yaml
 from dotenv import load_dotenv
 
 # This file is also runnable directly (`python uploaders/paramify_evidence/uploader.py`)
@@ -26,8 +25,7 @@ from dotenv import load_dotenv
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO_ROOT))
 
-from framework import api  # noqa: E402
-from framework.run_files import is_evidence_file  # noqa: E402
+from framework import api, upload_config  # noqa: E402
 from framework.sync.providers.desired import (  # noqa: E402,F401
     artifact_content,
     artifact_note,
@@ -40,28 +38,6 @@ from framework.sync.providers.desired import (  # noqa: E402,F401
 logger = logging.getLogger("paramify_evidence_uploader")
 
 DEPRECATION = "paramify_evidence/uploader.py is deprecated; use 'paramify upload'"
-
-
-def find_latest_run(output_dir: Path) -> Optional[Path]:
-    """The newest run that holds evidence — not simply the newest run, which is
-    often a pipeline manifest's (issue reports only) sharing the same output dir."""
-    if not output_dir.is_dir():
-        return None
-    runs = sorted((p for p in output_dir.glob("run-*") if p.is_dir()), reverse=True)
-    return next((r for r in runs if any(iter_evidence_files(r))), None)
-
-
-def iter_evidence_files(run_dir: Path):
-    for p in sorted(run_dir.glob("*.json")):
-        if is_evidence_file(p):
-            yield p
-
-
-def load_config(path: Optional[str]) -> Dict:
-    if not path:
-        return {}
-    data = yaml.safe_load(Path(path).read_text())
-    return data or {}
 
 
 def _upload(run_dir, config, token, base_url, dry_run, on_event, custom_tags, deprecations) -> Dict:
@@ -111,7 +87,8 @@ def main(argv=None) -> int:
     parser.add_argument("--dry-run", action="store_true", help="Resolve and report what would upload; no API calls")
     args = parser.parse_args(argv)
 
-    run_dir = Path(args.run_dir) if args.run_dir else find_latest_run(Path(args.output_dir))
+    latest = None if args.run_dir else api.latest_run(args.output_dir, kind="evidence")
+    run_dir = Path(args.run_dir) if args.run_dir else (Path(latest["dir"]) if latest else None)
     if not run_dir or not run_dir.is_dir():
         logger.error(
             "No run directory to upload (looked for %s)",
@@ -119,7 +96,7 @@ def main(argv=None) -> int:
         )
         return 1
     try:
-        summary = _upload(run_dir, load_config(args.config), None, None, args.dry_run, None, True, [DEPRECATION])
+        summary = _upload(run_dir, upload_config.load(args.config), None, None, args.dry_run, None, True, [DEPRECATION])
     except ValueError as e:  # setup errors
         logger.error("%s", e)
         return 1

@@ -19,13 +19,13 @@ import json
 import logging
 from collections import Counter, defaultdict
 from dataclasses import asdict
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from dotenv import load_dotenv
 
-from framework import yaml_io
+from framework import upload_config, yaml_io
+from framework.clock import utc_now
 from framework.config_loader import discover_fetchers
 from framework.custom_tags import Tagger, category_display_names, resolve_tag_policy
 from framework.paramify.client import Client
@@ -65,19 +65,6 @@ _FILE_OUTCOME = {"uploaded": "uploaded", "already_present": "skipped_duplicate",
 # A planned-only entry state, for a dry run.
 _PLANNED_STATE = {"deliver": "planned", "noop": "noop", "refuse": "refused"}
 INTERRUPTED = "not applied: upload interrupted"
-
-
-def _utc_now() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
-def load_config(config_path: Optional[Path]) -> Dict[str, Any]:
-    if not config_path:
-        return {}
-    data = yaml_io.load_path(Path(config_path)) or {}
-    if not isinstance(data, dict):
-        raise ValueError(f"the uploader config {config_path} is not a mapping")
-    return data
 
 
 def _run_manifest(run_dir: Path, root: Path) -> Optional[Path]:
@@ -147,7 +134,7 @@ class _Setup:
             raise ValueError(f"No run directory to upload: {self.run_dir}")
         self.config_path = config_path
         # An in-memory config replaces the file: nothing is read or written.
-        self.config = upload_cfg if upload_cfg is not None else load_config(config_path)
+        self.config = upload_cfg if upload_cfg is not None else upload_config.load(config_path)
         # Config wins, then an explicit argument, then the environment.
         self.settings = paramify_settings(self.config, base_url=base_url, token=token)
         self.base_url = self.settings.base_url
@@ -586,7 +573,7 @@ def _write_log(run_dir: Path, summary: Dict[str, Any], error: Optional[str]) -> 
     """upload_log.json: the fields it has always had, plus `dropped`, `plan`, `entries`
     (each entry's mode, batch, stack, channel and request), `batches`, `outcomes` and the validator sync."""
     log: Dict[str, Any] = {
-        "uploaded_at": _utc_now(),
+        "uploaded_at": utc_now(),
         "run_dir": summary["run_dir"],
         "uploaded": summary["uploaded"],
         "skipped_duplicate": summary["skipped_duplicate"],

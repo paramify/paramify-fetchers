@@ -38,8 +38,9 @@ from packaging.requirements import Requirement
 from packaging.specifiers import SpecifierSet
 from packaging.utils import canonicalize_name
 
-from framework import patterns, yaml_io
+from framework import patterns, upload_config, yaml_io
 from framework import samples as _samples
+from framework.clock import utc_now
 from framework.config_loader import discover_fetchers, discover_platforms
 from framework.contract import (
     ConfigField,
@@ -637,21 +638,19 @@ def upload_readiness(root: Path, config_path: Optional[Path] = None) -> dict:
     missing here while `paramify stacks` and `paramify upload` find it.
     """
     load_dotenv()
-    config: dict = {}
-    if config_path is not None:
-        try:
-            loaded = yaml_io.load_path(Path(config_path))
-            config = loaded if isinstance(loaded, dict) else {}
-        except (OSError, yaml.YAMLError) as exc:
-            return {
-                "ok": False,
-                "token_present": False,
-                "token_source": None,
-                "base_url": None,
-                "base_url_source": None,
-                "base_url_label": None,
-                "errors": [f"Could not read uploader config {config_path}: {exc}"],
-            }
+    try:
+        config = upload_config.load(config_path)
+    except (OSError, yaml.YAMLError, ValueError) as exc:
+        problem = str(exc) if isinstance(exc, ValueError) else f"Could not read uploader config {config_path}: {exc}"
+        return {
+            "ok": False,
+            "token_present": False,
+            "token_source": None,
+            "base_url": None,
+            "base_url_source": None,
+            "base_url_label": None,
+            "errors": [problem],
+        }
 
     resolved = paramify_settings(config)
     errors = resolved.errors(need_token=True)
@@ -1396,9 +1395,6 @@ def validate(manifest: dict, root: Path, fetchers=None, platforms=None) -> List[
 # Run — the orchestration loop, with an optional event callback for streaming
 # --------------------------------------------------------------------------- #
 
-def _iso_now() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
 
 def _invocation_record(r) -> dict:
     record = {
@@ -1580,7 +1576,7 @@ def run(
     setup_errors: List[dict] = []
     notes: List[dict] = []
     overall_ok = True
-    started_at = _iso_now()
+    started_at = utc_now()
 
     for entry in entries:
         key = keys[id(entry)]
@@ -1688,7 +1684,7 @@ def run(
             emit(result_event)
         all_results.extend(results)
 
-    completed_at = _iso_now()
+    completed_at = utc_now()
     metadata = {
         "run_id": run_id,
         "manifest": _manifest_id(manifest_path, root) if manifest_path else None,
@@ -1830,9 +1826,7 @@ def sync_validators(
     # The same default config as the other stages (<root>/upload.yaml), so the
     # base URL and the default tags do not depend on which stage is running.
     config_path = _upload_config(root, config_path)
-    config: dict = {}
-    if config_path:
-        config = yaml_io.load_path(Path(config_path)) or {}
+    config = upload_config.load(config_path)
     return syncer.sync_validators(
         validators,
         config=config,
@@ -1855,7 +1849,7 @@ def upload_preflight(
     """Inspect upload readiness without making Paramify API calls."""
     load_dotenv()
     config_path = _upload_config(root, config_path)
-    resolved = paramify_settings(_sync_upload.load_config(config_path))
+    resolved = paramify_settings(upload_config.load(config_path))
 
     run_path = Path(run_dir)
     errors: List[str] = []
@@ -1961,7 +1955,7 @@ def upload_run(
 def _workspace(root: Optional[Path], config_path: Optional[Path]) -> Resources:
     """Resources for the configured workspace. Raises ValueError with no token or a bad base URL."""
     root = Path(root) if root is not None else find_repo_root()
-    _, resources = open_workspace(_sync_upload.load_config(_upload_config(root, config_path)))
+    _, resources = open_workspace(upload_config.load(_upload_config(root, config_path)))
     assert resources is not None  # a token is required, or open_workspace raised
     return resources
 
@@ -2186,7 +2180,7 @@ def issues_upload_preflight(
     uploader = _load_paramify_issues_uploader(root)
     load_dotenv()
     config_path = _upload_config(root, config_path)
-    config = (yaml_io.load_path(Path(config_path)) or {}) if config_path else {}
+    config = upload_config.load(config_path)
     resolved = paramify_settings(config)
 
     run_path = Path(run_dir)
@@ -2298,7 +2292,7 @@ def issues_upload_run(
     """
     uploader = _load_paramify_issues_uploader(root)
     config_path = _upload_config(root, config_path)
-    config = (yaml_io.load_path(Path(config_path)) or {}) if config_path else {}
+    config = upload_config.load(config_path)
     try:
         index = read_issue_report_index(Path(run_dir))
     except ValueError:
@@ -2319,7 +2313,7 @@ def _pipelines(root: Path, config_path: Optional[Path] = None) -> Pipelines:
     """The pipeline endpoints, for the commands that act on Paramify directly
     rather than on a run: jobs, retry, cancel, close."""
     config_path = _upload_config(root, config_path)
-    config = (yaml_io.load_path(Path(config_path)) or {}) if config_path else {}
+    config = upload_config.load(config_path)
     _, pipelines = open_workspace(config, wrap=Pipelines)
     assert pipelines is not None  # a token is required, or open_workspace raised
     return pipelines
@@ -2418,7 +2412,7 @@ def scripts_sync_preflight(
     """
     load_dotenv()
     config_path = _upload_config(root, config_path)
-    config = (yaml_io.load_path(Path(config_path)) or {}) if config_path else {}
+    config = upload_config.load(config_path)
     resolved = paramify_settings(config)
 
     errors: List[str] = []
@@ -2472,7 +2466,7 @@ def scripts_sync(
     """
     uploader = _load_paramify_scripts_uploader(root)
     config_path = _upload_config(root, config_path)
-    config = (yaml_io.load_path(Path(config_path)) or {}) if config_path else {}
+    config = upload_config.load(config_path)
     return uploader.sync_scripts(
         root,
         config=config,
@@ -2594,7 +2588,12 @@ def run_has(run: dict, kind: str) -> bool:
     if kind == "issue_report":
         return bool(run.get("issue_reports"))
     if kind == "evidence":
-        return any(f.get("kind") == "evidence" for f in run.get("files") or [])
+        # What the upload would send: an evidence file that is there. Metadata can
+        # list outputs that are not (deleted, or not JSON).
+        return any(
+            f.get("kind") == "evidence" and is_evidence_file(Path(f["path"])) and Path(f["path"]).is_file()
+            for f in run.get("files") or []
+        )
     raise ValueError(f"unknown run kind {kind!r}; expected one of {RUN_KINDS}")
 
 
@@ -3729,10 +3728,7 @@ def _validator_lock(root: Path, config_path: Optional[Path]) -> Dict[str, str]:
     `validators sync` writes, or {} when it is absent or unreadable."""
     try:
         syncer = _load_paramify_validator_syncer(root)
-        config: dict = {}
-        if config_path:
-            loaded = yaml_io.load_path(Path(config_path))
-            config = loaded if isinstance(loaded, dict) else {}
+        config = upload_config.load(config_path)
         # As given, like the syncer: a relative path is from the working
         # directory, which is where `validators sync` wrote it.
         lock_path = Path((config.get("validators") or {}).get("lock_path") or syncer.DEFAULT_LOCK_PATH)
@@ -3791,13 +3787,10 @@ def paramify_status(root: Path, manifest_path: Path, config_path: Optional[Path]
     token = bool(readiness["token_present"])
     # The uploader config can send a fetcher to another set (overrides.<name>);
     # the scripts sync and the upload both follow it, so the status does too.
-    overrides: dict = {}
-    if config_path:
-        try:
-            loaded = yaml_io.load_path(Path(config_path))
-            overrides = (loaded.get("overrides") or {}) if isinstance(loaded, dict) else {}
-        except (OSError, yaml.YAMLError):
-            overrides = {}  # upload_readiness read it just now; a race at most
+    try:
+        overrides = upload_config.load(config_path).get("overrides") or {}
+    except (OSError, yaml.YAMLError, ValueError):
+        overrides = {}  # upload_readiness read it just now and reported it
 
     rows: List[dict] = []
     seen: set = set()
