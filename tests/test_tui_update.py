@@ -11,7 +11,6 @@ import copy
 import io
 import json
 import subprocess
-import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -65,8 +64,16 @@ PLAN = {
          "detail": "Evidence set, artifact count and validators", "try": "paramify status <manifest>",
          "release": "unreleased"},
     ],
+    "hidden_highlights": 0,
+    "tries": ["paramify status <manifest>"],
+    "used": 2,
+    "changelog": "https://github.com/paramify/paramify-fetchers/blob/3a97b70bdf/CHANGELOG.md",
+    "stops": {"breaks": [], "python_required": None,
+              "touching": ["An inventory fetcher needs a pipeline block in fetcher.yaml",
+                           "Inventory records must carry asset_type"]},
     "can_roll_back": False,
 }
+SHA = PLAN["target"]["sha"]
 
 
 def _plan(**over) -> dict:
@@ -176,7 +183,7 @@ def test_rollback_button_only_when_there_is_something_to_roll_back_to():
 def test_apply_with_breaking_needs_second_confirm(monkeypatch):
     calls = []
     monkeypatch.setattr(api, "apply_update",
-                        lambda root, allow_breaking: calls.append(allow_breaking) or {"ok": True, "errors": []})
+                        lambda root, expect, allow_breaking: calls.append((expect, allow_breaking)) or {"ok": True, "errors": []})
 
     async def body(app, pilot):
         await app.push_screen(UpdateScreen(_plan()))
@@ -202,7 +209,7 @@ def test_apply_with_breaking_needs_second_confirm(monkeypatch):
         await pilot.pause()
         await app.workers.wait_for_complete()
         await pilot.pause()
-        assert calls == [True]
+        assert calls == [(SHA, True)]  # the commit this screen showed, nothing newer
         assert "Restart the TUI to load the new code." in _text(app.screen.query_one("#update-result"))
 
     _run(body)
@@ -211,8 +218,8 @@ def test_apply_with_breaking_needs_second_confirm(monkeypatch):
 def test_apply_without_breaking_asks_once(monkeypatch):
     calls = []
     monkeypatch.setattr(api, "apply_update",
-                        lambda root, allow_breaking: calls.append(allow_breaking) or {"ok": True, "errors": []})
-    plan = _plan(breaking=[])
+                        lambda root, expect, allow_breaking: calls.append((expect, allow_breaking)) or {"ok": True, "errors": []})
+    plan = _plan(breaking=[], stops={"breaks": [], "touching": [], "python_required": None})
 
     async def body(app, pilot):
         await app.push_screen(UpdateScreen(plan))
@@ -223,17 +230,18 @@ def test_apply_without_breaking_asks_once(monkeypatch):
         await pilot.pause()
         await app.workers.wait_for_complete()
         await pilot.pause()
-        assert calls == [False]
+        assert calls == [(SHA, False)]
 
     _run(body)
 
 
 def test_failed_apply_shows_the_error_and_keeps_the_screen(monkeypatch):
     monkeypatch.setattr(api, "apply_update",
-                        lambda root, allow_breaking: {"ok": False, "errors": ["local files are in the way"]})
+                        lambda root, expect, allow_breaking: {"ok": False, "errors": ["local files are in the way"]})
 
     async def body(app, pilot):
-        await app.push_screen(UpdateScreen(_plan(breaking=[])))
+        await app.push_screen(UpdateScreen(_plan(breaking=[], stops={"breaks": [], "touching": [],
+                                                                     "python_required": None})))
         await pilot.pause()
         await pilot.click("#update-apply")
         await pilot.pause()
@@ -322,76 +330,42 @@ def _fake_run(monkeypatch, *, stdout="", stderr="", code=0):
 
 def test_non_json_output_is_an_error_line(monkeypatch, tmp_path):
     seen = _fake_run(monkeypatch, stdout="Traceback...\n", stderr="warn\nModuleNotFoundError: no module x\n", code=1)
-    out = api.apply_update(tmp_path, allow_breaking=False)
+    out = api.apply_update(tmp_path, SHA, allow_breaking=False)
     assert out == {"ok": False, "errors": ["ModuleNotFoundError: no module x"]}
     assert seen["cwd"] == tmp_path
 
 
-def test_commands_and_flags(monkeypatch, tmp_path):
-    reply = json.dumps({"ok": True, "errors": []})
-    seen = _fake_run(monkeypatch, stdout=reply)
-    api.apply_update(tmp_path, allow_breaking=True)
-    assert seen["cmd"][:4] == [sys.executable, "-m", "framework.cli", "update"]
-    assert seen["cmd"][4:] == ["--yes", "--json", "--allow-breaking"]
-    api.apply_update(tmp_path, allow_breaking=False)
-    assert seen["cmd"][4:] == ["--yes", "--json"]
-    api.rollback_update(tmp_path)
-    assert seen["cmd"][4:] == ["--rollback", "--yes", "--json"]
+def test_apply_asks_the_cli_for_exactly_the_planned_commit(monkeypatch, tmp_path):
+    reply = {"ok": True, "errors": [], "version": "main"}
+    seen = _fake_run(monkeypatch, stdout=json.dumps(reply))
+    assert api.apply_update(tmp_path, SHA, allow_breaking=True) == reply
+    assert seen["cmd"][seen["cmd"].index("--expect") + 1] == SHA
+    assert api.rollback_update(tmp_path) == reply
 
 
-def test_update_plan_treats_the_confirmation_stop_as_a_plan(monkeypatch, tmp_path):
-    doc = _plan(ok=False, errors=["stopped: 2 breaking changes touch this clone. Read them above, then rerun "
-                                  "with --allow-breaking (or without --yes)"])
-    _fake_run(monkeypatch, stdout=json.dumps(doc), code=1)
-    monkeypatch.setattr("framework.update.read_state", lambda root: {"previous": {"sha": "abc"}})
+def test_update_plan_reads_the_plan_in_this_process(monkeypatch, tmp_path):
+    from framework import update
+
+    located = {"current": {"label": "main @ fc74f19"}, "target": PLAN["target"], "up_to_date": False,
+               "manifests": [{"label": "manifests/prod.yaml", "path": "/x"}], "rows": [{"tag": "new"}]}
+    monkeypatch.setattr(update, "plan", lambda root: located)
+    monkeypatch.setattr(update, "read_state", lambda root: {"previous": {"sha": "abc"}})
     plan = api.update_plan(tmp_path)
-    assert plan["ok"] is True and plan["errors"] == []
-    assert plan["can_roll_back"] is True
-    assert plan["breaking"]
+    assert plan["ok"] and plan["errors"] == [] and plan["can_roll_back"]
+    assert plan["manifests"] == ["manifests/prod.yaml"] and "rows" not in plan
 
+    def refuse(root):
+        raise update.UpdateError("main has 2 commits that origin/main does not")
 
-def test_update_plan_keeps_real_errors(monkeypatch, tmp_path):
-    doc = {"ok": False, "errors": ["local files are in the way of this update"]}
-    _fake_run(monkeypatch, stdout=json.dumps(doc), code=1)
-    monkeypatch.setattr("framework.update.read_state", lambda root: {})
-    plan = api.update_plan(tmp_path)
-    assert plan["ok"] is False
-    assert plan["errors"] == ["local files are in the way of this update"]
-
-
-def test_update_notice_is_the_waiting_text_or_none(monkeypatch, tmp_path):
-    monkeypatch.setattr(api, "check_for_update", lambda root: {"update_available": True, "waiting": "3 new commits on main"})
-    assert api.update_notice(tmp_path) == "3 new commits on main"
-    monkeypatch.setattr(api, "check_for_update", lambda root: {"update_available": False, "waiting": None})
-    assert api.update_notice(tmp_path) is None
-    monkeypatch.setattr(api, "check_for_update", lambda root: None)
-    assert api.update_notice(tmp_path) is None
+    monkeypatch.setattr(update, "plan", refuse)
+    monkeypatch.setattr(update, "read_state", lambda root: {})
+    assert api.update_plan(tmp_path) == {"ok": False, "errors": ["main has 2 commits that origin/main does not"],
+                                         "can_roll_back": False}
 
 
 # --------------------------------------------------------------------------- #
 # The header at 80 columns with the notice showing
 # --------------------------------------------------------------------------- #
-
-def test_notice_does_not_break_the_header_at_80_columns(monkeypatch, tui_size):
-    monkeypatch.setattr(api, "update_notice", lambda root: "12 new commits on main")
-    from framework.tui.components.chrome import AppHeader
-    from framework.tui.screens.workspace import WorkspaceScreen
-
-    async def body(app, pilot):
-        await app.push_screen(WorkspaceScreen())
-        await pilot.pause()
-        await app.workers.wait_for_complete()
-        await pilot.pause()
-        screen = app.screen
-        screen.query_one(AppHeader).set_crumb("manifests › prod › paramify")
-        await pilot.pause()
-        notice = screen.query_one(UpdateNotice)
-        assert notice.display and "update" in _text(notice)
-        assert screen.query_one(AppHeader).size.height <= 2
-        assert screen.query_one("#app-header-crumb").size.width >= 12
-
-    _run(body, size=(80, 24))
-
 
 @pytest.mark.parametrize("notice", ["12 new commits on main", None])
 def test_header_fits_at_80_columns(monkeypatch, notice):

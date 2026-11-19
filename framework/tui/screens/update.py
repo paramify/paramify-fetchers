@@ -1,17 +1,17 @@
 """UpdateScreen: what `paramify update` would do, and a way to do it or undo it.
 
-It shows the plan the CLI prints (`paramify update --json`) with the CLI's own
-wording (framework/update_view.py): where you are and where you'd go, whether
+It shows the plan the CLI prints (framework.update.plan) with the CLI's own
+drawing (framework/update_view.py): where you are and where you'd go, whether
 your manifests still pass, which of your fetchers change, what breaks, what is
 new. Apply asks once; breaking changes that touch this clone ask a second time,
 by count, like `--allow-breaking`. The move itself runs in a subprocess
-(api.apply_update), so this process never loads half-updated code, and says so:
-restart the TUI afterwards.
+(api.apply_update) pinned to the commit shown here, so this process never loads
+half-updated code and never lands commits it didn't show; restart the TUI
+afterwards.
 """
 
 from __future__ import annotations
 
-import fnmatch
 from typing import List, Optional
 
 from rich.console import Group
@@ -33,23 +33,8 @@ from framework.tui.modals import ConfirmModal
 _RESTART = "Restart the TUI to load the {what} code."
 
 
-def _versions(row: dict) -> str:
-    if row["change"] == "removed":
-        return "removed"
-    if row["change"] == "added":
-        return f"new {row['to']}" if row["to"] else "new"
-    if row["from"] == row["to"]:
-        return row["to"] or ""
-    return f"{row['from'] or '?'} → {row['to'] or '?'}"
-
-
-def _lines(rows: List[Text]) -> Text:
-    out = Text()
-    for i, row in enumerate(rows):
-        if i:
-            out.append("\n")
-        out.append_text(row)
-    return out
+def _errors_text(errors: List[str]) -> Group:
+    return Group(*(view.fail(e) for e in errors))
 
 
 class UpdateScreen(ButtonRowNav, Screen):
@@ -75,13 +60,8 @@ class UpdateScreen(ButtonRowNav, Screen):
         return bool(self.plan.get("ok")) and "target" in self.plan and not self.plan.get("up_to_date")
 
     @property
-    def _touching(self) -> List[dict]:
-        return [b for b in self.plan.get("breaking") or [] if b.get("touches")]
-
-    @property
-    def _breaks(self) -> List[str]:
-        rows = (self.plan.get("check") or {}).get("manifests") or []
-        return [m["manifest"] for m in rows if m.get("status") == "breaks"]
+    def _stops(self) -> dict:
+        return self.plan.get("stops") or {"breaks": [], "touching": []}
 
     # -- layout ------------------------------------------------------------ #
 
@@ -121,80 +101,44 @@ class UpdateScreen(ButtonRowNav, Screen):
                 found.first().focus()
                 break
 
-    def _header_text(self) -> Text:
+    def _header_text(self):
         if self._errors:
-            out = Text()
-            for i, err in enumerate(self._errors):
-                if i:
-                    out.append("\n")
-                out.append("✗ ", style="red")
-                out.append(err)
-            return out
+            return _errors_text(self._errors)
         if self.plan.get("up_to_date"):
             label = (self.plan.get("current") or {}).get("label") or "this clone"
-            return Text(f"✓ Up to date: {label}.", style="green")
+            return view.ok(f"Up to date: {label}.")
         return view.header(self.plan)
 
-    def _check_text(self) -> Text:
-        state, summary = view.check_summary(self.plan["check"])
-        mark, color = view.MARKS[state]
-        out = Text()
-        out.append(f"  {mark} ", style=color)
-        out.append("check your manifests  ", style="")
-        out.append(summary, style=color if state != "ok" else "dim")
-        for detail in view.check_details(self.plan["check"]):
-            out.append("\n")
-            out.append_text(detail)
-        return out
-
-    def _fetchers(self) -> dict:
-        return self.plan.get("fetchers") or {}
+    def _check_text(self) -> view.Step:
+        step = view.Step("check your manifests")
+        view.settle_check(step, self.plan["check"])
+        return step
 
     def _fetchers_title(self) -> Text:
-        yours = self._fetchers().get("yours") or []
+        yours = (self.plan.get("fetchers") or {}).get("yours") or []
         title = Text("Your fetchers", style="bold")
         title.append(f"   {len(yours)} changed" if yours else "   none of the fetchers you use changed",
                      style="dim")
         return title
 
     def _fetcher_rows(self) -> List[tuple]:
-        broken = [p for b in self._touching for m in b.get("manifests") or [] for p in m.get("fetchers") or []]
+        broken = view.broken_patterns(self.plan.get("breaking") or [])
         rows = []
-        for row in self._fetchers().get("yours") or []:
-            note = Text()
-            if any(fnmatch.fnmatchcase(row["name"], p) for p in broken):
-                note.append("⚠ breaking  ", style=palette.WARN)
-            if row.get("reason"):
-                note.append(row["reason"])
-                if row.get("more"):
-                    note.append(f"  +{row['more']} more", style=palette.MUTED)
-            elif row.get("more"):
-                note.append(view.plural(row["more"], "commit"), style=palette.MUTED)
+        for row in (self.plan.get("fetchers") or {}).get("yours") or []:
             color = palette.FAIL if row["change"] == "removed" else palette.INFO
-            rows.append((Text(row["name"], style=color), Text(_versions(row), style=palette.MUTED), note))
+            rows.append((Text(row["name"], style=color), Text(view.versions(row), style=palette.MUTED),
+                         view.fetcher_note(row, broken)))
         return rows
 
     def _breaking_text(self) -> Group:
         # A Group, not one Text: the fix lines wrap with a hanging indent here too.
         return Group(*view.breaking(self.plan.get("breaking") or []))
 
-    def _new_text(self) -> Text:
-        return _lines(view.whats_new(self.plan.get("highlights") or []))
+    def _new_text(self) -> Group:
+        return Group(*view.whats_new(self.plan.get("highlights") or []))
 
-    def _rest_text(self) -> Text:
-        changes = self._fetchers()
-        bits = []
-        if changes.get("others"):
-            bits.append(f"{view.plural(len(changes['others']), 'other fetcher')} changed")
-        if changes.get("added"):
-            bits.append(f"{len(changes['added'])} added")
-        if changes.get("removed"):
-            bits.append(f"{len(changes['removed'])} removed")
-        other = len(self.plan.get("breaking") or []) - len(self._touching)
-        if other:
-            bits.append(f"{view.plural(other, 'other breaking change')} that "
-                        f"{'does' if other == 1 else 'do'}n't touch you")
-        return Text(" · ".join(bits), style="dim")
+    def _rest_text(self) -> Group:
+        return Group(*view.rest(self.plan))
 
     # -- actions ----------------------------------------------------------- #
 
@@ -220,18 +164,12 @@ class UpdateScreen(ButtonRowNav, Screen):
     def _first_answer(self, yes: Optional[bool]) -> None:
         if not yes:
             return
-        touching, breaks = self._touching, self._breaks
-        if not (touching or breaks):
+        stops = self._stops
+        if not (stops["touching"] or stops["breaks"]):
             self._apply(False)
             return
-        reasons = []
-        if touching:
-            reasons.append(f"{view.plural(len(touching), 'breaking change')} "
-                           f"{'touches' if len(touching) == 1 else 'touch'} this clone")
-        if breaks:
-            reasons.append(f"{view.plural(len(breaks), 'manifest')} would break")
         self.app.push_screen(
-            ConfirmModal(f"{' and '.join(reasons).capitalize()}. Apply anyway?"), self._second_answer
+            ConfirmModal(f"{view.stop_reasons(stops).capitalize()}. Apply anyway?"), self._second_answer
         )
 
     def _second_answer(self, yes: Optional[bool]) -> None:
@@ -260,7 +198,7 @@ class UpdateScreen(ButtonRowNav, Screen):
     def _apply(self, allow_breaking: bool) -> None:
         self.app.call_from_thread(self._working, "Updating…")
         try:
-            out = api.apply_update(self.app.root_path, allow_breaking)
+            out = api.apply_update(self.app.root_path, self.plan["target"]["sha"], allow_breaking)
         except Exception as exc:
             out = {"ok": False, "errors": [str(exc)]}
         self.app.call_from_thread(self._finished, out, "Updated.", "new")
@@ -285,11 +223,4 @@ class UpdateScreen(ButtonRowNav, Screen):
             return
         for button in self.query(Button):
             button.disabled = False
-        errors = out.get("errors") or ["the update failed"]
-        text = Text()
-        for i, err in enumerate(errors):
-            if i:
-                text.append("\n")
-            text.append("✗ ", style=palette.FAIL)
-            text.append(err)
-        result.update(text)
+        result.update(_errors_text(out.get("errors") or ["the update failed"]))

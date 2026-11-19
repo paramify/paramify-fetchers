@@ -129,11 +129,6 @@ def update_notice(root: Path) -> Optional[str]:
     return info["waiting"] if info and info.get("update_available") else None
 
 
-# `paramify update --json` stops with one of these when it has made its plan but was not told to go
-# ahead (no --yes, or breaking changes without --allow-breaking). For a front-end that is the plan.
-_PLAN_STOPS = ("needs confirmation: pass --yes", "stopped: ")
-
-
 def _run_update(root: Path, *flags: str) -> dict:
     """Run `paramify update <flags>` in `root` as a subprocess and parse its JSON.
 
@@ -166,19 +161,18 @@ def _run_update(root: Path, *flags: str) -> dict:
 def update_plan(root: Path) -> dict:
     """What `paramify update` would do, without doing it (it asks nothing and changes nothing).
 
-    The `paramify update --json` document: {ok, errors, current, fetched,
-    channel, target, span, direction, manifests, check, fetchers, breaking,
-    highlights}, or {ok, up_to_date: True, ...} when there is nothing to do.
-    The CLI ends a plan it was not told to apply with an error; that stop is
-    cleared here (ok True), while a real refusal keeps its errors. Adds
-    `can_roll_back`: whether an earlier update left a position to return to.
+    The plan the CLI draws (framework.update.plan, as `--json` shows it), read
+    in this process: reading is safe here, only the move must be a subprocess.
+    {ok, errors, current, target, ...}, or {ok: False, errors} when update
+    refuses outright. Adds `can_roll_back`: whether an earlier update left a
+    position to return to.
     """
     from framework import update
 
-    doc = _run_update(root, "--json")
-    errors = doc.get("errors") or []
-    if "check" in doc and errors and all(e.startswith(_PLAN_STOPS[1]) or e.endswith(_PLAN_STOPS[0]) for e in errors):
-        doc.update(ok=True, errors=[])
+    try:
+        doc = {"ok": True, "errors": [], **update.public(update.plan(root))}
+    except update.UpdateError as e:
+        doc = {"ok": False, "errors": [str(e)]}
     try:
         doc["can_roll_back"] = bool(update.read_state(root).get("previous"))
     except Exception:
@@ -186,10 +180,12 @@ def update_plan(root: Path) -> dict:
     return doc
 
 
-def apply_update(root: Path, allow_breaking: bool = False) -> dict:
-    """Run the update (`paramify update --yes --json`). Breaking changes that touch
-    this clone stop it unless allow_breaking. Returns the CLI's JSON document."""
-    flags = ["--yes", "--json"] + (["--allow-breaking"] if allow_breaking else [])
+def apply_update(root: Path, expect: str, allow_breaking: bool = False) -> dict:
+    """Move to the commit a plan showed (`paramify update --yes --json --expect <sha>`),
+    in a subprocess, so the running process never loads half-replaced code. It
+    refuses if the target has moved since. Breaking changes that touch this
+    clone stop it unless allow_breaking. Returns the CLI's JSON document."""
+    flags = ["--yes", "--json", "--expect", expect] + (["--allow-breaking"] if allow_breaking else [])
     return _run_update(root, *flags)
 
 
