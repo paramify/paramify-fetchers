@@ -66,3 +66,114 @@ def test_open_workspace_returns_a_given_endpoint_object_without_a_token():
     from framework.paramify.connection import open_workspace
     given = object()
     assert open_workspace(use=given)[1] is given
+
+
+def test_reads_prefer_the_read_token_and_name_it_when_missing(monkeypatch):
+    """Each side prefers its own name and falls back to the other, so a workspace
+    with two tokens uses the right one for each."""
+    monkeypatch.setenv("PARAMIFY_API_TOKEN", "read-tok")
+    monkeypatch.setenv("PARAMIFY_UPLOAD_API_TOKEN", "upload-tok")
+    assert settings(read=True).token == "read-tok"
+    assert settings().token == "upload-tok"
+    monkeypatch.delenv("PARAMIFY_API_TOKEN")
+    monkeypatch.delenv("PARAMIFY_UPLOAD_API_TOKEN")
+    assert "read scope" in settings(read=True).errors(need_token=True)[0]
+
+
+def test_each_read_builds_its_client_in_one_place_with_its_own_token(monkeypatch, tmp_path):
+    """Patching connection.Client reaches every read, and with both tokens set
+    each command uses its side's: workspace reads the read token, stacks (an
+    upload concern) the upload token."""
+    from framework import api
+    from framework.paramify import connection
+
+    built = []
+
+    class Stop(Exception):
+        pass
+
+    def spy(token, base_url, **kw):
+        built.append(token)
+        raise Stop
+
+    monkeypatch.setattr(connection, "Client", spy)
+    monkeypatch.setenv("PYTHON_DOTENV_DISABLED", "1")
+    monkeypatch.setenv("PARAMIFY_API_TOKEN", "read-tok")
+    monkeypatch.setenv("PARAMIFY_UPLOAD_API_TOKEN", "upload-tok")
+    for read in (api.list_programs, lambda: api.list_stacks(tmp_path)):
+        with pytest.raises(Stop):
+            read()
+    assert built == ["read-tok", "upload-tok"]
+
+
+def test_doctor_accepts_a_local_stub_like_every_other_stage(monkeypatch, tmp_path):
+    from framework import api
+    monkeypatch.setenv("PYTHON_DOTENV_DISABLED", "1")
+    monkeypatch.setenv("PARAMIFY_UPLOAD_API_TOKEN", "tok")
+    monkeypatch.setenv("PARAMIFY_API_BASE_URL", "http://localhost:8080/api/v0")
+    assert api.upload_readiness(tmp_path)["ok"]
+    monkeypatch.setenv("PARAMIFY_API_BASE_URL", "http://app.example.test/api/v0")
+    assert "https" in api.upload_readiness(tmp_path)["errors"][0]
+
+
+# --------------------------------------------------------------------------- #
+# Workspace reads: every failure is one RuntimeError a CLI prints verbatim
+# --------------------------------------------------------------------------- #
+
+class _Reply:
+    headers: dict = {}
+
+    def __init__(self, status, text):
+        self.status_code, self.text = status, text
+
+    def json(self):
+        import json
+        return json.loads(self.text)
+
+
+@pytest.fixture
+def read_env(monkeypatch):
+    monkeypatch.setenv("PYTHON_DOTENV_DISABLED", "1")
+    monkeypatch.setenv("PARAMIFY_API_TOKEN", "tok")
+    monkeypatch.setenv("PARAMIFY_API_BASE_URL", "https://api.example.test")
+
+
+def _answer(monkeypatch, reply):
+    from tests.paramify_fake import reads_through
+
+    def fake_get(url, headers=None, params=None, timeout=None):
+        if isinstance(reply, Exception):
+            raise reply
+        return reply
+
+    monkeypatch.setattr("framework.paramify.client.requests.Session", lambda: reads_through(fake_get))
+
+
+@pytest.mark.parametrize("reply, expected", [
+    (_Reply(401, "no"), r"rejected the token \(HTTP 401\).*read scope"),
+    (_Reply(500, "boom"), r"failed \(HTTP 500\): boom"),
+    (_Reply(200, "<html>login</html>"), r"non-JSON body: <html>login</html>"),
+    (_Reply(200, ""), r"non-JSON body: \(empty\)"),
+])
+def test_a_failed_read_is_one_printable_error(read_env, monkeypatch, reply, expected):
+    from framework import api
+    _answer(monkeypatch, reply)
+    with pytest.raises(RuntimeError, match=expected):
+        api.list_programs()
+
+
+def test_an_unreachable_workspace_says_so_without_claiming_a_retry(read_env, monkeypatch):
+    import requests
+
+    from framework import api
+    _answer(monkeypatch, requests.ConnectionError("dns failed"))
+    with pytest.raises(RuntimeError, match="could not reach https://api.example.test/projects") as e:
+        api.list_programs()
+    assert "after retrying" not in str(e.value)
+
+
+def test_the_https_error_names_the_setting_the_user_set(monkeypatch):
+    monkeypatch.setenv("PARAMIFY_API_BASE_URL", "http://app.example.test")
+    assert settings().errors(need_token=False)[0].startswith("PARAMIFY_API_BASE_URL must be https")
+    cfg = {"paramify": {"base_url": "http://app.example.test"}}
+    assert settings(cfg).errors(need_token=False)[0].startswith("base_url must be https")

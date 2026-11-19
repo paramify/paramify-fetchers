@@ -388,3 +388,23 @@ class FakeParamify:
             return FakeResponse(409, text="Batch has no artifacts")
         batch["status"] = "SUBMITTED" if batch["whenToApprove"] == "MANUAL" else "APPROVED"
         return FakeResponse(200, batch)
+
+
+def reads_through(fake_get: Any) -> Any:
+    """A requests.Session stand-in for `Client` that answers every GET with a
+    `requests.get`-style fake: `fake_get(url, headers=, params=, timeout=)`.
+
+    Patch it in with
+    `monkeypatch.setattr("framework.paramify.client.requests.Session", lambda: reads_through(fake_get))`,
+    which replaces `requests.Session` itself for the test (monkeypatch restores it).
+    """
+    class _Session:
+        def __init__(self) -> None:
+            self.headers: Dict[str, str] = {}
+
+        def request(self, method: str, url: str, params: Any = None, json: Any = None,
+                    files: Any = None, timeout: Any = None) -> Any:
+            assert method == "GET", f"a workspace read sent {method} {url}"
+            return fake_get(url, headers=dict(self.headers), params=params, timeout=timeout)
+
+    return _Session()

@@ -31,7 +31,6 @@ from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as pkg_version
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
-from urllib.parse import urlparse
 
 import yaml
 from dotenv import load_dotenv
@@ -67,8 +66,8 @@ from framework.issue_reports import (
 )
 from framework.issue_reports import read_index as read_issue_report_index
 from framework.issue_reports import record_outputs as record_issue_reports
-from framework.paramify.client import base_url_error
-from framework.paramify.connection import open_workspace
+from framework.paramify.client import ApiError
+from framework.paramify.connection import client_for, open_workspace
 from framework.paramify.connection import settings as paramify_settings
 from framework.paramify.pipelines import (
     DEFAULT_WAIT_TIMEOUT,
@@ -76,14 +75,9 @@ from framework.paramify.pipelines import (
     job_summary,
     wait_for_job,
 )
+from framework.paramify.resources import Resources
 from framework.paramify_auth import (
-    BASE_URL_ENV,
-    READ_TOKEN_ENV,
-    UPLOAD_TOKEN_ENV,
     describe_base_url,
-    missing_token_error,
-    resolve_base_url,
-    resolve_upload_token,
 )
 from framework.probe import probe_categories
 from framework.run_files import is_evidence_file
@@ -96,8 +90,6 @@ from framework.secret_resolver import (
 from framework.sync import upload as _sync_upload
 from framework.sync.model import Plan
 from framework.sync.providers.delivery_routing import PIPELINE_DIRECT
-
-_missing_token_error = missing_token_error
 
 _STDERR_TAIL_CHARS = 4000
 
@@ -736,25 +728,15 @@ def upload_readiness(root: Path, config_path: Optional[Path] = None) -> dict:
                 "errors": [f"Could not read uploader config {config_path}: {exc}"],
             }
 
-    paramify_cfg = config.get("paramify") or {}
-    base_url, base_url_source = resolve_base_url(paramify_cfg.get("base_url"))
-    token, token_source = resolve_upload_token()
-
-    errors: List[str] = []
-    if not token:
-        errors.append(_missing_token_error())
-    if not base_url.lower().startswith("https://"):
-        errors.append(
-            f"{BASE_URL_ENV} must be https to protect the API token (got {base_url!r})"
-        )
-
+    resolved = paramify_settings(config)
+    errors = resolved.errors(need_token=True)
     return {
         "ok": not errors,
-        "token_present": bool(token),
-        "token_source": token_source,
-        "base_url": base_url,
-        "base_url_source": base_url_source,
-        "base_url_label": describe_base_url(base_url),
+        "token_present": bool(resolved.token),
+        "token_source": resolved.token_source,
+        "base_url": resolved.base_url,
+        "base_url_source": resolved.base_url_source,
+        "base_url_label": describe_base_url(resolved.base_url),
         "errors": errors,
     }
 
@@ -1949,9 +1931,7 @@ def upload_preflight(
     """Inspect upload readiness without making Paramify API calls."""
     load_dotenv()
     config_path = _upload_config(root, config_path)
-    config = _sync_upload.load_config(config_path)
-    paramify_cfg = config.get("paramify") or {}
-    base_url, base_url_source = resolve_base_url(paramify_cfg.get("base_url"))
+    resolved = paramify_settings(_sync_upload.load_config(config_path))
 
     run_path = Path(run_dir)
     errors: List[str] = []
@@ -1963,25 +1943,18 @@ def upload_preflight(
         if file_count == 0:
             errors.append(f"No evidence files found in {run_path}")
 
-    url_error = base_url_error(base_url)
-    if url_error:
-        errors.append(url_error)
-
-    token, token_source = resolve_upload_token()
-    token_present = bool(token)
-    if not token_present and not dry_run:
-        errors.append(_missing_token_error())
+    errors.extend(resolved.errors(need_token=not dry_run))
 
     return {
         "ok": not errors,
         "run_dir": str(run_path),
-        "base_url": base_url,
-        "base_url_source": base_url_source,
-        "base_url_label": describe_base_url(base_url),
+        "base_url": resolved.base_url,
+        "base_url_source": resolved.base_url_source,
+        "base_url_label": describe_base_url(resolved.base_url),
         "config_path": str(config_path) if config_path else None,
         "file_count": file_count,
-        "token_present": token_present,
-        "token_source": token_source,
+        "token_present": bool(resolved.token),
+        "token_source": resolved.token_source,
         "dry_run": dry_run,
         "errors": errors,
     }
@@ -2061,19 +2034,12 @@ def upload_run(
     )
 
 
-def _workspace(root: Optional[Path], config_path: Optional[Path]) -> Any:
+def _workspace(root: Optional[Path], config_path: Optional[Path]) -> Resources:
     """Resources for the configured workspace. Raises ValueError with no token or a bad base URL."""
     root = Path(root) if root is not None else find_repo_root()
-    load_dotenv()
-    config = _sync_upload.load_config(_upload_config(root, config_path))
-    base_url, _ = resolve_base_url((config.get("paramify") or {}).get("base_url"))
-    url_error = base_url_error(base_url)
-    if url_error:
-        raise ValueError(url_error)
-    token, _ = resolve_upload_token()
-    if not token:
-        raise ValueError(_missing_token_error())
-    return _sync_upload.Resources(_sync_upload.Client(token, base_url))
+    _, resources = open_workspace(_sync_upload.load_config(_upload_config(root, config_path)))
+    assert resources is not None  # a token is required, or open_workspace raised
+    return resources
 
 
 def list_stacks(root: Optional[Path] = None, config_path: Optional[Path] = None) -> List[dict]:
@@ -3157,7 +3123,6 @@ def new_manifest_path(
 
 _PROGRAMS_PATH = "/projects"  # the UI's "programs" are the API's projects
 _ASSESSMENTS_PATH = "/assessment"
-_WORKSPACE_READ_TIMEOUT = 30
 
 
 def _workspace_get(
@@ -3167,62 +3132,37 @@ def _workspace_get(
 
     `base_url` is the instance to read; None resolves it from the environment.
     A caller that has already resolved it with the uploader config (as
-    `upload_readiness` does) passes it, so every call it makes goes to one host.
-
-    The one place the read path resolves a token, enforces https, and turns a
-    transport or HTTP failure into a single actionable message. Shared by every
-    `api` function that reads live workspace state (programs, assessments) —
-    duplicating it is exactly the drift framework/paramify_auth.py exists to
-    prevent.
+    `paramify_status` does) passes it, so every call it makes goes to one host.
+    Reads prefer the read-scope token (PARAMIFY_API_TOKEN). A person is usually
+    waiting, so a failing read is reported at once, not retried.
 
     Raises RuntimeError with a message a CLI can print verbatim.
     """
-    import requests  # local: keeps `paramify list`/`tui` startup free of it
-    from dotenv import load_dotenv
-
-    # Same as the uploaders: a token in `.env` is a first-class source, not
-    # something you have to `export` first. Without this, `paramify upload`
-    # works from `.env` while `paramify assessments list` / `programs list`
-    # report the token as missing. override=False so a real shell export wins.
+    # A token in `.env` is a first-class source, as it is for the uploads.
+    # override=False so a real shell export wins.
     load_dotenv()
-
-    token = os.environ.get(READ_TOKEN_ENV) or os.environ.get(UPLOAD_TOKEN_ENV)
-    if not token:
-        raise RuntimeError(
-            f"No Paramify API token: set {READ_TOKEN_ENV} (or "
-            f"{UPLOAD_TOKEN_ENV}) to a token with read scope on the workspace"
-        )
-    if not base_url:
-        base_url, _ = resolve_base_url()
-    # Same rule the uploader enforces (uploader._base_url_error): a Bearer token
-    # must not go out over plaintext. Localhost is exempt so a local stub works.
-    host = urlparse(base_url).hostname or ""
-    if urlparse(base_url).scheme != "https" and host not in ("localhost", "127.0.0.1", "::1"):
-        raise RuntimeError(
-            f"{BASE_URL_ENV} must be https to protect the API token (got {base_url!r}); "
-            "only localhost may use http"
-        )
-    url = f"{base_url.rstrip('/')}{path}"
+    resolved = paramify_settings(base_url=base_url, read=True)
+    problems = resolved.errors(need_token=True)
+    if problems:
+        raise RuntimeError(problems[0])
+    url = f"{resolved.base_url.rstrip('/')}{path}"
+    client = client_for(resolved, retry_budget_s=0)
     try:
-        resp = requests.get(
-            url,
-            headers={"Accept": "application/json", "Authorization": f"Bearer {token}"},
-            params=params or None,
-            timeout=_WORKSPACE_READ_TIMEOUT,
-        )
-    except Exception as e:  # noqa: BLE001 — transport errors become one clean message
-        raise RuntimeError(f"could not reach {url}: {e}") from e
-    if resp.status_code in (401, 403):
-        raise RuntimeError(
-            f"Paramify rejected the token (HTTP {resp.status_code}) for {url}; "
-            "check that it has read scope on this workspace"
-        )
-    if resp.status_code != 200:
-        raise RuntimeError(f"GET {url} failed (HTTP {resp.status_code}): {resp.text[:300]}")
-    try:
-        return resp.json()
-    except ValueError as e:
-        raise RuntimeError(f"GET {url} returned a non-JSON body: {resp.text[:200]}") from e
+        body = client.get(path, params or None)
+    except ApiError as e:
+        if e.status in (401, 403):
+            raise RuntimeError(
+                f"Paramify rejected the token (HTTP {e.status}) for {url}; "
+                "check that it has read scope on this workspace"
+            ) from e
+        if e.status is None:
+            raise RuntimeError(f"could not reach {url}: {e.message}") from e
+        if e.status < 400:
+            raise RuntimeError(f"GET {url} returned a non-JSON body: {e.body[:200]}") from e
+        raise RuntimeError(f"GET {url} failed (HTTP {e.status}): {e.body[:300]}") from e
+    if body is None:
+        raise RuntimeError(f"GET {url} returned a non-JSON body: (empty)")
+    return body
 
 
 def program_display_name(program: dict) -> str:

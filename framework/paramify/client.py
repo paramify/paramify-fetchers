@@ -99,12 +99,13 @@ def classify(method: str, path: str, status: int, body: str, is_upload: bool) ->
     return ErrorKind.FATAL
 
 
-def base_url_error(base_url: str) -> Optional[str]:
-    """A message when the base URL would send the token over plain http."""
+def base_url_error(base_url: str, setting: str = "base_url") -> Optional[str]:
+    """A message when the base URL would send the token over plain http.
+    `setting` names where the URL came from, so the message says what to fix."""
     parsed = urlparse(base_url)
     if parsed.scheme != "https" and (parsed.hostname or "") not in ("localhost", "127.0.0.1", "::1"):
         return (
-            "base_url must be https to protect the API token "
+            f"{setting} must be https to protect the API token "
             f"(got {base_url!r}); only localhost may use http"
         )
     return None
@@ -210,6 +211,7 @@ class Client:
                         raise ApiError(
                             f"{method} {path} returned a body that is not valid JSON",
                             status=status, kind=ErrorKind.FATAL, method=method, path=path,
+                            body=resp.text or "",
                         ) from exc
                 body = resp.text or ""
                 kind = classify(method, path, status, body, is_upload)
@@ -231,7 +233,7 @@ class Client:
                 delay = 1.0
             if delay > self._budget_left:
                 raise ApiError(
-                    f"{method} {path} failed after retrying ({reason})",
+                    f"{method} {path} failed{' after retrying' if attempt else ''} ({reason})",
                     status=status, kind=ErrorKind.TEMPORARY, method=method, path=path, body=body,
                 )
             self._budget_left -= delay
