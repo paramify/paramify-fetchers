@@ -897,3 +897,48 @@ def test_the_docker_hint_needs_a_built_image(monkeypatch, tmp_path):
     monkeypatch.setattr(up.shutil, "which", lambda name: None)
     assert up.built_image(tmp_path) is False
     assert up.built_image(tmp_path / "nowhere") is False
+
+
+# --------------------------------------------------------------------------- #
+# One plan for every front-end, and Apply moves to the commit that was shown
+# --------------------------------------------------------------------------- #
+
+def test_the_plan_carries_what_a_front_end_draws(main_repo, stubs):
+    many = "".join(f"  - {{tag: new, title: Row {i}}}\n" for i in range(up.MAX_NEW + 2))
+    _rows(main_repo.parent / "upstream", BREAKS_ALPHA + NEW_ROW + many)
+    plan = up.public(up.plan(main_repo))
+    assert plan["fetched"] and not plan["up_to_date"]
+    assert len(plan["highlights"]) == up.MAX_NEW and plan["hidden_highlights"] == 3
+    assert plan["tries"] == ["paramify catalog"]
+    assert plan["stops"] == {"breaks": [], "touching": ["alpha renames a field"], "python_required": None}
+    assert plan["manifests"] == ["manifests/prod.yaml"]
+    assert plan["changelog"].endswith("/CHANGELOG.md")
+
+
+def test_apply_with_expect_moves_to_that_commit(main_repo, stubs):
+    _git(main_repo, "fetch", "-q", "origin")  # what the plan saw
+    planned = _sha(main_repo, "origin/main")
+    result, doc = _run("--yes", "--json", "--expect", planned[:10])
+    assert result.exit_code == 0, result.stdout
+    assert _sha(main_repo) == planned
+
+
+def test_apply_with_expect_refuses_a_target_that_moved(main_repo, stubs):
+    _git(main_repo, "fetch", "-q", "origin")  # what the plan saw
+    planned = _sha(main_repo, "origin/main")
+    _commit(main_repo.parent / "upstream", {"fetchers/demo/alpha/fetch.py": "# v4\n"}, "demo_alpha: newer still")
+    before = _sha(main_repo)
+    result, doc = _run("--yes", "--json", "--expect", planned)
+    assert result.exit_code == 1
+    assert "has moved since the plan was made" in doc["errors"][0]
+    assert _sha(main_repo) == before
+
+
+def test_a_failed_move_puts_the_old_rollback_record_back(main_repo):
+    up.write_state(main_repo, {"previous": {"sha": "old", "after": "older"}})
+    pos = up.position(main_repo)
+    with pytest.raises(up.UpdateError):
+        with up.recorded_move(main_repo, pos, "abc"):
+            assert up.read_state(main_repo)["previous"]["after"] == "abc"
+            raise up.UpdateError("git refused")
+    assert up.read_state(main_repo)["previous"] == {"sha": "old", "after": "older"}

@@ -13,15 +13,13 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, NoReturn, Optional, Tuple
+from typing import Any, Dict, List, NoReturn, Optional
 
 import typer
 
 from framework import api
 from framework import update as up
 from framework import update_view as view
-
-MAX_NEW = 5  # non-breaking rows shown; the rest are counted
 
 
 def _emit(doc: dict, code: int) -> NoReturn:
@@ -105,6 +103,10 @@ def update_cmd(
         False, "--allow-breaking",
         help="With --yes or --json: go ahead even when a breaking change or a failing manifest touches you",
     ),
+    expect: Optional[str] = typer.Option(
+        None, "--expect", metavar="SHA",
+        help="Move only to this commit: refuse if the target has moved since a plan was shown",
+    ),
     json_out: bool = typer.Option(False, "--json", help="Emit JSON"),
 ):
     """Bring this clone up to date: say what changes for you, check, move, reinstall, validate.
@@ -114,8 +116,8 @@ def update_cmd(
     changes, the target's own `paramify validate` runs against each of your
     manifests in a temporary worktree. Your own fetchers stay put.
     """
-    if sum(map(bool, (to, check, rollback))) > 1:
-        raise typer.BadParameter("pick one of --to, --check, --rollback")
+    if sum(map(bool, (to or expect, check, rollback))) > 1:
+        raise typer.BadParameter("pick one of --to/--expect, --check, --rollback")
     run = _Run(json_out)
     root = api.find_repo_root()
 
@@ -136,18 +138,10 @@ def update_cmd(
         _check(run, root)
     if rollback:
         _rollback(run, root, yes)
-    _update(run, root, to=to, yes=yes, allow_breaking=allow_breaking)
+    _update(run, root, to=to, expect=expect, yes=yes, allow_breaking=allow_breaking)
 
 
-def _fetch(root: Path) -> Tuple[bool, str]:
-    try:
-        up.fetch(root)
-        return True, ""
-    except up.UpdateError as e:
-        return False, str(e)
-
-
-OFFLINE = "couldn't reach origin, so this compares against what this clone last fetched"
+OFFLINE = f"couldn't reach {up.REMOTE}, so this compares against what this clone last fetched"
 
 
 # --------------------------------------------------------------------------- #
@@ -155,7 +149,7 @@ OFFLINE = "couldn't reach origin, so this compares against what this clone last 
 # --------------------------------------------------------------------------- #
 
 def _check(run: _Run, root: Path) -> NoReturn:
-    fetched, _ = _fetch(root)
+    fetched, _ = up.try_fetch(root)
     try:
         info = up.update_status(root)
     except up.UpdateError as e:
@@ -176,8 +170,7 @@ def _check(run: _Run, root: Path) -> NoReturn:
 # update
 # --------------------------------------------------------------------------- #
 
-def _refuse_if_blocked(run: _Run, root: Path, sha: str) -> None:
-    blocking = up.blocking_changes(root, sha)
+def _refuse_if_blocked(run: _Run, blocking: dict) -> None:
     if blocking["tracked"] or blocking["untracked"]:
         if run.json:
             run.fail("local files are in the way of this update; commit, move or remove them first",
@@ -186,106 +179,86 @@ def _refuse_if_blocked(run: _Run, root: Path, sha: str) -> None:
         raise typer.Exit(1)
 
 
-def _update(run: _Run, root: Path, *, to: Optional[str], yes: bool, allow_breaking: bool) -> NoReturn:
-    with run.step("fetch from origin") as s:
-        fetched, why = _fetch(root)
+def _update(run: _Run, root: Path, *, to: Optional[str], expect: Optional[str], yes: bool,
+            allow_breaking: bool) -> NoReturn:
+    with run.step(f"fetch from {up.REMOTE}") as s:
+        fetched, why = up.try_fetch(root)
         if not fetched:
             s.warn(f"offline ({why})")
     if not fetched:
         run.show(view.note(OFFLINE))
-    pos = up.position(root)
-    run.doc.update(current={**pos, "label": up.describe(pos)}, fetched=fetched)
-
     try:
-        target = up.choose_target(root, pos, up.list_releases(root), to=to)
+        located = up.locate(root, to, fetched=fetched)
     except up.UpdateError as e:
         run.fail(str(e))
-    run.doc.update(channel=target.channel, target=target.to_json())
-    if target.sha == pos["sha"] and target.branch == pos["branch"]:
-        run.doc.update(ok=True, up_to_date=True)
+    run.doc.update(up.public(located))
+    target, pos = located["target"], located["current"]
+    if expect and not target["sha"].startswith(expect.lower()):
+        run.fail(f"{target['label']} has moved since the plan was made (it is at {target['sha'][:7]} now, "
+                 f"not {expect[:7]}). Look at the new plan before applying it")
+    if located["up_to_date"]:
+        run.doc["ok"] = True
         if run.json:
             _emit(run.doc, 0)
-        run.show(view.ok(f"Nothing to do: {up.describe(pos)} is up to date."))
+        run.show(view.ok(f"Nothing to do: {pos['label']} is up to date."))
         raise typer.Exit(0)
-    _refuse_if_blocked(run, root, target.sha)
-
-    manifests = up.user_manifests(root)
-    rows = up.curated_rows(root, "HEAD", target.sha)
-    span = up.span(root, "HEAD", target.sha)
-    forward = bool(span["commits"]) or target.sha == pos["sha"]
-    plan = {"current": run.doc["current"], "target": target.to_json(), "span": span,
-            "direction": "forward" if forward else "back"}
-    run.doc.update(span=span, direction=plan["direction"], manifests=[m["label"] for m in manifests])
-    run.section([view.header(plan)])
+    _refuse_if_blocked(run, located["blocking"])
+    run.section([view.header(located)])
 
     if not run.json:
         run.console.print()
     with run.step("check your manifests") as s:
         try:
-            check = up.check_target(root, target, manifests)
+            plan = up.assess(root, located)
         except up.UpdateError as e:
             s.fail(str(e))
             run.fail(f"the check before moving failed: {e}")
-        state, summary = view.check_summary(check)
+        state, summary = view.check_summary(plan["check"])
         s.done(summary, state)
-        for detail in view.check_details(check):
+        for detail in view.check_details(plan["check"]):
             s.add(detail)
-    breaking = up.breaking_for(rows, manifests, check["has_local_fetchers"])
-    new = [r for r in rows if r["tag"] != "breaking"]
-    run.doc.update(check=check, fetchers=check["fetchers"], breaking=breaking, highlights=new[:MAX_NEW])
-    used = len({u for m in manifests for u in m["uses"]})
-    run.section(view.your_fetchers(check["fetchers"], used, breaking))
-    run.section(view.breaking(breaking))
-    run.section(view.whats_new(new[:MAX_NEW]))
-    touching = [b for b in breaking if b["touches"]]
-    run.section(view.rest(check["fetchers"], len(breaking) - len(touching), max(0, len(new) - MAX_NEW),
-                          up.changelog_url(root, target)))
+    run.doc.update(up.public(plan))
+    run.section(view.your_fetchers(plan["fetchers"], plan["used"], plan["breaking"]))
+    run.section(view.breaking(plan["breaking"]))
+    run.section(view.whats_new(plan["highlights"]))
+    run.section(view.rest(plan))
     if not run.json:
         run.console.print()
 
-    if check["python_required"]:
-        run.fail(f"{target.label} needs Python {check['python_required']}; make a venv with a newer Python first")
-    breaks = [m["manifest"] for m in check["manifests"] if m["status"] == "breaks"]
-    if (yes or run.json) and not allow_breaking and (breaks or touching):
-        reasons = []
-        if breaks:
-            reasons.append(f"{view.plural(len(breaks), 'manifest')} would break")
-        if touching:
-            reasons.append(f"{view.plural(len(touching), 'breaking change')} {'touches' if len(touching) == 1 else 'touch'} this clone")
-        run.fail(f"stopped: {' and '.join(reasons)}. Read them above, then rerun with --allow-breaking (or without --yes)")
-    question = f"Update {target.label}?" if target.branch == pos["branch"] else f"Switch to {target.label}?"
-    if breaks:
-        question += f" {view.plural(len(breaks), 'manifest')} would break."
+    stops = plan["stops"]
+    if stops["python_required"]:
+        run.fail(f"{target['label']} needs Python {stops['python_required']}; make a venv with a newer Python first")
+    if (yes or run.json) and not allow_breaking and (stops["breaks"] or stops["touching"]):
+        run.fail(f"stopped: {view.stop_reasons(stops)}. Read them above, then rerun with --allow-breaking "
+                 f"(or without --yes)")
+    question = f"Update {target['label']}?" if target["branch"] == pos["branch"] else f"Switch to {target['label']}?"
+    if stops["breaks"]:
+        question += f" {view.plural(len(stops['breaks']), 'manifest')} would break."
     _confirmed(run, question, yes, "switching")
 
-    tries = [h["try"] for h in new if h.get("try")]
-    _apply(run, root, pos, manifests, label=target.label, new_sha=target.sha, tries=tries,
-           go=lambda: up.move(root, target), verb=f"move to {target.label}")
-
-
-def _apply(run: _Run, root: Path, pos: dict, manifests: List[dict], *, label: str, new_sha: str,
-           tries: List[str], go: Any, verb: str, rolling_back: bool = False) -> NoReturn:
-    """Move, reinstall if pyproject.toml changed, validate. Shared by update and --rollback."""
-    extras = up.detect_extras()
-    env = up.environment()
-    reinstalling = up.needs_reinstall(root, pos["sha"], new_sha)
-    run.doc["environment"] = {**env, "extras": extras}
-
-    # Recorded before the move, so a move cut short can still be rolled back.
-    replaced = None if rolling_back else up.remember_previous(root, pos, new_sha)
-    with run.step(verb) as s:
+    with run.step(f"move to {target['label']}") as s:
         try:
-            go()
+            with up.recorded_move(root, pos, target["sha"]):
+                up.move(root, up.Target(**target))
         except up.UpdateError as e:
-            if not rolling_back:
-                up.set_previous(root, replaced)
             s.fail(str(e))
             run.fail(f"git refused the move: {e}")
-        s.done(new_sha[:7])
+        s.done(target["sha"][:7])
     run.doc["switched"] = True
+    if _reinstall(run, root, pos, target["sha"]):
+        up.forget_previous(root)
+        run.fail("the reinstall failed, so update put your previous version back; the pip error is above")
+    _validate_and_report(run, root, plan["manifests"], target["label"], plan["tries"], offer_rollback=True)
 
+
+def _reinstall(run: _Run, root: Path, pos: dict, new_sha: str) -> bool:
+    """Reinstall if pyproject.toml changed. If pip fails, put the code back at
+    `pos` (so `paramify` still starts) and return True; if even that fails,
+    end the run."""
+    extras = up.detect_extras()
+    run.doc["environment"] = {**up.environment(), "extras": extras}
     with run.step("reinstall") as s:
-        if not reinstalling:
+        if not up.needs_reinstall(root, pos["sha"], new_sha):
             res: Dict[str, Any] = {"ok": True, "skipped": True, "command": None, "error": None}
             s.done("not needed: pyproject.toml didn't change", "skip")
         else:
@@ -297,17 +270,33 @@ def _apply(run: _Run, root: Path, pos: dict, manifests: List[dict], *, label: st
                 for err in (res.get("error") or "").splitlines()[-4:]:
                     s.add(view.line((err, "dim"), indent=6))
         run.doc["reinstall"] = res
-    if not res["ok"]:
-        _revert(run, root, pos, extras, rolling_back)
-    if rolling_back:
-        up.forget_previous(root)  # only now: a rollback that failed can be tried again
+    if res["ok"]:
+        return False
+    with run.step("put the code back") as s:
+        try:
+            up.restore(root, pos)
+        except up.UpdateError as e:
+            s.fail(str(e))
+            run.doc.update(switched=True, reverted=False)
+            run.fail(f"the reinstall failed, and the code could not be put back ({e}). "
+                     f"The pip error is above; check git status before running anything else")
+        again = up.reinstall(root, extras)
+        s.done(f"back on {up.describe(pos)}" + ("" if again["ok"] else ", but its reinstall failed too"),
+               "ok" if again["ok"] else "warn")
+    run.doc.update(switched=False, reverted=True)
+    return True
 
+
+def _validate_and_report(run: _Run, root: Path, manifests: List[dict], label: str, tries: List[str], *,
+                         offer_rollback: bool) -> NoReturn:
+    """Validate with the code now checked out, say where the clone is, and exit.
+    A manifest that newly fails is a failed run: the move happened, but a
+    script must not read it as a clean update."""
     with run.step("validate manifests") as s:
         val = up.validate_all(root, manifests)
         run.doc["validate"] = val
-        before = {m["label"] for m in manifests if m["errors_now"]}
-        bad = [r for r in val["manifests"] if r["ok"] is False]
-        new_bad = [r for r in bad if r["manifest"] not in before]
+        new_bad = [r for r in val["manifests"] if r["status"] == "breaks"]
+        old_bad = [r for r in val["manifests"] if r["status"] == "still_failing"]
         if not manifests:
             s.done("no manifests", "skip")
         elif new_bad:
@@ -315,47 +304,23 @@ def _apply(run: _Run, root: Path, pos: dict, manifests: List[dict], *, label: st
             for r in new_bad:
                 for detail in view.manifest_errors(r["manifest"], "fails", "red", r["errors"]):
                     s.add(detail)
-        elif bad:
-            s.warn(f"{len(bad)} {'was' if len(bad) == 1 else 'were'} already failing; nothing new")
+        elif old_bad:
+            s.warn(f"{len(old_bad)} {'was' if len(old_bad) == 1 else 'were'} already failing; nothing new")
         else:
             s.done(f"{view.plural(len(manifests), 'manifest')} valid")
 
     run.doc["version"] = label
-    run.section(view.done(label, tries, rollback=not rolling_back, rebuild=up.COMPOSE_BUILD if up.built_image(root) else None))
+    run.section(view.done(label, tries, rollback=offer_rollback,
+                          rebuild=up.COMPOSE_BUILD if up.built_image(root) else None))
     if new_bad:
-        # The move happened, but a script must not read this as a clean update.
         n = len(new_bad)
-        back = "" if rolling_back else ", or go back with paramify update --rollback"
+        back = ", or go back with paramify update --rollback" if offer_rollback else ""
         run.fail(f"you're on {label}, but {view.plural(n, 'manifest')} fail{'s' if n == 1 else ''} on the new code. "
                  f"Fix what validate names{back}")
     run.doc["ok"] = True
     if run.json:
         _emit(run.doc, 0)
     raise typer.Exit(0)
-
-
-def _revert(run: _Run, root: Path, pos: dict, extras: Optional[List[str]], rolling_back: bool) -> NoReturn:
-    """The reinstall failed: put the code back where it was so `paramify` still starts."""
-    where, problem = up.describe(pos), ""
-    with run.step("put the code back") as s:
-        try:
-            up.restore(root, pos)
-            if not rolling_back:
-                up.forget_previous(root)
-            again = up.reinstall(root, extras)
-            s.done(f"back on {where}" + ("" if again["ok"] else ", but its reinstall failed too"),
-                   "ok" if again["ok"] else "warn")
-        except up.UpdateError as e:
-            problem = str(e)
-            s.fail(problem)
-    run.doc.update(switched=bool(problem), reverted=not problem)
-    if problem:
-        run.fail(f"the reinstall failed, and the code could not be put back ({problem}). "
-                 f"The pip error is above; check git status before running anything else")
-    if rolling_back:
-        run.fail(f"the reinstall failed, so rollback left you on {where}; the pip error is above. "
-                 f"Fix it and run paramify update --rollback again")
-    run.fail("the reinstall failed, so update put your previous version back; the pip error is above")
 
 
 # --------------------------------------------------------------------------- #
@@ -371,7 +336,7 @@ def _rollback(run: _Run, root: Path, yes: bool) -> NoReturn:
         run.fail(f"this clone has moved since the update (it is at {pos['short']}; the update left it at "
                  f"{prev['after'][:7]}), so rolling back would discard that work. To go back anyway: "
                  f"git switch --detach {prev['sha'][:7]}")
-    _refuse_if_blocked(run, root, prev["sha"])
+    _refuse_if_blocked(run, up.blocking_changes(root, prev["sha"]))
     manifests = up.user_manifests(root)
     label = prev.get("describe") or prev["sha"][:7]
     current = {**pos, "label": up.describe(pos)}
@@ -380,8 +345,19 @@ def _rollback(run: _Run, root: Path, yes: bool) -> NoReturn:
     _confirmed(run, f"Go back to {label}?", yes, "rolling back")
     if not run.json:
         run.console.print()
-    _apply(run, root, pos, manifests, label=label, new_sha=prev["sha"], tries=[],
-           go=lambda: up.restore(root, prev), verb="go back", rolling_back=True)
+    with run.step("go back") as s:
+        try:
+            up.restore(root, prev)
+        except up.UpdateError as e:
+            s.fail(str(e))
+            run.fail(f"git refused the move: {e}")
+        s.done(prev["sha"][:7])
+    run.doc["switched"] = True
+    if _reinstall(run, root, pos, prev["sha"]):
+        run.fail(f"the reinstall failed, so rollback left you on {up.describe(pos)}; the pip error is above. "
+                 f"Fix it and run paramify update --rollback again")
+    up.forget_previous(root)
+    _validate_and_report(run, root, manifests, label, [], offer_rollback=False)
 
 
 # --------------------------------------------------------------------------- #

@@ -38,7 +38,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from importlib import metadata
 from pathlib import Path
-from typing import Dict, Iterator, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Sequence, Tuple
 
 import yaml
 from packaging.requirements import Requirement
@@ -396,7 +396,7 @@ def curated_rows(root: Path, head: str, target: str) -> List[dict]:
     have = {(h["tag"], h["title"]) for rows in _highlight_files(root, head).values() for h in rows}
     files = _highlight_files(root, target)
 
-    try:  # a release HEAD already contains is not news, even if its file came later
+    try:
         contained = set(git(root, "tag", "--merged", head, "-l", "v*").split())
     except UpdateError:
         contained = set()
@@ -730,6 +730,17 @@ def breaking_for(rows: Sequence[dict], manifests: Sequence[dict], has_local_fetc
     return out
 
 
+def classify(ok: Optional[bool], manifest: dict) -> str:
+    """A validate result against how the manifest validated before the update:
+    `breaks` (passed, now fails), `still_failing` (failed before too, so not the
+    update's fault), `fixed`, `ok`, or `unchecked` (validate could not run)."""
+    if ok is None:
+        return "unchecked"
+    if ok:
+        return "fixed" if manifest["errors_now"] else "ok"
+    return "still_failing" if manifest["errors_now"] else "breaks"
+
+
 def check_target(root: Path, target: Target, manifests: Sequence[dict], python: str = sys.executable) -> dict:
     """Validate every manifest with the target's own code, before moving.
 
@@ -742,13 +753,7 @@ def check_target(root: Path, target: Target, manifests: Sequence[dict], python: 
         too_old = _python_supported(tree)
         for m in manifests:
             res = run_validate(tree, m["path"], python)
-            if res["ok"] is None:
-                status = "unchecked"
-            elif res["ok"]:
-                status = "fixed" if m["errors_now"] else "ok"
-            else:
-                status = "still_failing" if m["errors_now"] else "breaks"
-            results.append({"manifest": m["label"], "path": m["path"], "status": status,
+            results.append({"manifest": m["label"], "path": m["path"], "status": classify(res["ok"], m),
                             "errors": res["errors"], "reason": res.get("reason")})
         changes = fetcher_changes(root, tree, target.sha, manifests)
     return {
@@ -760,6 +765,99 @@ def check_target(root: Path, target: Target, manifests: Sequence[dict], python: 
         "has_local_fetchers": bool(linked),
         "fetchers": changes,
     }
+
+
+# --------------------------------------------------------------------------- #
+# The plan: what an update would do, for the CLI to draw and the TUI to show
+# --------------------------------------------------------------------------- #
+
+MAX_NEW = 5  # non-breaking highlights a plan carries; the rest are counted
+
+
+def try_fetch(root: Path) -> Tuple[bool, Optional[str]]:
+    """(fetched, why not). Offline is not an error: the plan then compares
+    against what the clone last fetched."""
+    try:
+        fetch(root)
+        return True, None
+    except UpdateError as e:
+        return False, str(e)
+
+
+def locate(root: Path, to: Optional[str] = None, *, fetched: bool = True) -> dict:
+    """The quick half of a plan: where the clone is, where it would go, and
+    what is in the way. Raises UpdateError when update refuses outright (a
+    branch with commits of its own, a detached commit, an unknown --to).
+
+    {current, target, channel, fetched, up_to_date} and, unless up to date,
+    {blocking, manifests, rows, span, direction}. `manifests` are full records
+    (path, label, uses, errors_now); the JSON names them by label.
+    """
+    pos = position(root)
+    target = choose_target(root, pos, list_releases(root), to=to)
+    doc: Dict[str, Any] = {
+        "current": {**pos, "label": describe(pos)}, "target": target.to_json(), "channel": target.channel,
+        "fetched": fetched, "up_to_date": target.sha == pos["sha"] and target.branch == pos["branch"],
+    }
+    if doc["up_to_date"]:
+        return doc
+    spanned = span(root, "HEAD", target.sha)
+    doc.update(
+        blocking=blocking_changes(root, target.sha),
+        manifests=user_manifests(root),
+        rows=curated_rows(root, "HEAD", target.sha),
+        span=spanned,
+        # Same commit, another branch (a detached clone moving onto main) is still forward.
+        direction="forward" if spanned["commits"] or target.sha == pos["sha"] else "back",
+    )
+    return doc
+
+
+def assess(root: Path, located: dict, python: str = sys.executable) -> dict:
+    """The slow half: check the manifests on the target's own code, then say
+    which breaking changes touch this clone, what is new, and what would stop
+    an unattended run (`stops`: manifests that would break, breaking changes
+    that touch, a Python too old). Returns `located` with those added."""
+    target = Target(**located["target"])
+    manifests = located["manifests"]
+    check = check_target(root, target, manifests, python)
+    rows = located["rows"]
+    breaking = breaking_for(rows, manifests, check["has_local_fetchers"])
+    new = [r for r in rows if r["tag"] != "breaking"]
+    return {
+        **located,
+        "check": check,
+        "fetchers": check["fetchers"],
+        "breaking": breaking,
+        "highlights": new[:MAX_NEW],
+        "hidden_highlights": max(0, len(new) - MAX_NEW),
+        "tries": [h["try"] for h in new if h.get("try")],
+        "used": len({u for m in manifests for u in m["uses"]}),
+        "changelog": changelog_url(root, target),
+        "stops": {
+            "breaks": [m["manifest"] for m in check["manifests"] if m["status"] == "breaks"],
+            "touching": [b["title"] for b in breaking if b["touches"]],
+            "python_required": check["python_required"],
+        },
+    }
+
+
+def plan(root: Path, to: Optional[str] = None) -> dict:
+    """The whole plan in one call, for a front-end that draws it afterwards:
+    fetch, locate, assess. Raises UpdateError when update refuses."""
+    fetched, _ = try_fetch(root)
+    located = locate(root, to, fetched=fetched)
+    if located["up_to_date"] or located["blocking"]["tracked"] or located["blocking"]["untracked"]:
+        return located
+    return assess(root, located)
+
+
+def public(doc: dict) -> dict:
+    """A plan as JSON shows it: manifests by label, without the raw rows."""
+    out = {k: v for k, v in doc.items() if k != "rows"}
+    if "manifests" in out:
+        out["manifests"] = [m["label"] for m in out["manifests"]]
+    return out
 
 
 # --------------------------------------------------------------------------- #
@@ -875,7 +973,8 @@ def validate_all(root: Path, manifests: Sequence[dict], python: str = sys.execut
     rows = []
     for m in manifests:
         res = run_validate(root, m["path"], python)
-        rows.append({"manifest": m["label"], "ok": res["ok"], "errors": res["errors"], "reason": res.get("reason")})
+        rows.append({"manifest": m["label"], "ok": res["ok"], "status": classify(res["ok"], m),
+                     "errors": res["errors"], "reason": res.get("reason")})
     return {"ok": all(r["ok"] is not False for r in rows), "manifests": rows}
 
 
@@ -905,11 +1004,13 @@ def write_state(root: Path, state: dict) -> None:
     os.replace(tmp, p)
 
 
-def remember_previous(root: Path, pos: dict, after_sha: str) -> Optional[dict]:
-    """Record where the clone is and where the update will leave it. Returns
-    the record this replaces, for set_previous if the move then fails."""
+@contextmanager
+def recorded_move(root: Path, pos: dict, after_sha: str) -> Iterator[None]:
+    """Record where the clone is before the body moves it to `after_sha`, so a
+    move cut short can still be rolled back. If the body raises, the record it
+    replaced is put back."""
     state = read_state(root)
-    old = state.get("previous")
+    replaced = state.get("previous")
     state["previous"] = {
         "ref": pos["branch"] or pos["sha"],
         "branch": pos["branch"],
@@ -920,21 +1021,21 @@ def remember_previous(root: Path, pos: dict, after_sha: str) -> Optional[dict]:
         "at": int(time.time()),
     }
     write_state(root, state)
-    return old
+    try:
+        yield
+    except BaseException:
+        forget_previous(root, replaced)
+        raise
 
 
-def set_previous(root: Path, prev: Optional[dict]) -> None:
-    """Put a rollback record back, or drop it with None."""
+def forget_previous(root: Path, replaced: Optional[dict] = None) -> None:
+    """Drop the rollback record, or put back the one it replaced."""
     state = read_state(root)
-    if prev:
-        state["previous"] = prev
+    if replaced:
+        state["previous"] = replaced
     else:
         state.pop("previous", None)
     write_state(root, state)
-
-
-def forget_previous(root: Path) -> None:
-    set_previous(root, None)
 
 
 def describe(pos: dict) -> str:

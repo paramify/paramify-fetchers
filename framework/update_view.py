@@ -195,7 +195,7 @@ def breaking(rows: Sequence[dict]) -> List[RenderableType]:
     mine = [b for b in rows if b["touches"]]
     if not mine:
         return []
-    out: List[RenderableType] = [_heading("Breaking", f"{len(mine)} {'touches' if len(mine) == 1 else 'touch'} you")]
+    out: List[RenderableType] = [_heading("Breaking", f"{len(mine)} {touches(len(mine))} you")]
     for b in mine:
         who = (", ".join(m["manifest"] for m in b["manifests"]) if b["why"] == "fetchers"
                else "your own fetchers" if b["why"] == "custom" else "everyone")
@@ -216,8 +216,9 @@ def whats_new(rows: Sequence[dict]) -> List[Text]:
     return out
 
 
-def rest(changes: dict, other_breaking: int, hidden_new: int, url: str) -> List[Text]:
+def rest(plan: dict) -> List[Text]:
     """Everything that isn't about you, as counts, and where the full list is."""
+    changes = plan["fetchers"]
     bits = []
     if changes["others"]:
         bits.append(f"{plural(len(changes['others']), 'other fetcher')} changed")
@@ -226,13 +227,30 @@ def rest(changes: dict, other_breaking: int, hidden_new: int, url: str) -> List[
     if changes["removed"]:
         bits.append(f"{len(changes['removed'])} removed")
     out = [line((" · ".join(bits), "dim"))] if bits else []
-    if other_breaking:
-        out.append(line((f"{plural(other_breaking, 'other breaking change')} that "
-                         f"{'does' if other_breaking == 1 else 'do'}n't touch you", "dim")))
-    if hidden_new:
-        out.append(line((f"{plural(hidden_new, 'more highlight')} in the changelog", "dim")))
-    out.append(line(("full changelog  ", "dim"), (url, "dim underline")))
+    other = sum(not b["touches"] for b in plan["breaking"])
+    if other:
+        out.append(line((f"{plural(other, 'other breaking change')} that "
+                         f"{'does' if other == 1 else 'do'}n't touch you", "dim")))
+    if plan.get("hidden_highlights"):
+        out.append(line((f"{plural(plan['hidden_highlights'], 'more highlight')} in the changelog", "dim")))
+    if plan.get("changelog"):
+        out.append(line(("full changelog  ", "dim"), (plan["changelog"], "dim underline")))
     return out
+
+
+def touches(n: int) -> str:
+    return "touches" if n == 1 else "touch"
+
+
+def stop_reasons(stops: dict) -> str:
+    """Why an unattended run stops, and why the TUI asks twice: one sentence."""
+    reasons = []
+    if stops["breaks"]:
+        reasons.append(f"{plural(len(stops['breaks']), 'manifest')} would break")
+    if stops["touching"]:
+        n = len(stops["touching"])
+        reasons.append(f"{plural(n, 'breaking change')} {touches(n)} this clone")
+    return " and ".join(reasons)
 
 
 # --------------------------------------------------------------------------- #
