@@ -519,3 +519,22 @@ def test_a_container_is_unknown_when_the_index_cant_be_read():
     rules = ResourceScope([], ["tag:Boundary"], index=TagIndex(broken))
     assert rules.match(RG) is SCOPE_UNKNOWN
     assert rules.match(f"{RG}/providers/Microsoft.Authorization/locks/no-delete") is SCOPE_UNKNOWN
+
+
+def test_a_grant_kept_by_the_identity_rule_names_only_an_exclusion_pattern():
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "azure_rbac_for_inclusions", REPO_ROOT / "fetchers" / "azure" / "rbac_role_assignments" / "fetcher.py")
+    rbac = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(rbac)
+    out = f"{SUB}/resourceGroups/rg-out"
+
+    def kept(rules):
+        grant = {"id": f"{out}/providers/Microsoft.Authorization/roleAssignments/g1", "scope": out,
+                 "scope_level": rbac.SCOPE_RESOURCE_GROUP}
+        [record], _ = rbac.split_by_scope([grant], "role_assignment", rules, frozenset({out.lower()}))
+        return record["kept_by_identity_rule"]
+
+    assert kept(ResourceScope(["rg:rg-out"])) == "rg:rg-out"
+    assert kept(ResourceScope([], ["rg:rg-app"])) is None
