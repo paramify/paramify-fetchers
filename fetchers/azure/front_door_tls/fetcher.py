@@ -365,7 +365,8 @@ def main() -> int:
         summary={
             **summarize(profiles, skipped_by_sku, routes, domains, secrets),
             "provider_registration_status": registration,
-            **exclusions.summary(excluded, EXCLUDED_KINDS, {**in_scope_totals(scopes), "secrets": len(secrets)}),
+            **exclusions.summary(excluded, EXCLUDED_KINDS, {
+                name: n if listed else None for name, n in {**in_scope_totals(scopes), "secrets": len(secrets)}.items()}),
             **resources.summary(excluded, ("profile",), {"profiles": len(profiles) if listed else None}),
         },
     )
