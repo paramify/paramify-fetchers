@@ -293,7 +293,8 @@ def test_a_container_holding_nothing_in_scope_is_not_included(inclusion):
     tags = {SUB.lower(): {}, other.lower(): {}, f"{other}/providers/microsoft.keyvault/vaults/kv-example": ({}, "westus")}
     rules = scope(inclusions=[inclusion], tags=tags)
     assert rules.match(f"{other}/providers/Microsoft.Authorization/locks/no-delete") is NOT_INCLUDED
-    assert rules.match(RECORDS["subscription"]) is NOT_INCLUDED
+    # Under rg: alone a subscription record reaches the named groups, so it stays without a read.
+    assert rules.match(RECORDS["subscription"]) is (None if inclusion.startswith("rg:") else NOT_INCLUDED)
     # Above the subscription it reaches others this run can't see, so it stays.
     assert rules.match(RECORDS["management group"]) is None and rules.match(RECORDS["root"]) is None
 
@@ -316,7 +317,55 @@ def test_rg_inclusions_judge_a_group_without_reading_the_index():
     other = f"{SUB}/resourceGroups/rg-other/providers/Microsoft.Authorization/locks/no-delete"
     assert rules.match(other) is NOT_INCLUDED and rules.match(RECORDS["group"]) is None
     assert rules.match(RECORDS["management group"]) is None and reads == []
-    assert rules.match(RECORDS["subscription"]) is None and reads == [SUB_ID]
+    assert rules.match(RECORDS["subscription"]) is None and reads == []
+
+
+def test_rg_inclusions_keep_subscription_records_even_when_the_index_cant_be_read():
+    def broken(sub):
+        raise PermissionError("(403)")
+
+    rules = ResourceScope([], ["rg:rg-app"], index=TagIndex(broken))
+    assert rules.match(RECORDS["subscription"]) is None and not rules.tags_unreadable()
+
+
+PROCESSING_RULE = f"{RG}/providers/Microsoft.AlertsManagement/actionRules/route-all"
+
+
+def test_a_taggable_resource_under_an_attached_namespace_is_judged_as_a_resource_under_id_and_location():
+    tags = {SUB.lower(): {}, RG.lower(): {}, VAULT.lower(): ({}, "eastus"), PROCESSING_RULE.lower(): ({}, "global")}
+    for inclusion in ("id:*/vaults/kv-contoso", "location:eastus"):
+        rules = scope(inclusions=[inclusion], tags=tags)
+        # The group holds an in-scope vault, but the rule is a resource of its own and no inclusion matches it.
+        assert rules.match(PROCESSING_RULE) is NOT_INCLUDED, inclusion
+        assert rules.match(RECORDS["group"]) is None, inclusion
+    assert scope(inclusions=["id:*/actionRules/route-all"], tags=tags).match(PROCESSING_RULE) is None
+    # Under rg: alone it is judged by its group's name, which gives the same answer, with no read.
+    rules = scope(inclusions=["rg:rg-app"], loader=lambda sub: 1 / 0)
+    assert rules.match(PROCESSING_RULE) is None and not rules.tags_unreadable()
+
+
+EAST_VM = f"{RG}/providers/Microsoft.Compute/virtualMachines/vm-east"
+WEST_VM = f"{RG}/providers/Microsoft.Compute/virtualMachines/vm-west"
+ZONE = f"{RG}/providers/Microsoft.Network/privateDnsZones/privatelink.example.net"
+
+
+def test_a_location_inclusion_judges_a_record_without_a_region_by_its_resource():
+    tags = {SUB.lower(): {}, RG.lower(): {}, EAST_VM.lower(): ({}, "eastus"), WEST_VM.lower(): ({}, "westus"),
+            ZONE.lower(): ({}, "global")}
+    rules = scope(inclusions=["location:eastus"], tags=tags)
+    assert rules.match(EAST_VM) is None and rules.match(f"{EAST_VM}/extensions/agent") is None
+    assert rules.match(WEST_VM) is NOT_INCLUDED
+    # The record's own region still wins when it has one.
+    assert rules.match(WEST_VM, location="eastus") is None
+    # A global resource matches only location:global.
+    assert rules.match(ZONE) is NOT_INCLUDED
+    assert scope(inclusions=["location:global"], tags=tags).match(ZONE) is None
+
+
+def test_a_location_exclusion_never_reads_a_region_from_the_index():
+    reads = []
+    rules = scope(["location:eastus"], loader=lambda sub: reads.append(sub) or TAGS)
+    assert rules.match(VAULT) is None and reads == []
 
 
 def test_no_evidence_is_written_after_a_failed_index_read(tmp_path):

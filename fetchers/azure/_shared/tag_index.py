@@ -114,3 +114,10 @@ class TagIndex:
         if entries is None:
             return None
         return next((entries[k][0] for k in _lookup_keys(resource_id) if k in entries), None)
+
+    def location_of(self, resource_id: Optional[str]) -> Optional[str]:
+        """The region of the id, else of its nearest held parent; None when neither is held or readable."""
+        entries = self.entries(subscription_of(resource_id))
+        if entries is None:
+            return None
+        return next((entries[k][1] for k in _lookup_keys(resource_id) if k in entries), None)
