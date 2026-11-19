@@ -480,9 +480,10 @@ def build_payload(
     }
 
 
-def write_evidence(output_dir: Path, filename: str, evidence: Dict[str, Any]) -> Path:
-    """Write the evidence dict deterministically (sorted keys, stable ordering); nothing after a failed scope read."""
-    from resource_exclusions import cap_not_included  # lazy: resource_exclusions imports this module
+def write_evidence(output_dir: Path, filename: str, evidence: Dict[str, Any]) -> Optional[Path]:
+    """Write the evidence dict deterministically (sorted keys, stable ordering); None after a failed scope read."""
+    # lazy: resource_exclusions imports this module
+    from resource_exclusions import cap_not_included
     from tag_index import failed_read
 
     path = output_dir / filename
@@ -490,7 +491,7 @@ def write_evidence(output_dir: Path, filename: str, evidence: Dict[str, Any]) ->
     if unread:
         # No resource's scope is known, so every count would mislead; the recorded failure fails the run.
         _LOGGER.error("evidence not written: %s failed, so no resource's scope is known", unread)
-        return path
+        return None
     cap_not_included(evidence)
     output_dir.mkdir(parents=True, exist_ok=True)
     with open(path, "w") as f:

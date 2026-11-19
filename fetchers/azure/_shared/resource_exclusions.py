@@ -146,7 +146,8 @@ class ResourceScope:
 
     def _tag_index(self):
         if self._index is None:
-            from tag_index import TagIndex  # lazy: built only when a tag: pattern or a container needs it
+            # lazy: built only when a tag: pattern or a container needs it
+            from tag_index import TagIndex
 
             self._index = TagIndex()
         return self._index
@@ -184,9 +185,7 @@ class ResourceScope:
 
     def match(self, resource_id: Optional[str] = None, location: Optional[str] = None,
               resource_group: Optional[str] = None, record: bool = True, tags: Any = MISSING) -> Optional[str]:
-        """The first exclusion matching, else NOT_INCLUDED (inclusions set, none matches) or SCOPE_UNKNOWN (no readable
-        subscription to judge its tags), else None. `tags` is the record's own, used when the index doesn't hold it.
-        Matches count as used unless record is False (a check about a reference)."""
+        """First matching exclusion, else NOT_INCLUDED / SCOPE_UNKNOWN, else None; record=False leaves matches unused."""
         names = {
             "rg": [_key("rg", resource_group or resource_group_from_id(resource_id))],
             "location": [_key("location", location)],
@@ -237,9 +236,7 @@ class ResourceScope:
         return (None, True) if inclusion_not_found else (NOT_INCLUDED, False)
 
     def _container(self, container: str, names: dict, record: bool) -> Optional[str]:
-        """Tags never take a container out; rg:, location: and id: exclusions do. With inclusions, one above the
-        subscription stays (it reaches subscriptions this run can't see); the subscription or a group stays when an
-        inclusion matches it, its own tags included, or while it holds an in-scope resource."""
+        """Tags never take a container out; with inclusions it stays if matched or holding an in-scope resource."""
         from tag_index import above_subscription, group_of
 
         excluded_by, *_ = self._hits(self._keys, self.patterns, names, None)
@@ -359,11 +356,7 @@ class ResourceScope:
         return kept, excluded
 
     def summary(self, excluded: list[dict], kinds: Iterable[str], in_scope: dict) -> dict:
-        """The patterns as given, the ones that matched nothing, how many items of each kind were excluded, and how
-        many of each stayed in scope (in_scope maps a plural name to a count, or to None when that list wasn't read,
-        which leaves its excluded count None too, and the unmatched patterns None). With inclusions set, the same for
-        them and the not-included counts; scope_unknown_<kind>s appear when tags for some resource couldn't be read.
-        Unreadable tags leave every scope count None."""
+        """Patterns, unmatched patterns and per-kind excluded / in-scope (and not-included) counts; None where unread."""
         kinds = list(kinds)
         if any(count is None for count in in_scope.values()):
             self.mark_unread()
@@ -407,6 +400,8 @@ class ResourceScope:
         return out
 
     def warn_unmatched(self, logger: logging.Logger) -> None:
+        if self.tags_unreadable():
+            return  # no pattern was judged
         for pattern in self.unmatched() or ():
             logger.warning("resource exclusion pattern %r matched nothing", pattern)
         for pattern in (self.inclusions_unmatched() or ()) if self.inclusions else ():

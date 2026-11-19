@@ -325,7 +325,7 @@ def test_no_evidence_is_written_after_a_failed_index_read(tmp_path):
     failure = {"operation": f"resourcegraph.resources (tags in subscription {SUB_ID})", "type": "PermissionError",
                "message": "(403)"}
     evidence = {"metadata": {"partial_failure": True, "api_failures": [failure]}, "results": {}, "summary": {}}
-    assert not write_evidence(tmp_path, "unread.json", evidence).exists()
+    assert write_evidence(tmp_path, "unread.json", evidence) is None and not (tmp_path / "unread.json").exists()
     evidence["metadata"]["api_failures"] = [{**failure, "operation": "keyvault.vaults.list"}]
     assert write_evidence(tmp_path, "read.json", evidence).exists()
 
@@ -395,6 +395,17 @@ def test_unmatched_inclusions_are_logged(caplog):
     with caplog.at_level(logging.WARNING):
         rules.warn_unmatched(logging.getLogger("t"))
     assert "resource inclusion pattern 'tag:Typo' matched nothing" in caplog.text
+
+
+def test_no_pattern_is_called_unmatched_after_a_failed_index_read(caplog):
+    def broken(sub):
+        raise PermissionError("(403)")
+
+    rules = ResourceScope(["rg:rg-out"], ["tag:Boundary=FedRAMP"], index=TagIndex(broken))
+    rules.match(VAULT)
+    with caplog.at_level(logging.WARNING):
+        rules.warn_unmatched(logging.getLogger("t"))
+    assert "matched nothing" not in caplog.text
 
 
 def test_match_callers_get_a_reason_through_excluded_item():

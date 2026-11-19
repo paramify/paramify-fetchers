@@ -91,6 +91,17 @@ def test_the_grammar_refuses_what_the_fetcher_would_fail_on(pattern, problem):
     assert problem in found
 
 
+@pytest.mark.parametrize("pattern", ["tag:=Prod", 'tag:""', 'tag:""=x', 'TAG:" "=x'])
+def test_a_tag_pattern_without_a_name_is_refused(pattern):
+    [found] = patterns.check([patterns.Item(pattern)], RESOURCE + ("tag",), bare=False)
+    assert "has no tag name" in found
+
+
+@pytest.mark.parametrize("pattern", ["tag:Boundary", "tag:Boundary=", "tag:Env*=x", 'tag:"Cost Center"="a=b"'])
+def test_a_tag_pattern_with_a_name_passes(pattern):
+    assert patterns.check([patterns.Item(pattern)], RESOURCE + ("tag",), bare=False) == []
+
+
 def test_prefixes_compare_without_case_and_duplicates_are_refused():
     assert patterns.check([patterns.Item("Location:eastus2")], RESOURCE, False) == []
     assert patterns.check([patterns.Item("rg:a"), patterns.Item("RG:A")], RESOURCE, False) == [
