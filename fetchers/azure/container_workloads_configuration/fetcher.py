@@ -31,7 +31,7 @@ from azure_common import (  # noqa: E402
     write_evidence,
 )
 from diagnostics import audit_logging_summary  # noqa: E402
-from resource_exclusions import ResourceExclusions  # noqa: E402
+from resource_exclusions import ResourceExclusions, taken_out  # noqa: E402
 from scope_exclusions import excluded_item  # noqa: E402
 
 logger = logging.getLogger("azure_container_workloads_configuration")
@@ -472,7 +472,7 @@ def collect(subscription_id, cred, collector: Collector, exclusions: ResourceExc
     environments, apps, jobs, groups = environments or [], apps or [], jobs or [], groups or []
     all_environments = environments
     environments, out = exclusions.split(environments, "environment")
-    excluded_envs = {e["id"].lower(): e for e in out if e["id"]}
+    excluded_envs = {e["id"].lower(): e for e in out if e["id"] and taken_out(e)}
     apps, out_apps = split_workloads(apps, "container_app", excluded_envs, exclusions)
     jobs, out_jobs = split_workloads(jobs, "job", excluded_envs, exclusions)
     groups, out_groups = exclusions.split(groups, "container_group")

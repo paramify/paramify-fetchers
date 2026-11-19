@@ -29,7 +29,7 @@ from azure_common import (  # noqa: E402
     sanitize_for_filename,
     write_evidence,
 )
-from resource_exclusions import ResourceExclusions  # noqa: E402
+from resource_exclusions import ResourceExclusions, taken_out  # noqa: E402
 from scope_exclusions import excluded_item  # noqa: E402
 from vpn_crypto import (  # noqa: E402
     VIRTUAL_WAN_DEFAULT_WEAK,
@@ -266,6 +266,7 @@ def scope(key: str, rows: list, gone: dict, exclusions: ResourceExclusions) -> t
     for record, parent_id in rows:
         pattern = exclusions.match(record["id"], record.get("location"))
         parent = gone.get(parent_key[1], {}).get((parent_id or "").lower()) if parent_key else None
+        parent = parent if parent is not None and taken_out(parent) else None
         if pattern is not None:
             reason, by, extra = "resource_matched", pattern, {}
         elif parent is not None and parent_key:

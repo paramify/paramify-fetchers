@@ -12,6 +12,8 @@ from pathlib import Path
 from types import ModuleType
 from types import SimpleNamespace as NS
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 AZURE = REPO_ROOT / "fetchers" / "azure"
 sys.path.insert(0, str(AZURE / "_shared"))
@@ -453,7 +455,7 @@ def _deployment(resource, location, status="Succeeded"):
               error=None, created_on=WHEN, last_updated_on=WHEN)
 
 
-def _policy_client(calls, refuse=(), fail=()):
+def _policy_client(calls, refuse=(), fail=(), assignments=()):
     timeline = [NS(timestamp=datetime(2026, 10, d, tzinfo=timezone.utc), compliance_state=s)
                 for d, s in ((1, "NonCompliant"), (2, "Compliant"), (3, "NonCompliant"))]
 
@@ -472,7 +474,9 @@ def _policy_client(calls, refuse=(), fail=()):
             NS(policy_assignment_id=ASSIGN_DENY, policy_set_definition_id=None, results=_results(1),
                policy_definitions=[member(DEF_DENY, "deny", 1)]),
             NS(policy_assignment_id=ASSIGN_OUT, policy_set_definition_id=None, results=_results(1),
-               policy_definitions=[])])])
+               policy_definitions=[]),
+            *(NS(policy_assignment_id=a, policy_set_definition_id=None, results=_results(0), policy_definitions=[])
+              for a in assignments)])])
 
     def for_subscription(resource, sub, query_options):
         apply = getattr(query_options, "apply", None) or ""
@@ -549,10 +553,10 @@ def _stub_policyinsights(monkeypatch, client):
     monkeypatch.setitem(sys.modules, "azure.mgmt.policyinsights.models", models)
 
 
-def run_policy(monkeypatch, tmp_path, patterns, refuse=(), env=None, fail=()):
+def run_policy(monkeypatch, tmp_path, patterns, refuse=(), env=None, fail=(), assignments=()):
     _env(monkeypatch, tmp_path, pc, patterns)
     calls: list = []
-    _stub_policyinsights(monkeypatch, _policy_client(calls, refuse, fail))
+    _stub_policyinsights(monkeypatch, _policy_client(calls, refuse, fail, assignments))
     monkeypatch.setattr(pc, "credential", lambda: object())
     monkeypatch.setattr(pc, "provider_registration_status", lambda *a: "registered")
     for name in (pc.MAX_NON_COMPLIANT_ENV, pc.MAX_DETAIL_RESOURCES_ENV, pc.MAX_RECURRENCE_PAIRS_ENV,
@@ -890,3 +894,32 @@ def test_policy_later_task_with_unread_deployments_leaves_them_incomplete(monkey
     summary = evidence["summary"]
     assert (summary["remediation_failed_deployments"], summary["remediation_successful_deployments"]) == (None, None)
     assert summary["resource_exclusion_patterns_unmatched"] is None
+
+
+ASSIGN_MG = "/providers/Microsoft.Management/managementGroups/mg-contoso/providers/Microsoft.Authorization/" \
+            "policyAssignments/a-mg"
+
+
+@pytest.mark.parametrize("inclusion", ["tag:Boundary=FedRAMP", "rg:rg-in", f"id:{VM_IN}", "location:regionwest"])
+def test_policy_keeps_assignments_that_reach_an_in_scope_resource(monkeypatch, tmp_path, inclusion):
+    import tag_index
+    from resource_exclusions import INCLUSIONS_ENV
+
+    held = {SUB.lower(): ({}, None), IN_RG.lower(): ({}, None), OUT_RG.lower(): ({}, None),
+            VM_IN.lower(): ({"boundary": "FedRAMP"}, "regionwest"), VM_OUT.lower(): ({}, "regioneast")}
+
+    class OnlyVmInTagged(tag_index.TagIndex):
+        """Every resource in s1 is held untagged except vm-in; only vm-in sits in rg-in."""
+
+        def tags_of(self, resource_id):
+            return held.get(resource_id.lower(), ({}, None))[0] if tag_index.subscription_of(resource_id) else None
+
+    monkeypatch.setattr(tag_index, "TagIndex", lambda: OnlyVmInTagged(lambda sub: held))
+    monkeypatch.setenv(INCLUSIONS_ENV, inclusion)
+    code, evidence, _ = run_policy(monkeypatch, tmp_path, None, assignments=(ASSIGN_MG,))
+    assert code == 0
+    kept = {a["policy_assignment_id"] for a in evidence["results"]["assignment_compliance"]}
+    # The management group's and the subscription's reach the boundary; the group's holds nothing in it.
+    assert kept == {ASSIGN_MG, ASSIGN_SUB, ASSIGN_DENY}
+    assert [(e["kind"], e["id"], e["reason"]) for e in evidence["results"]["excluded"]
+            if e["kind"] == "policy_assignment"] == [("policy_assignment", ASSIGN_OUT, "not_included")]

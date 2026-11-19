@@ -35,7 +35,7 @@ from azure_common import (  # noqa: E402
     write_evidence,
 )
 from azure_rest import int_config, target_subscription_scope  # noqa: E402
-from resource_exclusions import ResourceExclusions  # noqa: E402
+from resource_exclusions import ResourceExclusions, taken_out  # noqa: E402
 from scope_exclusions import excluded_item  # noqa: E402
 
 logger = logging.getLogger("azure_vnet_egress_routing")
@@ -686,7 +686,8 @@ def split_network_interfaces(nics: list[dict], exclusions: ResourceExclusions) -
     kept, excluded = exclusions.split(nics, "network_interface")
     in_scope = []
     for nic in kept:
-        matches = [(pattern, s) for s in nic["subnet_ids"] if exclusions and (pattern := exclusions.match(s))]
+        matches = [(pattern, s) for s in nic["subnet_ids"]
+                   if exclusions and taken_out(pattern := exclusions.match(s))]
         if not matches:
             in_scope.append(nic)
             continue

@@ -743,12 +743,12 @@ def main() -> int:
     # run_workspaces, except that summarize learns whether discovery failed, so finding none isn't read as none there.
     def per_workspace(client, subscription_id: str, collector) -> tuple:
         excluded: List[Dict[str, Any]] = []
+        exclusions.record_invalid(collector)
         failures = len(collector.failures)
         found = find_workspaces(client, subscription_id, collector, exclusions, excluded)
         discovered = len(collector.failures) == failures
         listed = found is not None
         found = found or []
-        exclusions.record_invalid(collector)
         if not listed:
             exclusions.mark_unread()
         exclusions.warn_unmatched(logger)
@@ -764,7 +764,7 @@ def main() -> int:
                    "workspaces_without_sentinel": without_sentinel, "excluded": excluded}
         summary = {"workspaces_collected": len(workspaces), **summarize(workspaces, discovered),
                    "workspaces_without_sentinel": len(without_sentinel),
-                   **exclusions.summary(excluded, ("workspace",), {"workspaces": len(found)})}
+                   **exclusions.summary(excluded, ("workspace",), {"workspaces": len(found) if listed else None})}
         if not listed:  # unknown, not none, when the workspace list wasn't read
             summary.update(excluded_workspaces=None, in_scope_workspaces=None)
         return results, summary

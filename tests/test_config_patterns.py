@@ -440,7 +440,7 @@ def test_exclude_and_unexclude_write_the_manifest(m_path):
     code, out = cli("manifest", "exclude", "azure", "location:Region East", "-f", m_path)
     assert code == 1 and out["errors"] == [
         "resource_exclusions: pattern 'location:Region East' has a space or a comma; write each pattern as its own "
-        "item, with no spaces"]
+        "item, with no spaces outside double quotes"]
     shown = cli("manifest", "show", "-f", m_path)[1]
     assert shown["run"]["platforms"]["azure"]["config"]["resource_exclusions"] == [
         {"pattern": "location:regioneast", "reason": "Outside"}]

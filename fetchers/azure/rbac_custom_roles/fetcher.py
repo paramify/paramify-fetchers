@@ -41,7 +41,7 @@ from azure_common import (  # noqa: E402
     sanitize_for_filename,
     write_evidence,
 )
-from resource_exclusions import ResourceExclusions  # noqa: E402
+from resource_exclusions import ResourceExclusions, taken_out  # noqa: E402
 from scope_exclusions import excluded_item  # noqa: E402
 
 logger = logging.getLogger("azure_rbac_custom_roles")
@@ -253,7 +253,8 @@ def split_custom_roles(roles: list[dict], exclusions: ResourceExclusions) -> tup
         if matched and all(pattern for _, pattern in matched):
             excluded.append(excluded_item(
                 "custom_role", role["role_name"], matched[0][1], "all_scopes_matched", id=role["id"],
-                matched_scopes=[{"scope": s, "pattern": pattern} for s, pattern in matched]))
+                matched_scopes=[{"scope": s, "pattern": pattern if taken_out(pattern) else None,
+                                 **({} if taken_out(pattern) else {"reason": str(pattern)})} for s, pattern in matched]))
         else:
             kept.append(role)
     return kept, excluded

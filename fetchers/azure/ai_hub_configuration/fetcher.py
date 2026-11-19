@@ -32,7 +32,7 @@ from azure_common import (  # noqa: E402
 from diagnostics import log_export_summary  # noqa: E402
 from foundry_connections import compact, connection_fields  # noqa: E402
 from ip_ranges import cidrs_allow_all  # noqa: E402
-from resource_exclusions import ResourceExclusions  # noqa: E402
+from resource_exclusions import ResourceExclusions, taken_out  # noqa: E402
 from scope_exclusions import excluded_item  # noqa: E402
 
 logger = logging.getLogger("azure_ai_hub_configuration")
@@ -298,7 +298,7 @@ def split_workspaces(listed: list[dict], exclusions: ResourceExclusions) -> tupl
         k, o = exclusions.split([w for w in listed if workspace_kind(w) == kind], kind)
         kept += k
         out += o
-    hubs = {(e["id"] or "").lower(): e for e in out if e["kind"] == "hub"}
+    hubs = {(e["id"] or "").lower(): e for e in out if e["kind"] == "hub" and taken_out(e)}
     in_scope = []
     for w in kept:
         parent = hubs.get((w["hub_resource_id"] or "").lower()) if workspace_kind(w) == "project" else None

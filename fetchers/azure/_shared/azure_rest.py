@@ -387,9 +387,10 @@ def find_workspaces(client: AzureRestClient, subscription_id: str, collector: Co
         for name in wanted:
             out = [e for e in out_of_scope if _matches(e, name)]
             if out and not any(_matches(ws, name) for ws in selected):
+                why = (f"resource exclusion pattern {out[0]['pattern']!r} takes it out of scope" if out[0]["pattern"]
+                       else f"no resource inclusion pattern takes it in ({out[0]['reason']})")
                 collector.record(f"config {WORKSPACES_ENV}", ValueError(
-                    f"workspace {name!r} is named in {WORKSPACES_ENV} but resource exclusion pattern "
-                    f"{out[0]['pattern']!r} takes it out of scope"))
+                    f"workspace {name!r} is named in {WORKSPACES_ENV} but {why}"))
     out = []
     for ws in selected:
         onboarded = collector.guard(
@@ -617,7 +618,7 @@ def run_workspaces(
                 exclusions.mark_unread()
             exclusions.warn_unmatched(logger)
             results["excluded"] = excluded
-            summary.update(exclusions.summary(excluded, ("workspace",), {"workspaces": len(found)}))
+            summary.update(exclusions.summary(excluded, ("workspace",), {"workspaces": len(found) if listed else None}))
             if not listed:  # unknown, not none, when the workspace list wasn't read
                 summary.update(excluded_workspaces=None, in_scope_workspaces=None)
         return results, summary

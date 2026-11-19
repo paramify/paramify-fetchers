@@ -25,7 +25,8 @@ from azure_common import (  # noqa: E402
     sorted_counts,
 )
 from azure_rest import ArmError, int_config, parse_time, run_subscription  # noqa: E402
-from resource_exclusions import ResourceExclusions  # noqa: E402
+from resource_exclusions import NOT_INCLUDED, ResourceExclusions  # noqa: E402
+from scope_exclusions import excluded_item  # noqa: E402
 
 NAME = "azure_backup_vault_protection"
 logger = logging.getLogger(NAME)
@@ -451,6 +452,24 @@ def read_recovery_points(client, api: str, instance: Dict[str, Any], settings: D
     return with_recovery_points(instance, RECOVERY_POINTS_READ, points, settings, now)
 
 
+def scope_instances(instances: List[Dict[str, Any]], exclusions: ResourceExclusions) -> tuple:
+    """(in scope, excluded entries): an exclusion of the instance, its vault or the resource it protects takes it out;
+    with inclusions, only the protected resource can bring it in."""
+    kept, excluded = [], []
+    for i in instances:
+        rid, location = i.get("id"), i.get("datasource_location")
+        answer = exclusions.match(rid, location) if exclusions else None
+        if exclusions and (answer is None or answer is NOT_INCLUDED):
+            rid, location = i.get("datasource_resource_id"), None
+            answer = exclusions.match(rid, i.get("datasource_location"))
+        if answer is None:
+            kept.append(i)
+        else:
+            excluded.append(excluded_item("backup_instance", i.get("name"), answer, "resource_matched", id=rid,
+                                          resource_group=resource_group_from_id(rid), location=location))
+    return kept, excluded
+
+
 def collect_vault(client, api: str, vault: Dict[str, Any], settings: Dict[str, Any], now: datetime,
                   collector: Collector, exclusions: ResourceExclusions, excluded: List[dict]) -> Dict[str, Any]:
     name = vault["name"]
@@ -470,11 +489,8 @@ def collect_vault(client, api: str, vault: Dict[str, Any], settings: Dict[str, A
     )
     instances_read = instances is not None
     instances = sorted(instances or [], key=lambda i: arm_id_key(i["id"]))
-    # An instance leaves by its own id or by the resource it protects; it then gets no recovery point calls.
-    instances, out = exclusions.split(instances, "backup_instance", location=lambda i: i.get("datasource_location"))
-    excluded += out
-    instances, out = exclusions.split(instances, "backup_instance", resource_id=lambda i: i.get("datasource_resource_id"),
-                                      location=lambda i: None, resource_group=lambda i: None)
+    # An instance out of scope gets no recovery point calls.
+    instances, out = scope_instances(instances, exclusions)
     excluded += out
     with ThreadPoolExecutor(max_workers=WORKERS) as pool:
         instances = list(pool.map(lambda i: read_recovery_points(client, api, i, settings, now, collector), instances))
@@ -506,9 +522,21 @@ def collect(client, subscription_id: str, collector: Collector, exclusions: Opti
         )
         vaults_listed = raw is not None
         vaults = sorted(raw or [], key=lambda v: arm_id_key(v["id"]))
-        vaults, out = exclusions.split(vaults, "backup_vault")
-        excluded += out
-        vaults = [collect_vault(client, api, v, settings, now, collector, exclusions, excluded) for v in vaults]
+        kept, out = exclusions.split(vaults, "backup_vault")
+        # A vault no inclusion names is still read: it stays in scope while it holds a backup of an in-scope resource.
+        held = {arm_id_key(e["id"]): e for e in out if e.get("reason") == NOT_INCLUDED}
+        excluded += [e for e in out if e.get("reason") != NOT_INCLUDED]
+        in_scope = {arm_id_key(v["id"]) for v in kept}
+        listed, vaults = vaults, []
+        for vault in listed:
+            k = arm_id_key(vault["id"])
+            if k not in in_scope and k not in held:
+                continue
+            vault = collect_vault(client, api, vault, settings, now, collector, exclusions, excluded)
+            if k in held and vault["instances_read"] and not vault["backup_instances"]:
+                excluded.append(held[k])
+            else:
+                vaults.append(vault)
     exclusions.record_invalid(collector)
     if not vaults_listed or not all(v["instances_read"] for v in vaults):
         exclusions.mark_unread()

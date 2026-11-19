@@ -9,6 +9,9 @@ from typing import Any, List, Optional, Sequence, Tuple
 
 TYPE = "patterns"
 SEPARATORS = re.compile(r"[\s,]+")
+# A run with no space or comma outside double quotes, so tag:"Cost Center"=Shared is one pattern.
+TOKEN = re.compile(r'(?:"[^"]*"?|[^\s,"])+')
+QUOTED = re.compile(r'"[^"]*"')
 ITEM_KEYS = ("pattern", "reason")
 ENV_REF_REFUSAL = "${env:} references aren't read for a pattern list; write its patterns in the manifest"
 
@@ -25,10 +28,10 @@ class Item:
 def _split_string(raw: str) -> List[str]:
     # Read as the fetchers' own parser reads it: "route: qa-*" is one pattern.
     parts: List[str] = []
-    for part in SEPARATORS.split(raw):
-        if parts and parts[-1].endswith(":") and part:
+    for part in TOKEN.findall(raw):
+        if parts and parts[-1].endswith(":"):
             parts[-1] += part
-        elif part:
+        else:
             parts.append(part)
     return parts
 
@@ -77,8 +80,11 @@ def check(items: Sequence[Item], prefixes: Sequence[str] = (), bare: bool = True
         kind, sep, glob = p.partition(":")
         if "${env:" in p:
             problems.append(f"pattern {p!r}: {ENV_REF_REFUSAL}")
-        elif SEPARATORS.search(p):
-            problems.append(f"pattern {p!r} has a space or a comma; write each pattern as its own item, with no spaces")
+        elif p.count('"') % 2:
+            problems.append(f"pattern {p!r} has an unclosed double quote")
+        elif SEPARATORS.search(QUOTED.sub("", p)):
+            problems.append(f"pattern {p!r} has a space or a comma; write each pattern as its own item, with no spaces "
+                            "outside double quotes")
         elif sep and kind.lower() not in prefixes:
             takes = f"this field takes {known}" if prefixes else "this field takes no prefixes"
             problems.append(f"pattern {p!r} has the unknown prefix {kind + ':'!r}; {takes}")
@@ -126,12 +132,24 @@ def to_lines(value: Any) -> str:
     return "\n".join(line(i) for i in parse(value)[0])
 
 
+def _unquoted_hash(line: str) -> int:
+    quoted = False
+    for i, ch in enumerate(line):
+        if ch == '"':
+            quoted = not quoted
+        elif ch == "#" and not quoted:
+            return i
+    return -1
+
+
 def from_lines(text: str) -> Tuple[List[Item], List[str]]:
     """Editor text back into items: a line is `pattern` or `pattern  # reason`; blank lines are skipped."""
     items: List[Item] = []
     problems: List[str] = []
     for n, line in enumerate(text.splitlines(), 1):
-        pattern, _, reason = (part.strip() for part in line.partition("#"))
+        at = _unquoted_hash(line)
+        pattern, reason = (line, "") if at < 0 else (line[:at], line[at + 1:])
+        pattern, reason = pattern.strip(), reason.strip()
         if pattern:
             items.append(Item(pattern, reason or None))
         elif reason:

@@ -19,6 +19,28 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **Resource inclusions for Azure fetchers.** Every fetcher that takes `resource_exclusions` also takes
+  `resource_inclusions` (`AZURE_RESOURCE_INCLUSIONS`), a pattern list naming the only resources in scope, mainly by
+  tag: `tag:<name>=<value glob>`, or `tag:<name>` for any value, next to `rg:`, `location:` and `id:`. Tag names and
+  values compare without case, and a name or value holding a space, comma, `=` or `:` is double-quoted (`tag:"Cost
+  Center"="Shared, Prod"`). A resource is in scope when an inclusion matches it and no exclusion does; exclusions win.
+  Only a resource's own tags count: a resource group's or parent's tags never pass down, while an object that can't
+  carry tags (a key vault key or secret, a storage container) and a record about a resource (a diagnostic setting, an
+  assessment, a backup) go with the resource they belong to. A parent left out only by inclusions never takes out a
+  child that carries its own tags (a NIC with its network, a flexible VM with its scale set, a container app with its
+  environment). A resource group, the subscription, a management group or the tenant root is never taken out by tags.
+  With inclusions, a grant, lock, policy assignment or exemption made on a resource group or the subscription stays in
+  scope while it holds an in-scope resource, under every kind of inclusion, and one made on a management group or the
+  root always stays, since it reaches subscriptions the run can't see. A `tag:` pattern, or an inclusion judging such
+  a record, reads each subscription's resources once, in one paged Resource Graph query; if it can't be read, or
+  doesn't return the subscription itself, the run fails and writes no evidence. A resource left out is listed under
+  `results.excluded` with the reason `not_included` (1000 per kind, the rest counted), and the summary adds
+  `resource_inclusion_patterns`, `resource_inclusion_patterns_unmatched`, `not_included_<kind>s` and
+  `not_included_<kind>s_not_listed`, plus `scope_unknown_<kind>s` for a record with no id or one outside any
+  subscription, which also fails the run. With a `tag:` pattern, a resource Resource Graph doesn't return (deleted, or
+  newer than the read) stays in scope and is counted in `scope_not_found_resources`. A kind with resources but none
+  included logs a warning. `metadata.config_patterns` records the inclusion patterns with their reasons. With no
+  inclusions set, the evidence is unchanged.
 - Manifest: `concurrency` on a fetcher entry (1 to 32, default 1) runs up to that many of its targets at once. Each
   concurrent target writes to its own staging directory, moved into the run directory in target order, so results,
   envelopes and `_run_metadata.json` keep target order and a file name two targets share still fails the later one

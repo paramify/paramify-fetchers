@@ -29,7 +29,7 @@ from azure_common import (  # noqa: E402
     sanitize_for_filename,
     write_evidence,
 )
-from resource_exclusions import ResourceExclusions  # noqa: E402
+from resource_exclusions import ResourceExclusions, taken_out  # noqa: E402
 from scope_exclusions import excluded_item  # noqa: E402
 from vpn_crypto import (  # noqa: E402
     VPN_GATEWAY_DEFAULT_WEAK,
@@ -197,7 +197,7 @@ def split_connections(connections: list[dict], owner_ids: dict, out_gateways: li
                       exclusions: ResourceExclusions) -> tuple[list[dict], list[dict]]:
     """A connection leaves on its own match or with the gateway that owns it (gateway1); a connection to an excluded
     gateway2 or local network gateway stays."""
-    by_gateway = {(e["id"] or "").lower(): e for e in out_gateways}
+    by_gateway = {(e["id"] or "").lower(): e for e in out_gateways if taken_out(e)}
     kept, excluded = [], []
     for conn in connections:
         owner = by_gateway.get((owner_ids.get(conn["id"]) or "").lower())
