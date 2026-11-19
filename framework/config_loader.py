@@ -45,6 +45,7 @@ def _parse_config_schema(raw: Optional[dict]) -> dict:
             description=spec.get("description"),
             prefixes=tuple(spec.get("prefixes") or ()),
             bare=spec.get("bare", True),
+            globs=spec.get("globs", True),
             exclusion=spec.get("exclusion", True),
         )
     return out

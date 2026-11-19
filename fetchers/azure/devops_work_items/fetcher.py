@@ -8,7 +8,6 @@ import re
 import sys
 from collections import Counter
 from datetime import datetime, timedelta, timezone
-from fnmatch import fnmatchcase
 from functools import partial
 from pathlib import Path
 from typing import (
@@ -83,7 +82,7 @@ MAX_CHANGE_PAGES = 500
 NOT_INCLUDED, NOT_READABLE = "not_included", "not_readable"
 NOT_READABLE_DETAIL = ("not readable; the included paths were readable this run, so it is outside them or in a "
                        "sub-folder the app can't read")
-GLOB_CHARS = re.compile(r"[*?\[]")
+WILDCARDS = re.compile(r"[*?]")
 
 SCOPE_WORK = "Work Items (Read)"
 SCOPE_CODE = "Code (Read)"
@@ -233,32 +232,24 @@ def tfvc_key(path: Any) -> str:
     return str(path or "").replace('"', "").strip().lower().rstrip("/")
 
 
-def literal_path(glob: str) -> str:
-    """The folder a path glob starts under: the glob itself without wildcards, else the folder before the first."""
-    found = GLOB_CHARS.search(glob)
-    if not found:
-        return "$/" if glob.rstrip("/") == "$" else glob.rstrip("/")
-    head = glob[:found.start()]
-    return head[:head.rfind("/")] if head.rfind("/") > 1 else "$/"
-
-
 class ChangesetScope:
-    """changeset_inclusions: path:<TFVC server path> globs, each taking in that path and everything under it."""
+    """changeset_inclusions: literal path:<TFVC server path> patterns, each taking in that path and all under it."""
 
     def __init__(self, patterns: Iterable[str] = ()):
         self.patterns = list(patterns)
-        self.globs: List[str] = []
+        self.paths: List[str] = []
         bad = []
         for pattern in self.patterns:
-            kind, sep, glob = pattern.partition(":")
-            glob = glob.replace('"', "").strip()
-            if not sep or kind.strip().lower() != "path" or not glob.startswith("$/"):
+            kind, sep, path = pattern.partition(":")
+            path = path.replace('"', "").strip()
+            # A wildcard's read check couldn't prove every path it covers, so paths are literal.
+            if not sep or kind.strip().lower() != "path" or not path.startswith("$/") or WILDCARDS.search(path):
                 bad.append(pattern)
-            self.globs.append(glob)
+            self.paths.append("$/" if path.rstrip("/") == "$" else path.rstrip("/"))
         if bad:
-            raise ValueError(f"{INCLUSIONS_ENV} patterns {bad} need path: and a TFVC server path starting $/, such "
-                             f"as path:$/ProjectA/Production")
-        self._keys = [tfvc_key(g) for g in self.globs]
+            raise ValueError(f"{INCLUSIONS_ENV} patterns {bad} need path: and a literal TFVC server path starting $/, "
+                             f"without * or ?, such as path:$/ProjectA/Production")
+        self._keys = [tfvc_key(p) for p in self.paths]
 
     @classmethod
     def from_env(cls) -> "ChangesetScope":
@@ -270,11 +261,11 @@ class ChangesetScope:
     def includes(self, path: Any) -> bool:
         """Whether a server path is an included path or under one, at folder boundaries."""
         key = tfvc_key(path)
-        return bool(key) and any(fnmatchcase(key, k) or fnmatchcase(key, f"{k}/*") for k in self._keys)
+        return bool(key) and any(key == k or key.startswith(f"{k}/") for k in self._keys)
 
     def checks(self) -> List[Tuple[str, str]]:
-        """(pattern, path to read) for each pattern; a glob's path is the folder before its first wildcard."""
-        return [(p, literal_path(g)) for p, g in zip(self.patterns, self.globs)]
+        """(pattern, path to read) for each pattern."""
+        return list(zip(self.patterns, self.paths))
 
 
 def check_included_path(client: DevOpsClient, path: str, found: Dict[str, Any]) -> None:
@@ -319,20 +310,26 @@ def changed_paths(changes: Any) -> List[str]:
     return out
 
 
-def changes_included(client: DevOpsClient, cid: int, scope: ChangesetScope) -> Optional[bool]:
-    """Pages a changeset's change list for an included path; None when the list can't be read to its end."""
-    skip, last = 0, None
+def every_path_named(changes: Any) -> bool:
+    return isinstance(changes, list) and all(isinstance(c, dict) and (c.get("item") or {}).get("path") for c in changes)
+
+
+def changes_included(client: DevOpsClient, cid: int, scope: ChangesetScope, skip: int = 0) -> Optional[bool]:
+    """Pages a changeset's change list from skip to an empty page; None unless every changed path was read."""
+    named, last = skip > 0, None
     for _ in range(MAX_CHANGE_PAGES):
         body = client.get(f"_apis/tfvc/changesets/{cid}/changes", params={"$top": CHANGES_PAGE, "$skip": skip})
-        page = (body.get("value") if isinstance(body, dict) else body) or []
+        page = body.get("value") if isinstance(body, dict) else None
+        if not isinstance(page, list):
+            return None
         paths = changed_paths(page)
         if any(scope.includes(p) for p in paths):
             return True
-        if len(page) < CHANGES_PAGE:
-            return False
-        if paths == last:  # $skip ignored: the rest can't be reached
+        if not page:
+            return False if named else None
+        if not every_path_named(page) or paths == last:  # an unnamed change, or $skip ignored
             return None
-        skip, last = skip + len(page), paths
+        named, skip, last = True, skip + len(page), paths
     return None
 
 
@@ -736,9 +733,12 @@ def read_changeset(client: DevOpsClient, collector: DevOpsCollector, cid: int, s
     if scope:
         changes = body.get("changes")
         included = any(scope.includes(p) for p in changed_paths(changes))
-        if not included and (body.get("hasMoreChanges") or len(changes or []) >= CHANGES_PAGE):
-            included = call(collector, f"tfvc.changesets.changes({cid})", SCOPE_CODE,
-                            partial(changes_included, client, cid, scope)) is not False
+        named = every_path_named(changes)
+        if not included and not (named and changes and not body.get("hasMoreChanges")
+                                 and len(changes) < CHANGES_PAGE):
+            # The read didn't list every changed path: page the rest, keeping it in scope unless all were read.
+            included = call(collector, f"tfvc.changesets.changes({cid})", SCOPE_CODE, partial(
+                changes_included, client, cid, scope, len(changes) if named else 0)) is not False
         if not included:
             left_out[cid] = NOT_INCLUDED
             return None

@@ -109,7 +109,8 @@ class FieldRow(Vertical):
         if shape or self.get_value() is None:
             # An untouched list writes nothing, so what it already holds is validate's to report, not the form's.
             return shape
-        return patterns.check(items, self.spec.get("prefixes", ()), self.spec.get("bare", True))
+        return patterns.check(items, self.spec.get("prefixes", ()), self.spec.get("bare", True),
+                              self.spec.get("globs", True))
 
     def get_value(self) -> Any:
         kind = self.spec.get("kind", "text")

@@ -240,8 +240,8 @@ def test_fetcher_yaml_follows_the_shape():
         "approval_field_from": mod.APPROVAL_FIELD_FROM_ENV, "approval_before_field": mod.APPROVAL_BEFORE_FIELD_ENV,
         "emergency_types": mod.EMERGENCY_TYPES_ENV, "changeset_inclusions": mod.INCLUSIONS_ENV}
     inclusions = config["changeset_inclusions"]
-    assert (inclusions["type"], inclusions["prefixes"], inclusions["bare"], inclusions["exclusion"]) == \
-        ("patterns", ["path"], False, False) and "default" not in inclusions
+    assert (inclusions["type"], inclusions["prefixes"], inclusions["bare"], inclusions["globs"],
+            inclusions["exclusion"]) == ("patterns", ["path"], False, False, False) and "default" not in inclusions
     assert config["approval_source"]["default"] == mod.HISTORY == config["approval_before_field"]["default"]
     assert "default" not in config["approval_field"] and "default" not in config["emergency_types"]
     assert config["approval_mentions"]["default"] is False and config["approval_mentions"]["type"] == "boolean"
@@ -1200,28 +1200,65 @@ def test_a_changeset_with_no_file_under_an_included_path_is_not_included(tmp_pat
     assert s["finished_change_items_without_linked_change"] == [103]
 
 
-def test_a_long_change_list_is_paged_until_an_included_path(tmp_path, monkeypatch):
+def outside(count, start=0):
+    return [change(f"$/ProjectB/Main/f{n}.cs") for n in range(start, start + count)]
+
+
+def change_list(fake, cid, found, per_page=None):
+    """Serves a changeset's /changes by $skip and $top, at most per_page a page when the server caps it."""
+    def page(params, body):
+        skip, top = int(params["$skip"]), min(int(params["$top"]), per_page or int(params["$top"]))
+        return Resp(body={"count": len(found[skip:skip + top]), "value": found[skip:skip + top]})
+    fake.routes[("GET", f"/contoso/_apis/tfvc/changesets/{cid}/changes")] = page
+
+
+def test_a_long_change_list_is_paged_until_an_included_path_or_its_end(tmp_path, monkeypatch):
     include(monkeypatch)
-    outside = [change(f"$/ProjectB/Main/f{n}.cs") for n in range(100)]
-    pages = {501: [outside, [change(f"{INCLUDED}/late.cs")]], 502: [outside, outside[:3]]}
-    fake = scoped(FakeADO(), {501: outside, 502: outside}, more=(501,))
-    for cid, found in pages.items():
-        fake.routes[("GET", f"/contoso/_apis/tfvc/changesets/{cid}/changes")] = \
-            lambda params, body, found=found: Resp(body={"value": found[int(params["$skip"]) // 100]})
+    fake = scoped(FakeADO(), {501: outside(100), 502: outside(100)}, more=(501,))
+    change_list(fake, 501, outside(100) + [change(f"{INCLUDED}/late.cs")])
+    change_list(fake, 502, outside(103))
     code, evidence, _, fake, _ = run(tmp_path, fake)
     assert code == 0
     assert [c["id"] for c in evidence["results"]["changesets"]] == [501]
     assert [(e["id"], e["reason"]) for e in evidence["results"]["excluded"]] == [(502, "not_included")]
+    # Paging starts after the 100 the changeset read listed, and ends only on an empty page.
     skips = [(path.split("/")[-2], params["$skip"]) for _, path, params, _ in fake.calls if path.endswith("/changes")]
-    assert skips == [("501", 0), ("501", 100), ("502", 0), ("502", 100)]
+    assert skips == [("501", 100), ("502", 100), ("502", 103)]
+
+
+def test_paging_goes_past_a_short_page(tmp_path, monkeypatch):
+    include(monkeypatch)
+    fake = scoped(FakeADO(), {501: outside(100), 502: [change(f"{INCLUDED}/a.cs")]}, more=(501,))
+    # The server answers 50 at a time, and the included file is the 152nd change.
+    change_list(fake, 501, outside(151) + [change(f"{INCLUDED}/deep.cs")], per_page=50)
+    code, evidence, _, _, _ = run(tmp_path, fake)
+    assert code == 0 and evidence["results"]["excluded"] == []
+    assert {c["id"] for c in evidence["results"]["changesets"]} == {501, 502}
+
+
+@pytest.mark.parametrize("read, pages", [
+    ({}, []),  # no changes key, and an empty change list
+    ({"changes": []}, {"count": 0}),  # an empty list, and a page without value
+    ({"changes": outside(100), "hasMoreChanges": True}, {"count": 0}),  # truncated, then a page without value
+    ({"changes": [{"changeType": "edit"}]}, [{"changeType": "edit"}]),  # changes that name no path
+])
+def test_change_data_without_every_path_keeps_the_changeset_in_scope(tmp_path, monkeypatch, read, pages):
+    include(monkeypatch)
+    fake = scoped(FakeADO(), {501: [change(f"{INCLUDED}/a.cs")],
+                              502: Resp(body={**CHANGESETS[502], **read})})
+    fake.routes[("GET", "/contoso/_apis/tfvc/changesets/502/changes")] = Resp(
+        body=pages if isinstance(pages, dict) else {"count": len(pages), "value": pages})
+    code, evidence, _, fake, _ = run(tmp_path, fake)
+    assert code == 0 and evidence["results"]["excluded"] == []
+    assert {c["id"] for c in evidence["results"]["changesets"]} == {501, 502}
+    assert any(path.endswith("/changesets/502/changes") for _, path, _, _ in fake.calls)
 
 
 def test_a_change_list_that_cant_be_read_to_its_end_counts_as_in_scope(tmp_path, monkeypatch):
     include(monkeypatch)
-    outside = [change(f"$/ProjectB/Main/f{n}.cs") for n in range(100)]
-    fake = scoped(FakeADO(), {501: outside, 502: [change(f"{INCLUDED}/a.cs")]})
-    # $skip ignored: the same first page again, so the rest can't be reached.
-    fake.routes[("GET", "/contoso/_apis/tfvc/changesets/501/changes")] = Resp(body={"value": outside})
+    fake = scoped(FakeADO(), {501: outside(100), 502: [change(f"{INCLUDED}/a.cs")]})
+    # $skip ignored: the same page every time, so the rest can't be reached.
+    fake.routes[("GET", "/contoso/_apis/tfvc/changesets/501/changes")] = Resp(body={"value": outside(100, 100)})
     code, evidence, _, _, _ = run(tmp_path, fake)
     assert code == 0 and evidence["results"]["excluded"] == []
     assert {c["id"] for c in evidence["results"]["changesets"]} == {501, 502}
@@ -1262,8 +1299,7 @@ def test_with_inclusions_other_errors_still_fail(tmp_path, monkeypatch, failure)
     import requests
 
     include(monkeypatch)
-    outside = [change(f"$/ProjectB/Main/f{n}.cs") for n in range(100)]
-    fake = scoped(FakeADO(), {501: [change(f"{INCLUDED}/a.cs")], 502: outside})
+    fake = scoped(FakeADO(), {501: [change(f"{INCLUDED}/a.cs")], 502: outside(100)})
 
     def timeout(params, body):
         raise requests.ReadTimeout("read timed out")
@@ -1296,20 +1332,19 @@ def test_without_inclusions_the_evidence_only_gains_the_new_keys(tmp_path):
                     ("/contoso/_apis/tfvc/changesets/502", {"api-version": "7.1"})]
 
 
-def test_included_paths_sharing_a_folder_are_read_once(tmp_path, monkeypatch):
-    include(monkeypatch, "path:$/ProjectA/Prod*", "path:$/ProjectA/Release-?")
-    fake = scoped(FakeADO(), {501: [change("$/ProjectA/Release-1/a.cs")], 502: [change("$/ProjectA/Docs/b.md")]},
-                  latest={"$/projecta": 900})
+def test_one_path_listed_twice_is_read_once(tmp_path, monkeypatch):
+    include(monkeypatch, f"path:{INCLUDED}", f"path:{INCLUDED}/")
+    fake = scoped(FakeADO(), {501: [change(f"{INCLUDED}/a.cs")], 502: [change("$/ProjectA/Docs/b.md")]})
     code, evidence, _, fake, _ = run(tmp_path, fake)
     assert code == 0
     assert [(c["pattern"], c["path"]) for c in evidence["results"]["changeset_inclusion_checks"]] == [
-        ("path:$/ProjectA/Prod*", "$/ProjectA"), ("path:$/ProjectA/Release-?", "$/ProjectA")]
+        (f"path:{INCLUDED}", INCLUDED), (f"path:{INCLUDED}/", INCLUDED)]
     assert sum(1 for _, path, _, _ in fake.calls if path == "/contoso/_apis/tfvc/changesets") == 1
     assert [(e["id"], e["reason"]) for e in evidence["results"]["excluded"]] == [(502, "not_included")]
 
 
 @pytest.mark.parametrize("pattern", ["$/ProjectA/Production", "path:ProjectA/Production", "repo:$/ProjectA",
-                                     "path:"])
+                                     "path:", "path:$/ProjectA/*", "path:$/Project?/Production"])
 def test_a_pattern_that_cant_name_a_tfvc_path_is_bad_config(tmp_path, monkeypatch, pattern):
     monkeypatch.setenv(mod.INCLUSIONS_ENV, pattern)
     code, _, status, fake, _ = run(tmp_path)
@@ -1323,22 +1358,14 @@ def test_a_pattern_that_cant_name_a_tfvc_path_is_bad_config(tmp_path, monkeypatc
     ("path:$/ProjectA/Production/", "$/projecta/PRODUCTION/app.cs", True),
     ("path:$/ProjectA/Production", "$/ProjectA/Production2/app.cs", False),
     ("path:$/ProjectA/Production", "$/ProjectA", False),
-    ("path:$/ProjectA/*/Production", "$/ProjectA/Team1/Production/app.cs", True),
-    ("path:$/ProjectA/*/Production", "$/ProjectB/Team1/Production/app.cs", False),
-    ("path:$/My?Project/Main", "$/My Project/Main/app.cs", True),
+    ("path:$/ProjectA", "$/ProjectAB/app.cs", False),
+    ("path:$/A/[Legacy]", "$/A/[Legacy]/app.cs", True),
+    ("path:$/A/[Legacy]", "$/A/L/app.cs", False),
     ('path:"$/My Project/Main"', "$/My Project/Main/app.cs", True),
     ("path:$/", "$/Anything/at/all.cs", True),
 ])
 def test_an_inclusion_takes_in_its_path_and_everything_under_it(pattern, path, included):
     assert mod.ChangesetScope([pattern]).includes(path) is included
-
-
-@pytest.mark.parametrize("glob, path", [
-    ("$/ProjectA/Production", "$/ProjectA/Production"), ("$/ProjectA/Production/", "$/ProjectA/Production"),
-    ("$/ProjectA/*/Production", "$/ProjectA"), ("$/Proj*", "$/"), ("$/", "$/"), ("$/A/B[12]", "$/A"),
-])
-def test_a_glob_is_read_from_the_folder_before_its_first_wildcard(glob, path):
-    assert mod.literal_path(glob) == path
 
 
 def test_a_rename_counts_its_source_path():

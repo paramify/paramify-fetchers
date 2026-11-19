@@ -413,9 +413,10 @@ class ManifestPanel(ButtonRowNav, Vertical):
             "value": value,
             "placeholder": "one per line: pattern  # reason",
             "required": field.get("required", False),
-            "help": api.grammar_text(field.get("prefixes") or (), field.get("bare", True)),
+            "help": api.grammar_text(field.get("prefixes") or (), field.get("bare", True), field.get("globs", True)),
             "prefixes": tuple(field.get("prefixes") or ()),
             "bare": field.get("bare", True),
+            "globs": field.get("globs", True),
             "note": note,
         }
 
