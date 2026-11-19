@@ -542,13 +542,13 @@ def fake_paramify(monkeypatch):
 
     from framework.paramify.client import Client
     from framework.paramify_auth import BASE_URL_ENV, UPLOAD_TOKEN_ENV
-    from framework.sync import upload as upload_mod
+    from framework.paramify import connection as connection_mod
 
     fake = _paramify_fake().FakeParamify()
     fake.set_today(date.today())
     monkeypatch.setenv(UPLOAD_TOKEN_ENV, "fake-token")
     monkeypatch.setenv(BASE_URL_ENV, FAKE_PARAMIFY_URL)
-    monkeypatch.setattr(upload_mod, "Client", functools.partial(
+    monkeypatch.setattr(connection_mod, "Client", functools.partial(
         Client, session=fake.session, sleep=lambda _s: None, retry_budget_s=3))
     return fake
 
