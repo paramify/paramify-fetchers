@@ -51,7 +51,6 @@ import json
 import logging
 import os
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 
@@ -62,7 +61,8 @@ from dotenv import load_dotenv
 # fixed, so derive the root.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from framework import yaml_io  # noqa: E402
+from framework import upload_config  # noqa: E402
+from framework.clock import utc_now  # noqa: E402
 from framework.issue_reports import (  # noqa: E402
     CLOSE_AFTER_RUN,
     CLOSE_CYCLE_FIELD,
@@ -115,9 +115,6 @@ _CONTENT_TYPES = {
     "nessus": "application/xml",
 }
 
-def _utc_now() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
 
 # --------------------------------------------------------------------------- #
 # Jobs
@@ -151,15 +148,6 @@ def cycle_placement(pipelines: Pipelines, aid: str, cycle_id: Optional[str]) -> 
 # --------------------------------------------------------------------------- #
 # Helpers
 # --------------------------------------------------------------------------- #
-def find_latest_run(output_dir: Path) -> Optional[Path]:
-    """The newest run that collected issue reports — not simply the newest run,
-    which is often an evidence manifest's sharing the same output dir."""
-    if not output_dir.is_dir():
-        return None
-    runs = sorted((p for p in output_dir.glob("run-*") if p.is_dir()), reverse=True)
-    return next((r for r in runs if (r / ISSUE_REPORTS_DIR / SIDECAR_NAME).is_file()), None)
-
-
 def read_sidecar(run_dir: Path) -> Optional[dict]:
     """Read the run's issue-report index, or None when the run produced none."""
     path = Path(run_dir) / ISSUE_REPORTS_DIR / SIDECAR_NAME
@@ -246,7 +234,7 @@ def write_intake_log(
     run_dir: Path, uploaded: Dict[str, dict], jobs: Dict[str, List[dict]]
 ) -> Optional[Path]:
     path = Path(run_dir) / ISSUE_REPORTS_DIR / INTAKE_LOG_NAME
-    body = {"updated_at": _utc_now(), "uploaded": uploaded, "jobs": jobs}
+    body = {"updated_at": utc_now(), "uploaded": uploaded, "jobs": jobs}
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(body, indent=2))
@@ -279,17 +267,8 @@ def build_artifact_meta(record: dict) -> Dict:
     return {
         "title": record.get("title") or record.get("file"),
         "note": "; ".join(note_parts),
-        "effectiveDate": record.get("collected_at") or _utc_now(),
+        "effectiveDate": record.get("collected_at") or utc_now(),
     }
-
-
-def load_config(path: Optional[str]) -> Dict:
-    return (yaml_io.load_path(Path(path)) or {}) if path else {}
-
-
-def _emit(on_event: Optional[Callable[[dict], None]], event: dict) -> None:
-    if on_event is not None:
-        on_event(event)
 
 
 # --------------------------------------------------------------------------- #
@@ -449,6 +428,7 @@ def upload_run(
     and processes them again. Only use it when a previous intake was parsed
     incorrectly.
     """
+    on_event = on_event or (lambda _event: None)
     config = config or {}
 
     # Unlike the evidence uploader this defaults to True. A failed evidence fetch
@@ -485,7 +465,7 @@ def upload_run(
         "Intaking %d issue report(s) from %s%s",
         len(records), run_dir, " (dry-run)" if dry_run else "",
     )
-    _emit(on_event, {
+    on_event({
         "event": "upload_start",
         "run_dir": str(run_dir),
         "base_url": base_url,
@@ -512,7 +492,7 @@ def upload_run(
 
     def add_result(result: Dict) -> None:
         results.append(result)
-        _emit(on_event, {"event": "upload_file", **result})
+        on_event({"event": "upload_file", **result})
 
     def save_log() -> None:
         if not dry_run:
@@ -673,7 +653,7 @@ def upload_run(
                     "assessment_id": aid,
                     "artifact_id": artifact_id,
                     "sha256": record.get("sha256"),
-                    "uploaded_at": _utc_now(),
+                    "uploaded_at": utc_now(),
                 }
                 # Written per file, not once at the end: a batch that dies halfway
                 # through must not re-send what it already sent.
@@ -733,9 +713,9 @@ def upload_run(
             count = len(pending) + would_send
             if count:
                 logger.info("would process %d artifact(s) on %s with %s", count, aid, operation)
-            _emit(on_event, {"event": "process_plan", "assessment_id": aid,
-                             "artifacts": count, "operation": operation if count else None,
-                             "close_skipped": close_skipped})
+            on_event({"event": "process_plan", "assessment_id": aid,
+                      "artifacts": count, "operation": operation if count else None,
+                      "close_skipped": close_skipped})
             continue
 
         if not pending:
@@ -745,16 +725,16 @@ def upload_run(
             last = assessment_jobs[-1] if assessment_jobs else None
             entry["operation"] = None
             if last is None:
-                _emit(on_event, {"event": "process_skipped", "assessment_id": aid,
-                                 "reason": "nothing new to process"})
+                on_event({"event": "process_skipped", "assessment_id": aid,
+                          "reason": "nothing new to process"})
                 continue
             if last.get("status") not in TERMINAL and wait and pipelines:
                 last = _wait_and_record(pipelines, aid, last, wait_timeout, on_event)
                 save_log()
             else:
-                _emit(on_event, {"event": "process_skipped", "assessment_id": aid,
-                                 "reason": f"already queued as job {last.get('job_id')} "
-                                           f"({last.get('status')})"})
+                on_event({"event": "process_skipped", "assessment_id": aid,
+                          "reason": f"already queued as job {last.get('job_id')} "
+                                    f"({last.get('status')})"})
             entry["operation"] = last.get("operation")
             entry["job"] = last
             still_running = (
@@ -786,7 +766,7 @@ def upload_run(
             **job_summary(job),
             "operation": operation,
             "artifact_ids": pending,
-            "queued_at": _utc_now(),
+            "queued_at": utc_now(),
             **cycle_placement(pipelines, aid, job.get("cycleId")),
         }
         assessment_jobs.append(job_state)
@@ -796,12 +776,12 @@ def upload_run(
             operation, job_state["job_id"], aid, len(pending),
             f" ({close_skipped})" if close_skipped else "",
         )
-        _emit(on_event, {"event": "job_queued", "assessment_id": aid,
-                         "job_id": job_state["job_id"], "operation": operation,
-                         "artifacts": len(pending), "close_skipped": close_skipped,
-                         "cycle_id": job_state.get("cycle_id"),
-                         "cycle_name": job_state.get("cycle_name"),
-                         "newer_cycles": job_state.get("newer_cycles", 0)})
+        on_event({"event": "job_queued", "assessment_id": aid,
+                  "job_id": job_state["job_id"], "operation": operation,
+                  "artifacts": len(pending), "close_skipped": close_skipped,
+                  "cycle_id": job_state.get("cycle_id"),
+                  "cycle_name": job_state.get("cycle_name"),
+                  "newer_cycles": job_state.get("newer_cycles", 0)})
 
         if wait:
             job_state = _wait_and_record(pipelines, aid, job_state, wait_timeout, on_event)
@@ -832,18 +812,18 @@ def upload_run(
         "Done: uploaded=%d skipped_duplicate=%d skipped_failed=%d errors=%d jobs_failed=%d",
         uploaded, skipped_dup, skipped_failed, errors, jobs_failed,
     )
-    _emit(on_event, {"event": "upload_complete", **summary})
+    on_event({"event": "upload_complete", **summary})
     return summary
 
 
 def _wait_and_record(
     pipelines: Pipelines, aid: str, job_state: dict, timeout: float,
-    on_event: Optional[Callable[[dict], None]],
+    on_event: Callable[[dict], None],
 ) -> dict:
     """Wait on one job and fold its outcome into the logged job state (in place)."""
     def on_status(job: Dict) -> None:
-        _emit(on_event, {"event": "job_status", "assessment_id": aid,
-                         "job_id": job.get("id"), "status": job.get("status")})
+        on_event({"event": "job_status", "assessment_id": aid,
+                  "job_id": job.get("id"), "status": job.get("status")})
 
     try:
         job, timed_out = wait_for_job(
@@ -851,7 +831,7 @@ def _wait_and_record(
         )
     except PipelineError as e:
         job_state["poll_error"] = str(e)[:300]
-        _emit(on_event, {"event": "job_complete", "assessment_id": aid, **job_state})
+        on_event({"event": "job_complete", "assessment_id": aid, **job_state})
         return job_state
     job_state.update(job_summary(job))
     if timed_out:
@@ -862,7 +842,7 @@ def _wait_and_record(
             job_state.get("status"),
             f" (blocked by {job_state['blocked_by']})" if job_state.get("blocked_by") else "",
         )
-    _emit(on_event, {"event": "job_complete", "assessment_id": aid, **job_state})
+    on_event({"event": "job_complete", "assessment_id": aid, **job_state})
     return job_state
 
 
@@ -895,7 +875,10 @@ def main(argv=None) -> int:
                         help=f"Seconds to wait for each job (default {DEFAULT_WAIT_TIMEOUT})")
     args = parser.parse_args(argv)
 
-    run_dir = Path(args.run_dir) if args.run_dir else find_latest_run(Path(args.output_dir))
+    from framework import api  # lazy: only the script entry point needs the facade
+
+    latest = None if args.run_dir else api.latest_run(args.output_dir, kind="issue_report")
+    run_dir = Path(args.run_dir) if args.run_dir else (Path(latest["dir"]) if latest else None)
     if not run_dir or not run_dir.is_dir():
         logger.error(
             "No run directory to upload (looked for %s)",
@@ -904,10 +887,11 @@ def main(argv=None) -> int:
         return 1
     try:
         summary = upload_run(
-            run_dir, config=load_config(args.config), dry_run=args.dry_run, force=args.force,
+            run_dir, config=upload_config.load(args.config), dry_run=args.dry_run, force=args.force,
             wait=not args.no_wait, wait_timeout=args.wait_timeout,
         )
-    except ValueError:
+    except ValueError as e:
+        logger.error("%s", e)  # most were logged where raised; a bad --config was not
         return 1
     return 0 if summary["ok"] else 1
 

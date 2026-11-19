@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from framework.paramify.connection import connect, settings
@@ -177,3 +179,27 @@ def test_the_https_error_names_the_setting_the_user_set(monkeypatch):
     assert settings().errors(need_token=False)[0].startswith("PARAMIFY_API_BASE_URL must be https")
     cfg = {"paramify": {"base_url": "http://app.example.test"}}
     assert settings(cfg).errors(need_token=False)[0].startswith("base_url must be https")
+
+
+def test_doctor_reports_a_config_that_is_not_a_mapping_once(monkeypatch, tmp_path):
+    from framework import api
+    monkeypatch.setenv("PYTHON_DOTENV_DISABLED", "1")
+    cfg = tmp_path / "upload.yaml"
+    cfg.write_text("- just\n- a list\n")
+    report = api.upload_readiness(tmp_path, cfg)
+    assert not report["ok"]
+    [error] = report["errors"]
+    assert "not a mapping" in error and error.count(str(cfg)) == 1
+
+
+def test_a_script_with_a_bad_config_says_why(tmp_path, caplog):
+    import importlib.util
+    root = Path(__file__).resolve().parent.parent
+    spec = importlib.util.spec_from_file_location("scripts_cfg", root / "uploaders/paramify_scripts/uploader.py")
+    scripts = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(scripts)
+    cfg = tmp_path / "upload.yaml"
+    cfg.write_text("- a list\n")
+    with caplog.at_level("ERROR"):
+        assert scripts.main(["--root", str(root), "--all", "--dry-run", "--config", str(cfg)]) == 1
+    assert any("not a mapping" in r.getMessage() for r in caplog.records)

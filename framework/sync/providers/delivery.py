@@ -42,6 +42,7 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
+from framework.clock import utc_now
 from framework.paramify.client import ApiError, ErrorKind
 from framework.paramify.resources import (
     Artifact,
@@ -271,10 +272,6 @@ def _delivered_run(e: EntryDesired, obs: EntryObserved) -> bool:
 def _file_json(f: DeliveryFile) -> Dict[str, Any]:
     return {"path": str(f.path), "original_file_name": f.original_file_name, "title": f.title, "note": f.note,
             "effective_date": f.effective_date, "pipeline": f.pipeline}
-
-
-def _utc_now() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _batch_meta(meta: Dict[str, Any]) -> Dict[str, Any]:
@@ -865,7 +862,7 @@ class DeliveryProvider:
                 # effectiveDate: when the evidence was collected, not when it was uploaded,
                 # as the pre-batch uploader sent it. Without a collected_at, the upload time.
                 upload(name, content, {"title": f["title"], "note": f["note"],
-                                       "effectiveDate": f.get("effective_date") or _utc_now()})
+                                       "effectiveDate": f.get("effective_date") or utc_now()})
                 run.uploaded.append(name)
                 outcome = "uploaded"
             except ApiError as exc:

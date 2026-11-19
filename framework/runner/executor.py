@@ -28,7 +28,6 @@ import threading
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import contextmanager
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import (
     Callable,
@@ -44,6 +43,7 @@ from typing import (
 )
 
 from framework import patterns
+from framework.clock import utc_now
 from framework.contract import (
     ConfigField,
     Fetcher,
@@ -249,10 +249,6 @@ def is_credential_env_name(name: str) -> bool:
     if up.endswith("_FILE") or up.endswith("_URI"):
         return False
     return bool(_CREDENTIAL_NAME_WORDS & set(up.split("_"))) or "CONNECTION_STRING" in up
-
-
-def _utc_now() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _coerce_env(value) -> str:
@@ -750,7 +746,7 @@ def _invoke(
     else:
         raise RuntimeError(f"Unknown runtime: {fetcher.runtime_type}")
 
-    started_at = _utc_now()
+    started_at = utc_now()
     start = time.monotonic()
 
     before = {p.name for p in output_dir.iterdir()} if output_dir.exists() else set()
@@ -834,7 +830,7 @@ def _invoke(
         stderr += f"\nrunner: killed — exceeded timeout of {timeout}s"
 
     duration = time.monotonic() - start
-    completed_at = _utc_now()
+    completed_at = utc_now()
 
     after = {p.name for p in output_dir.iterdir()} if output_dir.exists() else set()
     # Reported relative to the run dir, so every consumer — _run_metadata.json,
@@ -1027,7 +1023,7 @@ def run_entry(
 def _not_started(fetcher: Fetcher, target: Optional[TargetInstance], entry_key: Optional[str],
                  reason: str, error_code: str) -> InvocationResult:
     """The failed result of an invocation the runner never started."""
-    now = _utc_now()
+    now = utc_now()
     return InvocationResult(
         fetcher_name=fetcher.name,
         fetcher_version=fetcher.version,

@@ -165,15 +165,27 @@ def test_dash_f_with_no_run_of_that_manifest_names_it(tmp_path, in_repo):
 # Standalone uploaders
 # --------------------------------------------------------------------------- #
 
-def test_standalone_uploaders_pick_their_own_kind(tmp_path):
+def test_standalone_uploaders_pick_their_own_kind(tmp_path, monkeypatch):
+    """Run as scripts with no run dir, each uploader takes the newest run of its
+    own kind, the same choice `paramify upload` / `issues upload` make."""
     issues = _load(REPO_ROOT / "uploaders" / "paramify_issues" / "uploader.py", "issues_sel")
     evidence = _load(REPO_ROOT / "uploaders" / "paramify_evidence" / "uploader.py", "evidence_sel")
+    picked = []
+    monkeypatch.setattr(issues, "upload_run", lambda run_dir, **kw: picked.append(run_dir) or {"ok": True})
+    monkeypatch.setattr(evidence, "_upload", lambda run_dir, *a: picked.append(run_dir) or {"ok": True})
+    monkeypatch.setenv("PYTHON_DOTENV_DISABLED", "1")
+
+    def latest(module):
+        picked.clear()
+        assert module.main(["--output-dir", str(tmp_path)]) == 0
+        return picked[0]
+
     ev = evidence_run(tmp_path, "2026-09-01T00-00-00Z")
     sc = issue_run(tmp_path, "2026-09-02T00-00-00Z")
-    assert evidence.find_latest_run(tmp_path) == ev, "took the newer scan-only run"
+    assert latest(evidence) == ev, "took the newer scan-only run"
     later = evidence_run(tmp_path, "2026-09-03T00-00-00Z")
-    assert issues.find_latest_run(tmp_path) == sc, "took the newer evidence-only run"
-    assert evidence.find_latest_run(tmp_path) == later
+    assert latest(issues) == sc, "took the newer evidence-only run"
+    assert latest(evidence) == later
 
 
 def test_the_evidence_uploaders_log_is_not_evidence(tmp_path):
@@ -182,3 +194,17 @@ def test_the_evidence_uploaders_log_is_not_evidence(tmp_path):
     run = issue_run(tmp_path, "2026-09-01T00-00-00Z")
     (run / "upload_log.json").write_text("{}")
     assert api.latest_run(tmp_path, kind="evidence") is None
+
+
+def test_a_run_whose_listed_outputs_are_not_on_disk_has_no_evidence(tmp_path):
+    """Metadata can name outputs that were deleted, or are not JSON: a run like
+    that has nothing to upload, so the older run with a real file is the latest."""
+    older = evidence_run(tmp_path, "2026-09-01T00-00-00Z")
+    newer = tmp_path / "run-2026-09-02T00-00-00Z"
+    newer.mkdir()
+    (newer / "_run_metadata.json").write_text(json.dumps({
+        "run_id": "2026-09-02T00-00-00Z",
+        "invocations": [{"fetcher_name": "ev", "exit_code": 0, "outputs": ["notes.txt", "gone.json"]}],
+    }))
+    (newer / "notes.txt").write_text("not evidence")
+    assert api.latest_run(tmp_path, kind="evidence")["dir"] == str(older)

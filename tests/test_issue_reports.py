@@ -436,19 +436,11 @@ def test_per_target_title_gets_the_target_suffix(tmp_path):
 def test_evidence_uploader_cannot_see_issue_reports(tmp_path):
     """The evidence stage globs the run root only. If that ever changed, a scan
     report would be posted to an evidence set as an opaque blob."""
-    import importlib.util
-
-    spec = importlib.util.spec_from_file_location(
-        "_ev_uploader", REPO_ROOT / "uploaders" / "paramify_evidence" / "uploader.py"
-    )
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-
     reports = tmp_path / ISSUE_REPORTS_DIR
     reports.mkdir()
     (reports / "scan.json").write_text('{"findings": []}')
     (reports / "_issue_reports.json").write_text('{"reports": []}')
-    assert list(module.iter_evidence_files(tmp_path)) == []
+    assert api.upload_preflight(tmp_path, tmp_path, None, dry_run=True)["file_count"] == 0
 
 
 def test_run_with_only_reports_and_no_metadata_is_still_listed(tmp_path):

@@ -43,7 +43,7 @@ from dotenv import load_dotenv
 # sys.path. Its position in the repo is fixed, so derive the root.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from framework import yaml_io  # noqa: E402
+from framework import upload_config  # noqa: E402
 from framework.contract import DEFAULT_EVIDENCE_FREQUENCY  # noqa: E402
 from framework.custom_tags import (  # noqa: E402
     ENTITY_EVIDENCE,
@@ -89,15 +89,6 @@ def parse_marker(description: Optional[str]) -> Dict[str, str]:
 # --------------------------------------------------------------------------- #
 # Helpers
 # --------------------------------------------------------------------------- #
-def _emit(on_event: Optional[Callable[[dict], None]], event: dict) -> None:
-    if on_event is not None:
-        on_event(event)
-
-
-def load_config(path: Optional[str]) -> Dict:
-    return (yaml_io.load_path(Path(path)) or {}) if path else {}
-
-
 def _evidence_id(resources: Resources, ref: Dict) -> str:
     """The id of the fetcher's evidence set, creating the set when it is absent."""
     found = resources.evidence_by_reference([ref["reference_id"]]).get(ref["reference_id"])
@@ -185,6 +176,7 @@ def sync_scripts(
     A failure on one fetcher is recorded and the sweep goes on, except one no
     later call can survive (a rejected token), which ends it.
     """
+    on_event = on_event or (lambda _event: None)
     config = config or {}
     base_url, resources = open_workspace(config, base_url=base_url, token=token, client=client,
                                          dry_run=dry_run, log=logger)
@@ -205,7 +197,7 @@ def sync_scripts(
         raise
 
     logger.info("Syncing %d fetcher script(s) → %s%s", len(specs), base_url, " (dry-run)" if dry_run else "")
-    _emit(on_event, {"event": "sync_start", "base_url": base_url, "dry_run": dry_run, "fetchers": len(specs)})
+    on_event({"event": "sync_start", "base_url": base_url, "dry_run": dry_run, "fetchers": len(specs)})
 
     index: Dict[str, Dict] = {}
     if resources is not None:
@@ -220,7 +212,7 @@ def sync_scripts(
 
     def add_result(result: Dict) -> None:
         results.append(result)
-        _emit(on_event, {"event": "sync_item", **result})
+        on_event({"event": "sync_item", **result})
 
     def _tag(entity: str, entity_id: Optional[str], category: Optional[str]) -> List[str]:
         """Tag one entity; the names applied, or [] when off, dry-run, or refused."""
@@ -327,7 +319,7 @@ def sync_scripts(
         "Done: created=%d updated=%d drift=%d noop=%d associated=%d errors=%d",
         counts["created"], counts["updated"], counts["drift"], counts["noop"], counts["associated"], counts["errors"],
     )
-    _emit(on_event, {"event": "sync_complete", **summary})
+    on_event({"event": "sync_complete", **summary})
     return summary
 
 
@@ -374,13 +366,14 @@ def main(argv=None) -> int:
     try:
         summary = sync_scripts(
             root,
-            config=load_config(args.config),
+            config=upload_config.load(args.config),
             dry_run=args.dry_run,
             force=args.force,
             reassociate=args.reassociate,
             include=include,
         )
-    except ValueError:
+    except ValueError as e:
+        logger.error("%s", e)  # most were logged where raised; a bad --config was not
         return 1
     return 0 if summary["ok"] else 1
 
