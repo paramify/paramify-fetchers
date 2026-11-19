@@ -117,6 +117,80 @@ def find_repo_root(start: Optional[Path] = None) -> Path:
     )
 
 
+def update_notice(root: Path) -> Optional[str]:
+    """The one line a front-end shows when an update is waiting, else None.
+
+    The `waiting` text of update.check_for_update ("12 new commits on main"),
+    so a front-end that only wants the notice need not read the dict.
+    """
+    from framework import update
+
+    info = update.check_for_update(root)
+    return info["waiting"] if info and info.get("update_available") else None
+
+
+def _run_update(root: Path, *flags: str) -> dict:
+    """Run `paramify update <flags>` in `root` as a subprocess and parse its JSON.
+
+    A subprocess, not an import: an update replaces the code on disk, and the
+    running TUI must not load half of it. Output that is not JSON becomes
+    {"ok": False, "errors": [<last line it printed>]}.
+    """
+    import json
+    import subprocess
+    import sys
+
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-m", "framework.cli", "update", *flags],
+            cwd=root, capture_output=True, text=True,  # no timeout: killing it mid-pip would leave a half install
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return {"ok": False, "errors": [str(exc)]}
+    try:
+        doc = json.loads(proc.stdout)
+        if isinstance(doc, dict):
+            return doc
+    except ValueError:
+        pass
+    lines = [ln.strip() for ln in (proc.stderr or "").splitlines() if ln.strip()]
+    lines = lines or [ln.strip() for ln in (proc.stdout or "").splitlines() if ln.strip()]
+    return {"ok": False, "errors": [lines[-1] if lines else f"paramify update exited {proc.returncode} without output"]}
+
+
+def update_plan(root: Path) -> dict:
+    """What `paramify update` would do, without doing it (it asks nothing and changes nothing).
+
+    The plan the CLI draws (framework.update.plan, as `--json` shows it), read
+    in this process: reading is safe here, only the move must be a subprocess.
+    {ok, errors, current, target, ...}, or {ok: False, errors} when update
+    refuses outright. Adds `can_roll_back`: whether `--rollback` would go back
+    from here (update.rollback_refusal).
+    """
+    from framework import update
+
+    try:
+        doc = {"ok": True, "errors": [], **update.public(update.plan(root))}
+    except update.UpdateError as e:
+        doc = {"ok": False, "errors": [str(e)]}
+    doc["can_roll_back"] = update.rollback_refusal(root) is None
+    return doc
+
+
+def apply_update(root: Path, expect: str, allow_breaking: bool = False) -> dict:
+    """Move to the commit a plan showed (`paramify update --yes --json --expect <sha>`),
+    in a subprocess, so the running process never loads half-replaced code. It
+    refuses if the target has moved since. Breaking changes that touch this
+    clone stop it unless allow_breaking. Returns the CLI's JSON document."""
+    flags = ["--yes", "--json", "--expect", expect] + (["--allow-breaking"] if allow_breaking else [])
+    return _run_update(root, *flags)
+
+
+def rollback_update(root: Path) -> dict:
+    """Return to where the clone was before the last update (`--rollback --yes --json`)."""
+    return _run_update(root, "--rollback", "--yes", "--json")
+
+
 # --------------------------------------------------------------------------- #
 # Catalog — discover + group + describe (powers the UI form and `catalog --json`)
 # --------------------------------------------------------------------------- #
