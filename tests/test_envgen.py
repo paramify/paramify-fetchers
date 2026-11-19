@@ -486,3 +486,43 @@ def test_secret_references_are_read_as_resolve_reads_them():
     groups, unmapped = needs(entry)
     assert "okta_tok" not in names(groups) and "OKTA_HOST" not in names(groups)  # literal: passed as is
     assert [(u.secret, u.malformed) for u in unmapped] == [("api_token", True)]
+
+
+# --------------------------------------------------------------------------- #
+# Config references, read by the runner's own merged_config
+# --------------------------------------------------------------------------- #
+
+def test_a_required_config_reference_with_a_platform_value_to_fall_back_on_is_optional():
+    entry = {**wired("aws_config_inventory"), "config": {"aggregator_name": "${env:AGGREGATOR}"}}
+    alone = {v.name: v for g in groups_for(entry) for v in g.vars}
+    assert alone["AGGREGATOR"].required  # nothing to fall back on: the run needs it
+    platforms = {"aws": {"config": {"aggregator_name": "org-aggregator"}}}
+    backed = {v.name: v for g in groups_for(entry, platforms=platforms) for v in g.vars}
+    assert not backed["AGGREGATOR"].required  # unset, the run takes the platform value
+
+
+def test_a_platform_reference_an_entry_literal_shadows_is_not_listed():
+    entry = {**wired("aws_config_inventory"), "config": {"aggregator_name": "mine"}}
+    platforms = {"aws": {"config": {"aggregator_name": "${env:NEVER_READ}"}}}
+    assert "NEVER_READ" not in names(groups_for(entry, platforms=platforms))
+
+
+def test_config_references_the_runner_refuses_are_not_listed():
+    entry = {**wired("aws_guard_duty_findings"), "config": {
+        "lookback_days": "${env:ON_AN_INTEGER}",           # references work on string fields only
+        "not_a_field": "${env:UNDECLARED}",               # passed through unresolved
+    }}
+    got = names(groups_for(entry))
+    assert "ON_AN_INTEGER" not in got and "UNDECLARED" not in got
+    entry = {**wired("aws_config_inventory"), "config": {"aggregator_name": "${env:MY_API_KEY}"}}
+    assert "MY_API_KEY" not in names(groups_for(entry))  # a credential's name: refused
+
+
+def test_resolve_reads_the_environment_it_is_given():
+    from framework.secret_resolver import UnsetSecretError, resolve
+
+    with mock.patch.dict(os.environ, {"SET_IN_THE_SHELL": "shell"}):
+        assert resolve("${env:SET_IN_THE_SHELL}") == "shell"  # the default is os.environ, as before
+        assert resolve("${env:SET_IN_THE_SHELL}", {"SET_IN_THE_SHELL": "given"}) == "given"
+        with pytest.raises(UnsetSecretError):
+            resolve("${env:SET_IN_THE_SHELL}", {})
