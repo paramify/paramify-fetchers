@@ -51,6 +51,14 @@ def repo_root() -> Path:
 
 
 @pytest.fixture(autouse=True)
+def _no_update_check(monkeypatch):
+    """The TUI asks for the update notice on start, and the real check runs `git fetch`
+    in the background and writes .paramify/state.json. Tests never do either; the
+    tests of the check itself clear this (tests/test_update.py)."""
+    monkeypatch.setenv("PARAMIFY_NO_UPDATE_CHECK", "1")
+
+
+@pytest.fixture(autouse=True)
 def _no_upload_yaml_from_the_working_tree(monkeypatch):
     """Tests never read the user's own `<repo>/upload.yaml`.
 

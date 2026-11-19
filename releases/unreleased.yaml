@@ -34,3 +34,7 @@ highlights:
     title: Datadog evidence fields were removed, renamed or changed meaning
     fix: Re-check validators that read Datadog fields; a failed page now gives null counts
     fetchers: [datadog_*]
+  - tag: tui
+    title: The TUI tells you when an update is waiting, and applies it
+    detail: Press U for the plan paramify update shows; apply it or roll back from there
+    try: paramify tui

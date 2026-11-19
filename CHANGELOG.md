@@ -36,6 +36,10 @@ schemas and the `paramify` CLI — not the internal code.
   when `pyproject.toml` changed. Also `--check` (exit 0/1/2), `--rollback`, `--yes`, `--allow-breaking`, `--json`, `--expect <sha>` (move
   only to the commit a plan showed), and
   a once-a-day notice (`PARAMIFY_NO_UPDATE_CHECK=1` turns it off). See `docs/versioning_guide.md`.
+- **The TUI shows when an update is waiting and applies it.** A quiet `↑ 12 new commits on main · press U` line
+  in the header and on the welcome screen (it gives way first when the header is short of room); `U` opens the plan
+  `paramify update` shows, with Apply (a second confirmation when breaking changes touch this clone) and Roll back.
+  The update runs as a subprocess, so the running TUI never loads half-replaced code.
 - **Update notes**, `releases/unreleased.yaml` and `releases/<version>.yaml`: the short rows `paramify update` shows
   instead of the CHANGELOG. Add a row with the change; format in `releases/README.md`.
 - Manifest: `concurrency` on a fetcher entry (1 to 32, default 1) runs up to that many of its targets at once. Each

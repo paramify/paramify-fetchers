@@ -13,11 +13,15 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
-from textual import on
+from textual import on, work
 from textual.app import App
+from textual.binding import Binding
+from textual.screen import ModalScreen
 
 from framework import api
+from framework.tui.components.chrome import UPDATE_KEY, UpdateNotice
 from framework.tui.modals import PickerModal
+from framework.tui.screens.update import UpdateScreen
 from framework.tui.screens.welcome import ManifestSelected, WelcomeScreen
 from framework.tui.screens.workspace import WorkspaceScreen
 
@@ -33,6 +37,9 @@ class FetcherApp(App):
     # built-ins; turn it off and keep the key free.
     ENABLE_COMMAND_PALETTE = False
 
+    # Capital U: lower-case u is the Paramify tab's "upload run".
+    BINDINGS = [Binding(UPDATE_KEY, "open_update", "Update", show=False)]
+
     def __init__(
         self, manifest_path: Optional[str] = None, root_override: Optional[str] = None
     ) -> None:
@@ -44,6 +51,8 @@ class FetcherApp(App):
         self.catalog_data: Optional[dict] = None
         self.manifest: Optional[dict] = None
         self.manifest_path: Optional[Path] = None
+        self.update_waiting: Optional[str] = None  # "12 new commits on main", once the check is back
+        self._opening_update = False
 
     def on_mount(self) -> None:
         self.theme = "tokyo-night"
@@ -52,6 +61,58 @@ class FetcherApp(App):
             self.enter_workspace(self._initial_manifest)
         else:
             self.push_screen(WelcomeScreen())
+        self._load_update_notice()
+
+    # -- update ------------------------------------------------------------ #
+
+    @work(thread=True, exclusive=True, group="update-notice")
+    def _load_update_notice(self) -> None:
+        """Ask in the background, so the first screen never waits on git. Silent on None or any failure."""
+        if self.root_path is None:
+            return
+        try:
+            waiting = api.update_notice(self.root_path)
+            if waiting:
+                self.call_from_thread(self._show_update_notice, waiting)
+        except Exception:
+            return  # no notice, or the app is shutting down under us
+
+    def _show_update_notice(self, waiting: str) -> None:
+        self.update_waiting = waiting
+        for screen in self.screen_stack:
+            for notice in screen.query(UpdateNotice):
+                notice.set_waiting(waiting)
+
+    def action_open_update(self) -> None:
+        if self.root_path is None or self._opening_update:
+            return
+        if isinstance(self.screen, (ModalScreen, UpdateScreen)):
+            return
+        self._opening_update = True
+        self.notify("Reading what the update changes…", timeout=3)
+        self._read_update_plan()
+
+    @work(thread=True, exclusive=True, group="update-plan")
+    def _read_update_plan(self) -> None:
+        try:
+            try:
+                plan = api.update_plan(self.root_path)
+            except Exception as exc:
+                plan = {"ok": False, "errors": [str(exc)]}
+            self.call_from_thread(self._show_update_screen, plan)
+        except Exception as exc:  # the app is shutting down under us, or the screen would not open
+            try:
+                self.call_from_thread(self._update_failed, str(exc))
+            except Exception:
+                pass
+
+    def _update_failed(self, why: str) -> None:
+        self._opening_update = False
+        self.notify(f"Could not open the update screen: {why}", severity="error")
+
+    def _show_update_screen(self, plan: dict) -> None:
+        self._opening_update = False
+        self.push_screen(UpdateScreen(plan))
 
     # -- shared loads ----------------------------------------------------- #
 

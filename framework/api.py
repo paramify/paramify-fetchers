@@ -117,6 +117,87 @@ def find_repo_root(start: Optional[Path] = None) -> Path:
     )
 
 
+def update_notice(root: Path) -> Optional[str]:
+    """The one line a front-end shows when an update is waiting, else None.
+
+    The `waiting` text of update.check_for_update ("12 new commits on main"),
+    so a front-end that only wants the notice need not read the dict.
+    """
+    from framework import update
+
+    info = update.check_for_update(root)
+    return info["waiting"] if info and info.get("update_available") else None
+
+
+# `paramify update --json` stops with one of these when it has made its plan but was not told to go
+# ahead (no --yes, or breaking changes without --allow-breaking). For a front-end that is the plan.
+_PLAN_STOPS = ("needs confirmation: pass --yes", "stopped: ")
+
+
+def _run_update(root: Path, *flags: str) -> dict:
+    """Run `paramify update <flags>` in `root` as a subprocess and parse its JSON.
+
+    A subprocess, not an import: an update replaces the code on disk, and the
+    running TUI must not load half of it. Output that is not JSON becomes
+    {"ok": False, "errors": [<last line it printed>]}.
+    """
+    import json
+    import subprocess
+    import sys
+
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-m", "framework.cli", "update", *flags],
+            cwd=root, capture_output=True, text=True, timeout=900,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return {"ok": False, "errors": [str(exc)]}
+    try:
+        doc = json.loads(proc.stdout)
+        if isinstance(doc, dict):
+            return doc
+    except ValueError:
+        pass
+    lines = [ln.strip() for ln in (proc.stderr or "").splitlines() if ln.strip()]
+    lines = lines or [ln.strip() for ln in (proc.stdout or "").splitlines() if ln.strip()]
+    return {"ok": False, "errors": [lines[-1] if lines else f"paramify update exited {proc.returncode} without output"]}
+
+
+def update_plan(root: Path) -> dict:
+    """What `paramify update` would do, without doing it (it asks nothing and changes nothing).
+
+    The `paramify update --json` document: {ok, errors, current, fetched,
+    channel, target, span, direction, manifests, check, fetchers, breaking,
+    highlights}, or {ok, up_to_date: True, ...} when there is nothing to do.
+    The CLI ends a plan it was not told to apply with an error; that stop is
+    cleared here (ok True), while a real refusal keeps its errors. Adds
+    `can_roll_back`: whether an earlier update left a position to return to.
+    """
+    from framework import update
+
+    doc = _run_update(root, "--json")
+    errors = doc.get("errors") or []
+    if "check" in doc and errors and all(e.startswith(_PLAN_STOPS[1]) or e.endswith(_PLAN_STOPS[0]) for e in errors):
+        doc.update(ok=True, errors=[])
+    try:
+        doc["can_roll_back"] = bool(update.read_state(root).get("previous"))
+    except Exception:
+        doc["can_roll_back"] = False
+    return doc
+
+
+def apply_update(root: Path, allow_breaking: bool = False) -> dict:
+    """Run the update (`paramify update --yes --json`). Breaking changes that touch
+    this clone stop it unless allow_breaking. Returns the CLI's JSON document."""
+    flags = ["--yes", "--json"] + (["--allow-breaking"] if allow_breaking else [])
+    return _run_update(root, *flags)
+
+
+def rollback_update(root: Path) -> dict:
+    """Return to where the clone was before the last update (`--rollback --yes --json`)."""
+    return _run_update(root, "--rollback", "--yes", "--json")
+
+
 # --------------------------------------------------------------------------- #
 # Catalog — discover + group + describe (powers the UI form and `catalog --json`)
 # --------------------------------------------------------------------------- #
