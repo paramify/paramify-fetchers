@@ -19,6 +19,16 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **One-line install.** `curl -fsSL https://raw.githubusercontent.com/paramify/paramify-fetchers/main/install.sh |
+  bash` clones the repo to `~/paramify-fetchers`, installs the CLI and TUI into the clone's `.venv`, and links
+  `paramify` into `~/.local/bin`. In a terminal it shows a spinner and elapsed time for each step, offers to add
+  `~/.local/bin` to your shell profile and to open the TUI, and installs with uv when uv is on your `PATH`.
+  `PARAMIFY_DIR`, `PARAMIFY_REF`, `PARAMIFY_EXTRAS` and `PARAMIFY_REPO_URL` change the defaults. It finds a Python
+  3.11 or later even when `python3` is older (as on macOS), has uv provide one when none is installed, rebuilds a
+  `.venv` left on an older Python, names the install command for your OS when git or Python is missing, refuses a
+  directory that is not a clone, and leaves an existing clone's code alone. A CI job shellchecks it and runs it end to
+  end. The README's manual install now covers uv, choosing a Python 3.11+ explicitly, and the errors an older Python
+  causes.
 - Manifest: `concurrency` on a fetcher entry (1 to 32, default 1) runs up to that many of its targets at once. Each
   concurrent target writes to its own staging directory, moved into the run directory in target order, so results,
   envelopes and `_run_metadata.json` keep target order and a file name two targets share still fails the later one
