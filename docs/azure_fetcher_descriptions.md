@@ -51,12 +51,14 @@ What each Azure fetcher collects, the access it needs, the calls it makes, and w
 | Security posture, policy and backup | [azure_defender_regulatory_compliance](#azure_defender_regulatory_compliance) | `EVD-AZURE-DEFENDER-REG-COMPLIANCE` |
 | Security posture, policy and backup | [azure_defender_vulnerability_findings](#azure_defender_vulnerability_findings) | `EVD-AZURE-DEFENDER-VULNERABILITY-FINDINGS` |
 | Security posture, policy and backup | [azure_disk_encryption_status](#azure_disk_encryption_status) | `EVD-AZURE-DISK-ENC` |
+| Security posture, policy and backup | [azure_endpoint_availability](#azure_endpoint_availability) | `EVD-AZURE-ENDPOINT-AVAILABILITY` |
 | Security posture, policy and backup | [azure_policy_assignments](#azure_policy_assignments) | `EVD-AZURE-POLICY-ASSIGN` |
 | Security posture, policy and backup | [azure_policy_compliance](#azure_policy_compliance) | `EVD-AZURE-POLICY-COMPLIANCE` |
 | Security posture, policy and backup | [azure_residual_resources](#azure_residual_resources) | `EVD-AZURE-RESIDUAL-RESOURCES` |
 | Security posture, policy and backup | [azure_resource_inventory](#azure_resource_inventory) | `EVD-AZURE-RESOURCE-INVENTORY` |
 | Security posture, policy and backup | [azure_resource_locks](#azure_resource_locks) | `EVD-AZURE-RESOURCE-LOCKS` |
 | Security posture, policy and backup | [azure_service_availability](#azure_service_availability) | `EVD-AZURE-SERVICE-AVAILABILITY` |
+| Security posture, policy and backup | [azure_velero_backups](#azure_velero_backups) | `EVD-AZURE-VELERO-BACKUPS` |
 | Security posture, policy and backup | [azure_vm_hardening_status](#azure_vm_hardening_status) | `EVD-AZURE-VM-HARDENING` |
 | Security posture, policy and backup | [azure_zone_redundancy](#azure_zone_redundancy) | `EVD-AZURE-ZONE-REDUNDANCY` |
 | Network and edge | [azure_api_management_configuration](#azure_api_management_configuration) | `EVD-AZURE-API-MANAGEMENT-CONFIG` |
@@ -82,6 +84,7 @@ What each Azure fetcher collects, the access it needs, the calls it makes, and w
 | Compute, apps and AI | [azure_ai_hub_configuration](#azure_ai_hub_configuration) | `EVD-AZURE-AI-HUB-CONFIG` |
 | Compute, apps and AI | [azure_ai_services_configuration](#azure_ai_services_configuration) | `EVD-AZURE-AI-SERVICES-CONFIG` |
 | Compute, apps and AI | [azure_aks_cluster_configuration](#azure_aks_cluster_configuration) | `EVD-AZURE-AKS-CONFIG` |
+| Compute, apps and AI | [azure_aks_workload_security](#azure_aks_workload_security) | `EVD-AZURE-AKS-WORKLOAD-SECURITY` |
 | Compute, apps and AI | [azure_app_service_configuration](#azure_app_service_configuration) | `EVD-AZURE-APPSVC-CONFIG` |
 | Compute, apps and AI | [azure_app_service_deployments](#azure_app_service_deployments) | `EVD-AZURE-APPSVC-DEPLOYMENTS` |
 | Compute, apps and AI | [azure_app_service_plans](#azure_app_service_plans) | `EVD-AZURE-APPSVC-PLANS` |
@@ -91,6 +94,7 @@ What each Azure fetcher collects, the access it needs, the calls it makes, and w
 | Compute, apps and AI | [azure_function_app_configuration](#azure_function_app_configuration) | `EVD-AZURE-FUNCAPP-CONFIG` |
 | Data, keys and encryption | [azure_cosmosdb_configuration](#azure_cosmosdb_configuration) | `EVD-AZURE-COSMOSDB-CONFIG` |
 | Data, keys and encryption | [azure_data_services_configuration](#azure_data_services_configuration) | `EVD-AZURE-DATA-SERVICES-CONFIG` |
+| Data, keys and encryption | [azure_flexible_server_backups](#azure_flexible_server_backups) | `EVD-AZURE-FLEXIBLE-SERVER-BACKUPS` |
 | Data, keys and encryption | [azure_key_vault_configuration](#azure_key_vault_configuration) | `EVD-AZURE-KEYVAULT-CFG` |
 | Data, keys and encryption | [azure_key_vault_key_rotation](#azure_key_vault_key_rotation) | `EVD-AZURE-KEYVAULT-ROTATION` |
 | Data, keys and encryption | [azure_managed_redis_configuration](#azure_managed_redis_configuration) | `EVD-AZURE-MANAGED-REDIS-CONFIG` |
@@ -2756,6 +2760,67 @@ Summary fields:
 - `network_access_restricted_disks` — Number of disks whose network access policy is DenyAll or AllowPrivate, so a download (SAS) link for the disk can't be used from the internet; AllowAll doesn't count
 
 
+### azure_endpoint_availability
+Short Description: Shows whether customer-facing endpoints are tested for availability from outside and how available they were, and whether Standard load balancers kept their data path and backend health probes up.
+
+Script: fetchers/azure/endpoint_availability/fetcher.py
+
+Access: Reader on the subscription, which includes reading Azure Monitor metrics.
+
+Commands Executed:
+- `subscriptions.list()` — picks a subscription when none is set
+- `GET Microsoft.Insights/webtests` — every Application Insights availability test with its URL, locations, frequency, component and the status code, content and certificate checks it validates
+- `GET components/{component}/providers/Microsoft.Insights/metrics` (per enabled test) — the test's hourly availabilityResults/availabilityPercentage
+- `GET Microsoft.Network/loadBalancers` — every load balancer with its SKU, whether it has a public frontend, and its load-balancing rules, inbound NAT rules and health probes
+- `GET loadBalancers/{lb}/providers/Microsoft.Insights/metrics` (per Standard load balancer) — hourly VipAvailability when it has load-balancing rules, and DipAvailability when it has health probes
+
+Output: `azure_endpoint_availability_<subscription>.json` — each availability test (with what it validates) and each Standard load balancer, with its hourly availability and measurement coverage over the lookback, which ends at the start of the last complete hour, judged against the availability target when one is set and every hour was measured.
+
+Summary fields:
+
+**What was checked?**
+- `availability_tests_enabled` — Number of availability tests that are enabled; null if the test list could not be read
+- `availability_tests_results_unread` — Number of enabled availability tests whose results could not be read, including a test with no link to its Application Insights component; null if the test list could not be read
+- `load_balancers_standard` — Number of Standard load balancers, the only SKU that reports availability metrics; null if the load balancer list could not be read
+- `load_balancers_public` — Number of load balancers of any SKU with a public frontend IP address; null if the load balancer list could not be read
+- `load_balancers_metrics_unread` — Number of Standard load balancers whose data-path or health-probe metric could not be read; null if the load balancer list could not be read
+- `load_balancers_without_measured_traffic` — Number of Standard load balancers with neither load-balancing rules nor health probes, such as an outbound-only load balancer, which report no availability metrics and are not judged; null if the load balancer list could not be read
+- `lookback_days` — Days of hourly availability read (the lookback_days setting, 7 by default, at most 30)
+- `availability_target_percentage` — The configured availability objective each average is compared with, as a percentage above 0 and up to 100; null when not set, and then nothing is judged against a target
+
+**Which tests and load balancers are left out of scope?**
+- `resource_exclusion_patterns` — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every test and load balancer is in scope
+- `resource_exclusion_patterns_unmatched` — List of configured patterns that matched no availability test or load balancer, such as a mistyped name; null if the test or load balancer list could not be read
+- `excluded_availability_tests` — Number of availability tests left out of scope because a pattern matched; each is listed under excluded with the pattern, and no other count includes it; null if the test list could not be read
+- `excluded_load_balancers` — Number of load balancers left out of scope because a pattern matched; each is listed under excluded with the pattern, and no other count includes it; null if the load balancer list could not be read
+- `in_scope_availability_tests` — Number of availability tests read and in scope, enabled or not; null if the test list could not be read
+- `in_scope_load_balancers` — Number of load balancers read and in scope, of any SKU; null if the load balancer list could not be read
+
+**Are customer endpoints tested from outside, and do the tests check the application works?**
+- `endpoints_tested` — Number of distinct URLs that enabled availability tests request; null if the test list could not be read
+- `availability_tests_checking_application` — Number of enabled availability tests that check both an expected HTTP status code and the response content, so they show the application works and not only that it answers; null if the test list could not be read
+- `availability_tests_reachability_only` — Number of enabled availability tests that don't check both the status code and the content; null if the test list could not be read
+- `availability_tests_without_data` — Number of enabled availability tests with no result in any hour of the lookback; null unless the test list and every enabled test's results were read
+
+**Is every hour measured?**
+- `availability_tests_with_missing_measurements` — Number of enabled availability tests with at least one hour of the lookback that has no result; null unless the test list and every enabled test's results were read
+- `lowest_measurement_coverage_percentage` — Percentage of the lookback's hours with a result (measurement coverage), for the enabled test with the fewest = hours with a result / (`lookback_days` × 24) × 100, to one decimal; never 0 for want of tests: null if no test is enabled, and null unless the test list and every enabled test's results were read
+- `load_balancers_with_missing_measurements` — Number of Standard load balancers missing at least one hour of data-path data (when they have load-balancing rules) or health-probe data (when they have health probes); null unless the load balancer list and every metric that applies were read
+- `lowest_load_balancer_measurement_coverage_percentage` — Percentage of the lookback's hours with data, for the Standard load balancer metric (data path or health probe) with the fewest = hours with data / (`lookback_days` × 24) × 100, to one decimal; never 0 for want of load balancers: null if no Standard load balancer has a metric that applies, and null unless the load balancer list and every metric that applies were read
+
+**Were the endpoints available?**
+- `lowest_availability_percentage` — Percentage of successful test runs for the enabled test with the lowest average = the mean of that test's hourly values, each successful runs / runs × 100 in that hour, over the hours that have data (read it with the measurement coverage); never 0 for want of data: null if no enabled test has data, and null unless the test list and every enabled test's results were read
+- `availability_tests_below_target` — Number of enabled availability tests with every hour of the lookback measured whose average is lower than `availability_target_percentage` (below target); a test missing an hour or unread is counted in `availability_tests_not_judged` instead, so a few good hours never stand for the whole lookback; null while no target is set or if the test list could not be read
+- `availability_tests_not_judged` — Number of enabled availability tests not judged against the target because an hour of the lookback has no result or the results could not be read; null while no target is set or if the test list could not be read
+- `availability_tests_below_target_latest_hour` — Number of enabled availability tests whose most recent hour with data is lower than `availability_target_percentage`, whether or not every hour was measured; a test with no data is not counted; null while no target is set or if the test list could not be read
+
+**Did the load balancers stay up?**
+- `lowest_data_path_availability` — For the Standard load balancer with the lowest average data-path availability over the lookback, that average as a percentage: the mean of Azure Monitor's hourly VipAvailability values (whether traffic reaches the load balancer's frontend); null if no Standard load balancer has data, and null unless the load balancer list and every metric that applies were read
+- `lowest_health_probe_availability` — For the Standard load balancer with the lowest average health-probe status over the lookback, that average as a percentage: the mean of Azure Monitor's hourly DipAvailability values (whether its backend instances answer the health probe); null if no Standard load balancer has data, and null unless the load balancer list and every metric that applies were read
+- `load_balancers_below_target` — Number of Standard load balancers, with every hour of each metric that applies measured, whose average data-path availability or health-probe status is lower than `availability_target_percentage`; one missing an hour or unread is counted in `load_balancers_not_judged` instead; null while no target is set or if the load balancer list could not be read
+- `load_balancers_not_judged` — Number of Standard load balancers with load-balancing rules or health probes that are not judged against the target because an hour of a metric is missing or could not be read; null while no target is set or if the load balancer list could not be read
+
+
 ### azure_policy_assignments
 Short Description: Lists every Azure Policy assignment and exemption in effect on the subscription, showing which assignments actually enforce their policies, which only audit, and what each exemption waives and until when.
 
@@ -3239,6 +3304,86 @@ Summary fields:
 - `in_scope_apps` — Number of apps left in scope; null if the app list failed
 - `in_scope_front_door_profiles` — Number of Front Door profiles left in scope; null if the profile list failed
 - `in_scope_sql_managed_instances` — Number of SQL Managed Instances left in scope; null if the instance list failed
+
+
+### azure_velero_backups
+Short Description: Shows whether Velero backups stored in Azure Blob Storage succeed on schedule, expire on time and restore cleanly, and whether their storage is geo-replicated and encrypted with a customer key.
+
+Script: fetchers/azure/velero_backups/fetcher.py
+
+Access: Reader on the subscription, and Storage Blob Data Reader on each Velero backup container, from a network the storage account's firewall allows; without the data role or network access, the backup and restore counts read as null.
+
+Commands Executed:
+- `subscriptions.list()` — picks a subscription when none is set
+- `GET Microsoft.Storage/storageAccounts` — each account's blob endpoint, replication and encryption key source
+- `GET storageAccounts/{account}/blobServices/default/containers` (per account) — finds the Velero containers by name, unless the backup locations are set
+- `List Blobs` on backups/ and restores/ (per backup location) — every backup and restore Velero wrote
+- `Get Blob` velero-backup.json (per backup) — the backup's phase, schedule, completion time, expiration and volume snapshot counts
+- `Get Blob` restore results file (per restore) — the restore's errors and warnings
+
+Output: `azure_velero_backups_<subscription>.json` — each Velero backup storage location with its storage settings, every backup's outcome and expiry, every restore's result, and each schedule's newest success and missed runs, with schedules taken from each backup's schedule label since Velero doesn't write schedules to backup storage.
+
+Summary fields:
+
+**What was checked?**
+- `backup_locations` — Number of Velero backup storage locations found: a container with one of the container_names in an in-scope storage account, or an entry in the backup_locations setting; null if the account list or a container list could not be read, a backup_locations entry names no in-scope account, or an account has no blob endpoint
+- `backup_locations_read` — Number of backup storage locations whose backups could be listed
+
+**Which storage accounts are left out of scope?**
+- `resource_exclusion_patterns` — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every storage account is searched
+- `resource_exclusion_patterns_unmatched` — List of configured patterns that matched no storage account, such as a mistyped name; null if the storage account list could not be read
+- `excluded_storage_accounts` — Number of storage accounts left out of scope because a pattern matched; each is listed under excluded with the pattern, and none of its containers is read; null if the storage account list could not be read
+- `in_scope_storage_accounts` — Number of storage accounts read and in scope, which are searched for backup storage locations; null if the storage account list could not be read
+
+**Do backups run on schedule?**
+- `backups_total` — Number of backups in the backup storage locations; null unless every location was found and its backups listed
+- `backups_completed` — Number of backups whose phase is Completed; null unless every location was found and its backups listed
+- `backups_partially_failed` — Number of backups whose phase is PartiallyFailed; null unless every location was found and its backups listed
+- `backups_failed` — Number of backups whose phase is Failed; null unless every location was found and its backups listed
+- `backups_other_phase` — Number of backups in any other phase, such as InProgress; null unless every location was found and its backups listed
+- `backups_metadata_unreadable` — Number of backups whose velero-backup.json could not be read or parsed, and which no other backup count includes; null unless every location was found and its backups listed
+- `backups_volume_snapshots_incomplete` — Number of backups that completed fewer volume snapshots (native and CSI) than they attempted; null unless every location was found and its backups listed
+- `backups_failed_unresolved` — Number of current failures: Failed or PartiallyFailed backups with no later Completed backup of the same schedule and, when retry_suffix is set, no later Completed retry of their own; a backup with no schedule label is resolved only by its retry, since a later manual backup may cover other namespaces; resolved failures stay in `backups_failed` and `backups_partially_failed`; null unless every location was found and its backups listed
+- `backups_volume_snapshots_incomplete_unresolved` — Number of backups with incomplete volume snapshots that have no later Completed backup of the same schedule, or own retry, that completed every snapshot it attempted; a backup with no schedule label is resolved only by its retry; null unless every location was found and its backups listed
+- `schedules_observed` — Number of schedules named by a backup's velero.io/schedule-name label; null unless every location was found and its backups listed
+- `schedules_with_success_within_window` — Number of observed schedules whose newest Completed backup finished within the schedule's window (a success within the window): its interval plus 10%, at least 2 hours, when listed in expected_schedules, otherwise `success_window_hours`; null unless every location was found and its backups listed
+- `schedules_without_success_within_window` — List of the names of observed schedules without a success within the window; null unless every location was found and its backups listed
+- `max_hours_since_scheduled_success` — Hours since the newest Completed backup of the observed schedule that has gone longest without one; null if any observed schedule has no Completed backup, no schedule is observed, or not every location was found and its backups listed
+- `success_window_hours` — Hours a schedule not listed in expected_schedules may go since its newest Completed backup and still count as a success within the window (the success_window_hours setting, 26 by default)
+
+**Is every expected backup happening?**
+- `expected_schedules` — Number of schedules listed in the expected_schedules setting; null when none are listed
+- `expected_schedules_without_backups` — Number of expected schedules with no backup at all in storage; null when expected_schedules is not set or not every location was found and its backups listed
+- `expected_schedules_without_backups_names` — List of the names of expected schedules with no backup at all in storage; null when expected_schedules is not set or not every location was found and its backups listed
+- `missed_scheduled_runs` — Number of missed runs across expected schedules, from the gaps between Completed backups and from the newest one to now: each gap longer than the interval plus 10% adds one missed run per whole interval; only the part of `missed_run_lookback_days` that the schedule's backups are kept for is checked, so a backup Velero deleted when its retention ended is not a missed run; null when expected_schedules is not set or not every location was found and its backups listed
+- `schedules_with_missed_runs` — Number of expected schedules with at least one missed run; null when expected_schedules is not set or not every location was found and its backups listed
+- `missed_run_lookback_days` — Days of each expected schedule's periods checked for missed runs (the missed_run_lookback_days setting, 7 by default, at most 90)
+- `schedules_exceeding_rpo` — Number of schedules (the expected schedules when listed, otherwise every observed schedule) whose newest Completed backup is older than `rpo_hours`, or that have none; null while `rpo_hours` is not set or not every location was found and its backups listed
+- `rpo_hours` — Hours of the recovery point objective (the rpo_hours setting); null when not set
+
+**Are expired backups removed?**
+- `expired_backups_not_deleted` — Number of backups still in storage more than `expiry_grace_hours` past their expiration; null unless every location was found and its backups listed
+- `expiry_grace_hours` — Hours past its expiration a backup may stay in storage before it counts as expired but not deleted (the expiry_grace_hours setting, 24 by default)
+
+**Do restores work?**
+- `restores_total` — Number of restores Velero recorded in the backup storage locations; null unless every location was found and its restores listed
+- `restores_without_errors` — Number of clean restores: a results file that lists no errors; null unless every location was found and its restores listed
+- `restores_with_errors` — Number of restores whose results file lists at least one error; null unless every location was found and its restores listed
+- `restores_with_errors_unresolved` — Number of restores with errors not resolved by their own retry (a later restore named with retry_suffix that has no errors); a clean restore of anything else never resolves one, since storage doesn't record which backup a restore used, and a restore with errors and no readable date is never resolved; null unless every location was found and its restores listed
+- `restores_results_missing` — Number of restores whose results file is missing or could not be read; null unless every location was found and its restores listed
+- `restores_date_unknown` — Number of restores whose results file was read but has no readable date; they never count as recent; null unless every location was found and its restores listed
+- `failures_resolved_by_retry` — Number of failed backups, backups with incomplete snapshots, and restores with errors resolved by their own retry (a later record named with retry_suffix that did not fail); null while retry_suffix is not set or unless every location was found and its backups and restores listed
+- `retry_suffix` — The configured retry name suffix; null when not set
+- `validation_backups` — Number of backups carrying the validation_label, which are judged like every other backup; null while validation_label is not set or unless every location was found and its backups listed
+- `validation_backups_failed` — Number of validation backups that are Failed or PartiallyFailed, which also stay in every failure count; null while validation_label is not set or unless every location was found and its backups listed
+- `validation_label` — The configured validation label as key=value; null when not set
+- `days_since_last_clean_restore` — Days since the newest clean restore's results file was written; null if there is no clean restore with a readable date, or unless every location was found and its restores listed
+- `restore_test_interval_days` — Days within which a clean restore must have been recorded (the restore_test_interval_days setting); null when not set
+- `clean_restore_within_interval` — True if the newest clean restore is no older than `restore_test_interval_days`; false if it is older or there is none; null while no interval is set or unless every location was found and its restores listed
+
+**Is backup storage protected?**
+- `backup_locations_geo_replicated` — Number of backup storage locations whose storage account is geo-replicated (GRS, RA-GRS, GZRS or RA-GZRS)
+- `backup_locations_customer_managed_key` — Number of backup storage locations whose storage account encrypts with a customer-managed key from Key Vault
 
 
 ### azure_vm_hardening_status
@@ -4904,6 +5049,78 @@ Summary fields:
 - `azure_monitor_enabled_clusters` — Number of clusters sending metrics to Azure Monitor managed Prometheus; Container Insights logging isn't checked
 
 
+### azure_aks_workload_security
+Short Description: Shows from each AKS cluster's Kubernetes API whether workload containers run non-root with privilege escalation off, a read-only root filesystem and capabilities dropped, and which namespaces network policies cover.
+
+Script: fetchers/azure/aks_workload_security/fetcher.py
+
+Access: Reader on the subscription, plus Azure Kubernetes Service Cluster User Role and Azure Kubernetes Service RBAC Reader on each cluster (where a cluster authorizes with Kubernetes RBAC instead of Azure RBAC, a ClusterRole allowing get and list on pods, namespaces and network policies replaces RBAC Reader). Each cluster must use AKS-managed Microsoft Entra integration, and the run must reach its API server, which for a private cluster means its virtual network or a peered one; without these, the cluster's Kubernetes API reads as unread.
+
+Commands Executed:
+- `subscriptions.list()` — picks a subscription when none is set
+- `GET Microsoft.ContainerService/managedClusters` — every AKS cluster with its power state, Entra integration, network policy engine and Azure Policy add-on
+- `POST managedClusters/{cluster}/listClusterUserCredential` (per cluster) — the API server address and CA certificate; the kubeconfig's user entry is not read
+- `GET {API server}/api/v1/pods` (per cluster) — every pod's security context, containers, host namespaces, host path volumes, labels and owner
+- `GET {API server}/apis/networking.k8s.io/v1/networkpolicies` (per cluster) — every network policy with its pod selector, policy types and rule counts
+- `GET {API server}/api/v1/namespaces` (per cluster) — every namespace with its Pod Security Admission labels
+
+Output: `azure_aks_workload_security_<subscription>.json` — per cluster, its Entra integration and network policy engine, each namespace with its Pod Security Admission levels and network policy coverage, each network policy, and each workload with every container's security context; no environment variables, images, secrets or logs are read.
+
+Summary fields:
+
+**Which clusters were read?**
+- `clusters_read` — True if the cluster list was read; false if it failed, and then every cluster count is 0 and every namespace, workload and container count is null
+- `clusters` — Number of AKS clusters in scope
+- `clusters_with_kubernetes_api_read` — Number of clusters whose pods, network policies and namespaces were all read; a stopped cluster counts, since it runs nothing
+- `clusters_with_kubernetes_api_unread` — Number of clusters where at least one of the pod, network policy or namespace lists could not be read: no AKS-managed Entra integration, a missing role, or an API server the run could not reach
+- `clusters_stopped` — Number of clusters that are stopped, which have no API server and run no workload
+- `clusters_without_entra_integration` — Number of clusters without AKS-managed Microsoft Entra integration (none, or the legacy kind), whose Kubernetes API this fetcher cannot read
+- `clusters_enforcing_network_policies` — Number of clusters with a network policy engine (azure, calico or cilium); only there do network policies have any effect
+- `clusters_without_network_policy_engine` — Number of clusters with no network policy engine, where no network policy is enforced
+- `clusters_with_azure_policy_addon` — Number of clusters with the Azure Policy add-on, which can enforce pod security rules when a pod is admitted
+
+**Are namespaces restricted?**
+- `system_namespaces` — List of the namespaces treated as the platform's own (the system_namespaces setting, or the default list: kube-system, kube-public, kube-node-lease, gatekeeper-system, calico-system, tigera-operator, app-routing-system and aks-command); every namespace, workload and container count leaves them out, except `system_workloads`
+- `namespaces` — Number of namespaces outside the system namespaces; null if any cluster's namespace list was not read
+- `namespaces_enforcing_pod_security` — Number of namespaces outside the system namespaces whose pod-security.kubernetes.io/enforce label is baseline or restricted, so the API server rejects pods that break that level; null if any cluster's namespace list was not read
+- `namespaces_enforcing_restricted_pod_security` — Number of namespaces outside the system namespaces whose enforce label is restricted; null if any cluster's namespace list was not read
+- `namespaces_without_pod_security_enforcement` — Number of namespaces outside the system namespaces with no enforce label or the privileged level; another admission controller, such as Azure Policy, may still restrict them; null if any cluster's namespace list was not read
+- `network_policies` — Number of network policies outside the system namespaces; null if any cluster's network policies were not read
+- `namespaces_with_network_policy` — Number of namespaces outside the system namespaces with at least one network policy; null if any cluster's network policies or namespaces were not read
+- `namespaces_without_network_policy` — Number of namespaces outside the system namespaces with no network policy, where every pod accepts and sends any traffic; null if any cluster's network policies or namespaces were not read
+- `namespaces_with_default_deny_ingress` — Number of namespaces outside the system namespaces with a default-deny ingress policy: one that selects every pod, covers ingress and allows nothing, so only traffic another policy allows gets in; null if any cluster's network policies or namespaces were not read
+- `namespaces_with_default_deny_egress` — Number of namespaces outside the system namespaces with a default-deny egress policy: one that selects every pod, covers egress and allows nothing; null if any cluster's network policies or namespaces were not read
+
+**Are containers restricted?**
+- `pods` — Number of pods that are running or pending, in every namespace; null if any cluster's pods were not read
+- `pods_finished_skipped` — Number of pods in the Succeeded or Failed phase, such as completed jobs, which are not assessed; null if any cluster's pods were not read
+- `system_workloads` — Number of workloads in the system namespaces, listed but not judged; null if any cluster's pods were not read
+- `windows_workloads` — Number of Windows workloads (by the pod's os field or node selector) outside the system namespaces, listed but not judged because Linux security contexts don't apply to them; null if any cluster's pods were not read
+- `workloads` — Number of Linux workloads outside the system namespaces, each the pods one Deployment, StatefulSet, DaemonSet, Job or other controller runs, or a bare pod; null if any cluster's pods were not read
+- `containers` — Number of containers and init containers in the Linux workloads outside the system namespaces, counted once per workload, not per replica; a workload running two pod templates, as during a rollout, is represented by its least restricted one; null if any cluster's pods were not read
+- `containers_non_root_enforced` — Number of containers with a runAsUser above 0, or with no runAsUser and runAsNonRoot true, set on the container or its pod; a runAsUser of 0 is root; null if any cluster's pods were not read
+- `containers_privilege_escalation_disabled` — Number of containers with allowPrivilegeEscalation false; unset means allowed; null if any cluster's pods were not read
+- `containers_read_only_root_filesystem` — Number of containers with readOnlyRootFilesystem true; null if any cluster's pods were not read
+- `containers_dropping_all_capabilities` — Number of containers whose dropped capabilities include ALL; null if any cluster's pods were not read
+- `containers_with_added_capabilities` — Number of containers that add a Linux capability; null if any cluster's pods were not read
+- `privileged_containers` — Number of containers with privileged true, which have the node's full access; null if any cluster's pods were not read
+- `containers_with_seccomp_profile` — Number of containers whose seccomp profile, on the container or its pod, is RuntimeDefault or Localhost; null if any cluster's pods were not read
+- `workloads_using_host_namespaces` — Number of Linux workloads outside the system namespaces with hostNetwork, hostPID or hostIPC; null if any cluster's pods were not read
+- `workloads_with_host_path_volumes` — Number of Linux workloads outside the system namespaces that mount a path of the node's filesystem; null if any cluster's pods were not read
+- `workloads_hardened` — Number of hardened workloads: Linux workloads outside the system namespaces where every container is non-root, has privilege escalation off, a read-only root filesystem, all capabilities dropped and none added, and is not privileged, and the pod uses no host namespace or host path; null if any cluster's pods were not read
+- `workloads_not_hardened` — Number of Linux workloads outside the system namespaces that are not hardened; null if any cluster's pods were not read
+- `workload_hardening_percentage` — Percentage of workloads that are hardened = `workloads_hardened` / `workloads` × 100 (a whole number, 0–100); 0 when `workloads` is 0; null if any cluster's pods were not read
+- `workloads_selected_by_network_policy` — Number of Linux workloads outside the system namespaces whose every pod is selected by at least one network policy in its namespace; null if any cluster's pods or network policies were not read
+- `workloads_without_network_policy` — Number of Linux workloads outside the system namespaces with a pod that no network policy selects; null if any cluster's pods or network policies were not read
+- `workload_rows_truncated` — True if a cluster has more workloads than the max_rows setting, so its workload list is cut (workloads that are not hardened are kept first); every count still covers all of its workloads
+
+**Which clusters are left out of scope?**
+- `resource_exclusion_patterns` — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every cluster is in scope
+- `resource_exclusion_patterns_unmatched` — List of configured patterns that matched no cluster, such as a mistyped name; null if the cluster list could not be read
+- `excluded_clusters` — Number of clusters left out of scope because a pattern matched; each is listed under excluded with the pattern, its Kubernetes API is not called, and no other count includes it; null if the cluster list could not be read
+- `in_scope_clusters` — Number of clusters read and in scope; null if the cluster list could not be read
+
+
 ### azure_app_service_configuration
 Short Description: Shows how each App Service web app is hardened: TLS and cipher suites, basic-auth publishing, identity, access restrictions, logging, Key Vault references, runtime support and, opt-in, literal secrets.
 
@@ -5470,6 +5687,62 @@ Summary fields:
 - `event_hubs_with_manage_rights_rules` — Number of event hubs with at least one of their own shared access policies granting Manage rights
 - `event_hubs_authorization_rules_unknown` — Number of event hubs whose shared access policies couldn't be read
 - `event_hubs_minimum_retention_days` — Days of message retention on the event hub with the shortest retention; null when no event hub reports a retention in days
+
+
+### azure_flexible_server_backups
+Short Description: Shows whether each PostgreSQL and MySQL flexible server completed a recent automatic backup, how long backups are kept, whether they are geo-redundant, and recent point-in-time restores.
+
+Script: fetchers/azure/flexible_server_backups/fetcher.py
+
+Access: Reader on the subscription.
+
+Commands Executed:
+- `subscriptions.list()` — picks a subscription when none is set
+- `GET providers/Microsoft.DBforPostgreSQL` and `GET providers/Microsoft.DBforMySQL` — whether each provider is registered, and the newest API version this cloud lists for both servers and their backups
+- `GET Microsoft.DBforPostgreSQL/flexibleServers` and `GET Microsoft.DBforMySQL/flexibleServers` — every flexible server with its backup retention, geo-redundant backup, earliest restore point, replication role and restore source
+- `GET flexibleServers/{server}/backups` (per server that is not a read replica) — the server's completed backups, each classed as automatic, manual (on-demand) or unknown from the backup type and source the engine reports, and for MySQL its name
+
+Output: `azure_flexible_server_backups_<subscription>.json` — each PostgreSQL and MySQL flexible server with its backup settings, its newest completed automatic and manual backups, and whether it was created by a point-in-time restore.
+
+Summary fields:
+
+**What was checked?**
+- `database_servers_postgresql` — Number of PostgreSQL flexible servers in scope; null if either server list could not be read
+- `database_servers_mysql` — Number of MySQL flexible servers in scope; null if either server list could not be read
+- `replica_servers` — Number of read replicas, which take no backups of their own and are not judged; null if either server list could not be read
+- `backup_servers` — Number of backup servers: flexible servers in scope that are not read replicas; null if either server list could not be read
+- `backup_servers_read` — Number of backup servers whose backup list could be read; null if either server list could not be read
+- `stopped_servers` — Number of backup servers that are stopped; a stopped server takes no backups, so it soon shows no automatic backup within the window; null if either server list could not be read
+- `postgresql_provider_registration_status` — Whether Microsoft.DBforPostgreSQL is registered on the subscription: registered, not_registered or unknown
+- `mysql_provider_registration_status` — Whether Microsoft.DBforMySQL is registered on the subscription: registered, not_registered or unknown
+
+**Which servers are left out of scope?**
+- `resource_exclusion_patterns` — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every server is in scope
+- `resource_exclusion_patterns_unmatched` — List of configured patterns that matched no flexible server, such as a mistyped name; null if either server list could not be read
+- `excluded_database_servers` — Number of flexible servers left out of scope because a pattern matched; each is listed under excluded with the pattern, and no other count includes it; null if either server list could not be read
+- `in_scope_database_servers` — Number of flexible servers read and in scope, read replicas included; null if either server list could not be read
+
+**Do backups run?**
+- `servers_with_automatic_backup_within_window` — Number of backup servers whose newest completed automatic backup finished within `backup_window_hours` (an automatic backup within the window); a backup counts as automatic only when its backup type and source match a known scheduled-backup label (PostgreSQL Full, MySQL FULL from Automatic), so manual, on-demand backups never count; null unless every backup server's backup list was read
+- `servers_without_automatic_backup_within_window` — List of the names of backup servers without an automatic backup within the window; null unless every backup server's backup list was read
+- `servers_relying_on_manual_backup` — Number of backup servers with no automatic backup within the window but a manual backup within it, where the manual backup would otherwise hide broken automation; null unless every backup server's backup list was read
+- `servers_with_manual_backups` — Number of backup servers with at least one manual, on-demand backup (PostgreSQL Customer On-Demand, or a MySQL backup named customer_… or customer-…, since MySQL labels an on-demand backup like a scheduled one); null unless every backup server's backup list was read
+- `servers_with_unknown_backup_types` — Number of backup servers with at least one backup whose type and source match no known label; such a backup never counts as automatic, so it can't hide broken automation (each server lists the labels under unknown_backup_labels); null unless every backup server's backup list was read
+- `max_hours_since_automatic_backup` — Hours since the newest completed automatic backup of the backup server that has gone longest without one; null if any backup server has no completed automatic backup, there are no backup servers, or any backup list could not be read
+- `backup_window_hours` — Hours a server's newest completed automatic backup may be old and still count as a backup within the window (the backup_window_hours setting, 26 by default)
+
+**Are backups kept for the authorized period and copied off-site?**
+- `min_backup_retention_days` — Days of backup retention on the backup server that keeps backups the shortest; null if no backup server reports its retention or either server list could not be read
+- `max_backup_retention_days` — Days of backup retention on the backup server that keeps backups the longest; null if no backup server reports its retention or either server list could not be read
+- `servers_retention_below_required` — Number of backup servers that keep backups for fewer days than `required_retention_days`; a server with no retention returned is counted in `servers_retention_unknown` instead; null when `required_retention_days` is not set or either server list could not be read
+- `servers_retention_unknown` — Number of backup servers for which Azure returned no backup retention; null if either server list could not be read
+- `required_retention_days` — Days of backup retention required (the required_retention_days setting); null when not set
+- `servers_geo_redundant_backup` — Number of backup servers with geo-redundant backup enabled, which keeps a copy of backups in the paired region; null if either server list could not be read
+
+**Are restores exercised?**
+- `restored_servers_within_lookback` — Number of servers created by a point-in-time restore (a restore source and not a read replica) within `restore_lookback_days`; only servers that still exist are seen, so a restore test that deleted its server afterwards doesn't count, and a server with no creation date never counts; null while `restore_lookback_days` is not set or if either server list could not be read
+- `restored_servers_date_unknown` — Number of servers created by a point-in-time restore whose creation date is missing, reported as unknown rather than recent; null if either server list could not be read
+- `restore_lookback_days` — Days back that a server created by point-in-time restore counts (the restore_lookback_days setting, at most 3650); null when not set
 
 
 ### azure_key_vault_configuration
