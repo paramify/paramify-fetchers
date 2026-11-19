@@ -445,7 +445,7 @@ results, see [verify validators](suggest_validator_guide.md#5-verify-in-paramify
 | `batches are off for this workspace (…); every entry is sent direct, as before batches` | This is a note, not an error. The workspace has no batches, so the upload sends every entry direct. |
 | An entry shows `held` | A temporary failure stopped the batch. Run the same upload again. |
 | `… was rejected in Paramify; collect again to send new evidence` | A person rejected this run's batch in the app. The upload does not send the same evidence again. Collect again: the new run makes a new batch. |
-| A file shows `blocked by the production WAF` | The evidence holds a string the WAF rejects (`../`, `/bin/sh`, `<script`). The upload sent the rest. Remove the string and collect again. |
+| A file shows `blocked by the production WAF` | Paramify's WAF refused the file (HTTP 403 with no request id). The upload sent the rest. Send the time of the upload and the file name to Paramify support, so they can find the rule in the WAF logs. |
 | Validators attach to `EVD-…`, not your remapped set | Validator sync uses the registry's reference IDs. Attach them on the set's **Validators** tab → **Manage Selection**. |
 | `No fetchers in the manifest …` from `scripts sync` | It found none in `manifest.yaml` at the repo root. Name your manifest, or pass `--all`. |
 | The run also collected scan reports | `paramify upload` sends evidence only. Send reports with the [issues uploader](../uploaders/paramify_issues/README.md). |

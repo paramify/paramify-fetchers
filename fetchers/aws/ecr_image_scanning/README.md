@@ -6,6 +6,9 @@ results for BASIC and ENHANCED scanning, including continuous scans and complete
 manual scans, regardless of the legacy repository `scan_on_push` flag. It never
 starts a scan or changes configuration.
 
+It calls AWS through boto3 (the `aws` extra) in one process and reads up to eight
+repositories at a time.
+
 The latest-image summary is not a report of all deployed or stored images. Use
 [`aws_inspector_ecr_findings`](../inspector_ecr_findings/README.md) for detailed
 active findings and coverage across the selected ECR image inventory, or
@@ -33,9 +36,9 @@ include this action, or the two Inspector actions.
 
 For BASIC scans the counts are AWS's `findingSeverityCounts`, the image total.
 For ENHANCED scans that field covers only the findings on the page AWS returns,
-so the fetcher reads every page and counts `enhancedFindings` itself. An image
-with many findings therefore takes longer: about 10,000 findings take around
-90 seconds.
+so the fetcher reads every page, 1,000 findings at a time, and counts
+`enhancedFindings` itself. An image with many findings therefore takes longer.
+A BASIC scan is read in one request.
 
 ## Results
 

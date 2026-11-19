@@ -11,7 +11,7 @@ The framework is secret-source-agnostic; .env is one path among many.
 
 import os
 import re
-from typing import Dict, Optional
+from typing import Dict, Mapping, Optional
 
 _ENV_REF_PATTERN = re.compile(r"^\$\{env:([A-Z_][A-Z0-9_]*)\}$")
 
@@ -40,8 +40,9 @@ class UnsetSecretError(SecretResolutionError):
         self.env_var = env_var
 
 
-def resolve(value: str) -> str:
-    """Resolve a ${env:VAR_NAME} reference. Plain strings pass through unchanged.
+def resolve(value: str, environ: Optional[Mapping[str, str]] = None) -> str:
+    """Resolve a ${env:VAR_NAME} reference against `environ` (default
+    os.environ). Plain strings pass through unchanged.
 
     Raises SecretResolutionError if the referenced env var is unset or empty.
     """
@@ -64,7 +65,7 @@ def resolve(value: str) -> str:
             )
         return value
     env_var = m.group(1)
-    resolved = os.environ.get(env_var, "")
+    resolved = (os.environ if environ is None else environ).get(env_var, "")
     if not resolved:
         raise UnsetSecretError(
             env_var,

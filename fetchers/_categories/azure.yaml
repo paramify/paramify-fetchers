@@ -117,6 +117,7 @@ requires:
     - azure-mgmt-subscription
     - azure-mgmt-web
     - cryptography
+    - defusedxml
     - msgraph-sdk
     - microsoft-kiota-http
 
