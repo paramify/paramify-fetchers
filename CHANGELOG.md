@@ -12,6 +12,11 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **`azure_activity_log_alerts` 0.4.0: alerts on attempts to alter protected log storage.** A new fixed map,
+  `log_storage_protection_coverage`, shows whether an alert that reaches a person fires on deleting or changing a
+  container's immutability policy, clearing a legal hold, or deleting a blob container or storage account. Activity
+  log alerts fire on the attempt, so one Azure denies is seen too. It is kept apart from the 12 CIS operations, so
+  their totals do not move. `all_log_storage_protection_operations_covered` gives one verdict.
 - **`azure_aks_cluster_configuration` 0.7.0: autoscaling for expected pools.** A new `expected_autoscaling_pools`
   setting lists the node pools that must have the cluster autoscaler on, as `pool` (every cluster) or `cluster/pool`.
   Missing pools and pools without the autoscaler are counted and named, a pool at zero nodes stays expected, and

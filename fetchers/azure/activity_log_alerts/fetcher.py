@@ -103,6 +103,18 @@ CHANGE_OPERATIONS = {
     ),
 }
 
+# Changes that would let protected (immutable) log storage be altered or removed, kept out of the CIS map so its
+# totals do not move. An activity log alert fires on the attempt whatever its outcome, so a denied attempt is seen too.
+LOG_STORAGE_PROTECTION_OPERATIONS = {
+    "delete_immutability_policy": (
+        "Microsoft.Storage/storageAccounts/blobServices/containers/immutabilityPolicies/delete",),
+    "change_immutability_policy": (
+        "Microsoft.Storage/storageAccounts/blobServices/containers/immutabilityPolicies/write",),
+    "clear_legal_hold": ("Microsoft.Storage/storageAccounts/blobServices/containers/clearLegalHold/action",),
+    "delete_blob_container": ("Microsoft.Storage/storageAccounts/blobServices/containers/delete",),
+    "delete_storage_account": ("Microsoft.Storage/storageAccounts/delete",),
+}
+
 # monitor_alert_service_health_exists is not an operationName alert: it needs BOTH
 # category == ServiceHealth and properties.incidentType == Incident on one rule.
 SERVICE_HEALTH_CATEGORY = "servicehealth"
@@ -290,6 +302,7 @@ def routing_summary(alerts: list[dict]) -> dict:
     """Coverage again, counting only alerts that reach a person, plus the App Service change map."""
     enabled = [a for a in alerts if a.get("enabled")]
     change = coverage_reaching_human(alerts, CHANGE_OPERATIONS)
+    protection = coverage_reaching_human(alerts, LOG_STORAGE_PROTECTION_OPERATIONS)
     return {
         "alerts_routing_to_enabled_receiver": sum(1 for a in enabled if a.get("routes_to_enabled_receiver") is True),
         "alerts_routing_unknown": sum(1 for a in enabled if a.get("routes_to_enabled_receiver") is None),
@@ -304,6 +317,12 @@ def routing_summary(alerts: list[dict]) -> dict:
         "change_operations_total": len(CHANGE_OPERATIONS),
         "all_change_operations_covered": tri_state(change.values()),
         "uncovered_change_operations": sorted(k for k, v in change.items() if v is False),
+        "log_storage_protection_coverage": protection,
+        "log_storage_protection_operations_covered": sum(1 for v in protection.values() if v is True),
+        "log_storage_protection_operations_possibly_covered": sum(1 for v in protection.values() if v is None),
+        "log_storage_protection_operations_total": len(LOG_STORAGE_PROTECTION_OPERATIONS),
+        "all_log_storage_protection_operations_covered": tri_state(protection.values()),
+        "uncovered_log_storage_protection_operations": sorted(k for k, v in protection.items() if v is False),
     }
 
 
