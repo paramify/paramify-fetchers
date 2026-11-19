@@ -41,6 +41,29 @@ schemas and the `paramify` CLI — not the internal code.
   newer than the read) stays in scope and is counted in `scope_not_found_resources`. A kind with resources but none
   included logs a warning. `metadata.config_patterns` records the inclusion patterns with their reasons. With no
   inclusions set, the evidence is unchanged.
+- **One-line install.** `curl -fsSL https://raw.githubusercontent.com/paramify/paramify-fetchers/main/install.sh |
+  bash` clones the repo to `~/paramify-fetchers`, installs the CLI and TUI into the clone's `.venv`, and links
+  `paramify` into `~/.local/bin`. In a terminal it shows a spinner and elapsed time for each step, offers to add
+  `~/.local/bin` to your shell profile and to open the TUI, and installs with uv when uv is on your `PATH`.
+  `PARAMIFY_DIR`, `PARAMIFY_REF`, `PARAMIFY_EXTRAS` and `PARAMIFY_REPO_URL` change the defaults. It finds a Python
+  3.11 or later even when `python3` is older (as on macOS), has uv provide one when none is installed, rebuilds a
+  `.venv` left on an older Python, names the install command for your OS when git or Python is missing, refuses a
+  directory that is not a clone, and leaves an existing clone's code alone. A CI job shellchecks it and runs it end to
+  end. The README's manual install now covers uv, choosing a Python 3.11+ explicitly, and the errors an older Python
+  causes.
+- **`paramify update`** brings a clone up to date: a clone on `main` is fast-forwarded to `origin/main`, a clone
+  pinned to a release moves to the newest release, and `--to main` / `--to vX.Y.Z-beta` switch between them. Before it
+  moves it runs the target's own `paramify validate` on each manifest in a temporary worktree and shows which of your
+  fetchers change (with versions), the breaking changes that touch this clone and a few highlights. It reinstalls only
+  when `pyproject.toml` changed. Also `--check` (exit 0/1/2), `--rollback`, `--yes`, `--allow-breaking`, `--json`, `--expect <sha>` (move
+  only to the commit a plan showed), and
+  a once-a-day notice (`PARAMIFY_NO_UPDATE_CHECK=1` turns it off). See `docs/versioning_guide.md`.
+- **The TUI shows when an update is waiting and applies it.** A quiet `↑ 12 new commits on main · press U` line
+  in the header and on the welcome screen (it gives way first when the header is short of room); `U` opens the plan
+  `paramify update` shows, with Apply (a second confirmation when breaking changes touch this clone) and Roll back.
+  The update runs as a subprocess, so the running TUI never loads half-replaced code.
+- **Update notes**, `releases/unreleased.yaml` and `releases/<version>.yaml`: the short rows `paramify update` shows
+  instead of the CHANGELOG. Add a row with the change; format in `releases/README.md`.
 - Manifest: `concurrency` on a fetcher entry (1 to 32, default 1) runs up to that many of its targets at once. Each
   concurrent target writes to its own staging directory, moved into the run directory in target order, so results,
   envelopes and `_run_metadata.json` keep target order and a file name two targets share still fails the later one
@@ -98,6 +121,17 @@ schemas and the `paramify` CLI — not the internal code.
   `approval: MANUAL` on one (the pipeline waits for someone to approve each batch). It also refuses a registry
   validator that targets a pipeline evidence set, since a failing validator means the batch never approves.
   Validator sync leaves pipeline sets out of an explicit `reference_ids` list.
+- **`paramify env`** prints what a manifest needs from the environment: only the variables it reads, grouped by
+  tool, each with a short note and whether it is required, Paramify's upload token first, so you know what to set in
+  your secret manager; `--json` lists them for a script (with the fetchers that read each, and whether it is set),
+  never a value. It lists what a run reads: the manifest's
+  `${env:}` references (a remapped secret, one token per target, a config value, `run.platforms`) and passthrough
+  variables; a required secret the manifest doesn't map yet is listed apart with the `set-secret` command that maps
+  it. For local testing, `--write` appends what `.env` (or `--path`) lacks and never
+  changes, reorders or prints an existing line; a CRLF file stays CRLF and a symlinked `.env` stays a link. It ends
+  with the required variables that still have no value. When a `.env` exists in the repo root, `run` and `doctor`
+  fill unset or empty variables from it; a variable set in the environment always wins, and a run never needs the
+  file. See [`docs/cli_guide.md`](docs/cli_guide.md#what-a-manifest-needs-paramify-env).
 
 ### Breaking
 
@@ -2811,6 +2845,21 @@ schemas and the `paramify` CLI — not the internal code.
   - `datadog_siem_configuration`: the suppression rule field `rule_id`.
 
 ### Fixed
+
+- **Every secret has a description, and settings the fetcher defaults are no longer required.** 19 secret env vars
+  across datadog, crowdstrike, okta, knowbe4, sentinelone, github, gitlab, rippling, checkov, paramify and splunk
+  had no `description`, so `paramify describe` and the TUI said nothing about what they were or where to get them.
+  Each now says both, with the same wording wherever fetchers share a variable. Four were declared required though
+  the fetcher runs without them; they are now `required: false`, so `paramify validate` stops demanding them and the
+  runner skips them when a manifest leaves them out:
+  - Datadog `base_url` (`DATADOG_BASE_URL`, default `https://api.ddog-gov.com`) on all 13 fetchers.
+  - Datadog `incidents_lookback_days` (`DATADOG_INCIDENTS_LOOKBACK_DAYS`, default 90) on `datadog_incidents_list`
+    and `datadog_incident_timelines`, and `signals_lookback_days` (`DATADOG_SIGNALS_LOOKBACK_DAYS`, default 30) on
+    `datadog_siem_signals`. They stay under `secrets`, so manifests that map them keep working unchanged.
+  - Checkov `clone_token` (`GIT_CLONE_TOKEN`) on `checkov_terraform` and `checkov_kubernetes`, which clone a public
+    repo without it (`checkov_bicep` already declared it optional).
+
+  No fetcher's output changes, so no fetcher version moves.
 
 - **`paramify run` stops its running fetchers on Ctrl-C or SIGTERM.** Each fetcher runs in its own session, so before,
   an interrupted run left it running and writing into the run directory. The runner now kills the fetcher's process

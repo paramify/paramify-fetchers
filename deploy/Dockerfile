@@ -73,6 +73,11 @@ RUN case ",${INSTALL_EXTRAS}," in \
         && ln -s /opt/checkov/bin/checkov /usr/local/bin/checkov ;; \
     esac
 
+# Tells `paramify update` it is running in this image. The image is a copy of
+# the clone with no .git (see .dockerignore), so there is nothing to update in
+# here: update the clone on the host, then rebuild the image.
+ENV PARAMIFY_CONTAINER=1
+
 # Collected evidence lands here; mount a volume to persist it to the host.
 ENV EVIDENCE_DIR=/app/evidence
 VOLUME ["/app/evidence"]

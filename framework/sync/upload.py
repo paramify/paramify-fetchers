@@ -28,14 +28,11 @@ from dotenv import load_dotenv
 from framework import yaml_io
 from framework.config_loader import discover_fetchers
 from framework.custom_tags import Tagger, category_display_names, resolve_tag_policy
-from framework.paramify.client import Client, base_url_error
+from framework.paramify.client import Client
+from framework.paramify.connection import client_for
+from framework.paramify.connection import settings as paramify_settings
 from framework.paramify.resources import Reader, Resources
 from framework.paramify.version import Capability, delivery_capability
-from framework.paramify_auth import (
-    missing_token_error,
-    resolve_base_url,
-    resolve_upload_token,
-)
 from framework.run_files import is_evidence_file
 from framework.runner import manifest_loader
 from framework.sync import engine
@@ -151,12 +148,12 @@ class _Setup:
         self.config_path = config_path
         # An in-memory config replaces the file: nothing is read or written.
         self.config = upload_cfg if upload_cfg is not None else load_config(config_path)
-        self.token = token
         # Config wins, then an explicit argument, then the environment.
-        self.base_url, _ = resolve_base_url((self.config.get("paramify") or {}).get("base_url") or base_url)
-        url_error = base_url_error(self.base_url)
-        if url_error:
-            raise ValueError(url_error)
+        self.settings = paramify_settings(self.config, base_url=base_url, token=token)
+        self.base_url = self.settings.base_url
+        url_errors = self.settings.errors(need_token=False)
+        if url_errors:
+            raise ValueError(url_errors[0])
         self.files = [p for p in sorted(self.run_dir.glob("*.json"))
                       if is_evidence_file(p) and (not only_file or p.name == only_file)]
         if not self.files:
@@ -167,10 +164,10 @@ class _Setup:
         self.notes: List[str] = []
 
     def client(self) -> Client:
-        token = self.token or resolve_upload_token()[0]
-        if not token:
-            raise ValueError(missing_token_error())
-        return Client(token, self.base_url)
+        problems = self.settings.errors(need_token=True)
+        if problems:
+            raise ValueError(problems[0])
+        return client_for(self.settings)
 
     def providers(
         self,
@@ -503,7 +500,7 @@ def run_upload(
                    upload_cfg=upload_cfg, token=token, base_url=base_url, owner=owner)
     setup.notes = manifest_notes(setup.run_dir, root, manifest_path, stack, owner)
     policy = resolve_tag_policy(setup.config, override_off=None if custom_tags else NO_TAGS)
-    report = _Report(emit, dry_run, Tagger(None, "", policy=policy, display_names=category_display_names(root)))
+    report = _Report(emit, dry_run, Tagger(None, policy=policy, display_names=category_display_names(root)))
     base = {"run_dir": str(setup.run_dir), "base_url": setup.base_url, "dry_run": dry_run,
             "files": len(setup.files)}
 

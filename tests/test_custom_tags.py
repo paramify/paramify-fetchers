@@ -1,5 +1,6 @@
 """Default custom tags: the policy read from upload.yaml, and the Tagger that
-applies it. The HTTP boundary is a fake session; nothing here touches a tenant.
+applies it. The HTTP boundary is the shared fake workspace behind the real
+Client; nothing here touches a tenant.
 
 What matters: tags are additive and re-asserted (one POST per entity per run,
 never PATCH), a 403 turns tagging off for the rest of the run with one warning
@@ -13,32 +14,13 @@ import logging
 from pathlib import Path
 
 import pytest
+import requests
 
 from framework import custom_tags as ct
+from framework.paramify.client import Client
+from framework.paramify.resources import Resources
+from tests.paramify_fake import FakeParamify
 
-
-class FakeResponse:
-    def __init__(self, status_code=200, text=""):
-        self.status_code = status_code
-        self.text = text
-
-
-class RecordingSession:
-    """Scripted requests.Session stand-in: answers from `responses` in order
-    (the last one repeats), and records every POST."""
-
-    def __init__(self, *responses):
-        self.responses = list(responses) or [FakeResponse(200)]
-        self.posts = []
-
-    def post(self, url, json=None, timeout=None, **_):
-        self.posts.append((url, json))
-        if len(self.responses) > 1:
-            return self.responses.pop(0)
-        return self.responses[0]
-
-
-BASE = "https://example.test/api/v0"
 NAMES = {"aws": "AWS", "okta": "Okta"}
 
 
@@ -48,8 +30,17 @@ def _no_ambient_switch(monkeypatch):
     monkeypatch.delenv(ct.ENV_SWITCH, raising=False)
 
 
-def _tagger(session=None, policy=None, names=NAMES):
-    return ct.Tagger(session, BASE, policy=policy or ct.TagPolicy(), display_names=names)
+def _resources(fake):
+    return Resources(Client("tok", "https://api.example.test", session=fake.session, sleep=lambda _s: None))
+
+
+def _tagger(fake=None, policy=None, names=NAMES):
+    resources = _resources(fake) if fake is not None else None
+    return ct.Tagger(resources, policy=policy or ct.TagPolicy(), display_names=names)
+
+
+def _tag_posts(fake):
+    return [path for method, path, _ in fake.calls if method == "POST" and path.startswith("/custom-tags/")]
 
 
 # --------------------------------------------------------------------------- #
@@ -66,7 +57,7 @@ def test_false_turns_everything_off():
     p = ct.resolve_tag_policy({"tags": False})
     assert p.provenance is None and p.service is False and not p.enabled
     assert "tags: false" in p.off_reason
-    t = ct.build_tagger(None, BASE, config={"tags": False})
+    t = ct.build_tagger(None, config={"tags": False})
     assert t.plan("aws") == []
     assert t.tag("evidence", "ev-1", "aws") == {"outcome": "off", "tags": []}
     assert t.summary()["enabled"] is False and "tags: false" in t.summary()["reason"]
@@ -91,9 +82,10 @@ def test_env_switch_other_values_leave_the_config_in_charge(value):
 
 def test_env_switch_is_read_from_the_process_environment(monkeypatch):
     monkeypatch.setenv(ct.ENV_SWITCH, "off")
-    t = ct.build_tagger(RecordingSession(), BASE, config={}, display_names=NAMES)
+    fake = FakeParamify()
+    t = ct.build_tagger(_resources(fake), config={}, display_names=NAMES)
     assert t.tag("evidence", "ev-1", "aws")["outcome"] == "off"
-    assert t.session is None, "an off tagger holds no session, so it cannot write"
+    assert fake.calls == [], "an off tagger writes nothing"
 
 
 def test_env_switch_wins_before_a_broken_block_is_read():
@@ -108,7 +100,7 @@ def test_override_off_wins_over_everything():
         {"tags": {"provenance": "Robots"}}, env={ct.ENV_SWITCH: "on"}, override_off="--no-tags"
     )
     assert not p.enabled and p.off_reason == "--no-tags"
-    t = ct.build_tagger(RecordingSession(), BASE, config={}, display_names=NAMES, override_off="--no-tags")
+    t = ct.build_tagger(_resources(FakeParamify()), config={}, display_names=NAMES, override_off="--no-tags")
     assert t.summary()["reason"] == "--no-tags" and t.plan("aws") == []
 
 
@@ -129,7 +121,7 @@ def test_facade_forwards_the_switch_to_every_stage(monkeypatch, tmp_path):
     # The evidence upload runs on the sync engine, not a path-loaded uploader.
     monkeypatch.setattr(api._sync_upload, "run_upload", stub("upload"))
     monkeypatch.setattr(api, "_load_paramify_scripts_uploader",
-                        lambda root: SimpleNamespace(load_config=lambda p: {}, sync_scripts=stub("scripts")))
+                        lambda root: SimpleNamespace(sync_scripts=stub("scripts")))
     monkeypatch.setattr(api, "_load_paramify_validator_syncer",
                         lambda root: SimpleNamespace(collect_validators=lambda *a, **k: [],
                                                      sync_validators=stub("validators")))
@@ -199,8 +191,8 @@ def test_plan_never_derives_a_service_tag_from_the_slug():
 # --------------------------------------------------------------------------- #
 
 def test_tag_posts_additively_once_per_entity():
-    s = RecordingSession(FakeResponse(200))
-    t = _tagger(s)
+    fake = FakeParamify()
+    t = _tagger(fake)
     first = t.tag("evidence", "ev-1", "aws")
     again = t.tag("evidence", "ev-1", "aws")
     other = t.tag("scripts", "sc-1", "okta")
@@ -208,10 +200,11 @@ def test_tag_posts_additively_once_per_entity():
     assert first == {"outcome": "applied", "tags": [ct.DEFAULT_PROVENANCE_TAG, "AWS"]}
     assert again["outcome"] == "already"
     assert other["outcome"] == "applied"
-    assert s.posts == [
-        (f"{BASE}/custom-tags/evidence/ev-1", {"names": [ct.DEFAULT_PROVENANCE_TAG, "AWS"]}),
-        (f"{BASE}/custom-tags/scripts/sc-1", {"names": [ct.DEFAULT_PROVENANCE_TAG, "Okta"]}),
-    ]
+    assert _tag_posts(fake) == ["/custom-tags/evidence/ev-1", "/custom-tags/scripts/sc-1"]
+    assert fake.tags == {
+        ("evidence", "ev-1"): [ct.DEFAULT_PROVENANCE_TAG, "AWS"],
+        ("scripts", "sc-1"): [ct.DEFAULT_PROVENANCE_TAG, "Okta"],
+    }
     assert t.summary() == {
         "enabled": True, "reason": None,
         "provenance": ct.DEFAULT_PROVENANCE_TAG, "service": True,
@@ -220,42 +213,48 @@ def test_tag_posts_additively_once_per_entity():
 
 
 def test_409_counts_as_already_tagged():
-    t = _tagger(RecordingSession(FakeResponse(409, "conflict")))
+    fake = FakeParamify()
+    fake.fail_route("POST", r"/custom-tags/.*", 409, "conflict")
+    t = _tagger(fake)
     assert t.tag("validators", "v-1", "aws")["outcome"] == "applied"
     assert t.summary()["failed"] == 0
 
 
 def test_403_disables_the_rest_of_the_run_with_one_warning(caplog):
-    s = RecordingSession(FakeResponse(403, "forbidden"))
-    t = _tagger(s)
+    fake = FakeParamify()
+    fake.fail_route("POST", r"/custom-tags/.*", 403, "forbidden")
+    t = _tagger(fake)
     with caplog.at_level(logging.WARNING, logger="paramify_custom_tags"):
         a = t.tag("evidence", "ev-1", "aws")
         b = t.tag("evidence", "ev-2", "aws")
     assert a["outcome"] == b["outcome"] == "forbidden"
-    assert len(s.posts) == 1, "after a 403 no further tag requests are sent"
+    assert len(_tag_posts(fake)) == 1, "after a 403 no further tag requests are sent"
     assert t.disabled and "403" in t.disabled
     assert sum("custom-tags permission" in r.message for r in caplog.records) == 1
     assert t.summary()["skipped"] == 2 and t.summary()["applied"] == 0
 
 
 def test_other_errors_are_counted_not_raised(caplog):
-    t = _tagger(RecordingSession(FakeResponse(500, "boom")))
+    fake = FakeParamify()
+    fake.fail_route("POST", r"/custom-tags/.*", 500, "boom")
+    t = _tagger(fake)
     with caplog.at_level(logging.WARNING, logger="paramify_custom_tags"):
         r = t.tag("evidence", "ev-1", "aws")
-    assert r["outcome"] == "error" and "HTTP 500" in r["error"]
+    assert r["outcome"] == "error" and "HTTP 500" in r["error"] and "boom" in r["error"]
     assert t.summary()["failed"] == 1 and t.disabled is None
 
 
-def test_network_failure_is_an_error_not_an_exception():
-    class Boom:
-        def post(self, *a, **k):
-            raise ConnectionError("down")
+def test_network_failure_is_an_error_not_an_exception(monkeypatch):
+    fake = FakeParamify()
 
-    t = _tagger(Boom())
-    assert t.tag("evidence", "ev-1", "aws")["outcome"] == "error"
+    def down(*_a, **_k):
+        raise requests.ConnectionError("down")
+
+    monkeypatch.setattr(fake.session, "request", down)
+    assert _tagger(fake).tag("evidence", "ev-1", "aws")["outcome"] == "error"
 
 
-def test_no_session_means_dry_run():
+def test_no_resources_means_dry_run():
     t = _tagger(None)
     r = t.tag("evidence", "ev-1", "aws")
     assert r == {"outcome": "dry_run", "tags": [ct.DEFAULT_PROVENANCE_TAG, "AWS"]}
@@ -291,7 +290,7 @@ def test_display_names_read_from_category_files(tmp_path):
 
 def test_build_tagger_reads_names_from_root(tmp_path):
     root = _repo_with_categories(tmp_path, aws="display_name: AWS\n")
-    t = ct.build_tagger(None, BASE, config={}, root=root)
+    t = ct.build_tagger(None, config={}, root=root)
     assert t is not None and t.plan("aws") == [ct.DEFAULT_PROVENANCE_TAG, "AWS"]
 
 
