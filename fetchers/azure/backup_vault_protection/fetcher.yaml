@@ -151,7 +151,7 @@ evidence_set:
     - total_backup_vaults — Number of Backup vaults in the subscription; null when the vault list was not read, and then every count and verdict here is null too (only the settings stay) and the run fails
     - vaults_instances_listed — True if every vault's backup instance list was read; false if any failed, and then the two counts below, every backup instance count and the two all_ fields are null and the run fails
     - vaults_with_backup_instances — Number of vaults protecting at least one resource
-    - vaults_without_backup_instances — Number of vaults protecting nothing
+    - vaults_without_backup_instances — Number of vaults protecting no in-scope resource; with no patterns set, vaults protecting nothing
     - vaults_by_vault_store_redundancy — Number of vaults for each redundancy of their vault store, where the backups are kept:
       - LocallyRedundant (three copies in one datacenter)
       - ZoneRedundant (copies across availability zones of the region)
