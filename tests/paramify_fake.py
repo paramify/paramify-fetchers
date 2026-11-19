@@ -70,6 +70,10 @@ class FakeParamify:
         self.batch_settings = True
         self.today = date(2026, 11, 1)
         self.tags: Dict[Tuple[str, str], List[str]] = {}
+        self.scripts: List[Dict[str, Any]] = []
+        self.validators: List[Dict[str, Any]] = []
+        #: (evidence id, subject type, subject id) for every CONNECT that took.
+        self.associations: set = set()
         self._stacks: List[Dict[str, Any]] = []
         self._evidence: List[Dict[str, Any]] = []
         self._requests: List[Dict[str, Any]] = []
@@ -132,6 +136,16 @@ class FakeParamify:
         }
         self._requests.append(row)
         return ArtifactRequest(row["id"], row["referenceId"], channel_id, evidence_id, requested, due)
+
+    def add_script(self, name: str, description: str) -> Dict[str, Any]:
+        row = {"id": f"sc-{self._next('sc')}", "name": name, "description": description, "code": ""}
+        self.scripts.append(row)
+        return row
+
+    def add_validator(self, name: str) -> Dict[str, Any]:
+        row = {"id": f"vl-{self._next('vl')}", "name": name}
+        self.validators.append(row)
+        return row
 
     def set_today(self, d: date) -> None:
         self.today = d
@@ -203,6 +217,7 @@ class FakeParamify:
             )
             row["whenToCreateAndUpdateProcessArtifactRequest"] = body.get(
                 "whenToCreateAndUpdateProcessArtifactRequest", "MANUAL")
+            row["frequency"], row["startDate"] = body.get("frequency"), body.get("startDate")
             return FakeResponse(201, row)
         if method == "GET" and path == "/artifact-requests":
             rows = [r for r in self._requests if r["evidenceId"] == params.get("evidenceId")]
@@ -247,6 +262,31 @@ class FakeParamify:
             have = self.tags.setdefault((m.group(1), m.group(2)), [])
             have.extend(n for n in body["names"] if n not in have)
             return FakeResponse(200, {"customTags": have})
+        for kind, rows in (("scripts", self.scripts), ("validators", self.validators)):
+            if path == f"/{kind}":
+                if method == "GET":
+                    return FakeResponse(200, {kind: rows})
+                row = {"id": f"{kind[:2]}-{self._next(kind[:2])}", **body}
+                rows.append(row)
+                return FakeResponse(201, row)
+            m = re.fullmatch(rf"/{kind}/([^/]+)", path)
+            if method == "PATCH" and m:
+                row = next((r for r in rows if r["id"] == m.group(1)), None)
+                if row is None:
+                    return FakeResponse(404, text="Not Found")
+                row.update(body)
+                return FakeResponse(200, row)
+        m = re.fullmatch(r"/evidence/([^/]+)/associate", path)
+        if method == "POST" and m:
+            if not any(e["id"] == m.group(1) for e in self._evidence):
+                return FakeResponse(404, text="Not Found")
+            link = (m.group(1), body["subjectType"], body["subjectId"])
+            if link in self.associations:
+                # A repeat CONNECT is refused with HTTP 400 saying it is already
+                # connected (seen live 2026-08-31); the exact wording is assumed.
+                return FakeResponse(400, text="Subject is already connected to this evidence")
+            self.associations.add(link)
+            return FakeResponse(201, {})
         return FakeResponse(404, text="Not Found")
 
     def _page(self, rows: List[Dict[str, Any]], key: str, params: Dict[str, Any]) -> FakeResponse:

@@ -503,7 +503,7 @@ def run_upload(
                    upload_cfg=upload_cfg, token=token, base_url=base_url, owner=owner)
     setup.notes = manifest_notes(setup.run_dir, root, manifest_path, stack, owner)
     policy = resolve_tag_policy(setup.config, override_off=None if custom_tags else NO_TAGS)
-    report = _Report(emit, dry_run, Tagger(None, "", policy=policy, display_names=category_display_names(root)))
+    report = _Report(emit, dry_run, Tagger(None, policy=policy, display_names=category_display_names(root)))
     base = {"run_dir": str(setup.run_dir), "base_url": setup.base_url, "dry_run": dry_run,
             "files": len(setup.files)}
 

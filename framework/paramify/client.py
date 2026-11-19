@@ -53,6 +53,7 @@ class ApiError(Exception):
         kind: ErrorKind,
         method: str,
         path: str,
+        body: str = "",
     ) -> None:
         super().__init__(message)
         self.message = message
@@ -60,6 +61,8 @@ class ApiError(Exception):
         self.kind = kind
         self.method = method
         self.path = path
+        #: The whole response body, for callers that read Paramify's own message.
+        self.body = body
 
     @property
     def fatal(self) -> bool:
@@ -147,6 +150,9 @@ class Client:
     def post_json(self, path: str, body: Dict[str, Any]) -> Any:
         return self._call("POST", path, json_body=body)
 
+    def patch_json(self, path: str, body: Dict[str, Any]) -> Any:
+        return self._call("PATCH", path, json_body=body)
+
     def post_file(self, path: str, filename: str, content: bytes, meta: Dict[str, Any]) -> Any:
         files = {
             "file": (filename, content, "application/json"),
@@ -172,6 +178,7 @@ class Client:
         safe_to_retry = method == "GET"
         while True:
             status: Optional[int] = None
+            body = ""
             retry_after: Optional[float] = None
             retryable = True
             try:
@@ -205,14 +212,14 @@ class Client:
                 if kind is not ErrorKind.TEMPORARY:
                     raise ApiError(
                         f"{method} {path} failed ({reason})",
-                        status=status, kind=kind, method=method, path=path,
+                        status=status, kind=kind, method=method, path=path, body=body,
                     )
                 retryable = safe_to_retry or status in (429, 503)
                 retry_after = _retry_after(resp.headers)
             if not retryable:
                 raise ApiError(
                     f"{method} {path} failed, not retried because it may have taken effect ({reason})",
-                    status=status, kind=ErrorKind.TEMPORARY, method=method, path=path,
+                    status=status, kind=ErrorKind.TEMPORARY, method=method, path=path, body=body,
                 )
             delay = retry_after if retry_after is not None else min(2.0**attempt, _BACKOFF_CAP_S)
             if not delay >= 1.0:  # also catches NaN: every retry costs at least 1 s of budget
@@ -220,7 +227,7 @@ class Client:
             if delay > self._budget_left:
                 raise ApiError(
                     f"{method} {path} failed after retrying ({reason})",
-                    status=status, kind=ErrorKind.TEMPORARY, method=method, path=path,
+                    status=status, kind=ErrorKind.TEMPORARY, method=method, path=path, body=body,
                 )
             self._budget_left -= delay
             self._sleep(delay)
