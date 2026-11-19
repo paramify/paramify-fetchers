@@ -122,7 +122,11 @@ tag: `tag:Boundary=FedRAMP`, or `tag:Boundary` for any value. Exclusions take
 `tag:` too, and win. Only a resource's own tags count: a key vault key, a
 storage container or a diagnostic setting goes with the resource it belongs to.
 A grant, lock or policy on a resource group or the subscription stays while it
-holds an in-scope resource, and one on a management group always stays.
+holds an in-scope resource, and one on a management group always stays. Under
+`rg:` inclusions alone, one on the subscription always stays too, with no read.
+A `location:` inclusion judges a record with no region, such as a Defender
+finding, by the region of the resource it is about; a global resource, such as
+a private DNS zone, matches only `location:global`.
 Double-quote a tag name or value that holds a space, comma, `=` or `:`. A value
 takes `*` globs; a name doesn't, so `*` in a name matches only a `*`.
 `manifest exclude` never adds to this list; set it with `set-platform-config`,

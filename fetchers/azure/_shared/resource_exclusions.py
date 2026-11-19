@@ -136,6 +136,10 @@ class ResourceScope:
         # Containers (the subscription, groups, management groups, the root) are judged apart when tags or inclusions
         # decide.
         self._containers = self.uses_tags or bool(self.inclusions)
+        # rg: inclusions alone judge every container by name, with no index read.
+        self._rg_only = bool(self.inclusions) and all(k == "rg" for k, _ in self._inclusion_keys)
+        # A location: inclusion judges a record with no region by the region of the resource it is about.
+        self._region_from_index = any(k == "location" for k, _ in self._inclusion_keys)
 
     @classmethod
     def from_env(cls) -> "ResourceScope":
@@ -197,7 +201,7 @@ class ResourceScope:
 
             container = container_of(resource_id)
             if container is not None and (container == _key("id", resource_id) or above_subscription(container)
-                                          or not self.uses_tags or record_tags is MISSING
+                                          or self._rg_only and not self.uses_tags or record_tags is MISSING
                                           and self._tag_index().held(resource_id) is False):
                 return self._unknown_if(self._container(container, names, record), resource_id)
         cache: list = []
@@ -207,7 +211,11 @@ class ResourceScope:
                 cache.append(self._tags(resource_id, record_tags))
             return cache[0]
 
-        answer, not_found = self._decide(names, resource_tags, record)
+        inclusion_names = names
+        if location is None and resource_id and self._region_from_index:
+            inclusion_names = {**names, "location": [_key("location", self._tag_index().location_of(resource_id))]}
+            self._flush()
+        answer, not_found = self._decide(names, resource_tags, record, inclusion_names)
         if not_found and record:
             self._not_found.add(_key("id", resource_id))
         return self._unknown_if(answer, resource_id)
@@ -217,11 +225,12 @@ class ResourceScope:
             self._unknown.add(_key("id", resource_id) or object())
         return answer
 
-    def _decide(self, names: dict, tags, record: bool) -> tuple[Optional[str], bool]:
+    def _decide(self, names: dict, tags, record: bool, inclusion_names: Optional[dict] = None
+                ) -> tuple[Optional[str], bool]:
         """The answer, and whether it stands only because a tag: pattern couldn't judge a resource not found."""
         excluded_by, unknown, not_found = self._hits(self._keys, self.patterns, names, tags)
-        included_by, inclusion_unknown, inclusion_not_found = \
-            self._hits(self._inclusion_keys, self.inclusions, names, tags) if self.inclusions else ([], False, False)
+        included_by, inclusion_unknown, inclusion_not_found = self._hits(
+            self._inclusion_keys, self.inclusions, inclusion_names or names, tags) if self.inclusions else ([], False, False)
         if record:
             self._matched.update(excluded_by)
             self._included.update(included_by)
@@ -252,8 +261,9 @@ class ResourceScope:
             self._included.update(included_by)
         if included_by:
             return None
-        if group_of(container) == container and all(k == "rg" for k, _ in self._inclusion_keys):
-            return NOT_INCLUDED  # under rg: alone, a group no pattern names holds nothing in scope
+        if self._rg_only:
+            # Under rg: alone, a group no pattern names holds nothing in scope; the subscription reaches the named ones.
+            return NOT_INCLUDED if group_of(container) == container else None
         holding = self._holders(subscription_of(container))
         self._flush()
         if holding is None:

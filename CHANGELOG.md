@@ -71,8 +71,10 @@ schemas and the `paramify` CLI — not the internal code.
   `not_included_<kind>s_not_listed`, plus `scope_unknown_<kind>s` for a record with no id or one outside any
   subscription, which also fails the run. With a `tag:` pattern, a resource Resource Graph doesn't return (deleted, or
   newer than the read) stays in scope and is counted in `scope_not_found_resources`. A kind with resources but none
-  included logs a warning. `metadata.config_patterns` records the inclusion patterns with their reasons. With no
-  inclusions set, the evidence is unchanged.
+  included logs a warning. `metadata.config_patterns` records the inclusion patterns with their reasons. Under `rg:`
+  inclusions alone, a record made on the subscription always stays, with no read. A `location:` inclusion judges a
+  record with no region (a Defender finding) by the region of the resource it is about, and a global resource only as
+  `location:global`. With no inclusions set, the evidence is unchanged.
 - **One-line install.** `curl -fsSL https://raw.githubusercontent.com/paramify/paramify-fetchers/main/install.sh |
   bash` clones the repo to `~/paramify-fetchers`, installs the CLI and TUI into the clone's `.venv`, and links
   `paramify` into `~/.local/bin`. In a terminal it shows a spinner and elapsed time for each step, offers to add
