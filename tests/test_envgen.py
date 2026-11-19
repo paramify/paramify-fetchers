@@ -469,3 +469,20 @@ def test_cli_says_how_to_map_a_per_target_secret(tmp_path):
     out = CliRunner().invoke(cli.app, ["env", "--manifest", str(m), "--path", str(tmp_path / ".env")])
     assert out.exit_code == 0, out.output
     assert "github_access_review target 1: add  token: ${env:GITHUB_TOKEN}" in out.stdout
+
+
+def test_a_comparator_does_not_take_its_categorys_platform_block():
+    platforms = {"azure": {"config": {"origins": "${env:ORIGINS}"}, "auth": {"passthrough_env": ["EXTRA_X"]}}}
+    alone = names(groups_for({"use": "azure_change_work_items"}, platforms=platforms))
+    assert "ORIGINS" not in alone and "EXTRA_X" not in alone
+    first = names(groups_for({"use": "azure_change_work_items"}, {"use": "azure_activity_log_alerts"}))
+    last = names(groups_for({"use": "azure_activity_log_alerts"}, {"use": "azure_change_work_items"}))
+    assert set(first) == set(last) and "AZURE_CLIENT_ID" in first  # order doesn't matter
+
+
+def test_secret_references_are_read_as_resolve_reads_them():
+    entry = {"use": "okta_least_privilege",
+             "secrets": {"api_token": "${env:okta_tok}", "org_url": "https://${env:OKTA_HOST}"}}
+    groups, unmapped = needs(entry)
+    assert "okta_tok" not in names(groups) and "OKTA_HOST" not in names(groups)  # literal: passed as is
+    assert [(u.secret, u.malformed) for u in unmapped] == [("api_token", True)]

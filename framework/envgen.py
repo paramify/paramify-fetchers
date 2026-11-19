@@ -20,8 +20,9 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 from dotenv import dotenv_values
 
 from framework import paramify_auth, patterns
-from framework.contract import effective_secrets, platform_for
+from framework.contract import effective_secrets, platform_category, platform_for
 from framework.runner.executor import UNDECLARED_KEYS
+from framework.secret_resolver import env_var_name, is_env_ref_attempt
 
 
 @dataclass
@@ -105,8 +106,8 @@ def _refs(value: Any) -> List[str]:
 
 @dataclass
 class Unmapped:
-    """A required secret the manifest doesn't map yet: the run stops on it
-    whatever .env holds. An entry-level secret is mapped with `paramify
+    """A secret that stops the run whatever .env holds: a required one the
+    manifest doesn't map yet, or any one mapped to a malformed reference. An entry-level secret is mapped with `paramify
     manifest set-secret`; a per-target one under that target's `secrets:`
     (`target` is its index, or None when the entry has no targets at all)."""
     fetcher: str
@@ -114,6 +115,7 @@ class Unmapped:
     env: str  # the fetcher's declared name, the usual choice
     per_target: bool = False
     target: Optional[int] = None
+    malformed: bool = False  # mapped, but not as a ${env:NAME} the runner accepts: it stops either way
 
 
 def env_groups(
@@ -168,9 +170,15 @@ def env_groups(
             for env in _refs(value):
                 add(cat, env, description, f"{key.replace('_', ' ')} for {where}", required)
 
-    def add_secret(cat: str, fname: str, s: Any, value: Any) -> None:
-        for env in dict.fromkeys(_refs(value)):
+    def secret(cat: str, fname: str, s: Any, value: Any, target: Optional[int] = None) -> None:
+        """One secret as resolve() reads it: absent, a ${env:NAME}, malformed, or a literal."""
+        if value is None:
+            if s.required:
+                unmapped.append(Unmapped(fname, s.name, s.env, per_target=s.per_target, target=target))
+        elif (env := env_var_name(value)) is not None:
             add(cat, env, s.description, f"{s.name.replace('_', ' ')} for {fname}", s.required)
+        elif is_env_ref_attempt(value):
+            unmapped.append(Unmapped(fname, s.name, s.env, per_target=s.per_target, target=target, malformed=True))
 
     used: Dict[str, Dict[str, Any]] = {}  # category -> (platform spec, merged config schema)
     for entry in entries:
@@ -181,23 +189,19 @@ def env_groups(
         cat = f.category or "other"
         spec = platform_for(f, platforms)
         schema = {**(spec.config_schema if spec else {}), **f.config_schema}
-        seen_cat = used.setdefault(cat, {"spec": spec, "schema": {}})
-        seen_cat["schema"].update(schema)
+        pcat = platform_category(f)  # a comparator takes no platform block
+        if pcat:
+            seen_cat = used.setdefault(pcat, {"spec": spec, "schema": {}})
+            seen_cat["schema"].update(schema)
         targets = [t if isinstance(t, Mapping) else {} for t in entry.get("targets") or []]
         for s in effective_secrets(f, spec):
-            if s.per_target:
+            if not s.per_target:
+                secret(cat, fname, s, (entry.get("secrets") or {}).get(s.name))
+            elif targets:
                 for i, t in enumerate(targets):
-                    value = (t.get("secrets") or {}).get(s.name)
-                    if value is None and s.required:
-                        unmapped.append(Unmapped(fname, s.name, s.env, per_target=True, target=i))
-                    add_secret(cat, fname, s, value)
-                if not targets and s.required:
-                    unmapped.append(Unmapped(fname, s.name, s.env, per_target=True))
-                continue
-            value = (entry.get("secrets") or {}).get(s.name)
-            if value is None and s.required:
-                unmapped.append(Unmapped(fname, s.name, s.env))
-            add_secret(cat, fname, s, value)
+                    secret(cat, fname, s, (t.get("secrets") or {}).get(s.name), i)
+            else:
+                secret(cat, fname, s, None)
         add_config_refs(cat, entry.get("config"), schema, fname)
 
     for cat, seen_cat in sorted(used.items()):

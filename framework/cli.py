@@ -1418,10 +1418,13 @@ def env_cmd(
     if res["missing_values"]:
         typer.echo(style.warn("Still need a value: " + ", ".join(res["missing_values"])))
     if res["unmapped"]:
-        typer.echo(style.warn("The manifest doesn't map these required secrets yet, so a run stops on them "
-                              "whatever .env holds. Map each one:"))
+        typer.echo(style.warn("A run stops on these secrets whatever .env holds, until the manifest maps "
+                              "each one:"))
         for u in res["unmapped"]:
-            if not u["per_target"]:
+            if u["malformed"]:
+                typer.echo(f"  {u['fetcher']} {u['secret']}: not a valid reference; write it as "
+                           f"${{env:{u['env']}}} (uppercase letters, digits and _) in {mpath}")
+            elif not u["per_target"]:
                 typer.echo(f"  paramify manifest set-secret -f {mpath} {u['fetcher']} {u['secret']} {u['env']}")
             elif u["target"] is None:
                 typer.echo(f"  paramify manifest add-target -f {mpath} {u['fetcher']} <field>=<value> ... "
