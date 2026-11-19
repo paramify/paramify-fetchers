@@ -29,8 +29,6 @@ schemas and the `paramify` CLI — not the internal code.
   directory that is not a clone, and leaves an existing clone's code alone. A CI job shellchecks it and runs it end to
   end. The README's manual install now covers uv, choosing a Python 3.11+ explicitly, and the errors an older Python
   causes.
-- **`paramify env`** prints the `.env` a manifest needs: only the variables it reads, grouped by tool, each with a
-  short note and whether it is required, Paramify's upload token first. It lists what a run reads: the manifest's
 - **`paramify env`** prints what a manifest needs from the environment: only the variables it reads, grouped by
   tool, each with a short note and whether it is required, Paramify's upload token first, so you know what to set in
   your secret manager; `--json` lists them for a script (with the fetchers that read each, and whether it is set),
