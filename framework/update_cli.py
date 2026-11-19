@@ -213,10 +213,7 @@ def _update(run: _Run, root: Path, *, to: Optional[str], expect: Optional[str], 
         except up.UpdateError as e:
             s.fail(str(e))
             run.fail(f"the check before moving failed: {e}")
-        state, summary = view.check_summary(plan["check"])
-        s.done(summary, state)
-        for detail in view.check_details(plan["check"]):
-            s.add(detail)
+        view.settle_check(s, plan["check"])
     run.doc.update(up.public(plan))
     run.section(view.your_fetchers(plan["fetchers"], plan["used"], plan["breaking"]))
     run.section(view.breaking(plan["breaking"]))

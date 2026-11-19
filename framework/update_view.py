@@ -156,7 +156,7 @@ def _heading(title: str, tail: str = "") -> Text:
     return line((title, "bold"), ("   " + tail if tail else "", "dim"))
 
 
-def _versions(row: dict) -> str:
+def versions(row: dict) -> str:
     if row["change"] == "removed":
         return "removed"
     if row["change"] == "added":
@@ -166,26 +166,39 @@ def _versions(row: dict) -> str:
     return f"{row['from'] or '?'} → {row['to'] or '?'}"
 
 
+def broken_patterns(breaking: Sequence[dict]) -> List[str]:
+    """The fetcher patterns named by breaking changes that touch this clone."""
+    return [p for b in breaking if b["touches"] for m in b["manifests"] for p in m["fetchers"]]
+
+
+def fetcher_note(row: dict, broken: Sequence[str]) -> Text:
+    """What changed in one of your fetchers: a breaking mark, the reason a
+    commit gives, and how many other commits touched it."""
+    note = Text()
+    if any(fnmatch.fnmatchcase(row["name"], p) for p in broken):
+        note.append("⚠ breaking  ", style="yellow")
+    if row["reason"]:
+        note.append(row["reason"])
+        if row["more"]:
+            note.append(f"  +{row['more']} more", style="dim")
+    elif row["more"]:
+        note.append(plural(row["more"], "commit"), style="dim")
+    return note
+
+
 def your_fetchers(changes: dict, used: int, breaking: Sequence[dict]) -> List[Text]:
     """The fetchers your manifests use that change, one line each."""
     yours = changes["yours"]
     out = [_heading("Your fetchers", f"{len(yours)} of {used} changed" if yours else "")]
     if not yours:
         out.append(line(("● ", "green"), ("none of the fetchers you use changed", "")))
-    broken = [p for b in breaking if b["touches"] for m in b["manifests"] for p in m["fetchers"]]
+    broken = broken_patterns(breaking)
     name_to = min(NAME_MAX, max((len(r["name"]) for r in yours), default=0))
     for row in yours:
         color = "red" if row["change"] == "removed" else "cyan"
-        parts = [("● ", color), (row["name"].ljust(name_to) + "  ", ""), (_versions(row).ljust(15) + " ", "dim")]
-        if any(fnmatch.fnmatchcase(row["name"], p) for p in broken):
-            parts.append(("⚠ breaking  ", "yellow"))
-        if row["reason"]:
-            parts.append((row["reason"], ""))
-            if row["more"]:
-                parts.append((f"  +{row['more']} more", "dim"))
-        elif row["more"]:
-            parts.append((plural(row["more"], "commit"), "dim"))
-        out.append(line(*parts))
+        text = line(("● ", color), (row["name"].ljust(name_to) + "  ", ""), (versions(row).ljust(15) + " ", "dim"))
+        text.append_text(fetcher_note(row, broken))
+        out.append(text)
     return out
 
 
@@ -263,6 +276,14 @@ def manifest_errors(label: str, word: str, color: str, lines: Sequence[str]) -> 
     if len(lines) > 4:
         out.append(line((f"… and {len(lines) - 4} more", "dim"), indent=8))
     return out
+
+
+def settle_check(step: Step, check: dict) -> None:
+    """Settle the "check your manifests" step with its summary and details."""
+    state, summary = check_summary(check)
+    step.done(summary, state)
+    for detail in check_details(check):
+        step.add(detail)
 
 
 def check_summary(check: dict) -> Tuple[str, str]:
