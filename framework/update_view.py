@@ -1,10 +1,12 @@
 """How `paramify update` looks in a terminal.
 
 Plain lines in the terminal's own colors, like the rest of the CLI, so it sits
-in whatever theme the reader runs. Every line is one row: it is cut with an
-ellipsis rather than wrapped, and nothing is wider than WIDTH. Without a
-terminal (a pipe, NO_COLOR) rich drops the color and the steps print once, when
-they settle, instead of spinning.
+in whatever theme the reader runs. Every line is one row, cut with an ellipsis
+rather than wrapped, except a breaking change and its fix: those wrap, hanging
+under their text, because they are the part a reader must not miss. Nothing is
+wider than WIDTH. Without a terminal (a pipe, a CI log, NO_COLOR) rich drops
+the color, the width is WIDTH, and the steps print once, when they settle,
+instead of spinning.
 """
 
 from __future__ import annotations
@@ -26,7 +28,10 @@ MARKS = {"ok": ("✓", "green"), "fail": ("✗", "red"), "warn": ("!", "yellow")
 
 
 def make_console(**kw: Any) -> Console:
-    return Console(highlight=False, soft_wrap=False, **kw)
+    console = Console(highlight=False, soft_wrap=False, **kw)
+    if "width" not in kw and not console.is_terminal:
+        console.width = WIDTH  # a pipe or a log is not 80 columns wide; rich would assume it is
+    return console
 
 
 def line(*parts: Tuple[str, str], indent: int = 2) -> Text:
@@ -35,6 +40,30 @@ def line(*parts: Tuple[str, str], indent: int = 2) -> Text:
     for text, style in parts:
         t.append(text, style=style or None)
     return t
+
+
+class _Wrapped:
+    """See `wrapped`."""
+
+    def __init__(self, lead: Tuple[str, str], body: Text, indent: int) -> None:
+        self.lead, self.body, self.indent = lead, body, indent
+
+    def __rich_console__(self, console: Console, options: Any) -> Any:
+        hang = self.indent + len(self.lead[0])
+        for i, row in enumerate(self.body.wrap(console, max(20, options.max_width - hang))):
+            head = Text(" " * self.indent)
+            head.append(self.lead[0] if i == 0 else " " * len(self.lead[0]), style=self.lead[1] if i == 0 else "")
+            row.rstrip()
+            yield head + row
+
+
+def wrapped(lead: Tuple[str, str], *parts: Tuple[str, str], indent: int = 2) -> RenderableType:
+    """A row whose text wraps instead of being cut, each wrapped line hanging
+    under the text rather than under `lead` (a mark, or a label like "fix: ")."""
+    body = Text()
+    for text, style in parts:
+        body.append(text, style=style or None)
+    return _Wrapped(lead, body, indent)
 
 
 def plural(n: int, word: str, many: Optional[str] = None) -> str:
@@ -160,18 +189,19 @@ def your_fetchers(changes: dict, used: int, breaking: Sequence[dict]) -> List[Te
     return out
 
 
-def breaking(rows: Sequence[dict]) -> List[Text]:
-    """Breaking changes that touch this clone, each with what to do about it."""
+def breaking(rows: Sequence[dict]) -> List[RenderableType]:
+    """Breaking changes that touch this clone, each with what to do about it.
+    These wrap: a cut-off fix is a fix nobody can follow."""
     mine = [b for b in rows if b["touches"]]
     if not mine:
         return []
-    out = [_heading("Breaking", f"{len(mine)} {'touches' if len(mine) == 1 else 'touch'} you")]
+    out: List[RenderableType] = [_heading("Breaking", f"{len(mine)} {'touches' if len(mine) == 1 else 'touch'} you")]
     for b in mine:
         who = (", ".join(m["manifest"] for m in b["manifests"]) if b["why"] == "fetchers"
                else "your own fetchers" if b["why"] == "custom" else "everyone")
-        out.append(line(("⚠ ", "yellow"), (b["title"], "bold"), ("   " + who, "dim")))
+        out.append(wrapped(("⚠ ", "yellow"), (b["title"], "bold"), ("   " + who, "dim")))
         if b.get("fix"):
-            out.append(line(("fix: ", "dim"), (b["fix"], ""), indent=4))
+            out.append(wrapped(("fix: ", "dim"), (b["fix"], ""), indent=4))
     return out
 
 
@@ -263,10 +293,12 @@ def blocked(blocking: dict) -> List[RenderableType]:
     return out
 
 
-def done(label: str, tries: Sequence[Tuple[str, str]], *, rollback: bool, container: bool) -> List[Text]:
+def done(label: str, tries: Sequence[str], *, rollback: bool, container: bool) -> List[Text]:
+    """The ending. `tries` are the new highlights' commands; their titles were
+    shown under New, so only the commands are repeated here."""
     out = [ok(f"You're on {label}.")]
-    for cmd, title in list(tries)[:4]:
-        out.append(line(("try  ", "dim"), (cmd.ljust(34) + " ", "cyan"), (title, "dim")))
+    for cmd in list(tries)[:4]:
+        out.append(line(("try  ", "dim"), (cmd, "cyan")))
     if rollback:
         out.append(line(("Changed your mind? ", "dim"), ("paramify update --rollback", "cyan")))
     if container:

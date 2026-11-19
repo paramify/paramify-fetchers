@@ -9,6 +9,7 @@ mocked pieces: they would run pip and the clone's own code.
 
 from __future__ import annotations
 
+import io
 import json
 import subprocess
 from pathlib import Path
@@ -825,3 +826,73 @@ def test_install_command_uses_uv_when_the_venv_has_no_pip(monkeypatch, tmp_path)
     assert up.install_command(tmp_path, None, python="py")[-2:] == ["-e", f"{tmp_path}[all]"]
 
 
+
+
+# --------------------------------------------------------------------------- #
+# Reading the output: breaking changes wrap, piped output is full width
+# --------------------------------------------------------------------------- #
+
+def _render(renderables, width):
+    from framework import update_cli
+    from framework import update_view as view
+    run = update_cli._Run(json_out=False)
+    run.console = view.make_console(width=width, record=True)
+    run.show(*renderables)
+    return run.console.export_text()
+
+
+def test_a_breaking_change_and_its_fix_wrap_instead_of_being_cut():
+    from framework import update_view as view
+    fix = ("Re-check validators that read Datadog fields; a failed page now gives null counts "
+           "instead of zero, so a threshold that compared against zero needs a null check")
+    rows = [{"touches": True, "why": "fetchers", "manifests": [{"manifest": "prod.yaml", "fetchers": ["datadog_*"]}],
+             "title": "Datadog evidence fields were removed, renamed or changed meaning", "fix": fix}]
+    text = _render(view.breaking(rows), 60)
+    assert "…" not in text
+    assert " ".join(text.split()).count(fix) == 1
+    lines = text.splitlines()
+    fix_at = next(i for i, ln in enumerate(lines) if ln.lstrip().startswith("fix: "))
+    body_col = lines[fix_at].index("fix: ") + len("fix: ")
+    assert lines[fix_at + 1][:body_col].strip() == ""  # continuation hangs under the text, not "fix:"
+    assert all(len(ln) <= 60 and ln == ln.rstrip() for ln in lines)
+
+
+def test_other_rows_are_still_one_row():
+    from framework import update_view as view
+    rows = [{"title": "A highlight", "detail": "word " * 40}]
+    text = _render(view.whats_new(rows), 60)
+    assert len(text.splitlines()) == 3 and "…" in text
+
+
+def test_piped_output_uses_the_full_width_cap():
+    from framework import update_view as view
+    console = view.make_console(file=io.StringIO())
+    assert not console.is_terminal
+    assert console.width == view.WIDTH
+
+
+def test_the_ending_lists_commands_without_repeating_their_titles():
+    from framework import update_view as view
+    out = [t.plain for t in view.done("main", ["paramify status <manifest>"], rollback=True, container=False)]
+    assert any(ln.split() == ["try", "paramify", "status", "<manifest>"] for ln in out)
+    assert not any("Docker" in ln for ln in out)
+
+
+def test_the_docker_hint_needs_a_built_image(monkeypatch, tmp_path):
+    from framework import update_cli
+    deploy = tmp_path / "deploy"
+    deploy.mkdir()
+    (deploy / "docker-compose.yml").write_text("services:\n  fetchers:\n    build: .\n    image: paramify-fetchers:beta\n")
+    calls = []
+
+    def fake_run(cmd, **kw):
+        calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0 if cmd[-1] == "paramify-fetchers:beta" else 1, "", "")
+
+    monkeypatch.setattr(update_cli.shutil, "which", lambda name: "/usr/bin/docker" if name == "docker" else None)
+    monkeypatch.setattr(update_cli.subprocess, "run", fake_run)
+    assert update_cli._built_image(tmp_path) is True
+    assert calls[0][:3] == ["/usr/bin/docker", "image", "inspect"]
+    monkeypatch.setattr(update_cli.shutil, "which", lambda name: None)
+    assert update_cli._built_image(tmp_path) is False
+    assert update_cli._built_image(tmp_path / "nowhere") is False
