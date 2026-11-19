@@ -68,7 +68,14 @@ from framework.issue_reports import (
 from framework.issue_reports import read_index as read_issue_report_index
 from framework.issue_reports import record_outputs as record_issue_reports
 from framework.paramify.client import base_url_error
+from framework.paramify.connection import open_workspace
 from framework.paramify.connection import settings as paramify_settings
+from framework.paramify.pipelines import (
+    DEFAULT_WAIT_TIMEOUT,
+    Pipelines,
+    job_summary,
+    wait_for_job,
+)
 from framework.paramify_auth import (
     BASE_URL_ENV,
     READ_TOKEN_ENV,
@@ -2211,11 +2218,10 @@ def issues_upload_preflight(
     files and sends the rest.
     """
     uploader = _load_paramify_issues_uploader(root)
-    uploader.load_dotenv()
+    load_dotenv()
     config_path = _upload_config(root, config_path)
-    config = uploader.load_config(str(config_path)) if config_path else {}
-    paramify_cfg = config.get("paramify") or {}
-    base_url, base_url_source = resolve_base_url(paramify_cfg.get("base_url"))
+    config = (yaml_io.load_path(Path(config_path)) or {}) if config_path else {}
+    resolved = paramify_settings(config)
 
     run_path = Path(run_dir)
     errors: List[str] = []
@@ -2286,28 +2292,21 @@ def issues_upload_preflight(
                     f"(fix: paramify assessments select {name})"
                 )
 
-    url_error = uploader._base_url_error(base_url)
-    if url_error:
-        errors.append(url_error)
-
-    token, token_source = resolve_upload_token()
-    token_present = bool(token)
-    if not token_present and not dry_run:
-        errors.append(_missing_token_error())
+    errors.extend(resolved.errors(need_token=not dry_run))
 
     return {
         "ok": not errors,
         "run_dir": str(run_path),
-        "base_url": base_url,
-        "base_url_source": base_url_source,
-        "base_url_label": describe_base_url(base_url),
+        "base_url": resolved.base_url,
+        "base_url_source": resolved.base_url_source,
+        "base_url_label": describe_base_url(resolved.base_url),
         "config_path": str(config_path) if config_path else None,
         "file_count": file_count,
         "missing_assessment": missing_assessment,
         "assessments": plan,
         "warnings": warnings,
-        "token_present": token_present,
-        "token_source": token_source,
+        "token_present": bool(resolved.token),
+        "token_source": resolved.token_source,
         "dry_run": dry_run,
         "errors": errors,
     }
@@ -2333,7 +2332,7 @@ def issues_upload_run(
     """
     uploader = _load_paramify_issues_uploader(root)
     config_path = _upload_config(root, config_path)
-    config = uploader.load_config(str(config_path)) if config_path else {}
+    config = (yaml_io.load_path(Path(config_path)) or {}) if config_path else {}
     try:
         index = read_issue_report_index(Path(run_dir))
     except ValueError:
@@ -2350,21 +2349,14 @@ def issues_upload_run(
     )
 
 
-def _issues_client(root: Path, config_path: Optional[Path] = None):
-    """(uploader module, client) for the pipeline commands that act on Paramify
-    directly rather than on a run: jobs, retry, cancel, close."""
-    uploader = _load_paramify_issues_uploader(root)
-    uploader.load_dotenv()
+def _pipelines(root: Path, config_path: Optional[Path] = None) -> Pipelines:
+    """The pipeline endpoints, for the commands that act on Paramify directly
+    rather than on a run: jobs, retry, cancel, close."""
     config_path = _upload_config(root, config_path)
-    config = uploader.load_config(str(config_path)) if config_path else {}
-    base_url, _ = resolve_base_url((config.get("paramify") or {}).get("base_url"))
-    url_error = uploader._base_url_error(base_url)
-    if url_error:
-        raise RuntimeError(url_error)
-    token, _ = resolve_upload_token()
-    if not token:
-        raise RuntimeError(_missing_token_error())
-    return uploader, uploader.ParamifyClient(token, base_url)
+    config = (yaml_io.load_path(Path(config_path)) or {}) if config_path else {}
+    _, pipelines = open_workspace(config, wrap=Pipelines)
+    assert pipelines is not None  # a token is required, or open_workspace raised
+    return pipelines
 
 
 def issues_jobs(
@@ -2376,16 +2368,16 @@ def issues_jobs(
     limit: int = 50,
 ) -> List[dict]:
     """Recent pipeline jobs, newest first, as job_summary dicts plus timestamps."""
-    uploader, client = _issues_client(root, config_path)
-    out = []
-    for job in client.list_jobs(assessment_id=assessment_id, status=status, limit=limit):
-        out.append({
-            **uploader.job_summary(job),
+    return [
+        {
+            **job_summary(job),
             "assessment_id": job.get("assessmentId"),
             "created_at": job.get("createdAt"),
             "completed_at": job.get("completedAt"),
-        })
-    return out
+        }
+        for job in _pipelines(root, config_path).list_jobs(
+            assessment_id=assessment_id, status=status, limit=limit)
+    ]
 
 
 def issues_job_action(
@@ -2393,14 +2385,11 @@ def issues_job_action(
 ) -> dict:
     """Retry or cancel one pipeline job. Cancelling also cancels every unfinished
     job queued behind it on the same assessment — that is Paramify's rule."""
-    uploader, client = _issues_client(root, config_path)
-    if action == "retry":
-        job = client.retry_job(job_id)
-    elif action == "cancel":
-        job = client.cancel_job(job_id)
-    else:
+    if action not in ("retry", "cancel"):
         raise ValueError(f"unknown job action {action!r}")
-    return uploader.job_summary(job)
+    pipelines = _pipelines(root, config_path)
+    job = pipelines.retry_job(job_id) if action == "retry" else pipelines.cancel_job(job_id)
+    return job_summary(job)
 
 
 def issues_close(
@@ -2418,16 +2407,15 @@ def issues_close(
     closing auto-closes every open issue the cycle never saw, so it belongs after
     the last file has landed, which only a person knows.
     """
-    uploader, client = _issues_client(root, config_path)
-    job = uploader.job_summary(client.close(assessment_id))
+    pipelines = _pipelines(root, config_path)
+    job = job_summary(pipelines.close(assessment_id))
     if on_event:
         on_event({"event": "job_queued", "assessment_id": assessment_id,
                   "job_id": job["job_id"], "operation": "CLOSE"})
     if not wait:
         return job
-    timeout = wait_timeout or uploader.DEFAULT_WAIT_TIMEOUT
-    final, timed_out = uploader.wait_for_job(client, job["job_id"], timeout=timeout)
-    result = uploader.job_summary(final)
+    final, timed_out = wait_for_job(pipelines, job["job_id"], timeout=wait_timeout or DEFAULT_WAIT_TIMEOUT)
+    result = job_summary(final)
     if timed_out:
         result["timed_out"] = True
     return result

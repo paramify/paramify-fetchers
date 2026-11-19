@@ -51,3 +51,18 @@ def test_a_dry_run_needs_no_token_and_gets_no_client():
 def test_a_preflight_lists_every_problem_without_raising():
     problems = settings(base_url="http://app.example.test").errors(need_token=True)
     assert len(problems) == 2 and "https" in problems[0] and "PARAMIFY_UPLOAD_API_TOKEN" in problems[1]
+
+
+def test_open_workspace_logs_only_to_a_logger_it_is_given(caplog):
+    """The CLI and TUI print the error themselves; a stray log line would print it
+    twice, and in the TUI land on the screen."""
+    from framework.paramify.connection import open_workspace
+    with pytest.raises(ValueError), caplog.at_level("ERROR"):
+        open_workspace()
+    assert caplog.records == []
+
+
+def test_open_workspace_returns_a_given_endpoint_object_without_a_token():
+    from framework.paramify.connection import open_workspace
+    given = object()
+    assert open_workspace(use=given)[1] is given

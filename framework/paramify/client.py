@@ -147,18 +147,22 @@ class Client:
     def get(self, path: str, params: Optional[Dict[str, Any]] = None) -> Any:
         return self._call("GET", path, params=params)
 
-    def post_json(self, path: str, body: Dict[str, Any]) -> Any:
+    def post_json(self, path: str, body: Optional[Dict[str, Any]] = None) -> Any:
+        """POST `body` as JSON; without one the request carries no body at all."""
         return self._call("POST", path, json_body=body)
 
     def patch_json(self, path: str, body: Dict[str, Any]) -> Any:
         return self._call("PATCH", path, json_body=body)
 
-    def post_file(self, path: str, filename: str, content: bytes, meta: Dict[str, Any]) -> Any:
+    def post_file(
+        self, path: str, filename: str, content: bytes, meta: Dict[str, Any],
+        *, content_type: str = "application/json", timeout: Optional[float] = None,
+    ) -> Any:
         files = {
-            "file": (filename, content, "application/json"),
+            "file": (filename, content, content_type),
             "artifact": ("artifact.json", json.dumps(meta), "application/json"),
         }
-        return self._call("POST", path, files=files, is_upload=True)
+        return self._call("POST", path, files=files, is_upload=True, timeout=timeout)
 
     def _call(
         self,
@@ -169,6 +173,7 @@ class Client:
         json_body: Optional[Dict[str, Any]] = None,
         files: Optional[Dict[str, Any]] = None,
         is_upload: bool = False,
+        timeout: Optional[float] = None,
     ) -> Any:
         attempt = 0
         # A POST may already be committed server-side when it times out or
@@ -188,7 +193,7 @@ class Client:
                     params=params,
                     json=json_body,
                     files=files,
-                    timeout=self.timeout,
+                    timeout=timeout or self.timeout,
                 )
             except requests.ConnectionError as exc:
                 reason = f"{type(exc).__name__}: {exc}"
