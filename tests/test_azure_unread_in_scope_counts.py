@@ -114,7 +114,7 @@ CASES = {
         {"collect_profiles": _failing("cdn.profiles.list", (None, {}))},
         {"collect_profiles": _returning(([], {}))}),
     "front_door_waf_coverage": (
-        {"collect_profiles": _failing("cdn.profiles.list", (None, {}))},
+        {"collect_profiles": _failing("cdn.profiles.list", (None, {})), **WAF},
         {"collect_profiles": _returning(([], {})), **WAF}),
     "key_vault_key_rotation": (
         {"collect_key_vaults": _failing("keyvault.vaults.list_by_subscription", []),
