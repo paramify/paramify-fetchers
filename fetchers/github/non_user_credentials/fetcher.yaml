@@ -1,5 +1,5 @@
 name: github_non_user_credentials
-version: 0.2.0
+version: 0.3.0
 description: >-
   Credentials that are not a person: deploy keys, installed GitHub Apps and
   their permissions, approved fine-grained personal access tokens, Actions
@@ -68,6 +68,23 @@ config_schema:
     default: 90
     env: GITHUB_MAX_UNUSED_DAYS
     description: An approved fine-grained token unused for longer than this counts as unused.
+  scope_to_repositories:
+    type: boolean
+    required: false
+    default: false
+    env: GITHUB_SCOPE_TO_REPOSITORIES
+    description: >-
+      Limit installed apps, fine-grained tokens and organization Actions
+      secrets to those that can reach the collected repositories (the
+      repositories target field, or every repository the token can see when it
+      is unset). One is left out only when it is shown not to reach any of
+      them: a secret or token whose repository list names none, a secret for
+      private repositories when every collected repository is public, or a
+      token with no repository access. One whose reach cannot be told stays
+      in with reaches_collected_repositories null, such as an app installed on
+      selected repositories (GitHub gives that list to the app alone) or a
+      repository list that could not be read. Organization webhooks are not
+      scoped. The metadata counts what was left out.
 
 secrets: []
 
@@ -80,8 +97,9 @@ evidence_set:
   name: GitHub Non-User Credentials
   instructions: >-
     Script: github/non_user_credentials/fetcher.py. Deploy keys per repository (read-only or write, age, last use), installed
-    apps with the permissions they hold and on how many repositories, approved
-    fine-grained tokens with expiry and last use (GitHub App tokens only;
-    null otherwise), Actions secrets by name and
-    last update (values are never readable), and webhooks with whether TLS is
-    verified and payloads are signed. Webhook URLs are reduced to their host.
+    apps with their permissions, approved fine-grained tokens with expiry and
+    last use (GitHub App tokens only; null otherwise), Actions secrets by name
+    and last update (values are never readable), and webhooks with TLS
+    verification and signing; URLs reduced to host. With scope_to_repositories,
+    apps, tokens and organization secrets are limited to those reaching the
+    collected repositories or of unknown reach.

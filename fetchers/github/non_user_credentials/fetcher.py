@@ -3,7 +3,7 @@
 
 import sys
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "_shared"))
 from github_client import iso, now_epoch, run, to_epoch  # noqa: E402
@@ -12,8 +12,56 @@ NAME = "github_non_user_credentials"
 CONFIG = {
     "max_secret_age_days": ("GITHUB_MAX_SECRET_AGE_DAYS", 365),
     "max_unused_days": ("GITHUB_MAX_UNUSED_DAYS", 90),
+    "scope_to_repositories": ("GITHUB_SCOPE_TO_REPOSITORIES", False),
 }
 WRITE_LEVELS = ("write", "admin")
+
+
+def app_reach(install):
+    """Whether an installed app can reach a collected repository: True, or None when it cannot be told.
+
+    An app on all repositories reaches every one. For an app on selected repositories GitHub gives the list to that
+    app alone (GET /installation/repositories with its own token), so another caller cannot tell: unknown, never no.
+    """
+    return True if install.get("repository_selection") == "all" else None
+
+
+def secret_reach(client, login, secret, repos, names):
+    """Whether an organization secret is available to a collected repository: True, False, or None when unknown."""
+    visibility = secret.get("visibility")
+    if visibility == "all":
+        return True
+    if visibility == "private":
+        kinds = {r.get("visibility") for r in repos}
+        if "private" in kinds:
+            return True
+        # Whether "private" also covers internal repositories is not measured, and a repository whose visibility
+        # GitHub did not return could be private: either leaves it unknown. Only all-public is a no.
+        return False if kinds and kinds <= {"public"} else None
+    if visibility == "selected":
+        chosen = client.paginate_required(f"orgs/{login}/actions/secrets/{quote(str(secret.get('name')), safe='')}"
+                                          "/repositories", key="repositories")
+        return None if chosen is None else any((r.get("name") or "").lower() in names for r in chosen)
+    return None
+
+
+def token_reach(client, login, grant, names):
+    """Whether a fine-grained token can reach a collected repository: True, False, or None when unknown."""
+    selection = grant.get("repository_selection")
+    if selection == "all":
+        return True
+    if selection == "none":
+        return False
+    if selection == "subset" and grant.get("id") is not None:
+        chosen = client.paginate_required(f"orgs/{login}/personal-access-tokens/{grant['id']}/repositories")
+        return None if chosen is None else any((r.get("name") or "").lower() in names for r in chosen)
+    return None
+
+
+def in_scope(rows, reaches):
+    """(kept rows, each marked with its reach; count left out). A row is left out only on a proven no."""
+    kept = [{**row, "reaches_collected_repositories": reach} for row, reach in zip(rows, reaches) if reach is not False]
+    return kept, len(rows) - len(kept)
 
 
 def age_days(value, now):
@@ -85,7 +133,31 @@ def collect(client, org, repos, config):
         for p in pats]
     records = [repo_record(client, login, r, now, config) for r in repos]
     done = [r for r in records if r["collected"]]
-    org_secret_rows = None if org_secrets is None else secret_rows(org_secrets, now, config["max_secret_age_days"])
+    org_secret_rows = None if org_secrets is None else [
+        # all, private or selected: which of the organization's repositories may use the secret.
+        {**row, "visibility": s.get("visibility")}
+        for row, s in zip(secret_rows(org_secrets, now, config["max_secret_age_days"]), org_secrets)]
+    # Scoping leaves out the organization's apps, tokens and secrets that are proven unable to reach a collected
+    # repository. One whose reach cannot be told stays in, marked null: unknown is not out of scope. A section that
+    # was not read stays null, and its left-out count with it.
+    scoped = bool(config["scope_to_repositories"])
+    left_out = {"apps": 0 if apps is not None else None, "fine_grained_tokens": 0 if tokens is not None else None,
+                "organization_secrets": 0 if org_secret_rows is not None else None}
+    if scoped:
+        names = {(r.get("name") or "").lower() for r in repos}
+        if apps is not None:
+            apps, left_out["apps"] = in_scope(apps, [app_reach(i) for i in installs])
+        if tokens is not None:
+            tokens, left_out["fine_grained_tokens"] = in_scope(
+                tokens, [token_reach(client, login, p, names) for p in pats])
+        if org_secret_rows is not None:
+            org_secret_rows, left_out["organization_secrets"] = in_scope(
+                org_secret_rows, [secret_reach(client, login, s, repos, names) for s in org_secrets])
+
+    def unknown(rows, key):
+        """Names of the kept rows whose reach is unknown; null when not scoped or the section was not read."""
+        return None if not scoped or rows is None else sorted(
+            str(r[key]) for r in rows if r["reaches_collected_repositories"] is None)
     hooks = [{"scope": "organization", **hook_row(h)} for h in org_hooks or []] + [
         {"scope": r["repository"], **h} for r in done for h in r["webhooks"]]
     return {
@@ -112,6 +184,10 @@ def collect(client, org, repos, config):
             "webhooks_insecure_ssl": None if org_hooks is None else len([h for h in hooks if h["insecure_ssl"]]),
             "webhooks_tls_unknown": None if org_hooks is None else len([h for h in hooks if h["insecure_ssl"] is None]),
             "webhooks_without_secret": None if org_hooks is None else len([h for h in hooks if not h["has_secret"]]),
+            # Kept because their reach into the collected repositories could not be told; null when not scoped.
+            "apps_reach_unknown": unknown(apps, "app"),
+            "fine_grained_tokens_reach_unknown": unknown(tokens, "id"),
+            "organization_secrets_reach_unknown": unknown(org_secret_rows, "name"),
             "not_collected": [r["repository"] for r in records if not r["collected"]],
         },
         "apps": apps,
@@ -120,6 +196,12 @@ def collect(client, org, repos, config):
         "webhooks": hooks,
         "repositories": records,
         "metadata": {"as_of": iso(now), "fine_grained_tokens_readable": tokens is not None,
+                     # True: apps, tokens and organization secrets are limited to those that can reach the collected
+                     # repositories, or whose reach is unknown. Organization webhooks are not scoped.
+                     "scoped_to_repositories": scoped,
+                     "apps_left_out": left_out["apps"],
+                     "fine_grained_tokens_left_out": left_out["fine_grained_tokens"],
+                     "organization_secrets_left_out": left_out["organization_secrets"],
                      **({"fine_grained_tokens_unreadable_because": "listed to GitHub Apps only; this run used a "
                                                                     "personal access token"}
                         if state == "apps_only" else {})},

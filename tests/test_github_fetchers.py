@@ -3974,3 +3974,228 @@ def test_a_token_with_no_readable_user_route_stays_a_failure(fake, monkeypatch, 
     fake(routes)
     code, ev, _ = run_fetcher("access_review", monkeypatch, tmp_path, **USER_TOKEN)
     assert code == 1 and invitation_failed(ev)
+
+
+# --- non_user_credentials: scope_to_repositories ---------------------------------------
+
+def scoped_credential_routes(app_visibility="private"):
+    """Organization apps, tokens and secrets, some reaching the collected repositories (app, site) and some not."""
+    routes = credential_routes()
+    o = f"orgs/{ORG}"
+    routes[f"{o}/repos"] = [repo("app", visibility=app_visibility), repo("site")]
+    routes[f"{o}/actions/secrets"] = lambda q: (200, {"total_count": 4, "secrets": [
+        {"name": "FOR_ALL", "updated_at": ago(5), "visibility": "all"},
+        {"name": "FOR_PRIVATE", "updated_at": ago(5), "visibility": "private"},
+        {"name": "PICKED_IN", "updated_at": ago(5), "visibility": "selected"},
+        {"name": "PICKED_OUT", "updated_at": ago(500), "visibility": "selected"}]})
+    routes[f"{o}/actions/secrets/PICKED_IN/repositories"] = lambda q: (200, {"total_count": 1, "repositories": [
+        {"name": "App"}]})  # matched without regard to case
+    routes[f"{o}/actions/secrets/PICKED_OUT/repositories"] = lambda q: (200, {"total_count": 1, "repositories": [
+        {"name": "elsewhere"}]})
+    grant = {"permissions": {}, "token_expired": False, "token_expires_at": None, "token_last_used_at": ago(200),
+             "access_granted_at": ago(300)}
+    routes[f"{o}/personal-access-tokens"] = [
+        {"id": 5, "owner": {"login": "everywhere"}, "repository_selection": "all", **grant},
+        {"id": 6, "owner": {"login": "inside"}, "repository_selection": "subset", **grant},
+        {"id": 7, "owner": {"login": "outside"}, "repository_selection": "subset", **grant},
+        {"id": 8, "owner": {"login": "norepos"}, "repository_selection": "none", **grant}]
+    routes[f"{o}/personal-access-tokens/6/repositories"] = [{"name": "site"}]
+    routes[f"{o}/personal-access-tokens/7/repositories"] = [{"name": "elsewhere"}]
+    return routes
+
+
+def scoped_credentials(fake, monkeypatch, tmp_path, routes=None, **env):
+    f = fake(routes or scoped_credential_routes())
+    code, ev, status = run_fetcher("non_user_credentials", monkeypatch, tmp_path,
+                                   GITHUB_SCOPE_TO_REPOSITORIES="true", **env)
+    return f, code, ev, status
+
+
+def test_credential_scope_is_off_by_default_and_reads_no_repository_lists(fake, monkeypatch, tmp_path):
+    f = fake(scoped_credential_routes())
+    code, ev, _ = run_fetcher("non_user_credentials", monkeypatch, tmp_path)
+    m, s = ev["metadata"], ev["summary"]
+    assert code == 0 and m["scoped_to_repositories"] is False and m["scope_to_repositories"] is False
+    assert (m["apps_left_out"], m["fine_grained_tokens_left_out"], m["organization_secrets_left_out"]) == (0, 0, 0)
+    assert len(ev["apps"]) == 2 and len(ev["fine_grained_tokens"]) == 4 and len(ev["organization_actions_secrets"]) == 4
+    # No reach is claimed, and none is looked up, when scoping was not asked for.
+    assert (s["apps_reach_unknown"], s["fine_grained_tokens_reach_unknown"],
+            s["organization_secrets_reach_unknown"]) == (None, None, None)
+    assert "reaches_collected_repositories" not in json.dumps(ev)
+    assert not any(p.endswith("/repositories") for p, _ in f.calls)
+    assert {x["name"]: x["visibility"] for x in ev["organization_actions_secrets"]}["PICKED_OUT"] == "selected"
+    assert "org:PICKED_OUT" in s["actions_secrets_older_than_max"]  # unscoped, the old secret is still reported
+
+
+def test_credential_scope_keeps_what_reaches_the_collected_repositories(fake, monkeypatch, tmp_path):
+    _, code, ev, _ = scoped_credentials(fake, monkeypatch, tmp_path)
+    m, s = ev["metadata"], ev["summary"]
+    assert code == 0 and m["partial_failure"] is False and m["scoped_to_repositories"] is True
+    # Apps: one on all repositories reaches them; one on selected repositories cannot be told, so it stays as unknown.
+    assert {a["app"]: a["reaches_collected_repositories"] for a in ev["apps"]} == {"ci-bot": True, "reader": None}
+    assert m["apps_left_out"] == 0 and s["apps_reach_unknown"] == ["reader"] and s["apps_installed"] == 2
+    # Tokens: all repositories and a subset naming a collected one stay; a subset elsewhere and "none" are left out.
+    assert {t["owner"]: t["reaches_collected_repositories"] for t in ev["fine_grained_tokens"]} == {
+        "everywhere": True, "inside": True}
+    assert m["fine_grained_tokens_left_out"] == 2 and s["fine_grained_tokens"] == 2
+    assert s["fine_grained_tokens_reach_unknown"] == []
+    # Secrets: all, private (app is private) and one selected for app stay; one selected for another repository goes.
+    assert {x["name"]: x["reaches_collected_repositories"] for x in ev["organization_actions_secrets"]} == {
+        "FOR_ALL": True, "FOR_PRIVATE": True, "PICKED_IN": True}
+    assert m["organization_secrets_left_out"] == 1 and s["organization_secrets_reach_unknown"] == []
+    assert s["actions_secrets_total"] == 4  # three organization secrets in scope and app's own NEW
+    assert s["actions_secrets_older_than_max"] == []  # the old secret is out of scope, so it is not a finding here
+    text = json.dumps(ev)
+    assert "PICKED_OUT" not in text and '"outside"' not in text and '"norepos"' not in text
+    # What is not scoped is untouched: repository sections and organization webhooks.
+    assert s["deploy_keys_total"] == 2 and any(h["scope"] == "organization" for h in ev["webhooks"])
+
+
+@pytest.mark.parametrize("visibility,reach,left_out", [("public", None, 1), ("internal", None, 0), (None, None, 0)])
+def test_a_secret_for_private_repositories_is_out_only_when_every_repository_is_public(
+        fake, monkeypatch, tmp_path, visibility, reach, left_out):
+    routes = scoped_credential_routes(app_visibility=visibility)
+    routes[f"orgs/{ORG}/actions/secrets"] = lambda q: (200, {"total_count": 1, "secrets": [
+        {"name": "FOR_PRIVATE", "updated_at": ago(5), "visibility": "private"}]})
+    _, code, ev, _ = scoped_credentials(fake, monkeypatch, tmp_path, routes)
+    kept = {x["name"]: x["reaches_collected_repositories"] for x in ev["organization_actions_secrets"]}
+    # Whether "private" covers an internal repository is not measured, and an unreported visibility could be private.
+    assert code == 0 and ev["metadata"]["organization_secrets_left_out"] == left_out
+    assert kept == ({} if left_out else {"FOR_PRIVATE": reach})
+    assert ev["summary"]["organization_secrets_reach_unknown"] == ([] if left_out else ["FOR_PRIVATE"])
+
+
+def test_an_unread_secret_repository_list_is_unknown_not_out_of_scope(fake, monkeypatch, tmp_path):
+    routes = scoped_credential_routes()
+    routes[f"orgs/{ORG}/actions/secrets/PICKED_OUT/repositories"] = FAILING
+    _, code, ev, status = scoped_credentials(fake, monkeypatch, tmp_path, routes)
+    kept = {x["name"]: x["reaches_collected_repositories"] for x in ev["organization_actions_secrets"]}
+    assert code == 1 and ev["metadata"]["partial_failure"] is True and "PICKED_OUT" in status["error"]
+    assert kept["PICKED_OUT"] is None and ev["metadata"]["organization_secrets_left_out"] == 0
+    assert ev["summary"]["organization_secrets_reach_unknown"] == ["PICKED_OUT"]
+    assert "org:PICKED_OUT" in ev["summary"]["actions_secrets_older_than_max"]  # kept, so still reported
+
+
+def test_an_unread_token_repository_list_is_unknown_not_out_of_scope(fake, monkeypatch, tmp_path):
+    routes = scoped_credential_routes()
+    routes[f"orgs/{ORG}/personal-access-tokens/7/repositories"] = FAILING
+    _, code, ev, _ = scoped_credentials(fake, monkeypatch, tmp_path, routes)
+    kept = {t["owner"]: t["reaches_collected_repositories"] for t in ev["fine_grained_tokens"]}
+    assert code == 1 and ev["metadata"]["partial_failure"] is True
+    assert kept == {"everywhere": True, "inside": True, "outside": None}
+    assert ev["metadata"]["fine_grained_tokens_left_out"] == 1  # only the token with no repository access
+    assert ev["summary"]["fine_grained_tokens_reach_unknown"] == ["7"]
+
+
+def test_an_unrecognised_selection_or_visibility_is_unknown(fake, monkeypatch, tmp_path):
+    routes = scoped_credential_routes()
+    o = f"orgs/{ORG}"
+    routes[f"{o}/actions/secrets"] = lambda q: (200, {"total_count": 2, "secrets": [
+        {"name": "NO_VISIBILITY", "updated_at": ago(5)},
+        {"name": "NEW_KIND", "updated_at": ago(5), "visibility": "x"}]})
+    routes[f"{o}/personal-access-tokens"] = [{"id": 9, "owner": {"login": "odd"}, "repository_selection": None},
+                                             {"owner": {"login": "noid"}, "repository_selection": "subset"}]
+    routes[f"{o}/installations"] = lambda q: (200, {"total_count": 1, "installations": [
+        {"app_slug": "odd-app", "permissions": {}}]})
+    f, code, ev, _ = scoped_credentials(fake, monkeypatch, tmp_path, routes)
+    m = ev["metadata"]
+    assert code == 0 and (m["apps_left_out"], m["fine_grained_tokens_left_out"],
+                          m["organization_secrets_left_out"]) == (0, 0, 0)
+    assert all(x["reaches_collected_repositories"] is None
+               for x in ev["apps"] + ev["fine_grained_tokens"] + ev["organization_actions_secrets"])
+    assert not any("/personal-access-tokens/" in p for p, _ in f.calls)  # no id, no lookup
+
+
+def test_scope_leaves_an_unread_section_null(fake, monkeypatch, tmp_path):
+    routes = scoped_credential_routes()
+    routes[f"orgs/{ORG}/actions/secrets"] = FAILING
+    routes[f"orgs/{ORG}/installations"] = FAILING
+    _, code, ev, _ = scoped_credentials(fake, monkeypatch, tmp_path, routes, GITHUB_TOKEN="github_pat_test")
+    m, s = ev["metadata"], ev["summary"]
+    assert code == 1 and ev["apps"] is None and ev["organization_actions_secrets"] is None
+    assert ev["fine_grained_tokens"] is None  # a personal token cannot list them
+    assert (m["apps_left_out"], m["fine_grained_tokens_left_out"], m["organization_secrets_left_out"]) == (
+        None, None, None)
+    assert (s["apps_reach_unknown"], s["fine_grained_tokens_reach_unknown"],
+            s["organization_secrets_reach_unknown"]) == (None, None, None)
+    assert s["apps_installed"] is None and s["actions_secrets_total"] is None
+
+
+def test_credential_scope_follows_the_repository_filter(fake, monkeypatch, tmp_path):
+    routes = scoped_credential_routes()
+    routes[f"repos/{ORG}/site"] = repo("site")  # the filter looks each named repository up
+    _, code, ev, _ = scoped_credentials(fake, monkeypatch, tmp_path, routes, GITHUB_REPOSITORIES="site")
+    assert code == 0 and [r["repository"] for r in ev["repositories"]] == ["site"]
+    # Only site is collected now: the secret picked for app and the one for private repositories no longer reach it.
+    assert [x["name"] for x in ev["organization_actions_secrets"]] == ["FOR_ALL"]
+    assert ev["metadata"]["organization_secrets_left_out"] == 3
+    assert [t["owner"] for t in ev["fine_grained_tokens"]] == ["everywhere", "inside"]
+
+
+# --- workflow_runs: scheduled runs and include_actors -----------------------------------
+
+def scheduled(id_, days_ago, attempt=1, triggering="cron-editor", **kw):
+    """A scheduled run as GitHub reports it: its actor is whoever last changed the schedule."""
+    return {**wf_run(id_, days_ago, attempt=attempt, **kw), "event": "schedule", "actor": {"login": "cron-editor"},
+            "triggering_actor": {"login": triggering}}
+
+
+def test_a_scheduled_run_is_not_credited_to_whoever_edited_the_schedule(fake, monkeypatch, tmp_path):
+    fake(runs_routes({"app": [scheduled(3, 1), scheduled(2, 2, attempt=2, triggering="rerunner"), wf_run(1, 3)]}))
+    code, ev, _ = run_fetcher("workflow_runs", monkeypatch, tmp_path)
+    by = {r["id"]: r for r in ev["repositories"][0]["runs"]}
+    assert code == 0 and ev["summary"]["runs_scheduled"] == 2
+    assert (by[3]["event"], by[3]["actor"], by[3]["triggering_actor"]) == ("schedule", None, None)
+    # A person re-ran run 2: that person is kept, the schedule's editor is not.
+    assert (by[2]["actor"], by[2]["triggering_actor"]) == (None, "rerunner")
+    assert (by[1]["actor"], by[1]["triggering_actor"]) == ("dev", "dev")  # a pushed run is unchanged
+    assert "cron-editor" not in json.dumps(ev)
+    assert "schedule" in ev["metadata"]["scheduled_runs_actor_note"]
+    assert by[3]["created_at"] == ago(1) and by[3]["conclusion"] == "success"  # when it ran and how it ended stay
+
+
+def test_no_scheduled_runs_no_note(fake, monkeypatch, tmp_path):
+    fake(runs_routes({"app": [wf_run(1, 1)]}))
+    _, ev, _ = run_fetcher("workflow_runs", monkeypatch, tmp_path)
+    assert ev["summary"]["runs_scheduled"] == 0 and "scheduled_runs_actor_note" not in ev["metadata"]
+    assert ev["metadata"]["include_actors"] is True
+
+
+def test_actors_can_be_left_out(fake, monkeypatch, tmp_path):
+    runs = {"app": [scheduled(3, 1, attempt=2, triggering="rerunner"), wf_run(2, 1, conclusion="failure"),
+                    wf_run(1, 2)]}
+    fake(runs_routes(runs))
+    code, ev, _ = run_fetcher("workflow_runs", monkeypatch, tmp_path, GITHUB_WORKFLOW_RUNS_INCLUDE_ACTORS="false")
+    rows = ev["repositories"][0]["runs"]
+    assert code == 0 and all("actor" not in x and "triggering_actor" not in x for x in rows)
+    text = json.dumps(ev)
+    assert '"dev"' not in text and "rerunner" not in text and "cron-editor" not in text
+    assert ev["metadata"]["include_actors"] is False and "scheduled_runs_actor_note" not in ev["metadata"]
+    # Everything that does not name a person still holds.
+    s = ev["summary"]
+    assert s["runs_total"] == 3 and s["runs_scheduled"] == 1 and s["runs_rerun"] == 1
+    assert s["default_branch_runs_failed"] == 1 and all(x["created_at"] and x["head_sha"] for x in rows)
+
+
+def test_actors_and_branch_names_can_both_be_left_out(fake, monkeypatch, tmp_path):
+    fake(runs_routes({"app": [wf_run(2, 1, branch="feature-secret-name"), scheduled(1, 1)]}))
+    code, ev, _ = run_fetcher("workflow_runs", monkeypatch, tmp_path, GITHUB_WORKFLOW_RUNS_INCLUDE_ACTORS="false",
+                              GITHUB_WORKFLOW_RUNS_INCLUDE_BRANCH_NAMES="false")
+    rows = ev["repositories"][0]["runs"]
+    assert code == 0 and all(not {"actor", "triggering_actor", "head_branch"} & set(x) for x in rows)
+    assert "feature-secret-name" not in json.dumps(ev) and ev["summary"]["runs_scheduled"] == 1
+
+
+@pytest.mark.parametrize("fetcher,var", [("workflow_runs", "GITHUB_WORKFLOW_RUNS_INCLUDE_ACTORS"),
+                                         ("non_user_credentials", "GITHUB_SCOPE_TO_REPOSITORIES")])
+def test_a_bad_value_for_a_new_option_is_bad_config(fake, monkeypatch, tmp_path, fetcher, var):
+    f = fake(scoped_credential_routes())
+    monkeypatch.setenv("GITHUB_ORG", ORG)
+    monkeypatch.setenv("GITHUB_TOKEN", "test-token")
+    monkeypatch.setenv("GITHUB_API_URL", API)
+    monkeypatch.setenv("EVIDENCE_DIR", str(tmp_path))
+    monkeypatch.setenv("FETCHER_STATUS_FILE", str(tmp_path / "status.json"))
+    monkeypatch.setenv(var, "maybe")
+    m = MODS[fetcher]
+    assert gc.run(m.NAME, m.collect, m.CONFIG) == 1
+    assert "bad_config" in (tmp_path / "status.json").read_text() and f.calls == []

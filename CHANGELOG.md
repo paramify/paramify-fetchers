@@ -12,6 +12,14 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **`github_non_user_credentials` 0.3.0: limit to collected repositories.** A new `scope_to_repositories` setting
+  keeps apps, fine-grained tokens and organization Actions secrets only when they can reach a collected repository or
+  their reach is unknown, and marks each kept row with `reaches_collected_repositories`. Apps installed on selected
+  repositories stay as unknown, since GitHub shows that list only to the app itself. Left-out and unknown counts are
+  recorded. Organization secret rows now carry `visibility`. Off by default.
+- **`github_workflow_runs` 0.3.0: scheduled-run actors.** Scheduled runs no longer name a user as `actor`, since GitHub
+  credits them to whoever last changed the schedule; `triggering_actor` is kept only on a re-run. A new
+  `include_actors` setting (default true) removes both fields from every run. The summary adds `runs_scheduled`.
 - **`aws_inspector_ecr_findings` and `aws_inspector_ecr_report` 0.3.0: image counts and an opt-in for an empty scope.**
   - The evidence summary adds `repository_image_count`, every image in the selected repositories before tag,
     push-date and usage filters, next to `image_count`, the images that match them. Both are logged. No new API calls.

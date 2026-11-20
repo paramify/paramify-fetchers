@@ -25,7 +25,7 @@ organization, each with its own token and API host.
 | `github_actions_security` | Allowed actions and SHA pinning policy, the workflow token's default, fork PR approval, self-hosted runners and runner groups, OIDC subject claims, and what each workflow file does (unpinned actions, permissions blocks, privileged triggers checking out PR code, untrusted input in scripts, OIDC) | SCR-MIT, CMT-VTD, IAM-SNU, CNA-MAT |
 | `github_release_integrity` | Build provenance on each release asset (by digest), immutable releases, release tags locked by tag rulesets | SVC-VRI, SCR-MIT |
 | `github_deployment_controls` | Environments' reviewers, self-review, wait timers, branch policies and admin bypass; production deployments in a window with commit, creator, whether Actions made them and who approved them | CMT-RMV, CMT-VTD, CMT-LMC |
-| `github_workflow_runs` | Every workflow run in a window with its trigger, branch, commit, actor and result, and the artifacts each run kept (metadata only) | CMT-VTD, CMT-RMV |
+| `github_workflow_runs` | Every workflow run in a window with its trigger, branch, commit, actor (none on scheduled runs) and result, and the artifacts each run kept (metadata only) | CMT-VTD, CMT-RMV |
 | `github_image_signing` | The cosign sign and verify steps in each workflow file: the kind of signing key, whether the image is named by digest, whether the step can be skipped; and how each signing workflow ran in a window | SVC-VRI |
 | `github_vulnerability_disclosure` | Private vulnerability reporting, security policy, repository security advisories with state and age | PIY-RVD |
 | `github_significant_change_notifications` | FedRAMP SCN objects from pull requests flagged as significant changes, schema-validated and checked against SCN-CSO-INF | CMT-LMC |
@@ -113,6 +113,31 @@ organization; a `repositories` filter narrows only the per-repository
 section. Set `scope_to_repositories: true` to keep only the teams and roles
 that reach the collected repositories, and `include_members: false` to
 leave the member list out (the count stays).
+
+`non_user_credentials` reads installed apps, fine-grained tokens and
+organization Actions secrets across the whole organization; a `repositories`
+filter narrows only the per-repository section (deploy keys, repository
+secrets and webhooks). Set `scope_to_repositories: true` to keep only those
+that can reach the collected repositories. An item is left out only when it
+is shown not to reach any of them. One whose reach cannot be told stays in
+with `reaches_collected_repositories: null` and is named in the summary's
+`*_reach_unknown` lists:
+
+- An organization secret says which repositories may use it (`all`,
+  `private` or `selected`), and a `selected` secret's repositories are read.
+  Whether `private` also covers internal repositories is not measured, so
+  with only internal repositories collected such a secret stays as unknown.
+- A fine-grained token says `all`, `subset` or `none`, and a `subset` token's
+  repositories are read (GitHub App tokens only, like the token list itself).
+- An app on `all` repositories reaches every one. For an app on `selected`
+  repositories GitHub gives the list to that app alone
+  (`GET /installation/repositories` with its own token), so its reach is
+  always unknown to this fetcher. An organization owner can see it under
+  the app's *Configure* page.
+
+Organization webhooks are not scoped. The scoping in 0.3.0 is built against
+GitHub's API description and covered by unit tests; the two repository-list
+reads have not yet been measured on a live organization.
 
 A **GitHub App installation token** holding the same read-only permissions
 produced the same evidence as a personal token for those fifteen, with two
@@ -235,6 +260,14 @@ repositories; each returns well-formed, misleading data without an error.
   `total_count` is 0 (measured on cli/cli). That looks like a quiet window.
   `workflow_runs` does not filter. It reads the newest runs first and stops at
   the first run older than the window.
+- **A scheduled run's actor is not who started it.** No person starts a
+  scheduled run. GitHub reports as its `actor` the user who last changed the
+  workflow's `cron` schedule, or the repository's default branch (GitHub's
+  documentation of the `schedule` event), so one person appears to have
+  started every scheduled run. `workflow_runs` leaves `actor` null on
+  scheduled runs. `triggering_actor` is null on the first attempt and names
+  who re-ran the run on a later one. `include_actors: false` leaves both
+  fields out of every run.
 - **A fork's branch can have the default branch's name.** A pull request from
   a fork's `trunk` runs with `head_branch: trunk` (measured on cli/cli). So
   `workflow_runs` counts a run as on the default branch only when its head
