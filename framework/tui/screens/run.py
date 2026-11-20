@@ -14,6 +14,7 @@ disabled while a run is in flight.
 from __future__ import annotations
 
 from copy import deepcopy
+from pathlib import Path
 from typing import Dict
 
 from rich.text import Text
@@ -28,6 +29,7 @@ from framework import api
 from framework.tui import palette
 from framework.tui.components.table import DataTable
 from framework.tui.modals import ConfirmModal
+from framework.tui.words import plural
 
 _BAR_WIDTH = 20
 
@@ -60,13 +62,10 @@ class RunPage(Vertical):
         with Horizontal(id="run-body"):
             with Vertical(id="run-status-panel", classes="panel"):
                 yield DataTable(id="run-status")
-                yield Static(
-                    f"no run yet — [bold {palette.ACCENT}]ctrl+r[/] executes the manifest",
-                    classes="empty-hint",
-                )
+                yield Static(f"Press [bold {palette.ACCENT}]ctrl+r[/] to run.", classes="empty-hint")
             with Vertical(id="run-log-panel", classes="panel"):
                 yield RichLog(id="run-log", markup=False, wrap=True, highlight=False)
-                yield Static("run output streams here, fetcher by fetcher", classes="empty-hint")
+                yield Static("Each fetcher's output shows here as it runs.", classes="empty-hint")
         yield Static("", id="run-summary")
 
     def on_mount(self) -> None:
@@ -79,7 +78,7 @@ class RunPage(Vertical):
         dt.cursor_type = "row"
         dt.zebra_stripes = True
         self._cols = dt.add_columns("fetcher", "mode", "status", "info")
-        self._set_banner(Text("press Ctrl+R (or Run) to execute the manifest", style="dim"))
+        self._set_banner(Text(""))
         self._set_empty(True)
 
     def focus_default(self) -> None:
@@ -94,7 +93,7 @@ class RunPage(Vertical):
         self._rows = {}
         self.query_one("#run-status", DataTable).clear()
         self.query_one("#run-log", RichLog).clear()
-        self._set_banner(Text("press Ctrl+R (or Run) to execute the manifest", style="dim"))
+        self._set_banner(Text(""))
         self._set_empty(True)
         self._refresh_summary()
 
@@ -116,7 +115,7 @@ class RunPage(Vertical):
                 if ok:
                     self._start_run()
             self.app.push_screen(
-                ConfirmModal(f"Manifest has {len(errors)} issue(s) — run anyway?"), go
+                ConfirmModal(f"The manifest has {plural(len(errors), 'problem')}. Run anyway?"), go
             )
         else:
             self._start_run()
@@ -213,7 +212,7 @@ class RunPage(Vertical):
             self._finalize(ev.get("ok"), ev.get("metadata_path", ""), ev.get("issue_reports") or 0)
 
         elif etype == "_run_failed":
-            log.write(Text(f"✗ run failed: {ev.get('error', '')}", style=f"bold {palette.FAIL}"))
+            log.write(Text(f"✗ Run failed: {ev.get('error', '')}", style=f"bold {palette.FAIL}"))
             self._finalize(False, "")
 
     def _apply_result(self, ev: dict, log: RichLog) -> None:
@@ -247,7 +246,7 @@ class RunPage(Vertical):
         outs = ev.get("outputs") or []
         suffix = f"  {_exit_label(code)} ({ev.get('duration_sec', '?')}s)"
         if code == 0 and outs:
-            suffix += f"  · {len(outs)} file(s)"
+            suffix += f"  · {plural(len(outs), 'file')}"
         line.append(suffix, style="dim")
         log.write(line)
         self._paint_row(ev["fetcher"])
@@ -257,16 +256,16 @@ class RunPage(Vertical):
         self.query_one("#btn-run", Button).disabled = False
         icon = "✓" if ok else "✗"
         style = palette.OK if ok else palette.FAIL
-        msg = Text(f"{icon} run complete — ok={ok}", style=style)
+        msg = Text(f"{icon} Run complete." if ok else f"{icon} Run finished with failures.", style=style)
         if issue_reports:
             # Reports go through their own upload, so a run that collected any is
             # not finished after the evidence upload. Say where to send them.
             msg.append(
-                f"   {issue_reports} scan report(s) ready — Pipelines tab, i to send",
+                f"   {plural(issue_reports, 'scan report')} to send on the Pipelines tab (i).",
                 style=palette.WARN,
             )
         if metadata_path:
-            msg.append(f"   {metadata_path}", style="dim")
+            msg.append(f"   Saved to {Path(metadata_path).parent}", style="dim")
         self._set_banner(msg)
         for use in self._state:
             self._paint_row(use)

@@ -74,24 +74,16 @@ def _field_table(title: str, fields: List[dict]) -> RenderableType:
 # section heading is highlighted, so the difference is explained where it is drawn.
 _KIND_ABOUT = {
     kinds.EVIDENCE: (
-        "Asserts a configuration state — MFA is enforced, buckets are encrypted — "
-        "as a JSON payload the fetcher builds.",
-        "Wrapped in the standard envelope and uploaded to the evidence set the "
-        "fetcher names. Upload with u on the Paramify tab.",
+        "Shows a setting is in place, such as MFA being enforced, in a JSON file the fetcher builds.",
+        "Uploaded to its evidence set with u on the Paramify tab.",
     ),
     kinds.INVENTORY: (
-        "Lists every asset of a kind — cloud resources, hosts, devices — one "
-        "record each, for Paramify's Inventory.",
-        "Uploaded to its evidence set with u like evidence; an inventory "
-        "pipeline attached to that set builds the Inventory items. Only a run "
-        "that collected every asset is sent.",
+        "Lists every asset of one kind, one record each, for Paramify's Inventory.",
+        "Uploaded with u like evidence, but only from a run that collected every asset.",
     ),
     kinds.SCAN_REPORT: (
-        "Hands over findings a scanner already computed — a Nessus export, a Wiz "
-        "CSV, a STIG report — as the tool's own file, never rewritten.",
-        "Sent to an assessment's pipeline, which turns it into issues. Each one "
-        "needs an assessment, chosen per manifest with A on its entry on the Fetchers tab; "
-        "send with i on the Pipelines tab. Usually kept in a manifest of its own.",
+        "Hands over a scanner's own report, such as a Nessus export, unchanged.",
+        "Sent to an assessment's pipeline with i on the Pipelines tab. Pick the assessment with A on the Fetchers tab.",
     ),
 }
 
@@ -125,9 +117,9 @@ def _close_policy(config_view: Optional[List[dict]]) -> Optional[str]:
 
 def _close_label(policy: Optional[str]) -> Text:
     if policy == CLOSE_AFTER_RUN:
-        return Text("after each complete run (after_run)", style=palette.FG)
+        return Text("after each complete run", style=palette.FG)
     if policy == CLOSE_NEVER:
-        return Text("by hand — C on the Pipelines tab (never)", style=palette.FG)
+        return Text("by hand (C on the Pipelines tab)", style=palette.FG)
     return Text("unset — press A", style=palette.WARN)
 
 
@@ -177,8 +169,8 @@ def _destination(f: dict, config_view: Optional[List[dict]] = None, in_manifest:
         else:
             rows.append(("assessment", Text(f"a {atype} assessment, chosen per manifest", style=palette.FG)))
         fmt = ir.get("format")
-        rows.append(("format", Text(f"{fmt + ' — ' if fmt else ''}the tool's own file, never enveloped", style="dim")))
-        rows.append(("send", Text("i on the Pipelines tab, to the assessment's pipeline", style="dim")))
+        rows.append(("format", Text(f"{fmt + ', ' if fmt else ''}the tool's own file", style="dim")))
+        rows.append(("send", Text("i on the Pipelines tab", style="dim")))
     else:
         es = f.get("evidence_set")
         if es:
@@ -189,13 +181,10 @@ def _destination(f: dict, config_view: Optional[List[dict]] = None, in_manifest:
             pipe = f.get("pipeline")
             if pipe:
                 rows.append(("pipeline", Text(
-                    f"pipeline: {pipe.get('type')} · {pipe.get('id_scheme') or '—'}", style=palette.FG)))
+                    f"{pipe.get('type')} · {pipe.get('id_scheme') or '—'}", style=palette.FG)))
         else:
-            rows.append(("evidence set", Text(
-                "none declared — the upload skips it unless the uploader config names one",
-                style=palette.WARN,
-            )))
-        rows.append(("send", Text("u on the Paramify tab, enveloped JSON", style="dim")))
+            rows.append(("evidence set", Text("none, so the upload skips it", style=palette.WARN)))
+        rows.append(("send", Text("u on the Paramify tab", style="dim")))
     return Group(Text("sends to", style="bold"), _kv_table(rows))
 
 
@@ -241,17 +230,28 @@ def fetcher_detail(f: dict, in_manifest: Optional[bool] = None) -> RenderableTyp
         description,
         Text(),
         _destination(f),
-        Text(),
-        _field_table("secrets", f.get("secrets", [])),
-        Text(),
-        _field_table("config", f.get("config", [])),
-        Text(),
-        _field_table("target fields", f.get("target_schema", [])),
+        *_needs(f),
     )
 
 
+def _needs(f: dict) -> List[RenderableType]:
+    """The secrets, config and target fields a fetcher takes, as tables; the
+    empty ones are named on one line instead of each showing "(none)"."""
+    sections = (("secrets", f.get("secrets", [])), ("config", f.get("config", [])),
+                ("target fields", f.get("target_schema", [])))
+    out: List[RenderableType] = []
+    for title, fields in sections:
+        if fields:
+            out += [Text(), _field_table(title, fields)]
+    empty = [title for title, fields in sections if not fields]
+    if empty:
+        names = empty[0] if len(empty) == 1 else ", ".join(empty[:-1]) + " or " + empty[-1]
+        out += [Text(), Text(f"Needs no {names}.", style="dim")]
+    return out
+
+
 def empty_detail(message: Optional[str] = None) -> RenderableType:
-    return Text(message or "Select a fetcher to see its contract.", style="dim italic")
+    return Text(message or "Select a fetcher to see what it needs.", style="dim italic")
 
 
 # --------------------------------------------------------------------------- #
@@ -291,7 +291,7 @@ def entry_detail(
     if descriptor is None:
         return Group(
             Text(use, style=f"bold {palette.FG}"),
-            Text("unknown fetcher — not discovered in the catalog", style=palette.WARN),
+            Text("Unknown fetcher: it isn't in the catalog.", style=palette.WARN),
         )
 
     fanout = descriptor.get("supports_targets")
@@ -366,7 +366,7 @@ def entry_detail(
         targets = entry.get("targets") or []
         parts.append(Text(f"targets ({len(targets)})", style="bold"))
         if not targets:
-            parts.append(Text("  none — press 't' to add", style=palette.WARN))
+            parts.append(Text("  none yet (t to add one)", style=palette.WARN))
         for i, t in enumerate(targets):
             values = {k: v for k, v in t.items() if k != "secrets"}
             summary = "  ".join(f"{k}={v}" for k, v in values.items()) or "(empty)"

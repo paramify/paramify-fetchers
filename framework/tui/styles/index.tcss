@@ -337,6 +337,10 @@ PipelinesPage {
 #pipelines-fetchers { height: auto; max-height: 10; }
 #pipelines-log-panel { height: 1fr; min-height: 6; margin: 1 1 0 1; }
 #pipelines-log { height: 1fr; }
+/* No scan-report fetchers: only the send panel's one-line note shows. */
+PipelinesPage.no-scans #pipelines-fetchers-panel,
+PipelinesPage.no-scans #pipelines-log-panel,
+PipelinesPage.no-scans #issues-actions { display: none; }
 #pipelines-banner {
     height: auto;
     padding: 0 1;

@@ -64,14 +64,9 @@ class FieldRow(Vertical):
         req = " [b red]*[/]" if spec.get("required") else ""
         help_text = spec.get("help") or ""
 
-        if kind == "secret":
-            # Make it unmistakable: this field holds the NAME of an env var, not
-            # the credential itself.
+        if kind == "secret" and not help_text:
+            # The group label already says this field holds an env var's name, not the secret.
             yield Label(f"{head}{req}", classes="field-label")
-            note = "the env var NAME — not the secret value; the runner reads the value from it at run time"
-            if help_text:
-                note = f"{note}  ·  {help_text}"
-            yield Label(note, classes="field-note")
         else:
             suffix = f"  [dim]{help_text}[/]" if help_text else ""
             yield Label(f"{head}{req}{suffix}", classes="field-label")

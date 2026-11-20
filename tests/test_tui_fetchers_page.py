@@ -223,7 +223,7 @@ def test_empty_manifest_hint(tmp_path, run_tui):
     async def body(app, pilot):
         return _text(app.screen.query_one("#manifest-empty-hint", Static).content)
 
-    assert "press a on a fetcher to add it" in run_tui(body, _manifest_with(tmp_path))
+    assert "Press a on a fetcher to add it." in run_tui(body, _manifest_with(tmp_path))
 
 
 def test_switching_manifest_moves_the_marks(tmp_path, run_tui):
@@ -465,7 +465,7 @@ def test_the_add_notice_says_how_to_reach_the_entry(tmp_path, run_tui):
         return notices
 
     notices = run_tui(body, _manifest_with(tmp_path))
-    wired = [n for n in notices if "secrets wired" in n]
+    wired = [n for n in notices if "default env vars" in n]
     assert wired, notices
     assert "tab, then e" in wired[-1], "the notice names a key that does nothing in the catalog"
 
