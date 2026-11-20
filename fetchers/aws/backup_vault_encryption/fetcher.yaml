@@ -1,0 +1,47 @@
+name: aws_backup_vault_encryption
+version: 0.1.0
+description: Lists AWS Backup vaults and their KMS encryption key configuration to confirm backup data is encrypted at rest.
+category: aws
+
+supports_targets: true
+
+runtime:
+  type: bash
+  entry: fetcher.sh
+
+output:
+  type: json
+  path: aws_backup_vault_encryption.json
+  aggregation: per_target
+
+target_schema:
+  region:
+    type: string
+    required: false
+    env: AWS_DEFAULT_REGION
+    description: AWS region to collect from.
+  profile:
+    type: string
+    required: false
+    env: AWS_PROFILE
+    description: AWS named profile (credentials resolved from ~/.aws / SSO).
+
+secrets: []
+
+ksis:
+  - KSI-SVC-SIN
+  - KSI-RPL-ABO
+
+evidence_set:
+  reference_id: EVD-AWS-BACKUP-VAULT-ENC
+  name: AWS Backup Vault Encryption
+  instructions: |
+    Script: aws/backup_vault_encryption/fetcher.sh
+
+    Access: AWSBackupOperatorAccess or equivalent read-only permissions on the target account.
+
+    Commands Executed:
+    - aws backup list-backup-vaults — lists all backup vaults in the target region
+    - aws backup describe-backup-vault — per-vault details including EncryptionKeyArn and recovery point count
+
+    Output: aws_backup_vault_encryption_<profile>-<region>.json — each vault with its KMS encryption key ARN and totals for encrypted and unencrypted vaults.

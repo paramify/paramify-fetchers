@@ -91,6 +91,8 @@ else
                 policy_data=$(echo "$policy" | jq '{
                     "StatelessDefaultActions": (.FirewallPolicy.StatelessDefaultActions // []),
                     "StatelessFragmentDefaultActions": (.FirewallPolicy.StatelessFragmentDefaultActions // []),
+                    "StatefulDefaultActions": (.FirewallPolicy.StatefulDefaultActions // []),
+                    "StatefulEngineOptions": (.FirewallPolicy.StatefulEngineOptions // {}),
                     "StatelessRuleGroups": [.FirewallPolicy.StatelessRuleGroupReferences[]?.ResourceArn],
                     "StatefulRuleGroups": [.FirewallPolicy.StatefulRuleGroupReferences[]?.ResourceArn]
                 }')

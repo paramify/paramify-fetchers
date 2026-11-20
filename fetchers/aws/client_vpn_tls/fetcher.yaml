@@ -1,0 +1,45 @@
+name: aws_client_vpn_tls
+version: 0.1.0
+description: Lists Client VPN endpoints and their TLS authentication and transport security configuration to confirm admin VPN enforces strong encryption.
+category: aws
+
+supports_targets: true
+
+runtime:
+  type: bash
+  entry: fetcher.sh
+
+output:
+  type: json
+  path: aws_client_vpn_tls.json
+  aggregation: per_target
+
+target_schema:
+  region:
+    type: string
+    required: false
+    env: AWS_DEFAULT_REGION
+    description: AWS region to collect from.
+  profile:
+    type: string
+    required: false
+    env: AWS_PROFILE
+    description: AWS named profile (credentials resolved from ~/.aws / SSO).
+
+secrets: []
+
+ksis:
+  - KSI-SVC-SIN
+
+evidence_set:
+  reference_id: EVD-AWS-CLIENT-VPN-TLS
+  name: AWS Client VPN TLS Configuration
+  instructions: |
+    Script: aws/client_vpn_tls/fetcher.sh
+
+    Access: AmazonVPCReadOnlyAccess or equivalent read-only permissions on the target account.
+
+    Commands Executed:
+    - aws ec2 describe-client-vpn-endpoints — all Client VPN endpoints with TLS certificate, authentication options, transport protocol, and VPN protocol details
+
+    Output: aws_client_vpn_tls_<profile>-<region>.json — each Client VPN endpoint with its server certificate ARN, authentication options, transport protocol, and VPN protocol.
