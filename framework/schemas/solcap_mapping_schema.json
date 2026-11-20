@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Solution Capability Mapping Schema",
+  "description": "mappings/solution_capabilities.yaml — which solution capabilities each fetcher's evidence speaks to. GLOBAL and program-neutral: a capability maps to controls per program inside Paramify, so this file never names a control. Generated from the mapping sheet by tools/import_solcap_mapping.py; edit the sheet, then re-import. It is a SUGGESTION list for validator authoring: nothing is paired or attached from it on its own. Refreshed weekly by .github/workflows/solcap-mapping-refresh.yml; see docs/solcap_mapping_refresh.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "mappings"
+  ],
+  "properties": {
+    "source": {
+      "type": "object",
+      "description": "Where the rows came from and when, so a stale import is visible in review.",
+      "additionalProperties": true,
+      "properties": {
+        "sheet": {
+          "type": "string"
+        },
+        "tab": {
+          "type": "string"
+        },
+        "imported_at": {
+          "type": "string"
+        }
+      }
+    },
+    "mappings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "fetcher",
+          "solution_capability"
+        ],
+        "properties": {
+          "fetcher": {
+            "type": "string",
+            "description": "The fetcher's `name` from its fetcher.yaml (e.g. aws_auto_scaling_high_availability). Its evidence_set.reference_id is the set the pairs come from."
+          },
+          "solution_capability": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "Library capability id (RS-02-03-01). Matched against a workspace capability's templateReferenceId, then its referenceId. Absent when the sheet row had none; the row can then only be name-matched, which always needs a person's approval."
+              },
+              "name": {
+                "type": "string",
+                "description": "The capability's name, without any \": <component>\" suffix. Used to offer name-match candidates where the workspace carries no library ids."
+              }
+            }
+          },
+          "ksis": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The KSIs the sheet gave as the reason for this row. Context for a reviewer; nothing reads it to decide a pairing."
+          }
+        }
+      }
+    }
+  }
+}
