@@ -1,0 +1,23 @@
+key: openscap_no_high_severity_failures
+name: 'OpenSCAP: No High-Severity Rule Fails'
+type: AUTOMATED
+role: configuration
+statement: >
+  No high-severity rule fails in any target's latest OpenSCAP result (rules_failed_by_severity.high
+  is 0), and at least one target was scanned. A waived rule counts by its new result. Fails when any
+  result file could not be read, no target was scanned, or the counts appear other than exactly
+  once. Medium, low and unknown-severity failures are not judged here. Does not check whether the
+  collection run succeeded.
+
+regex: '"rules_failed_by_severity":\s*\{[^{}]*?"high":\s*(?<high>\d+)[\s\S]*?"targets_scanned":\s*(?<targets_scanned>[1-9]\d*)'
+rules_summary: MATCH_COUNT EQUALS 1; MATCH_GROUP[1] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "1" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # rules_failed_by_severity.high
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-OPENSCAP-BENCHMARK-RESULTS

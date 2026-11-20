@@ -1,0 +1,22 @@
+key: openscap_expected_targets_scanned
+name: 'OpenSCAP: Every Expected Target Scanned'
+type: AUTOMATED
+role: completeness
+statement: >
+  Every target in the expected_targets setting has an OpenSCAP benchmark result
+  (expected_targets_missing is 0). Fails while expected_targets is unset, any result file could not
+  be read, or the count appears other than exactly once. Which targets are expected is the
+  organization's decision. Does not check whether the collection run succeeded.
+
+regex: '"expected_targets_missing":\s*(?<expected_targets_missing>\d+)'
+rules_summary: MATCH_COUNT EQUALS 1; MATCH_GROUP[1] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "1" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # expected_targets_missing
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-OPENSCAP-BENCHMARK-RESULTS
