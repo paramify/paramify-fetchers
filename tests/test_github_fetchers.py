@@ -1351,6 +1351,8 @@ def test_non_user_credential_verdicts(fake, monkeypatch, tmp_path):
     assert s["apps_with_write"] == ["ci-bot"] and s["apps_on_all_repositories"] == ["ci-bot"]
     assert s["fine_grained_tokens_without_expiry"] == 1 and s["fine_grained_tokens_unused"] == 1
     assert s["actions_secrets_total"] == 2 and s["actions_secrets_older_than_max"] == ["org:ORG_OLD"]
+    assert ev["metadata"]["actions_secrets_readable"] is True
+    assert "actions_secrets_unreadable_because" not in ev["metadata"]
     assert s["webhooks_insecure_ssl"] == 1 and s["webhooks_without_secret"] == 1
     assert "SHOULDNOTLEAK" not in json.dumps(ev)  # webhook URLs are reduced to their host
 
@@ -1364,6 +1366,45 @@ def test_a_missing_key_access_or_tls_setting_is_unknown_not_safe(fake, monkeypat
     s = ev["summary"]
     assert s["deploy_keys_access_unknown"] == ["app:mystery"] and "app:mystery" not in s["write_deploy_keys"]
     assert s["webhooks_tls_unknown"] >= 1
+
+
+def _secrets_denied(permission):
+    return (403, {"message": "Resource not accessible by personal access token"},
+            {"X-Accepted-GitHub-Permissions": permission})
+
+
+def test_missing_secrets_read_leaves_the_lists_null_and_keeps_the_rest(fake, monkeypatch, tmp_path):
+    routes = credential_routes()
+    routes[f"orgs/{ORG}/actions/secrets"] = _secrets_denied("organization_secrets=read")
+    routes[f"repos/{ORG}/app/actions/secrets"] = _secrets_denied("secrets=read")
+    routes[f"repos/{ORG}/site/actions/secrets"] = _secrets_denied("secrets=read")
+    fake(routes)
+    code, ev, status = run_fetcher("non_user_credentials", monkeypatch, tmp_path)
+    assert code == 0 and status is None
+    s = ev["summary"]
+    assert s["actions_secrets_total"] is None and s["actions_secrets_older_than_max"] is None
+    assert ev["organization_actions_secrets"] is None
+    by = {r["repository"]: r for r in ev["repositories"]}
+    assert by["app"]["collected"] is True and by["app"]["actions_secrets"] is None
+    assert by["site"]["collected"] is True and by["site"]["deploy_keys"][0]["title"] == "deploy-ro"
+    assert s["deploy_keys_total"] == 2 and s["webhooks_insecure_ssl"] == 1 and s["apps_installed"] == 2
+    assert ev["metadata"]["actions_secrets_readable"] is False
+    assert "no read access" in ev["metadata"]["actions_secrets_unreadable_because"]
+    assert ev["metadata"]["api_failures"] == []
+
+
+def test_a_secrets_error_that_is_not_a_missing_grant_still_fails(fake, monkeypatch, tmp_path):
+    routes = credential_routes()
+    routes[f"repos/{ORG}/app/actions/secrets"] = (
+        403, {"message": "Resource not accessible by personal access token"},
+        {"X-Accepted-GitHub-Permissions": "administration=read"})
+    fake(routes)
+    code, ev, status = run_fetcher("non_user_credentials", monkeypatch, tmp_path)
+    assert code == 1 and status["code"] == "not_authorized"
+    by = {r["repository"]: r for r in ev["repositories"]}
+    assert by["app"]["collected"] is False and by["site"]["collected"] is True
+    assert ev["summary"]["actions_secrets_total"] == 1  # the organization secret only; app was not collected
+    assert "actions_secrets_unreadable_because" not in ev["metadata"]
 
 
 def test_a_personal_token_never_asks_for_the_apps_only_token_list(fake, monkeypatch, tmp_path):

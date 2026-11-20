@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Credentials that are not a person: deploy keys, installed apps, approved fine-grained tokens, Actions secrets and webhooks."""
+"""Credentials that are not a person: deploy keys, installed apps, approved fine-grained tokens, Actions secrets and webhooks.
+
+Actions secret names and ages are collected only when the token can list them.
+Repository Secrets and organization Secrets read are not required: without that
+grant the lists are null, metadata says why, and the rest of the evidence is kept.
+The list API never returns a secret value.
+"""
 
 import sys
 from pathlib import Path
@@ -14,6 +20,9 @@ CONFIG = {
     "max_unused_days": ("GITHUB_MAX_UNUSED_DAYS", 90),
 }
 WRITE_LEVELS = ("write", "admin")
+# Fine-grained token page names. GitHub quotes the one an endpoint requires in
+# X-Accepted-GitHub-Permissions, which the client appends as "(needs: …)".
+SECRETS_READ = {"secrets=read", "organization_secrets=read"}
 
 
 def age_days(value, now):
@@ -24,6 +33,37 @@ def age_days(value, now):
 def secret_rows(items, now, max_age):
     return [{"name": s.get("name"), "updated_at": s.get("updated_at"), "age_days": age_days(s.get("updated_at"), now),
              "older_than_max": (age_days(s.get("updated_at"), now) or 0) > max_age} for s in items or []]
+
+
+def _missing_secrets_read(failure):
+    """True when GitHub refused the call because this token lacks Secrets read."""
+    if failure.get("type") != "HTTP 403":
+        return False
+    message = failure.get("message") or ""
+    marker = "(needs: "
+    if marker not in message or not message.endswith(")"):
+        return False
+    needed = message[message.rindex(marker) + len(marker):-1]
+    grants = {part.strip().lower() for part in needed.replace(";", ",").split(",") if part.strip()}
+    return bool(grants & SECRETS_READ)
+
+
+def read_actions_secrets(client, path):
+    """("ok", items), ("unreadable", None) or ("failed", None).
+
+    A 403 that names secrets=read or organization_secrets=read is the token
+    declining that grant. Drop that recorded failure so the run still succeeds
+    and the caller can leave the list null. Any other error stays recorded.
+    """
+    recorded = len(client.failures)
+    items = client.paginate_required(path, key="secrets")
+    if items is not None:
+        return "ok", items
+    if len(client.failures) == recorded + 1 and _missing_secrets_read(client.failures[-1]):
+        client.failures.pop()
+        client.codes.pop()
+        return "unreadable", None
+    return "failed", None
 
 
 def hook_row(hook):
@@ -41,9 +81,9 @@ def repo_record(client, org, repo, now, config):
     name = repo["name"]
     base = f"repos/{org}/{name}"
     keys = client.paginate_required(f"{base}/keys")
-    state, secrets = client.paginate(f"{base}/actions/secrets", key="secrets")
+    secret_state, secrets = read_actions_secrets(client, f"{base}/actions/secrets")
     hooks = client.paginate_required(f"{base}/hooks")
-    if keys is None or state == "failed" or hooks is None:
+    if keys is None or secret_state == "failed" or hooks is None:
         return {"repository": name, "collected": False}
     deploy_keys = [{"id": k.get("id"), "title": k.get("title"), "read_only": k.get("read_only"),
                     "created_at": k.get("created_at"), "age_days": age_days(k.get("created_at"), now),
@@ -55,7 +95,8 @@ def repo_record(client, org, repo, now, config):
         "deploy_keys": deploy_keys,
         "write_deploy_keys": [k["title"] for k in deploy_keys if k["read_only"] is False],
         "deploy_keys_access_unknown": [k["title"] for k in deploy_keys if k["read_only"] is None],
-        "actions_secrets": secret_rows(secrets, now, config["max_secret_age_days"]),
+        "actions_secrets": None if secret_state == "unreadable" else secret_rows(
+            secrets, now, config["max_secret_age_days"]),
         "webhooks": [hook_row(h) for h in hooks],
     }
 
@@ -64,7 +105,7 @@ def collect(client, org, repos, config):
     login, now = org["login"], now_epoch()
     # Each organization section stands alone: one the token cannot read is null, and the others are kept.
     installs = client.paginate_required(f"orgs/{login}/installations", key="installations")
-    org_secrets = client.paginate_required(f"orgs/{login}/actions/secrets", key="secrets")
+    org_secret_state, org_secrets = read_actions_secrets(client, f"orgs/{login}/actions/secrets")
     org_hooks = client.paginate_required(f"orgs/{login}/hooks")
     # GitHub lists an organization's fine-grained tokens to GitHub Apps only; a personal token always gets a 403
     # (measured with a token granted every organization permission). Unknown, never zero.
@@ -85,7 +126,13 @@ def collect(client, org, repos, config):
         for p in pats]
     records = [repo_record(client, login, r, now, config) for r in repos]
     done = [r for r in records if r["collected"]]
-    org_secret_rows = None if org_secrets is None else secret_rows(org_secrets, now, config["max_secret_age_days"])
+    org_secret_rows = None if org_secret_state != "ok" else secret_rows(
+        org_secrets, now, config["max_secret_age_days"])
+    secret_lists = [r["actions_secrets"] for r in done]
+    # A missing grant, or a repository whose list was not read, leaves the totals
+    # null: a short count would look like the whole estate.
+    secrets_complete = org_secret_rows is not None and all(items is not None for items in secret_lists)
+    secrets_unreadable = org_secret_state == "unreadable" or any(items is None for items in secret_lists)
     hooks = [{"scope": "organization", **hook_row(h)} for h in org_hooks or []] + [
         {"scope": r["repository"], **h} for r in done for h in r["webhooks"]]
     return {
@@ -104,9 +151,9 @@ def collect(client, org, repos, config):
             len([t for t in tokens if not t["token_expires_at"]]),
             "fine_grained_tokens_unused": None if tokens is None else
             len([t for t in tokens if (t["unused_days"] or 0) > config["max_unused_days"]]),
-            "actions_secrets_total": None if org_secret_rows is None else
-            len(org_secret_rows) + sum(len(r["actions_secrets"]) for r in done),
-            "actions_secrets_older_than_max": None if org_secret_rows is None else sorted(
+            "actions_secrets_total": None if not secrets_complete else
+            len(org_secret_rows) + sum(len(items) for items in secret_lists),
+            "actions_secrets_older_than_max": None if not secrets_complete else sorted(
                 [f"org:{s['name']}" for s in org_secret_rows if s["older_than_max"]]
                 + [f"{r['repository']}:{s['name']}" for r in done for s in r["actions_secrets"] if s["older_than_max"]]),
             "webhooks_insecure_ssl": None if org_hooks is None else len([h for h in hooks if h["insecure_ssl"]]),
@@ -122,7 +169,12 @@ def collect(client, org, repos, config):
         "metadata": {"as_of": iso(now), "fine_grained_tokens_readable": tokens is not None,
                      **({"fine_grained_tokens_unreadable_because": "listed to GitHub Apps only; this run used a "
                                                                     "personal access token"}
-                        if state == "apps_only" else {})},
+                        if state == "apps_only" else {}),
+                     "actions_secrets_readable": secrets_complete,
+                     **({"actions_secrets_unreadable_because":
+                         "the token has no read access to Actions secrets; names and ages were left out. "
+                         "This API never returns secret values."}
+                        if secrets_unreadable else {})},
     }
 
 

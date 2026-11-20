@@ -20,7 +20,7 @@ organization, each with its own token and API host.
 | `github_secret_scanning` | Scanning and push protection per repository, every alert (never the secret), push-protection bypasses | SVC-ASM |
 | `github_org_security_settings` | Two-factor requirement and members without it, member defaults, Actions token rights, security configuration coverage | IAM-APM, IAM-ELP, CNA-EIS |
 | `github_access_review` | Owners, members, outside collaborators, invitations, teams and their repository grants, repository admins | IAM-ELP, IAM-AAM |
-| `github_non_user_credentials` | Deploy keys, installed apps, fine-grained tokens, Actions secrets by age, webhook TLS and signing | IAM-SNU, SVC-ASM |
+| `github_non_user_credentials` | Deploy keys, installed apps, fine-grained tokens, Actions secret names and ages when the token can list them, webhook TLS and signing | IAM-SNU, SVC-ASM |
 | `github_repository_inventory` | **Inventory** (`kind: inventory`): one record per repository with visibility, state, security features and custom property values; all or nothing | PIY-GIV |
 | `github_actions_security` | Allowed actions and SHA pinning policy, the workflow token's default, fork PR approval, self-hosted runners and runner groups, OIDC subject claims, and what each workflow file does (unpinned actions, permissions blocks, privileged triggers checking out PR code, untrusted input in scripts, OIDC) | SCR-MIT, CMT-VTD, IAM-SNU, CNA-MAT |
 | `github_release_integrity` | Build provenance on each release asset (by digest), immutable releases, release tags locked by tag rulesets | SVC-VRI, SCR-MIT |
@@ -73,11 +73,11 @@ a missing grant is reported as e.g. `(needs: administration=read)`.
 | Dependabot alerts (repository) | `vulnerability_alerts` | dependabot_alerts |
 | Code scanning alerts (repository) | `security_events` | code_scanning_alerts |
 | Secret scanning alerts (repository) | `secret_scanning_alerts` | secret_scanning |
-| Secrets (repository) | `secrets` | non_user_credentials |
+| Secrets (repository) | `secrets` | optional. `non_user_credentials` lists Actions secret names and ages only with this grant. Without it the fetcher still runs: those lists are `null` and metadata says why. The API never returns secret values |
 | Webhooks (repository) | `repository_hooks` | non_user_credentials |
 | Administration (organization) | `organization_administration` | org_security_settings, non_user_credentials (installations), actions_security (Actions policy, OIDC subject template), release_integrity (immutable releases), audit_log |
 | Members (organization) | `members` | access_review, org_security_settings |
-| Secrets (organization) | `organization_secrets` | non_user_credentials |
+| Secrets (organization) | `organization_secrets` | optional, same as repository Secrets |
 | Webhooks (organization) | `organization_hooks` | non_user_credentials |
 | Personal access tokens (organization) | `organization_personal_access_tokens` | non_user_credentials, **GitHub App tokens only**: the token page offers no such permission, and GitHub answers a personal token with 403 whatever it holds. Run with a personal token, `fine_grained_tokens` is `null` and the metadata says why |
 | Custom properties (organization) | `organization_custom_properties` | repository_inventory (or set `include_custom_properties: false`) |
