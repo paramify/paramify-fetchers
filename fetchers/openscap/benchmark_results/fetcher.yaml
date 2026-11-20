@@ -1,0 +1,86 @@
+name: openscap_benchmark_results
+version: 0.1.0
+description: >-
+  Reads OpenSCAP XCCDF and ARF result files and reports, for each scanned target, its latest benchmark evaluation: profile, failed rules by severity, errors, waivers and scan age.
+category: openscap
+
+supports_targets: false
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: openscap_benchmark_results.json
+
+config_schema:
+  expected_targets:
+    type: string
+    required: false
+    env: OPENSCAP_EXPECTED_TARGETS
+    description: >
+      The targets that must have a scan result, as comma-separated names matching the XCCDF target (usually the host
+      name), compared without regard to case. There is no default: while it is unset, expected_targets_missing is null.
+  max_age_days:
+    type: integer
+    required: false
+    env: OPENSCAP_MAX_AGE_DAYS
+    description: >
+      The adopted maximum age, in days, of each target's latest scan. There is no default: while it is unset,
+      targets_scan_older_than_max_age is null rather than judged against an age nobody adopted, and each scan's time
+      is still reported. A whole number from 1 to 3650.
+
+secrets: []          # the container is read with the run's Azure identity; see fetchers/_categories/openscap.yaml
+
+evidence_set:
+  reference_id: EVD-OPENSCAP-BENCHMARK-RESULTS
+  name: OpenSCAP Benchmark Results
+  description: >-
+    Each scanned target's latest OpenSCAP benchmark evaluation: profile, rule results, failed rules by severity, waived
+    rules and when it ran.
+  instructions: |
+    Script: openscap/benchmark_results/fetcher.py
+
+    Access: Either Storage Blob Data Reader on the Azure Blob Storage container the scans write to, held by the run's Azure identity (a managed identity, a service principal in AZURE_CLIENT_ID, AZURE_TENANT_ID and AZURE_CLIENT_SECRET, or an Azure CLI login), or read access to a local directory holding the files. Every call is a GET.
+
+    Commands Executed:
+    - GET {container URL}?restype=container&comp=list — the result files in the container, page by page; only .xml, .xml.gz, .arf and .arf.gz files under results_prefix are read
+    - GET {container URL}/{file} — each result file, an XCCDF results file (oscap xccdf eval --results) or an ARF report (--results-arf), gzipped or not
+    - read {results_dir}/{file} — with results_dir instead of a container, the same files from the directory and its subdirectories
+
+    Output: openscap_benchmark_results.json — for each target, its latest XCCDF TestResult: the file it came from, profile, benchmark, start and end time, score, the count of each rule result, the failed rules with their severities, and the waived rules (rule results with an override) with their old and new results. Rule text, check content and remediation are never copied. A file with no XCCDF TestResult, such as an OVAL results file, is counted and skipped. A target scanned more than once counts only its newest result.
+
+    Summary fields:
+
+    What was read?
+    - results_source — container or directory; null when neither is set
+    - files_found — Number of result files listed; null if the listing failed
+    - files_unreadable — Number of files that could not be read or parsed; while above 0, every judged field below is null
+    - files_without_test_results — Number of files read that hold no XCCDF TestResult, such as OVAL results
+    - test_results_read — Number of XCCDF TestResults read across all files, older scans of a target included
+    - targets_scanned — Number of targets with at least one result
+    - profiles — List of the profiles evaluated in the targets' latest results
+
+    Was every expected target scanned, and recently?
+    - expected_targets — The expected_targets setting; null when unset
+    - expected_targets_missing — Number of expected targets with no result; null when expected_targets is unset
+    - expected_targets_missing_names — List of those targets
+    - max_age_days — The max_age_days setting; null when unset
+    - oldest_latest_scan_age_days — Age in days of the oldest of the targets' latest scans
+    - targets_scan_older_than_max_age — Number of targets whose latest scan is older than max_age_days or has no time; null when it is unset
+
+    Did the targets pass?
+    - rules_failed — Number of failed rule results across the targets' latest scans
+    - rules_failed_by_severity — Map of each severity to its number of failed rule results:
+      - high (XCCDF severity high)
+      - medium (severity medium)
+      - low (severity low)
+      - info (severity info)
+      - unknown (severity unknown or not set)
+    - rules_errored — Number of rule results that ended in error or unknown, so the rule was not judged
+    - rules_waived — Number of rule results carrying an override (a waiver), whatever the new result
+    - targets_with_failures — Number of targets whose latest scan has at least one failed rule
+    - targets_with_failures_names — List of those targets
+    - targets_with_errors — Number of targets whose latest scan has at least one rule in error or unknown
+    - all_targets_pass — True if no target's latest scan has a failed, error or unknown rule; null if no target was scanned or any file was unreadable

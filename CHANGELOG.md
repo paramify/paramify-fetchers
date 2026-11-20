@@ -28,6 +28,12 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`openscap_benchmark_results` 0.1.0 and the `openscap` category: each target's latest OpenSCAP benchmark
+  result.** Reads XCCDF results and ARF reports written by `oscap xccdf eval`, gzipped or not, from an Azure Blob
+  Storage container (GET only, with the run's Azure identity) or a local directory. For each target's newest scan it
+  reports the profile, rule results, failed rules by severity, errors and waived rules. `expected_targets` and
+  `max_age_days` have no default, so their fields stay null until set. Rule text is never copied, and XML is parsed
+  with defusedxml.
 - **One-line install.** `curl -fsSL https://raw.githubusercontent.com/paramify/paramify-fetchers/main/install.sh |
   bash` clones the repo to `~/paramify-fetchers`, installs the CLI and TUI into the clone's `.venv`, and links
   `paramify` into `~/.local/bin`. In a terminal it shows a spinner and elapsed time for each step, offers to add
