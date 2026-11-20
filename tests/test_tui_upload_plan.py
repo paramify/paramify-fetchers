@@ -288,7 +288,7 @@ def _open_confirm(tmp_path, run_tui, check, monkeypatch):
     path, _ = _manifest(tmp_path)
 
     async def body(app, pilot):
-        await pilot.press("4")
+        await pilot.press("5")
         await pilot.pause()
         page = app.screen.query_one(ParamifyPage)
         page.action_upload_run()
@@ -395,7 +395,7 @@ def test_log_shows_brackets_in_file_names_and_reasons(tmp_path, run_tui, stub_pa
     path, _ = _manifest(tmp_path)
 
     async def body(app, pilot):
-        await pilot.press("4")
+        await pilot.press("5")
         await pilot.pause()
         page = app.screen.query_one(ParamifyPage)
         page._begin_log(Text("uploading"))
@@ -417,7 +417,7 @@ def test_log_panel_renders_delivery_file_progress(tmp_path, run_tui, stub_parami
     path, _ = _manifest(tmp_path)
 
     async def body(app, pilot):
-        await pilot.press("4")
+        await pilot.press("5")
         await pilot.pause()
         page = app.screen.query_one(ParamifyPage)
         page._begin_log(Text("uploading"))

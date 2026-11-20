@@ -87,7 +87,7 @@ def test_each_tab_focuses_a_widget_in_its_own_page(tmp_path, run_tui, stub_param
 
     async def body(app, pilot):
         landed = {}
-        for key, tab in zip("12345", app.screen.TAB_IDS):
+        for key, tab in zip("123456", app.screen.TAB_IDS):
             await pilot.press(key)
             await pilot.pause()
             assert app.screen.query_one(TabbedContent).active == tab
@@ -106,6 +106,7 @@ def test_each_tab_focuses_a_widget_in_its_own_page(tmp_path, run_tui, stub_param
         "tab-evidence": "evidence-runs",
         "tab-paramify": "pf-grid",
         "tab-pipelines": "issues-summary",
+        "tab-validators": "vs-fetchers",
     }
 
 
@@ -157,7 +158,7 @@ def test_ctrl_p_opens_no_palette_and_page_keys_reach_the_page(tmp_path, monkeypa
     monkeypatch.setattr(ParamifyPage, "action_sync_scripts", lambda self: calls.append(1))
 
     async def body(app, pilot):
-        await pilot.press("4")
+        await pilot.press("5")
         await app.workers.wait_for_complete()
         await pilot.pause()
         await pilot.press("ctrl+p")

@@ -165,6 +165,9 @@ class Validator:
     #: The registry directory the validator sits in (`validators/<category>/`),
     #: which is the service axis the uploaders tag it by.
     category: Optional[str] = None
+    #: Who made it: "paramify" or "community" (absent in the yaml = paramify).
+    #: Only Paramify-made validators are tracked by default.
+    source: str = "paramify"
 
 
 @dataclass
