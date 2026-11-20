@@ -28,6 +28,13 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`azure_dns_resolver_policy` fetcher.** Reads each Azure DNS security policy (DNS resolver policy) with its
+  security rules, linked virtual networks and diagnostic settings, and every virtual network in the subscription.
+  Counts enabled rules by action, policies with an enabled Block rule, policies blocking Azure's threat-intelligence
+  list (AzureDnsThreatIntel, visible only through the 2025-10-01-preview API; the fetcher falls back to 2025-05-01
+  and leaves those fields null where a cloud doesn't serve the preview), virtual networks no blocking policy covers,
+  and policies whose query logs go nowhere. Domain lists are counted, not copied. Takes `resource_exclusions`.
+
 - **One-line install.** `curl -fsSL https://raw.githubusercontent.com/paramify/paramify-fetchers/main/install.sh |
   bash` clones the repo to `~/paramify-fetchers`, installs the CLI and TUI into the clone's `.venv`, and links
   `paramify` into `~/.local/bin`. In a terminal it shows a spinner and elapsed time for each step, offers to add
