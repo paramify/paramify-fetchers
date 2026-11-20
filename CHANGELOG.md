@@ -19,6 +19,8 @@ schemas and the `paramify` CLI — not the internal code.
     `bad_config` and gives both counts; coverage gaps give the gap count and the first few image IDs.
   - New report setting `allow_no_images` permits a scope that matches no images. It requires `allow_empty: true`, and
     setting it alone fails before any AWS request.
+  - The report CSV adds a `Repository ARN` column after `Repository`, for matching findings to inventory. Update the
+    tenant's intake preset to map or ignore it.
 - **`azure_aks_cluster_configuration` 0.7.0: autoscaling for expected pools.** A new `expected_autoscaling_pools`
   setting lists the node pools that must have the cluster autoscaler on, as `pool` (every cluster) or `cluster/pool`.
   Missing pools and pools without the autoscaler are counted and named, a pool at zero nodes stays expected, and

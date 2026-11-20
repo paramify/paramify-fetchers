@@ -88,6 +88,7 @@ CSV_COLUMNS = [
     "Region",
     "Asset ID",
     "Repository",
+    "Repository ARN",
     "Image Digest",
     "Image Tags",
     "First Observed At",
@@ -796,6 +797,7 @@ def collect(aws, scope, *, allow_partial=False, now=None):
 def csv_rows(evidence):
     meta = evidence["metadata"]
     vulnerabilities = evidence["results"]["vulnerabilities"]
+    repository_arns = {i["repository"]: i["repository_arn"] for i in evidence["results"]["images"]}
     for compact in evidence["results"]["findings"]:
         finding = expand_finding(compact, vulnerabilities)
         package = finding["packageVulnerabilityDetails"]
@@ -814,6 +816,7 @@ def csv_rows(evidence):
                 "Region": meta["region"],
                 "Asset ID": asset,
                 "Repository": image["repositoryName"],
+                "Repository ARN": repository_arns[image["repositoryName"]],
                 "Image Digest": image["imageHash"],
                 "Image Tags": json.dumps(image.get("imageTags", [])),
                 "First Observed At": finding.get("firstObservedAt", ""),

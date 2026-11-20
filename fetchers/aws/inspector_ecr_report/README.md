@@ -43,7 +43,7 @@ The API key needs Pipelines and Pipeline Jobs permissions. This ships a mapping
 specification, not a preinstalled tenant preset. Verify the first import's created
 and updated issue counts before using it for production assessment cycles.
 
-## CSV contract (fetcher 0.1.0 and 0.2.0)
+## CSV contract (fetcher 0.3.0)
 
 One row represents one finding on one ECR image. Multiple packages stay together
 in that row. Multiple findings with the same CVE remain distinct. JSON-valued
@@ -67,6 +67,7 @@ values. Normal Inspector finding ARNs and asset identities remain unchanged.
 | AWS Account ID, Region | Finding scope. |
 | Asset ID | Account/region/repository@digest; use as the affected resource identity. |
 | Repository, Image Digest, Image Tags | Image attribution; tags are a JSON array. |
+| Repository ARN | The ECR repository's ARN from DescribeRepositories; matches the repository's inventory record. Added in 0.3.0. |
 | First Observed At, Last Observed At, Updated At | AWS finding timestamps; First Observed At supplies detection date. |
 | Fix Available, Exploit Available | AWS's values, without interpreting absent fields as false. |
 | Inspector Score, CVSS | Inspector score and JSON array of source/version-specific CVSS scores. |

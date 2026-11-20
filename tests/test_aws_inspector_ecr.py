@@ -249,6 +249,7 @@ def test_all_pages_and_severities_keep_distinct_findings(tmp_path):
     assert json.loads(rows[0]["Affected Packages"])[0]["fixedInVersion"] == "1.1"
     assert len({r["ID"] for r in rows}) == 3
     assert rows[0]["Asset ID"] == f"{ACCOUNT}/{REGION}/example@{DIGEST}"
+    assert {r["Repository ARN"] for r in rows} == {REPO}
     lists = [c for c in calls if c["args"][:2] == ["inspector2", "list-findings"]]
     assert len(lists) == 2
     assert lists[1]["params"]["nextToken"] == "second"
