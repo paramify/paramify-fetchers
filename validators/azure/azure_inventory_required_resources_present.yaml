@@ -4,10 +4,11 @@ type: AUTOMATED
 role: completeness
 statement: >
   Every id in the required_resources list is itself in the subscription's in-scope Resource Graph
-  inventory, or for a resource group id among its resource groups (required_resources_missing is
-  0). A child resource, another resource in the same group or an allowed_resources match never
-  stands in for a required one. Fails while neither list is set, the inventory could not be read,
-  or the count appears other than exactly once. Does not judge resources outside the list; see 'No
+  inventory, or for a resource group id among its in-scope resource groups (required_resources_missing
+  is 0). A child resource, another resource in the same group or an allowed_resources match never
+  stands in for a required one, and a resource or resource group that resource_exclusions leaves out
+  of scope reads as missing. Fails while neither list is set, the inventory could not be read, or
+  the count appears other than exactly once. Does not judge resources outside the list; see 'No
   Unexpected Resources'. Does not check whether the collection run succeeded.
 
 regex: '"required_resources_missing":\s*(?<required_resources_missing>\d+)'
