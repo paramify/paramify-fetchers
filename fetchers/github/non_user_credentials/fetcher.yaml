@@ -1,10 +1,11 @@
 name: github_non_user_credentials
-version: 0.2.0
+version: 0.2.1
 description: >-
   Credentials that are not a person: deploy keys, installed GitHub Apps and
   their permissions, approved fine-grained personal access tokens, Actions
-  secrets with their age, and webhooks that skip TLS verification or are
-  unsigned.
+  secret names and ages when the token can list them, and webhooks that skip
+  TLS verification or are unsigned. Repository Secrets and organization
+  Secrets read are not required.
 category: github
 
 supports_targets: true
@@ -82,6 +83,6 @@ evidence_set:
     Script: github/non_user_credentials/fetcher.py. Deploy keys per repository (read-only or write, age, last use), installed
     apps with the permissions they hold and on how many repositories, approved
     fine-grained tokens with expiry and last use (GitHub App tokens only;
-    null otherwise), Actions secrets by name and
-    last update (values are never readable), and webhooks with whether TLS is
+    null otherwise), Actions secret names and ages when Secrets read is granted
+    (never the values; otherwise null), and webhooks with whether TLS is
     verified and payloads are signed. Webhook URLs are reduced to their host.
