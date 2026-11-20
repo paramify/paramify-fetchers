@@ -266,7 +266,9 @@ jobs:
           print(f"smoke ok: described all {len(names)} discovered fetchers")
           EOF
       # The headless path a new user takes first, end to end and offline: run the
-      # credential-free demo manifest, validate it, dry-run its upload. Output is
+      # credential-free demo manifest, validate it, dry-run its upload; then
+      # set-stack and set-owner on a copy, and the dry run's note that they
+      # changed after the run. Output is
       # compared with tests/goldens/cli/ after the repo path, run ids and
       # timestamps are normalised out. Refresh: python tools/cli_goldens.py --update
       - name: paramify run / validate / upload --dry-run on the demo (goldens)
@@ -319,6 +321,33 @@ jobs:
           path: snapshot_report.html
           if-no-files-found: ignore
 
+  install:
+    name: install (install.sh)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      # 3.11: the oldest Python the installer accepts, so a newer-only feature
+      # in the install fails here.
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+      - name: shellcheck
+        run: shellcheck install.sh
+      # The path users take, piped into bash as `curl ... | bash` runs it, but
+      # cloning this checkout instead of GitHub's main. Headless extras keep it
+      # quick; the demo then runs through the linked `paramify`.
+      - name: install.sh into a fresh directory, then the demo
+        env:
+          PARAMIFY_REPO_URL: ${{ github.workspace }}
+          PARAMIFY_DIR: ${{ runner.temp }}/pf
+          PARAMIFY_EXTRAS: ""
+        run: |
+          set -euo pipefail
+          bash < install.sh
+          cd "$PARAMIFY_DIR"
+          "$HOME/.local/bin/paramify" run examples/demo.yaml
+
   secrets:
     name: secrets (gitleaks full history)
     runs-on: ubuntu-latest
@@ -345,7 +374,7 @@ jobs:
     # always(): a failed or cancelled job above would otherwise skip this one,
     # and a skipped required check counts as passing.
     if: always()
-    needs: [changes, lint, test, azure-sdk, oci-sdk, smoke, tui, secrets]
+    needs: [changes, lint, test, azure-sdk, oci-sdk, smoke, tui, install, secrets]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
