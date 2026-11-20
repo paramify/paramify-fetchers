@@ -1,7 +1,8 @@
 """required_resources and allowed_resources in azure_resource_inventory: the in-scope inventory reconciled against an
 expected population. A required resource is an exact ARM id that must itself be returned; an allowed pattern admits
 a family of resources, possibly none, and never stands in for a required one. Anything neither required nor allowed
-is unexpected. Null while both are unset."""
+is unexpected. Resource groups are judged the same way, in both directions, after resource_exclusions. Null while
+both are unset."""
 
 from __future__ import annotations
 
@@ -29,7 +30,8 @@ def run(monkeypatch, tmp_path, required=None, allowed=None, exclusions=None, res
     tables = dict(base.INVENTORY_TABLES)
     if resources is not None:
         tables["Resources"] = resources
-    tables["ResourceContainers"] = [{"id": g} for g in (groups if groups is not None else [base.IN_RG, base.OUT_RG])]
+    tables["ResourceContainers"] = [{"id": g, "name": g.rsplit("/", 1)[1], "location": "regionwest"}
+                                    for g in (groups if groups is not None else [base.IN_RG, base.OUT_RG])]
     queries = []
     base._env(monkeypatch, tmp_path, inv, exclusions)
     monkeypatch.setattr(inv, "credential", lambda: object())
@@ -51,7 +53,8 @@ def ids(*resource_ids):
     return ", ".join(f"id:{r}" for r in resource_ids)
 
 
-ALL = ids(base.SA_IN, base.SA_OUT, base.VM_EAST, VNET)
+ALL = ids(base.SA_IN, base.SA_OUT, base.VM_EAST, VNET, base.IN_RG, base.OUT_RG)
+EMPTY_RG = f"{base.SUB}/resourceGroups/rg-empty"
 
 
 def test_unset_leaves_every_reconciliation_field_null(monkeypatch, tmp_path):
@@ -68,11 +71,12 @@ def test_every_required_id_present_and_nothing_else_reconciles(monkeypatch, tmp_
     assert code == 0
     assert (s["required_resources_missing"], s["unexpected_resources"], s["inventory_matches_expected"]) == (0, 0, True)
     assert s["required_resources_missing_ids"] == [] and s["allowed_resource_patterns_unmatched"] == []
-    assert {r["expected_by"] for r in results["resources"]} == {"required"}
+    assert {r["expected_by"] for r in results["resources"] + results["resource_groups"]} == {"required"}
 
 
 def test_required_ids_are_compared_without_case(monkeypatch, tmp_path):
-    _, s, _, _ = run(monkeypatch, tmp_path, required=ids(base.SA_IN.upper(), base.SA_OUT.lower(), base.VM_EAST, VNET))
+    _, s, _, _ = run(monkeypatch, tmp_path, required=ids(base.SA_IN.upper(), base.SA_OUT.lower(), base.VM_EAST, VNET,
+                                                          base.IN_RG.upper(), base.OUT_RG))
     assert (s["required_resources_missing"], s["unexpected_resources"]) == (0, 0)
 
 
@@ -116,22 +120,46 @@ def test_an_allowed_family_may_be_empty_or_populated(monkeypatch, tmp_path):
 
 def test_a_required_resource_group_is_checked_against_the_resource_groups(monkeypatch, tmp_path):
     gone = f"{base.SUB}/resourceGroups/rg-gone"
-    code, s, _, queries = run(monkeypatch, tmp_path, required=ids(base.IN_RG, gone, *[r["id"] for r in base.INVENTORY_TABLES["Resources"]]))
+    code, s, _, queries = run(monkeypatch, tmp_path, required=ALL + ", " + ids(gone))
     assert code == 0 and "ResourceContainers" in queries
     assert s["required_resources_missing_ids"] == [gone]
 
 
-def test_unread_resource_groups_leave_missing_null_when_one_is_required(monkeypatch, tmp_path):
+def test_unread_resource_groups_leave_missing_and_unexpected_null(monkeypatch, tmp_path):
     code, s, _, _ = run(monkeypatch, tmp_path, required=ids(base.IN_RG, base.SA_IN), groups_fail=True)
     assert code == 1
-    assert (s["required_resources_missing"], s["inventory_matches_expected"]) == (None, None)
-    # Unexpected resources are still counted: they don't depend on the resource groups.
-    assert s["unexpected_resources"] == 3
+    # A resource group might be unexpected, and a required one present, so neither is decided.
+    assert (s["required_resources_missing"], s["unexpected_resources"], s["inventory_matches_expected"]) == (None, None, None)
 
 
-def test_excluded_required_resources_are_missing(monkeypatch, tmp_path):
+def test_without_a_required_group_unread_groups_still_leave_missing_judged(monkeypatch, tmp_path):
+    _, s, _, _ = run(monkeypatch, tmp_path, required=ids(base.SA_IN), groups_fail=True)
+    assert (s["required_resources_missing"], s["unexpected_resources"]) == (0, None)
+
+
+def test_an_empty_resource_group_neither_required_nor_allowed_is_unexpected(monkeypatch, tmp_path):
+    # rg-empty holds nothing, but it is in scope and nothing expects it.
+    _, s, results, _ = run(monkeypatch, tmp_path, required=ALL, groups=[base.IN_RG, base.OUT_RG, EMPTY_RG])
+    assert (s["required_resources_missing"], s["unexpected_resources"], s["inventory_matches_expected"]) == (0, 1, False)
+    assert s["unexpected_resources_by_type"] == {inv.RESOURCE_GROUP_TYPE: 1}
+    assert [g["name"] for g in results["resource_groups"] if g["expected_by"] is None] == ["rg-empty"]
+    # Allowed by a pattern, it is no longer unexpected.
+    _, s, _, _ = run(monkeypatch, tmp_path, required=ALL, allowed="rg:rg-empty", groups=[base.IN_RG, base.OUT_RG, EMPTY_RG])
+    assert (s["unexpected_resources"], s["inventory_matches_expected"]) == (0, True)
+
+
+def test_an_excluded_required_resource_group_is_missing(monkeypatch, tmp_path):
+    # rg-out is required, but resource_exclusions takes it, and sa-out in it, out of scope: both read as missing.
     _, s, results, _ = run(monkeypatch, tmp_path, required=ALL, exclusions="rg:rg-out")
-    assert s["required_resources_missing_ids"] == [base.SA_OUT] and s["unexpected_resources"] == 0
+    assert s["required_resources_missing_ids"] == [base.SA_OUT, base.OUT_RG]
+    assert s["unexpected_resources"] == 0
+    assert sorted((e["kind"], e["name"]) for e in results["excluded"]) == [("resource", "sa-out"), ("resource_group", "rg-out")]
+    assert [g["name"] for g in results["resource_groups"]] == ["rg-in"]
+
+
+def test_an_excluded_resource_group_is_not_unexpected(monkeypatch, tmp_path):
+    _, s, _, _ = run(monkeypatch, tmp_path, required=ALL, exclusions="rg:rg-empty", groups=[base.IN_RG, base.OUT_RG, EMPTY_RG])
+    assert (s["unexpected_resources"], s["inventory_matches_expected"]) == (0, True)
 
 
 def test_an_unread_inventory_leaves_the_counts_null(monkeypatch, tmp_path):
@@ -147,7 +175,7 @@ def test_an_unread_inventory_leaves_the_counts_null(monkeypatch, tmp_path):
     monkeypatch.setattr(inv, "query_all", fail)
     assert inv.main() == 1
     s = json.loads((tmp_path / "azure_resource_inventory_s1.json").read_text())["summary"]
-    assert len(s["required_resources"]) == 4
+    assert len(s["required_resources"]) == 6
     assert (s["required_resources_missing"], s["unexpected_resources"], s["inventory_matches_expected"]) == (None, None, None)
 
 
@@ -165,7 +193,9 @@ def test_an_allowed_pattern_without_a_known_prefix_fails_the_run(monkeypatch, tm
 
 def test_allowed_patterns_alone_still_report_unexpected(monkeypatch, tmp_path):
     _, s, _, _ = run(monkeypatch, tmp_path, allowed="rg:rg-in")
-    assert (s["required_resources_missing"], s["unexpected_resources"], s["inventory_matches_expected"]) == (0, 1, False)
+    # sa-out and the rg-out group itself; rg:rg-in allows both rg-in and everything in it.
+    assert (s["required_resources_missing"], s["unexpected_resources"], s["inventory_matches_expected"]) == (0, 2, False)
+    assert s["unexpected_resources_by_type"] == {inv.RESOURCE_GROUP_TYPE: 1, "microsoft.storage/storageaccounts": 1}
 
 
 def test_summary_fields_match_the_instructions(monkeypatch, tmp_path, assert_summary_documented):

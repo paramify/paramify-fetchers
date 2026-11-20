@@ -16,10 +16,12 @@ schemas and the `paramify` CLI — not the internal code.
   `required_resources` takes exact ARM ids (`id:` only, compared without case, no globs): each must itself be in the
   in-scope inventory, and no child, sibling or pattern match stands in for it; a resource group id is checked against
   the subscription's resource groups. `allowed_resources` takes `rg:`, `location:` and `id:` globs for families whose
-  ids change, such as backup snapshots; a family may be empty. Missing required ids are counted and listed
-  (`required_resources_missing`), resources neither required nor allowed are counted by type
-  (`unexpected_resources`), each resource records what expects it, and `inventory_matches_expected` gives one
-  verdict. Unset, the fields stay null.
+  ids change, such as backup snapshots; a family may be empty. Resource groups are reconciled in both directions
+  under the same `resource_exclusions` as resources: an excluded required group is missing, and an in-scope group
+  that is neither required nor allowed, even an empty one, is unexpected. Missing required ids are counted and listed
+  (`required_resources_missing`), resources and resource groups neither required nor allowed are counted by type
+  (`unexpected_resources`), each records what expects it, and `inventory_matches_expected` gives one verdict.
+  Unset, the fields stay null.
 - **`aws_inspector_ecr_findings` and `aws_inspector_ecr_report` 0.3.0: image counts and an opt-in for an empty scope.**
   - The evidence summary adds `repository_image_count`, every image in the selected repositories before tag,
     push-date and usage filters, next to `image_count`, the images that match them. Both are logged. No new API calls.
