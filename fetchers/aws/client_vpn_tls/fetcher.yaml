@@ -34,4 +34,12 @@ ksis:
 evidence_set:
   reference_id: EVD-AWS-CLIENT-VPN-TLS
   name: AWS Client VPN TLS Configuration
-  instructions: 'Script: aws/client_vpn_tls/fetcher.sh. Commands executed: aws ec2 describe-client-vpn-endpoints'
+  instructions: |
+    Script: aws/client_vpn_tls/fetcher.sh
+
+    Access: AmazonVPCReadOnlyAccess or equivalent read-only permissions on the target account.
+
+    Commands Executed:
+    - aws ec2 describe-client-vpn-endpoints — all Client VPN endpoints with TLS certificate, authentication options, transport protocol, and VPN protocol details
+
+    Output: aws_client_vpn_tls_<profile>-<region>.json — each Client VPN endpoint with its server certificate ARN, authentication options, transport protocol, and VPN protocol.

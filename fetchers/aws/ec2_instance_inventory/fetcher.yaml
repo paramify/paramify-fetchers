@@ -34,4 +34,12 @@ ksis:
 evidence_set:
   reference_id: EVD-AWS-EC2-INVENTORY
   name: AWS EC2 Instance Inventory
-  instructions: 'Script: aws/ec2_instance_inventory/fetcher.sh. Commands executed: aws ec2 describe-instances'
+  instructions: |
+    Script: aws/ec2_instance_inventory/fetcher.sh
+
+    Access: AmazonEC2ReadOnlyAccess or equivalent read-only permissions on the target account.
+
+    Commands Executed:
+    - aws ec2 describe-instances — all EC2 instances with state, instance type, platform, subnet, VPC, IP addresses, and tags
+
+    Output: aws_ec2_instance_inventory_<profile>-<region>.json — each EC2 instance with its state, type, platform, and network configuration, plus totals for running and stopped instances.

@@ -34,4 +34,13 @@ ksis:
 evidence_set:
   reference_id: EVD-AWS-SSM-COMPLIANCE
   name: AWS SSM Compliance Summary
-  instructions: 'Script: aws/ssm_compliance_summary/fetcher.sh. Commands executed: aws ssm list-compliance-summaries, aws ssm list-resource-compliance-summaries'
+  instructions: |
+    Script: aws/ssm_compliance_summary/fetcher.sh
+
+    Access: AmazonSSMReadOnlyAccess or equivalent read-only permissions on the target account.
+
+    Commands Executed:
+    - aws ssm list-compliance-summaries — overall compliance counts per compliance type (Patch, Association, etc.)
+    - aws ssm list-resource-compliance-summaries — per-resource compliance status across all types
+
+    Output: aws_ssm_compliance_summary_<profile>-<region>.json — compliance summary counts by type and per-resource compliance status with compliant and non-compliant totals.

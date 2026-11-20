@@ -35,4 +35,13 @@ ksis:
 evidence_set:
   reference_id: EVD-AWS-BACKUP-VAULT-ENC
   name: AWS Backup Vault Encryption
-  instructions: 'Script: aws/backup_vault_encryption/fetcher.sh. Commands executed: aws backup list-backup-vaults, aws backup describe-backup-vault'
+  instructions: |
+    Script: aws/backup_vault_encryption/fetcher.sh
+
+    Access: AWSBackupOperatorAccess or equivalent read-only permissions on the target account.
+
+    Commands Executed:
+    - aws backup list-backup-vaults — lists all backup vaults in the target region
+    - aws backup describe-backup-vault — per-vault details including EncryptionKeyArn and recovery point count
+
+    Output: aws_backup_vault_encryption_<profile>-<region>.json — each vault with its KMS encryption key ARN and totals for encrypted and unencrypted vaults.
