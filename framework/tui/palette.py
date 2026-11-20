@@ -60,6 +60,22 @@ STATUS_TONE = {
 }
 
 
+# Who made a fetcher or validator. Community gets an orange label wherever it
+# appears; Paramify, the default, is labelled only where the two are listed
+# side by side (the Validators tab).
+PARAMIFY_PILL = Style(color="#DCE6FD", bgcolor="#34416A", bold=True)
+COMMUNITY_PILL = Style(color="#FFE0CC", bgcolor="#6A4330", bold=True)
+COMMUNITY_NOTE = "Made by the community, not Paramify. Read its code before you give it secrets."
+
+
+def community_tag(source) -> Text:
+    """' COMMUNITY ' for a community-made fetcher, empty text otherwise."""
+    text = Text()
+    if source == "community":
+        text.append(" COMMUNITY ", style=COMMUNITY_PILL)
+    return text
+
+
 def pill(label: str, tone: str) -> Text:
     """A status pill for table cells. Unknown tones fall back to muted text so
     a new status word can never crash a repaint."""

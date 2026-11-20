@@ -17,7 +17,6 @@ import re
 from pathlib import Path
 
 from rich.console import Group
-from rich.style import Style
 from rich.syntax import Syntax
 from rich.text import Text
 from textual.app import ComposeResult
@@ -35,9 +34,9 @@ from framework.validators import available_for, default_keys, discover_validator
 # Each source gets its own hue, used everywhere it appears: the section pill,
 # the edge bar on each row, the fetcher counts and the detail pane.
 SOURCE = {
-    "paramify": {"label": "PARAMIFY", "fg": palette.BLUE, "pill": Style(color="#DCE6FD", bgcolor="#34416A", bold=True),
+    "paramify": {"label": "PARAMIFY", "fg": palette.BLUE, "pill": palette.PARAMIFY_PILL,
                  "blurb": "Made and maintained by Paramify. Tracked by default."},
-    "community": {"label": "COMMUNITY", "fg": palette.ORANGE, "pill": Style(color="#FFE0CC", bgcolor="#6A4330", bold=True),
+    "community": {"label": "COMMUNITY", "fg": palette.ORANGE, "pill": palette.COMMUNITY_PILL,
                   "blurb": "Made by the community, not Paramify. Not tracked unless you tick it."},
 }
 ORDER = ("paramify", "community")
@@ -230,7 +229,8 @@ class ValidatorsPage(Vertical):
             ref = fetcher.evidence_set.reference_id
             avail = sorted(available_for(ref, registry),
                            key=lambda v: (v.source != "paramify", v.role != "completeness", v.key))
-            self._fetchers.append({"entry": entry, "name": name, "ref": ref, "available": avail})
+            self._fetchers.append({"entry": entry, "name": name, "ref": ref, "available": avail,
+                                   "source": fetcher.source})
         self._draw_fetchers()
 
     def _tracked(self, item: dict) -> set:
@@ -275,9 +275,13 @@ class ValidatorsPage(Vertical):
             n = sum(1 for v in avail if v.key in tracked)
             cells.append(Text(f"{n:>3}/{len(avail)}", style=SOURCE[source]["fg"] if n else palette.MUTED))
         pinned = item["entry"].get("validators") is not None
-        # count columns + cell padding + scrollbar
-        room = self.query_one("#vs-left").content_size.width - 25 - (3 if pinned else 0)
+        community = item.get("source") == "community"
+        # count columns + cell padding + scrollbar (+ the community label)
+        room = self.query_one("#vs-left").content_size.width - 25 - (3 if pinned else 0) - (13 if community else 0)
         name = Text(fit(item["name"], room))
+        if community:
+            name.append("  ")
+            name.append_text(palette.community_tag("community"))
         if pinned:
             name.append("  *", style=palette.INFO)
         return [*cells, name]
@@ -295,7 +299,8 @@ class ValidatorsPage(Vertical):
             return
         tracked = self._tracked(item)
         self._shown = list(item["available"])
-        right.border_title = f"{item['name']}  ·  {item['ref']}"
+        right.border_title = f"{item['name']}  ·  {item['ref']}" + (
+            f"  ·  [{palette.ORANGE}]community fetcher[/]" if item.get("source") == "community" else "")
         self._rows = []
         for source in ORDER:
             group = [v for v in self._shown if v.source == source]

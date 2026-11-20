@@ -212,6 +212,8 @@ class Fetcher:
     evidence_set: Optional["EvidenceSet"] = None
     ksis: List[str] = field(default_factory=list)
     kind: str = "evidence"
+    #: Who made it: "paramify" or "community" (absent in fetcher.yaml = paramify).
+    source: str = "paramify"
     issue_report: Optional["IssueReport"] = None
     #: The Paramify pipeline this fetcher's output feeds. Required of an inventory.
     pipeline: Optional["Pipeline"] = None

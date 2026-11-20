@@ -234,6 +234,7 @@ def _fetcher_descriptor(f, platform_spec=None) -> dict:
         "description": f.description,
         "category": f.category,
         "kind": f.kind,
+        "source": f.source,
         "supports_targets": f.supports_targets,
         "config": [_config_descriptor(c) for c in f.config_schema.values()],
         # Category-declared secrets are part of what this fetcher takes, so the
