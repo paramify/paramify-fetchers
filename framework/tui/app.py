@@ -37,8 +37,13 @@ class FetcherApp(App):
     # built-ins; turn it off and keep the key free.
     ENABLE_COMMAND_PALETTE = False
 
-    # Capital U: lower-case u is the Paramify tab's "upload run".
-    BINDINGS = [Binding(UPDATE_KEY, "open_update", "Update", show=False)]
+    # U opens the update screen everywhere; so does u, except on the Paramify tab, where u is the
+    # page's "upload run" (even while upload is switched off). The notice says U, the key that
+    # works on every screen.
+    BINDINGS = [
+        Binding(UPDATE_KEY, "open_update", "Update", show=False),
+        Binding(UPDATE_KEY.lower(), "open_update_lowercase", "Update", show=False),
+    ]
 
     def __init__(
         self, manifest_path: Optional[str] = None, root_override: Optional[str] = None
@@ -82,6 +87,18 @@ class FetcherApp(App):
         for screen in self.screen_stack:
             for notice in screen.query(UpdateNotice):
                 notice.set_waiting(waiting)
+
+    def check_action(self, action: str, parameters: tuple) -> Optional[bool]:
+        if action == "open_update_lowercase":
+            from textual.widgets import TabbedContent
+
+            for tabs in self.screen.query(TabbedContent):
+                if tabs.active == "tab-paramify":
+                    return False
+        return True
+
+    def action_open_update_lowercase(self) -> None:
+        self.action_open_update()
 
     def action_open_update(self) -> None:
         if self.root_path is None or self._opening_update:

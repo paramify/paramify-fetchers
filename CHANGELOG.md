@@ -17,6 +17,15 @@ schemas and the `paramify` CLI — not the internal code.
   `resource_exclusions`. Expected patterns that match no in-scope resource and in-scope resources that match no
   pattern are counted and listed (`expected_resources_missing`, `unexpected_resources`), each resource records the
   pattern that expects it, and `inventory_matches_expected` gives one verdict. Unset, the fields stay null.
+- **`aws_inspector_ecr_findings` and `aws_inspector_ecr_report` 0.3.0: image counts and an opt-in for an empty scope.**
+  - The evidence summary adds `repository_image_count`, every image in the selected repositories before tag,
+    push-date and usage filters, next to `image_count`, the images that match them. Both are logged. No new API calls.
+  - The report's "no images matched" and "missing coverage" refusals are now separate errors. No matched images is
+    `bad_config` and gives both counts; coverage gaps give the gap count and the first few image IDs.
+  - New report setting `allow_no_images` permits a scope that matches no images. It requires `allow_empty: true`, and
+    setting it alone fails before any AWS request.
+  - The report CSV adds a `Repository ARN` column after `Repository`, for matching findings to inventory. Update the
+    tenant's intake preset to map or ignore it.
 - **`azure_aks_cluster_configuration` 0.7.0: autoscaling for expected pools.** A new `expected_autoscaling_pools`
   setting lists the node pools that must have the cluster autoscaler on, as `pool` (every cluster) or `cluster/pool`.
   Missing pools and pools without the autoscaler are counted and named, a pool at zero nodes stays expected, and
@@ -42,7 +51,8 @@ schemas and the `paramify` CLI — not the internal code.
   only to the commit a plan showed), and
   a once-a-day notice (`PARAMIFY_NO_UPDATE_CHECK=1` turns it off). See `docs/versioning_guide.md`.
 - **The TUI shows when an update is waiting and applies it.** A quiet `↑ 12 new commits on main · press U` line
-  in the header and on the welcome screen (it gives way first when the header is short of room); `U` opens the plan
+  in the header and on the welcome screen (it gives way first when the header is short of room); `U` (or `u`,
+  except on the Paramify tab, where `u` is upload run) opens the plan
   `paramify update` shows, with Apply (a second confirmation when breaking changes touch this clone) and Roll back.
   The update runs as a subprocess, so the running TUI never loads half-replaced code.
 - **Update notes**, `releases/unreleased.yaml` and `releases/<version>.yaml`: the short rows `paramify update` shows
@@ -166,6 +176,18 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **TUI regression tests for batches, channels and stacks.** The `tui` job now
+  covers the stack and owner pickers (online, typed, a listing error, escape),
+  the entry editor's Paramify settings, and the upload plan in the confirm,
+  made by the real planner against the in-process Paramify fake: a new batch on
+  a channel's request, an evidence-level batch, direct delivery, batches off
+  (the workspace flag, or an API with no batch routes), an API that refuses a
+  batch's approval, the owner choosing a channel, the refusal without one, the
+  settings-changed note, an upload, its no-op, a held entry resuming its batch
+  and a dropped file. New snapshots show the stack picker, the owner picker and the upload
+  plan; a second end-to-end flow picks a stack and an owner, runs, and confirms
+  the plan. The smoke job's goldens add `manifest set-stack`, `set-owner` and
+  the dry-run note for settings changed after the run.
 - **NIST CMVP category: cryptographic module validation status.**
   `nist_cmvp_module_validation_status` reads the public CMVP certificate page
   for each certificate number in its `certificates` config and reports whether
@@ -1973,6 +1995,13 @@ schemas and the `paramify` CLI — not the internal code.
   largest page each API allows, so an enhanced scan with many findings takes a tenth of the requests, and a BASIC
   scan is read in one. The output, its file name and the IAM actions are unchanged. It needs the `aws` extra
   (boto3), which the Docker image already installs.
+
+- `aws_ecr_image_scanning` 0.5.0 writes null, not `[]`, for what it could not read: `applied_scan_filters` when a
+  repository's effective scanning configuration was not read, `registry_scanning.rules` when the registry
+  configuration was not read, and `repositories` when the repository list was not read. An empty list now always
+  means AWS returned none. A missing boto3 fails as `bad_config` and names the install command, instead of
+  `partial_failure`. The run's failure message lists failures in repository order, so it no longer changes from run
+  to run.
 
 - `qualys_vmdr_vulnerability_findings` uses the v6 host detection and v4 KnowledgeBase endpoints in place of v2,
   which Qualys has scheduled for end of life. Requests, parameters and the report columns are unchanged.
