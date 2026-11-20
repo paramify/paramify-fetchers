@@ -1,0 +1,88 @@
+name: keycloak_users_and_roles
+version: 0.1.0
+description: >-
+  Lists every Keycloak user with their enabled state, authenticators, groups, effective roles and recent sign-ins, and counts privileged users, users without a second factor and inactive accounts.
+category: keycloak
+
+supports_targets: false
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: keycloak_users_and_roles.json
+
+config_schema:
+  inactive_days:
+    type: integer
+    required: false
+    default: 90
+    env: KEYCLOAK_INACTIVE_DAYS
+    description: >
+      An enabled user created before this many days ago with no stored sign-in since then is inactive. From 1 to 365.
+      A value outside that range fails the run as bad_config.
+  privileged_roles:
+    type: string
+    required: false
+    env: KEYCLOAK_PRIVILEGED_ROLES
+    description: >
+      Comma-separated realm roles the organization treats as privileged, matched by exact name. Holders of
+      realm-management admin roles (realm-admin and the manage-* roles, impersonation and create-client) are always
+      privileged.
+
+secrets: []          # client_id and client_secret come from the category (fetchers/_categories/keycloak.yaml)
+
+evidence_set:
+  reference_id: EVD-KEYCLOAK-USERS-AND-ROLES
+  name: Keycloak Users and Roles
+  description: >-
+    Every Keycloak user in a realm with enabled state, authenticator types, groups, effective realm and admin roles,
+    federation source and recent sign-ins, without email addresses, names, attributes or credential data.
+  instructions: |
+    Script: keycloak/users_and_roles/fetcher.py
+
+    Access: A Keycloak client with service accounts enabled whose service account holds the realm-management client roles view-users, view-clients and view-events, and nothing else, reached from a network that can call the Keycloak admin endpoint. On Keycloak 26.8.2 and later, the client also needs the built-in kc-admin-api client scope as a default scope, or every call is refused with 401. A call refused for a missing role records that role in api_failures. A per-user call refused once is not repeated for the other users, and every user's value for it reads null.
+
+    Commands Executed:
+    - POST /realms/{auth realm}/protocol/openid-connect/token — a client-credentials token for the service account (no role)
+    - GET /admin/realms/{realm}/users — every user, page by page; Keycloak leaves service accounts out (view-users)
+    - GET /admin/realms/{realm}/clients?clientId=realm-management — the client that holds the admin roles (view-clients)
+    - GET /admin/realms/{realm}/events/config — whether successful sign-ins are stored and how long they are kept (view-events)
+    - GET /admin/realms/{realm}/events?type=LOGIN — stored successful sign-ins in the window, page by page, read for each user's newest sign-in (view-events)
+    - GET /admin/realms/{realm}/users/{id}/credentials — the types of authenticator each user has registered (view-users)
+    - GET /admin/realms/{realm}/users/{id}/groups — each user's groups (view-users)
+    - GET /admin/realms/{realm}/users/{id}/role-mappings/realm/composite — each user's effective realm roles, through groups and composite roles (view-users)
+    - GET /admin/realms/{realm}/users/{id}/role-mappings/clients/{realm-management id}/composite — each user's effective admin roles (view-users)
+    - GET /admin/realms/{realm}/users/{id}/federated-identity — the external identity providers each user is linked to (view-users)
+
+    Output: keycloak_users_and_roles.json — each user's id, username, enabled state, creation time, required actions, LDAP federation, linked identity providers, authenticator types, groups, effective realm and admin roles, privileged roles held, newest sign-in in the window and whether the account is inactive. Email addresses, first and last names, user attributes and credential data are never copied. A user brokered from an external identity provider may use a second factor there, which this evidence cannot see; such users are counted apart.
+
+    Summary fields:
+
+    Which users were read?
+    - users_read — True if the user list was read; false if it could not be, and every count below is null
+    - users_total — Number of users, not counting service accounts
+    - users_enabled — Number of enabled users
+    - users_disabled — Number of disabled users
+    - service_accounts_skipped — Number of service-account users the user list returned and this evidence left out; null if the list was not read
+
+    How do users sign in?
+    - users_ldap_federated — Number of enabled users stored in a user federation provider such as LDAP
+    - users_brokered — Number of enabled users linked to an external identity provider; null if any user's links could not be read
+    - users_with_second_factor — Number of enabled users with an OTP or WebAuthn authenticator registered in Keycloak; null if any user's authenticators could not be read
+    - users_with_phishing_resistant_authenticator — Number of enabled users with a WebAuthn authenticator registered; null if any user's authenticators could not be read
+    - enabled_local_users_without_second_factor — Number of enabled users not linked to an external identity provider who have no OTP or WebAuthn authenticator; null if any user's links or authenticators could not be read
+    - users_with_required_actions — Number of enabled users with a required action pending, such as UPDATE_PASSWORD or CONFIGURE_TOTP
+
+    Who holds privileged roles?
+    - privileged_realm_roles_checked — List of the realm roles set in privileged_roles, besides the realm-management admin roles
+    - privileged_users — Number of enabled users holding, directly, through a group or through a composite role, a realm-management admin role (realm-admin, a manage-* role, impersonation or create-client) or a role in privileged_realm_roles_checked; null if any user's roles could not be read
+    - privileged_local_users_without_second_factor — Number of those not linked to an external identity provider who have no OTP or WebAuthn authenticator; null if any of their roles, links or authenticators could not be read
+    - privileged_brokered_users — Number of privileged users linked to an external identity provider, whose second factor is not visible here
+
+    Are accounts in use?
+    - inactive_days — Days without a stored sign-in after which an enabled account is inactive
+    - sign_in_history_covers_window — True if successful sign-ins (LOGIN) are stored and kept for at least inactive_days, so recency can be judged; false if they are not stored or expire sooner; null if the event settings or the sign-ins could not be read
+    - enabled_users_inactive — Number of enabled users created before the window with no stored sign-in in it; null unless sign_in_history_covers_window is true

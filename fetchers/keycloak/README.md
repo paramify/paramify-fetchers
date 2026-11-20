@@ -11,7 +11,8 @@ client-credentials grant as a dedicated service-account client, then issues only
 2. On Keycloak 26.8.2 and later, add the built-in `kc-admin-api` client scope to the client as a **default** scope.
    Keycloak's admin API now requires its audience, and a new client doesn't get it, so without it every call returns 401.
    Don't request the scope in the token call instead: Keycloak 26.8.1 and earlier reject an unknown scope.
-3. Give its service account the roles `view-realm`, `view-identity-providers` and `view-events`, and nothing else:
+3. Give its service account the roles `view-realm`, `view-identity-providers`, `view-events`, `view-users` and
+   `view-clients`, and nothing else (each fetcher's instructions name the roles it uses):
    - for a client in the realm being read, from that realm's `realm-management` client;
    - for a client in `master` (then set `auth_realm: master`), from the `<realm>-realm` client in `master`, such as
      `example-realm-realm`. These are Keycloak's realm-specific admin roles.
@@ -23,6 +24,7 @@ client-credentials grant as a dedicated service-account client, then issues only
 | Fetcher | Evidence set | Shows |
 | --- | --- | --- |
 | `realm_security` | `EVD-KEYCLOAK-REALM-SECURITY` | Sessions, lockout, password policy, browser and recovery flows, required actions, federation, event logging |
+| `users_and_roles` | `EVD-KEYCLOAK-USERS-AND-ROLES` | Every user's state, authenticators, groups, effective roles and recent sign-ins; privileged users, missing second factors, inactive accounts |
 
 Client secrets in identity provider configs and bind credentials in user federation configs are never written to
 the evidence.
