@@ -1,0 +1,37 @@
+name: aws_ssm_compliance_summary
+version: 0.1.0
+description: Lists SSM compliance summaries and per-resource compliance status across all compliance types to show overall managed-node compliance posture.
+category: aws
+
+supports_targets: true
+
+runtime:
+  type: bash
+  entry: fetcher.sh
+
+output:
+  type: json
+  path: aws_ssm_compliance_summary.json
+  aggregation: per_target
+
+target_schema:
+  region:
+    type: string
+    required: false
+    env: AWS_DEFAULT_REGION
+    description: AWS region to collect from.
+  profile:
+    type: string
+    required: false
+    env: AWS_PROFILE
+    description: AWS named profile (credentials resolved from ~/.aws / SSO).
+
+secrets: []
+
+ksis:
+  - KSI-SVC-EIS
+
+evidence_set:
+  reference_id: EVD-AWS-SSM-COMPLIANCE
+  name: AWS SSM Compliance Summary
+  instructions: 'Script: aws/ssm_compliance_summary/fetcher.sh. Commands executed: aws ssm list-compliance-summaries, aws ssm list-resource-compliance-summaries'

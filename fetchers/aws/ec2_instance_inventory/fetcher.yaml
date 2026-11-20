@@ -1,0 +1,37 @@
+name: aws_ec2_instance_inventory
+version: 0.1.0
+description: Lists EC2 instances with their state, type, platform, and network configuration as an inventory of compute resources in the target region.
+category: aws
+
+supports_targets: true
+
+runtime:
+  type: bash
+  entry: fetcher.sh
+
+output:
+  type: json
+  path: aws_ec2_instance_inventory.json
+  aggregation: per_target
+
+target_schema:
+  region:
+    type: string
+    required: false
+    env: AWS_DEFAULT_REGION
+    description: AWS region to collect from.
+  profile:
+    type: string
+    required: false
+    env: AWS_PROFILE
+    description: AWS named profile (credentials resolved from ~/.aws / SSO).
+
+secrets: []
+
+ksis:
+  - KSI-CNA-OFA
+
+evidence_set:
+  reference_id: EVD-AWS-EC2-INVENTORY
+  name: AWS EC2 Instance Inventory
+  instructions: 'Script: aws/ec2_instance_inventory/fetcher.sh. Commands executed: aws ec2 describe-instances'
