@@ -249,6 +249,7 @@ def test_all_pages_and_severities_keep_distinct_findings(tmp_path):
     assert json.loads(rows[0]["Affected Packages"])[0]["fixedInVersion"] == "1.1"
     assert len({r["ID"] for r in rows}) == 3
     assert rows[0]["Asset ID"] == f"{ACCOUNT}/{REGION}/example@{DIGEST}"
+    assert {r["Repository ARN"] for r in rows} == {REPO}
     lists = [c for c in calls if c["args"][:2] == ["inspector2", "list-findings"]]
     assert len(lists) == 2
     assert lists[1]["params"]["nextToken"] == "second"
@@ -537,6 +538,60 @@ def test_evidence_exposes_coverage_gaps_but_report_refuses_them(tmp_path, case):
     assert not files
 
 
+def test_report_separates_no_matched_images_from_coverage_gaps(tmp_path):
+    data = responses()
+    data["inspector2 list-coverage"]["coveredResources"] = []
+    result, files, _ = run_fetcher(tmp_path / "gap", data, AWS_INSPECTOR_ALLOW_EMPTY="true")
+    assert result.returncode == 1 and not files
+    status = json.loads((tmp_path / "gap/status.json").read_text())
+    assert "1 of 1 selected images have missing or inactive scan coverage" in status["error"]
+    assert status["code"] == "partial_failure"
+
+    result, files, _ = run_fetcher(
+        tmp_path / "none", AWS_INSPECTOR_IMAGE_TAGS='["no-such-tag"]', AWS_INSPECTOR_ALLOW_EMPTY="true"
+    )
+    assert result.returncode == 1 and not files
+    status = json.loads((tmp_path / "none/status.json").read_text())
+    assert "No images matched the scope (1 images in the selected repositories)" in status["error"]
+    assert status["code"] == "bad_config"
+
+
+def test_no_matched_images_is_allowed_only_with_allow_empty(tmp_path):
+    result, files, calls = run_fetcher(
+        tmp_path / "alone", AWS_INSPECTOR_IMAGE_TAGS='["no-such-tag"]', AWS_INSPECTOR_ALLOW_NO_IMAGES="true"
+    )
+    assert result.returncode == 1 and not files and not calls
+    status = json.loads((tmp_path / "alone/status.json").read_text())
+    assert "requires allow_empty=true" in status["error"] and status["code"] == "bad_config"
+
+    result, files, _ = run_fetcher(
+        tmp_path / "both",
+        AWS_INSPECTOR_IMAGE_TAGS='["no-such-tag"]',
+        AWS_INSPECTOR_ALLOW_NO_IMAGES="true",
+        AWS_INSPECTOR_ALLOW_EMPTY="true",
+    )
+    assert result.returncode == 0, result.stderr
+    assert list(csv.DictReader(io.StringIO(files[0].read_text()))) == []
+    assert "1 in the selected repositories, 0 matched the scope" in result.stderr
+
+    # The opt-in never excuses a coverage gap.
+    data = responses()
+    data["inspector2 list-coverage"]["coveredResources"] = []
+    result, files, _ = run_fetcher(
+        tmp_path / "gap", data, AWS_INSPECTOR_ALLOW_NO_IMAGES="true", AWS_INSPECTOR_ALLOW_EMPTY="true"
+    )
+    assert result.returncode == 1 and not files
+
+
+def test_summary_counts_repository_images_before_filters(tmp_path):
+    result, files, _ = run_fetcher(
+        tmp_path, None, "inspector_ecr_findings", AWS_INSPECTOR_IMAGE_TAGS='["no-such-tag"]'
+    )
+    assert result.returncode == 0, result.stderr
+    summary = json.loads(files[0].read_text())["results"]["summary"]
+    assert summary["repository_image_count"] == 1 and summary["image_count"] == 0
+
+
 def test_zero_findings_requires_explicit_opt_in(tmp_path):
     data = responses()
     data["inspector2 list-findings"] = {"findings": []}
@@ -641,6 +696,8 @@ def test_scan_configuration_failure_is_not_basic_scanning(tmp_path):
     assert result.returncode == 1
     evidence = json.loads(files[0].read_text())["results"]
     assert evidence["registry_scanning"]["scan_type"] is None
+    # Not read, so unknown: [] would claim the registry has no rules.
+    assert evidence["registry_scanning"]["rules"] is None
     assert evidence["repositories"][0]["scan_frequency"] is None
 
 
