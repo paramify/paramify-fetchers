@@ -1,5 +1,5 @@
 name: azure_resource_inventory
-version: 0.4.1
+version: 0.5.0
 description: >-
   Lists every resource in the subscription with its details, and how many Defender for Cloud assessments and Azure Policy evaluations cover it and how many fail.
 category: azure
@@ -38,6 +38,44 @@ config_schema:
       the outside-inventory ones. A pattern without one of these prefixes fails
       the run. Set it once under platforms.azure.config for every Azure fetcher that has this field; fetchers without it ignore it.
       Each item is a pattern, or a pattern with a reason. Empty: every resource is in scope.
+  required_resources:
+    type: patterns
+    prefixes: [id]
+    bare: false
+    required: false
+    env: AZURE_REQUIRED_RESOURCES
+    exclusion: false     # an expected population, not an exclusion: manifest exclude never changes it
+    description: >
+      The resources the boundary must hold, each as id:<exact ARM resource id>,
+      such as one exported from infrastructure as code. Compared without case,
+      never as a glob: * ? [ and ] fail the run, as does any other prefix. A
+      required id is present only if that resource itself is in the in-scope
+      inventory; a child resource, another resource in its group, or an
+      allowed_resources match never stands in for it. A resource group id
+      (/subscriptions/<id>/resourceGroups/<name>) is checked against the
+      subscription's in-scope resource groups. A required resource or resource
+      group that resource_exclusions leaves out of scope reads as missing. Each
+      item is an id, or an id with a reason. Empty: nothing is required.
+  allowed_resources:
+    type: patterns
+    prefixes: [rg, location, id]
+    bare: false
+    required: false
+    env: AZURE_ALLOWED_RESOURCES
+    exclusion: false     # an expected population, not an exclusion: manifest exclude never changes it
+    description: >
+      Families of resources the boundary may hold whose ids change, such as
+      Velero snapshots, as case-insensitive glob patterns in the same form as
+      resource_exclusions: rg:<resource group>, location:<region> or
+      id:<resource id> (also matches that resource's child resources). * matches
+      any run of characters and ? one character. A family may have no members,
+      and a match never satisfies a required resource. An in-scope resource or
+      resource group, an empty one included, that is neither required nor
+      matched by a pattern is reported as unexpected; an rg: pattern allows the
+      resource group itself as well as what it holds. A
+      pattern without one of these prefixes fails the run. Each item is a
+      pattern, or a pattern with a reason. Empty: only required resources are
+      expected.
 
 target_schema:
   subscription_id:
@@ -75,6 +113,7 @@ evidence_set:
     - subscriptions.list() — picks a subscription when none is set
     - Resource Graph Resources — every resource with its type, location, resource group, tags, SKU, kind and provisioning state
     - Resource Graph SecurityResources | where type =~ 'microsoft.security/assessments' — every Defender for Cloud assessment, its status and severity; a failed or truncated query leaves the Defender counts null
+    - Resource Graph ResourceContainers | where type =~ 'microsoft.resources/subscriptions/resourcegroups' — the subscription's resource groups, read only when required_resources or allowed_resources is set; resource_exclusions applies to them as to resources, and they are reconciled in both directions; a failed query leaves unexpected_resources null, and required_resources_missing too when a resource group is required
     - Resource Graph PolicyResources | where type =~ 'microsoft.policyinsights/policystates' — every Azure Policy state and its compliance, one per resource, assignment and policy (a query past 1,000 pages fails the run; PolicyResources is the one a large subscription reaches, and it usually hits the runner's 600-second timeout first, exit 124 with no evidence file); a failed or truncated query leaves the Policy counts null, and a failed Resources query leaves the inventory empty and both services' counts null
 
     Output: azure_resource_inventory_<subscription>.json — each resource with its details, how many Defender assessments and Policy evaluations cover it, and how many of them fail; Defender assessments and Policy states about anything outside the inventory are counted under coverage_queries by the kind of thing they target (never its name), AWS, GCP or on-premises ones by source. KSI-CNA-EIS and KSI-SVC-EIS are supporting evidence: Defender's coverage and unhealthy findings, not the enforcement or remediation itself.
@@ -94,6 +133,16 @@ evidence_set:
     - location_count — Number of different locations (regions, plus global)
     - resources_by_location — Number of resources in each location
     - resource_group_count — Number of resource groups that hold at least one resource
+
+    Is the inventory the expected population?
+    - required_resources — List of the configured required_resources ids; empty when none are set
+    - required_resources_missing — Number of required ids not found: no in-scope resource or resource group with exactly that id, so one that resource_exclusions excludes is missing; null when neither required_resources nor allowed_resources is set, the inventory could not be read, or a resource group is required and the resource groups could not be read
+    - required_resources_missing_ids — List of those ids; null when required_resources_missing is null
+    - allowed_resource_patterns — List of the configured allowed_resources patterns (rg:, location: or id:); empty when none are set
+    - allowed_resource_patterns_unmatched — List of allowed patterns that matched no in-scope resource that isn't required; an empty family is allowed, so this is information, not a failure; null when neither list is set or the inventory could not be read
+    - unexpected_resources — Number of in-scope resources and resource groups, empty ones included, neither required nor matched by an allowed pattern; each is listed in results (resources or resource_groups) with expected_by null (expected_by is "required" or the allowed pattern otherwise); null when neither list is set or the inventory or the resource groups could not be read
+    - unexpected_resources_by_type — Number of unexpected resources of each type, resource groups as microsoft.resources/subscriptions/resourcegroups; null when unexpected_resources is null
+    - inventory_matches_expected — True if no required id is missing and no resource or resource group is unexpected; false if either is not so; null when either count is null
 
     Are resources tagged?
     - untagged_resources — Number of resources with no tags at all

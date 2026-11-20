@@ -38,8 +38,9 @@ from azure_common import (  # noqa: E402
     sorted_counts,
     write_evidence,
 )
-from resource_exclusions import ResourceExclusions  # noqa: E402
+from resource_exclusions import KINDS, ResourceExclusions  # noqa: E402
 from resource_graph import query_all, resource_graph_client  # noqa: E402
+from scope_exclusions import parse_patterns  # noqa: E402
 
 logger = logging.getLogger("azure_resource_inventory")
 
@@ -383,6 +384,104 @@ def summarize(resources: list[dict], defender: dict | None = None, policy: dict 
     }
 
 
+# --- expected population: required resources and allowed patterns ---
+
+REQUIRED_ENV = "AZURE_REQUIRED_RESOURCES"
+ALLOWED_ENV = "AZURE_ALLOWED_RESOURCES"
+GLOB_CHARACTERS = frozenset("*?[]")
+RESOURCE_GROUP_QUERY = (
+    "ResourceContainers"
+    " | where type =~ 'microsoft.resources/subscriptions/resourcegroups'"
+    " | project id, name, location"
+    " | order by id asc"
+)
+RESOURCE_GROUP_TYPE = "microsoft.resources/subscriptions/resourcegroups"
+
+
+def required_from_env() -> tuple[list[str], list[str]]:
+    """(valid exact ARM ids, invalid entries). Each entry is id:<ARM id>, matched exactly and without case, never as a
+    glob and never by a child or a sibling, so a required resource is present only if that resource itself is."""
+    valid, invalid = [], []
+    for entry in parse_patterns(os.environ.get(REQUIRED_ENV)):
+        kind, _, value = entry.partition(":")
+        value = value.strip().rstrip("/")
+        if kind.strip().lower() != "id" or not value.startswith("/") or GLOB_CHARACTERS & set(value):
+            invalid.append(entry)
+        else:
+            valid.append(value)
+    return valid, invalid
+
+
+def allowed_from_env() -> ResourceExclusions:
+    """The allowed_resources patterns: the same rg:, location: and id: globs as resource_exclusions."""
+    return ResourceExclusions(parse_patterns(os.environ.get(ALLOWED_ENV)))
+
+
+def record_invalid_population(invalid_required: list[str], allowed: ResourceExclusions, collector: Collector) -> None:
+    for entry in invalid_required:
+        collector.record(f"config {REQUIRED_ENV}", ValueError(
+            f"required resource {entry!r} must be id: followed by one exact ARM resource id, with no * ? or [ ]"))
+    for pattern in allowed.invalid():
+        collector.record(f"config {ALLOWED_ENV}", ValueError(
+            f"allowed resource pattern {pattern!r} needs one of the prefixes {', '.join(k + ':' for k in KINDS)} "
+            "and something after it"))
+
+
+def is_resource_group_id(resource_id: str) -> bool:
+    """/subscriptions/<id>/resourceGroups/<name>, with nothing after it."""
+    parts = [p for p in resource_id.lower().split("/") if p]
+    return len(parts) == 4 and parts[0] == "subscriptions" and parts[2] == "resourcegroups"
+
+
+def resource_group_record(row: dict) -> dict:
+    """A resource group as a reconciliation row: its own name is its resource group, so rg: patterns match it."""
+    return {"id": row.get("id"), "name": row.get("name"), "type": RESOURCE_GROUP_TYPE, "location": row.get("location"),
+            "resource_group": row.get("name")}
+
+
+def reconcile(resources: list[dict], required: list[str], allowed: ResourceExclusions, inventory_read: bool,
+              resource_groups: list[dict] | None = None) -> dict:
+    """Compare the in-scope inventory, resources and resource groups alike, with the expected population.
+
+    Both lists hold only what resource_exclusions left in scope, so an excluded resource or resource group is never
+    present for a required id and never unexpected. A required id is present only if a resource or resource group
+    with exactly that id is in scope: no child, sibling or pattern match satisfies it. A resource or resource group,
+    empty or not, is unexpected if it is neither required nor matched by an allowed pattern. An allowed pattern may
+    match nothing. Each row records what expects it. Unset (neither list), or with the inventory unread, the fields
+    are null rather than 0; with the resource groups unread, unexpected_resources is null, and so is
+    required_resources_missing when a resource group is required."""
+    judged = bool(required or allowed) and inventory_read
+    groups_read = resource_groups is not None
+    required_keys = {r.lower(): r for r in required}
+    unexpected: Counter = Counter()
+    for r in [*resources, *(resource_groups or [])]:
+        if not judged:
+            r["expected_by"] = None
+            continue
+        if (r["id"] or "").lower().rstrip("/") in required_keys:
+            r["expected_by"] = "required"
+        else:
+            r["expected_by"] = allowed.match(r["id"], r["location"], r["resource_group"]) if allowed else None
+            if r["expected_by"] is None:
+                unexpected[r["type"] or "unknown"] += 1
+    present = {(r["id"] or "").lower().rstrip("/") for r in [*resources, *(resource_groups or [])]}
+    needs_groups = any(is_resource_group_id(r) for r in required)
+    missing = None
+    if judged and (groups_read or not needs_groups):
+        missing = [r for r in required if r.lower() not in present]
+    count = sum(unexpected.values()) if judged and groups_read else None
+    return {
+        "required_resources": list(required),
+        "required_resources_missing": None if missing is None else len(missing),
+        "required_resources_missing_ids": missing,
+        "allowed_resource_patterns": list(allowed.patterns),
+        "allowed_resource_patterns_unmatched": allowed.unmatched() if judged and allowed else ([] if judged else None),
+        "unexpected_resources": count,
+        "unexpected_resources_by_type": sorted_counts(unexpected) if count is not None else None,
+        "inventory_matches_expected": None if missing is None or count is None else not missing and count == 0,
+    }
+
+
 # --- collection (lazy azure imports) ---
 
 def _query_status(query: str, result: dict | None, tally: dict | None) -> dict:
@@ -395,15 +494,17 @@ def _query_status(query: str, result: dict | None, tally: dict | None) -> dict:
     }
 
 
-def collect(subscription_id, cred, collector: Collector, exclusions: ResourceExclusions | None = None) -> dict:
-    """Page the inventory and both coverage queries to the end, then join them by resource id.
+def collect(subscription_id, cred, collector: Collector, exclusions: ResourceExclusions | None = None,
+            read_resource_groups: bool = False) -> dict:
+    """Page the inventory and both coverage queries to the end, then join them by resource id. With
+    read_resource_groups, also read the resource groups, scoped by the same exclusions, for the reconciliation.
 
     A coverage query that fails or comes back truncated is recorded as a failure and
     its counts stay null, rather than every resource reading as uncovered.
     """
     exclusions = exclusions if exclusions is not None else ResourceExclusions()
     empty: dict = {"resources": [], "total_records": None, "pages": 0, "defender": None, "policy": None,
-                   "coverage_queries": {}, "excluded": []}
+                   "coverage_queries": {}, "excluded": [], "resource_groups": None}
     client = collector.guard("resourcegraph.ResourceGraphClient (init)", lambda: resource_graph_client(cred))
     if client is None:
         return empty
@@ -421,6 +522,14 @@ def collect(subscription_id, cred, collector: Collector, exclusions: ResourceExc
     def _read(label: str, query: str) -> dict | None:
         return collector.guard(f"resourcegraph.resources ({label})", lambda: query_all(client, subscription_id, query))
 
+    groups = _read("ResourceContainers", RESOURCE_GROUP_QUERY) if read_resource_groups else None
+    resource_groups = None
+    if groups is not None:
+        # The same exclusions as resources: an excluded group is neither present for a required id nor unexpected.
+        resource_groups, excluded_groups = exclusions.split(
+            sorted((resource_group_record(row) for row in groups["rows"] if row.get("id")), key=lambda g: g["id"] or ""),
+            "resource_group")
+        excluded = excluded + excluded_groups
     assessments = _read("SecurityResources", DEFENDER_QUERY)
     states = _read("PolicyResources", POLICY_QUERY)
     if assessments is None or states is None:
@@ -443,6 +552,7 @@ def collect(subscription_id, cred, collector: Collector, exclusions: ResourceExc
             "policy_states": _query_status(POLICY_QUERY, states, policy),
         },
         "excluded": excluded,
+        "resource_groups": resource_groups,
     }
 
 
@@ -463,11 +573,15 @@ def main() -> int:
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
     exclusions = ResourceExclusions.from_env()
     exclusions.record_invalid(collector)
+    required, invalid_required = required_from_env()
+    allowed = allowed_from_env()
+    record_invalid_population(invalid_required, allowed, collector)
 
     collected: dict = {"resources": [], "total_records": None, "pages": 0, "defender": None, "policy": None,
-                       "coverage_queries": {}, "excluded": []}
+                       "coverage_queries": {}, "excluded": [], "resource_groups": None}
     if subscription_id and cred is not None:
-        collected = collect(subscription_id, cred, collector, exclusions)
+        collected = collect(subscription_id, cred, collector, exclusions,
+                            read_resource_groups=bool(required or allowed))
     elif not subscription_id:
         collector.record(
             "resolve_subscription",
@@ -482,12 +596,17 @@ def main() -> int:
     exclusions.warn_unmatched(logger)
 
     resources, excluded = collected["resources"], collected["excluded"]
+    population = reconcile(resources, required, allowed, inventory_read=bool(collected["pages"]),
+                           resource_groups=collected["resource_groups"])
+    for resource_id in population["required_resources_missing_ids"] or ():
+        logger.warning("required resource %s is not in the in-scope inventory", resource_id)
     evidence = build_payload(
         subscription_id=subscription_id,
         subscription_source=sub["subscription_source"],
         collector=collector,
         results={
             "resources": resources,
+            "resource_groups": collected["resource_groups"],
             "inventory_source": "azure_resource_graph",
             "query": INVENTORY_QUERY,
             "pages_read": collected["pages"],
@@ -498,6 +617,7 @@ def main() -> int:
         summary={
             **summarize(resources, collected["defender"], collected["policy"]),
             **exclusions.summary(excluded, ("resource",), {"resources": len(resources)}),
+            **population,
         },
     )
 
