@@ -40,46 +40,38 @@ jq -n \
 
 log_info "Collecting Backup vault list"
 
-vault_list=$(aws backup list-backup-vaults \
-    --query 'BackupVaultList[*].BackupVaultName' \
+# list-backup-vaults already returns EncryptionKeyArn; no per-vault describe needed.
+vaults=$(aws backup list-backup-vaults \
+    --query 'BackupVaultList[*].{BackupVaultName:BackupVaultName,BackupVaultArn:BackupVaultArn,EncryptionKeyArn:EncryptionKeyArn,NumberOfRecoveryPoints:NumberOfRecoveryPoints,CreationDate:CreationDate}' \
     --output json 2>/dev/null)
 if [ $? -ne 0 ]; then
     echo "aws backup list-backup-vaults failed" >> "$_FAILURE_LOG"
-    vault_list='[]'
+    vaults='[]'
 fi
 
-# Describe each vault to get EncryptionKeyArn and other details.
-vaults='[]'
-while IFS= read -r vault_name; do
-    detail=$(aws backup describe-backup-vault \
-        --backup-vault-name "$vault_name" \
-        --query '{BackupVaultName:BackupVaultName,BackupVaultArn:BackupVaultArn,EncryptionKeyArn:EncryptionKeyArn,NumberOfRecoveryPoints:NumberOfRecoveryPoints,CreationDate:CreationDate}' \
-        --output json 2>/dev/null)
-    if [ $? -ne 0 ]; then
-        echo "aws backup describe-backup-vault failed for $vault_name" >> "$_FAILURE_LOG"
-        detail="{\"BackupVaultName\":\"$vault_name\",\"error\":\"describe failed\"}"
-    fi
-    vaults=$(echo "$vaults" | jq --argjson v "$detail" '. + [$v]')
-done < <(echo "$vault_list" | jq -r '.[]')
-
-encrypted_count=$(echo "$vaults" | jq '[.[] | select(.EncryptionKeyArn != null and .EncryptionKeyArn != "")] | length')
 total_count=$(echo "$vaults" | jq 'length')
+# AWS always encrypts vaults; the meaningful split is customer-managed vs the
+# default aws/backup key. A CMK ARN does not contain "aws/backup".
+cmk_count=$(echo "$vaults" | jq '[.[] | select(.EncryptionKeyArn != null and (.EncryptionKeyArn | contains("aws/backup") | not))] | length')
+default_key_count=$(echo "$vaults" | jq '[.[] | select(.EncryptionKeyArn != null and (.EncryptionKeyArn | contains("aws/backup")))] | length')
 
 _VAULTS_JSON="$(mktemp -t aws_backup_vaults.XXXXXX.json)"
 trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG" "$_AWS_ERR_LOG" "$_VAULTS_JSON"' EXIT
 printf '%s' "$vaults" > "$_VAULTS_JSON"
 
 jq --slurpfile vaults "$_VAULTS_JSON" \
-   --arg total     "$total_count" \
-   --arg encrypted "$encrypted_count" \
+   --arg total       "$total_count" \
+   --arg cmk         "$cmk_count" \
+   --arg default_key "$default_key_count" \
    '.results = {
        "vaults": ($vaults[0] // []),
        "summary": {
-         "total_vaults":     ($total     | tonumber),
-         "encrypted_vaults": ($encrypted | tonumber)
+         "total_vaults":               ($total       | tonumber),
+         "customer_managed_key_vaults": ($cmk         | tonumber),
+         "aws_managed_key_vaults":      ($default_key | tonumber)
        }
    }' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
 
-log_info "Evidence saved to $OUTPUT_JSON (vaults: $total_count, encrypted: $encrypted_count)"
+log_info "Evidence saved to $OUTPUT_JSON (vaults: $total_count, CMK: $cmk_count, AWS-managed key: $default_key_count)"
 
 aws_finish

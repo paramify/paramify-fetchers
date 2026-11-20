@@ -58,9 +58,13 @@ if [ $? -ne 0 ]; then
     resource_summaries='[]'
 fi
 
-compliant_resources=$(echo "$resource_summaries" | jq '[.[] | select(.Status == "COMPLIANT")] | length')
-non_compliant_resources=$(echo "$resource_summaries" | jq '[.[] | select(.Status == "NON_COMPLIANT")] | length')
-total_resources=$(echo "$resource_summaries" | jq 'length')
+# Deduplicate by ResourceId: a resource is non-compliant if any of its type
+# rows is NON_COMPLIANT; otherwise compliant. This prevents double-counting
+# resources that appear once per compliance type.
+total_resources=$(echo "$resource_summaries" | jq '[.[].ResourceId] | unique | length')
+non_compliant_resources=$(echo "$resource_summaries" | jq '[.[] | select(.Status == "NON_COMPLIANT") | .ResourceId] | unique | length')
+compliant_resources=$(echo "$resource_summaries" | jq --argjson nc "$non_compliant_resources" \
+    '([.[].ResourceId] | unique | length) - $nc')
 
 _COMP_SUM_JSON="$(mktemp -t aws_ssm_comp_sum.XXXXXX.json)"
 _RES_SUM_JSON="$(mktemp -t aws_ssm_res_sum.XXXXXX.json)"
@@ -77,12 +81,12 @@ jq --slurpfile comp_sum "$_COMP_SUM_JSON" \
        "compliance_summaries": ($comp_sum[0] // []),
        "resource_compliance_summaries": ($res_sum[0] // []),
        "summary": {
-         "total_resources":       ($total         | tonumber),
-         "compliant_resources":   ($compliant     | tonumber),
+         "total_resources":         ($total         | tonumber),
+         "compliant_resources":     ($compliant     | tonumber),
          "non_compliant_resources": ($non_compliant | tonumber)
        }
    }' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
 
-log_info "Evidence saved to $OUTPUT_JSON (resources: $total_resources, compliant: $compliant_resources, non-compliant: $non_compliant_resources)"
+log_info "Evidence saved to $OUTPUT_JSON (distinct resources: $total_resources, compliant: $compliant_resources, non-compliant: $non_compliant_resources)"
 
 aws_finish

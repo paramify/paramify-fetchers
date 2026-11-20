@@ -40,10 +40,10 @@ jq -n \
 
 log_info "Collecting Client VPN endpoint configurations"
 
-# Retrieve endpoint details including ServerCertificateArn, AuthenticationOptions,
-# TransportProtocol, and VpnProtocol for TLS validation evidence.
+# Retrieve endpoint details. TLS is always on for Client VPN (OpenVPN only),
+# so the useful fields are auth type, connection logging, and split-tunnel.
 endpoints=$(aws ec2 describe-client-vpn-endpoints \
-    --query 'ClientVpnEndpoints[*].{ClientVpnEndpointId:ClientVpnEndpointId,Description:Description,Status:Status,ServerCertificateArn:ServerCertificateArn,AuthenticationOptions:AuthenticationOptions,TransportProtocol:TransportProtocol,VpnProtocol:VpnProtocol,DnsName:DnsName,CreationTime:CreationTime}' \
+    --query 'ClientVpnEndpoints[*].{ClientVpnEndpointId:ClientVpnEndpointId,Description:Description,Status:Status,ServerCertificateArn:ServerCertificateArn,AuthenticationOptions:AuthenticationOptions,ConnectionLogOptions:ConnectionLogOptions,SplitTunnel:SplitTunnel,TransportProtocol:TransportProtocol,VpnProtocol:VpnProtocol,DnsName:DnsName,CreationTime:CreationTime}' \
     --output json 2>/dev/null)
 if [ $? -ne 0 ]; then
     echo "aws ec2 describe-client-vpn-endpoints failed" >> "$_FAILURE_LOG"
@@ -51,20 +51,33 @@ if [ $? -ne 0 ]; then
 fi
 
 total_count=$(echo "$endpoints" | jq 'length')
-tls_count=$(echo "$endpoints" | jq '[.[] | select(.VpnProtocol == "openvpn" or (.TransportProtocol != null))] | length')
+# Auth type breakdown: certificate-authentication, directory-service-authentication, or federated-authentication (SAML).
+cert_auth_count=$(echo "$endpoints" | jq '[.[] | select(.AuthenticationOptions[]?.Type == "certificate-authentication")] | length')
+saml_auth_count=$(echo "$endpoints" | jq '[.[] | select(.AuthenticationOptions[]?.Type == "federated-authentication")] | length')
+ad_auth_count=$(echo "$endpoints"   | jq '[.[] | select(.AuthenticationOptions[]?.Type == "directory-service-authentication")] | length')
+logging_count=$(echo "$endpoints"   | jq '[.[] | select(.ConnectionLogOptions.Enabled == true)] | length')
+split_tunnel_count=$(echo "$endpoints" | jq '[.[] | select(.SplitTunnel == true)] | length')
 
 _ENDPOINTS_JSON="$(mktemp -t aws_client_vpn_endpoints.XXXXXX.json)"
 trap 'rm -f "$_FETCHER_TMP_JSON" "$_FAILURE_LOG" "$_AWS_ERR_LOG" "$_ENDPOINTS_JSON"' EXIT
 printf '%s' "$endpoints" > "$_ENDPOINTS_JSON"
 
 jq --slurpfile endpoints "$_ENDPOINTS_JSON" \
-   --arg total "$total_count" \
-   --arg tls   "$tls_count" \
+   --arg total        "$total_count" \
+   --arg cert_auth    "$cert_auth_count" \
+   --arg saml_auth    "$saml_auth_count" \
+   --arg ad_auth      "$ad_auth_count" \
+   --arg logging      "$logging_count" \
+   --arg split_tunnel "$split_tunnel_count" \
    '.results = {
        "client_vpn_endpoints": ($endpoints[0] // []),
        "summary": {
-         "total_endpoints": ($total | tonumber),
-         "tls_endpoints":   ($tls   | tonumber)
+         "total_endpoints":              ($total        | tonumber),
+         "certificate_auth_endpoints":   ($cert_auth    | tonumber),
+         "saml_auth_endpoints":          ($saml_auth    | tonumber),
+         "ad_auth_endpoints":            ($ad_auth      | tonumber),
+         "connection_logging_enabled":   ($logging      | tonumber),
+         "split_tunnel_enabled":         ($split_tunnel | tonumber)
        }
    }' "$OUTPUT_JSON" > "$_FETCHER_TMP_JSON" && mv "$_FETCHER_TMP_JSON" "$OUTPUT_JSON"
 
