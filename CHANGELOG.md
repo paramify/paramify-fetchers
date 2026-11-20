@@ -46,7 +46,8 @@ schemas and the `paramify` CLI — not the internal code.
   only to the commit a plan showed), and
   a once-a-day notice (`PARAMIFY_NO_UPDATE_CHECK=1` turns it off). See `docs/versioning_guide.md`.
 - **The TUI shows when an update is waiting and applies it.** A quiet `↑ 12 new commits on main · press U` line
-  in the header and on the welcome screen (it gives way first when the header is short of room); `U` opens the plan
+  in the header and on the welcome screen (it gives way first when the header is short of room); `U` (or `u`,
+  except on the Paramify tab, where `u` is upload run) opens the plan
   `paramify update` shows, with Apply (a second confirmation when breaking changes touch this clone) and Roll back.
   The update runs as a subprocess, so the running TUI never loads half-replaced code.
 - **Update notes**, `releases/unreleased.yaml` and `releases/<version>.yaml`: the short rows `paramify update` shows

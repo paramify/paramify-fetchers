@@ -138,6 +138,13 @@ def test_demo_manifest_end_to_end(demo_workspace, no_network, monkeypatch, tui_s
             [row] = _rows(page.query_one("#pf-grid", DataTable))
             assert row[0] == "demo_hello"
             assert not any(page.check_action(a, ()) for a in ("sync_scripts", "sync_validators", "upload_run"))
+            # Here u is the page's own key, switched off: it must not fall through to the app's update.
+            planned = []
+            monkeypatch.setattr(api, "update_plan", lambda root: planned.append(root) or {"ok": False, "errors": []})
+            await pilot.press("u")
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+            assert planned == [] and type(app.screen).__name__ != "UpdateScreen"
 
             # Upload dry-run: the TUI has no switch, so fake a token and force dry_run=True.
             monkeypatch.setenv(UPLOAD_TOKEN_ENV, "unused")
