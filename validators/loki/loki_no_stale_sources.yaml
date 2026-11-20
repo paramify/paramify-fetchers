@@ -1,0 +1,22 @@
+key: loki_no_stale_sources
+name: 'Loki Log Ingestion: No Stale Source'
+type: AUTOMATED
+role: configuration
+statement: >
+  No expected log source's newest line is older than the adopted maximum age, and every source
+  was seen in the search window (sources_stale is 0). Fails while no maximum age is set, while any
+  source's queries failed, or when the count appears other than exactly once. Does not check
+  whether the collection run succeeded.
+
+regex: '"sources_stale":\s*(?<sources_stale>\d+)'
+rules_summary: MATCH_COUNT EQUALS 1; MATCH_GROUP[1] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "1" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # sources_stale
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-LOKI-LOG-INGESTION
