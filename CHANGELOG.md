@@ -28,6 +28,12 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`loki_log_ingestion` 0.1.0 and the `loki` category: whether expected log sources are arriving in Loki.** Each
+  expected source is a name and a LogQL stream selector (`LOKI_EXPECTED_SOURCES`). For each one the fetcher counts the
+  lines and streams in a recent window and finds the time of the newest line within a longer search window, through
+  GET calls to Loki's query API. `max_age_minutes` has no default, so `sources_stale` stays null until it is set. Log
+  lines and stream labels are never copied. The category sends `LOKI_TENANT_ID` as `X-Scope-OrgID` and an optional
+  bearer token for a proxy.
 - **One-line install.** `curl -fsSL https://raw.githubusercontent.com/paramify/paramify-fetchers/main/install.sh |
   bash` clones the repo to `~/paramify-fetchers`, installs the CLI and TUI into the clone's `.venv`, and links
   `paramify` into `~/.local/bin`. In a terminal it shows a spinner and elapsed time for each step, offers to add

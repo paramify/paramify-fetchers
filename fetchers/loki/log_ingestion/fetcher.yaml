@@ -1,0 +1,91 @@
+name: loki_log_ingestion
+version: 0.1.0
+description: >-
+  Shows whether each expected log source is arriving in Loki and how recently, from line counts, stream counts and the newest entry time, without copying log lines.
+category: loki
+
+supports_targets: false
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: loki_log_ingestion.json
+
+config_schema:
+  expected_sources:
+    type: string
+    required: true
+    env: LOKI_EXPECTED_SOURCES
+    description: >
+      The log sources Loki should be receiving, as name={stream selector} entries separated by semicolons, such as
+      kubernetes_pods={namespace=~".+", container!=""}; falco={namespace="falco"}; keycloak={app="keycloak"}. Each
+      selector is a LogQL stream selector in braces, with no pipeline. Use the labels your log shipper sets. An entry
+      that is not name={selector}, or repeats a name, fails the run as bad_config.
+  window_minutes:
+    type: integer
+    required: false
+    default: 60
+    env: LOKI_WINDOW_MINUTES
+    description: >
+      The recent window, in minutes, over which lines and streams are counted. A source with no line in it is not
+      ingesting. A whole number from 1 to 1440.
+  search_hours:
+    type: integer
+    required: false
+    default: 24
+    env: LOKI_SEARCH_HOURS
+    description: >
+      How far back, in hours, to look for each source's newest line. A source with no line in this window is reported
+      as not seen. A whole number from 1 to 720.
+  max_age_minutes:
+    type: integer
+    required: false
+    env: LOKI_MAX_AGE_MINUTES
+    description: >
+      The adopted maximum age, in minutes, of a source's newest line. There is no default: while it is unset,
+      sources_stale is null rather than judged against an age nobody adopted, and each source's age is still
+      reported. A whole number from 1 to 43200.
+
+secrets: []          # the optional token comes from the category (fetchers/_categories/loki.yaml)
+
+evidence_set:
+  reference_id: EVD-LOKI-LOG-INGESTION
+  name: Loki Log Ingestion
+  description: >-
+    For each expected log source, the lines and streams Loki received in a recent window and the time of its newest
+    line, with no log content copied.
+  instructions: |
+    Script: loki/log_ingestion/fetcher.py
+
+    Access: Network access to Loki's query API (or the gateway in front of it), with the tenant set when Loki is multi-tenant. Loki has no authentication of its own; set the optional token only when a proxy in front of it requires one. Every call is a GET.
+
+    Commands Executed:
+    - GET /loki/api/v1/query with sum(count_over_time({selector}[window])) — the number of lines each source sent in the window
+    - GET /loki/api/v1/query_range with the selector, limit 1, direction backward — the time of each source's newest line within the search window; the line itself is not kept
+    - GET /loki/api/v1/series with the selector — the number of streams (distinct label sets, such as one per pod and container) carrying each source in the window
+
+    Output: loki_log_ingestion.json — each expected source's name and selector, lines and streams in the window, newest line time and age, and whether it is ingesting and stale. Log lines and stream labels are never copied. A source arriving in Loki shows it is collected and stored; whether anyone reviews it or alerts on it needs its own evidence.
+
+    Summary fields:
+
+    Which sources are expected?
+    - expected_sources — List of the expected source names, from the expected_sources setting
+    - expected_sources_count — Number of expected sources
+    - sources_unread — Number of sources at least one query failed for; while above 0, every judged field below is null
+
+    Are they arriving?
+    - window_minutes — The window_minutes setting
+    - sources_ingesting — Number of sources with at least one line in the window
+    - sources_not_ingesting — Number of sources with no line in the window
+    - sources_not_ingesting_names — List of the names of those sources
+    - all_expected_sources_ingesting — True if every expected source has at least one line in the window; null if any source could not be read or none is set
+
+    How recently?
+    - search_hours — The search_hours setting
+    - sources_not_seen_in_search_window — Number of sources with no line at all in the search window
+    - longest_minutes_since_newest_entry — Minutes since the newest line of the source that has gone longest without one, among sources seen in the search window; null if none was seen
+    - max_age_minutes — The max_age_minutes setting; null when unset
+    - sources_stale — Number of sources whose newest line is older than max_age_minutes, or that were not seen in the search window; null when it is unset
