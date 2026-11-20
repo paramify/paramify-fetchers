@@ -3,18 +3,20 @@ name: 'Azure Resource Inventory: No Unexpected Resources'
 type: AUTOMATED
 role: completeness
 statement: >
-  Every in-scope resource in the subscription's Resource Graph inventory matches a pattern in the
-  expected_resources list (unexpected_resources is 0), so the deployed population holds nothing the
-  boundary does not account for. Resources left out of scope by resource_exclusions are not judged.
-  Fails while no expected list is set or the inventory could not be read. Does not show that each
-  resource is configured correctly. Does not check whether the collection run succeeded.
+  Every in-scope resource in the subscription's Resource Graph inventory is either a required
+  resource or matched by an allowed_resources pattern (unexpected_resources is 0), so the deployed
+  population holds nothing the boundary does not account for, even beside a required resource in
+  the same group. Resources left out of scope by resource_exclusions are not judged. Fails while
+  neither list is set, the inventory could not be read, or the count appears other than exactly
+  once. Does not show that each resource is configured correctly. Does not check whether the
+  collection run succeeded.
 
 regex: '"unexpected_resources":\s*(?<unexpected_resources>\d+)'
-rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0
+rules_summary: MATCH_COUNT EQUALS 1; MATCH_GROUP[1] EQUALS 0
 validation_rules:
   - regexOperation: { type: MATCH_COUNT }
-    criteria: NOT_EQUALS
-    value: { type: CUSTOM_TEXT, customText: "0" }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "1" }
   - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # unexpected_resources
     criteria: EQUALS
     value: { type: CUSTOM_TEXT, customText: "0" }
