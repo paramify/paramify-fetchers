@@ -12,11 +12,14 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
-- **`azure_resource_inventory` 0.5.0: reconciled against an expected population.** A new `expected_resources`
-  setting lists the resources the boundary should hold, as `rg:`, `location:` or `id:` patterns in the same form as
-  `resource_exclusions`. Expected patterns that match no in-scope resource and in-scope resources that match no
-  pattern are counted and listed (`expected_resources_missing`, `unexpected_resources`), each resource records the
-  pattern that expects it, and `inventory_matches_expected` gives one verdict. Unset, the fields stay null.
+- **`azure_resource_inventory` 0.5.0: reconciled against an expected population.** Two new settings work together.
+  `required_resources` takes exact ARM ids (`id:` only, compared without case, no globs): each must itself be in the
+  in-scope inventory, and no child, sibling or pattern match stands in for it; a resource group id is checked against
+  the subscription's resource groups. `allowed_resources` takes `rg:`, `location:` and `id:` globs for families whose
+  ids change, such as backup snapshots; a family may be empty. Missing required ids are counted and listed
+  (`required_resources_missing`), resources neither required nor allowed are counted by type
+  (`unexpected_resources`), each resource records what expects it, and `inventory_matches_expected` gives one
+  verdict. Unset, the fields stay null.
 - **`aws_inspector_ecr_findings` and `aws_inspector_ecr_report` 0.3.0: image counts and an opt-in for an empty scope.**
   - The evidence summary adds `repository_image_count`, every image in the selected repositories before tag,
     push-date and usage filters, next to `image_count`, the images that match them. Both are logged. No new API calls.

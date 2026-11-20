@@ -110,8 +110,9 @@ def test_inventory_without_patterns_adds_only_empty_exclusion_fields(monkeypatch
     code, evidence = run_inventory(monkeypatch, tmp_path, None)
     summary = evidence["summary"]
     assert code == 0 and evidence["results"]["excluded"] == []
-    expected = {"expected_resource_patterns", "expected_resource_patterns_unmatched", "expected_resources_missing",
-                "unexpected_resources", "unexpected_resources_by_type", "inventory_matches_expected"}
+    expected = {"required_resources", "required_resources_missing", "required_resources_missing_ids",
+                "allowed_resource_patterns", "allowed_resource_patterns_unmatched", "unexpected_resources",
+                "unexpected_resources_by_type", "inventory_matches_expected"}
     new = NEW_KEYS | expected | {"excluded_resources", "in_scope_resources"}
     assert {k: v for k, v in summary.items() if k not in new} == _inventory_summary_before()
     assert summary["resource_exclusion_patterns"] == summary["resource_exclusion_patterns_unmatched"] == []
