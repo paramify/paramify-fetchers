@@ -1,0 +1,19 @@
+key: azure_velero_restores_read
+name: 'Azure Velero: Restore Records Read'
+type: AUTOMATED
+role: integrity
+source: community
+statement: >
+  Every backup storage location's restore records were read (restores_total is a number, not null), so
+  the restore checks are judged on complete data. Zero restores is allowed here; whether a clean
+  restore is recent is judged separately. Does not check whether the collection run succeeded.
+
+regex: '"restores_total":\s*(?<restores_total>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-VELERO-BACKUPS

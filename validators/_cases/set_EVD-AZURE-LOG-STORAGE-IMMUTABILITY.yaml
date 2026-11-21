@@ -1,0 +1,10 @@
+# Set-level: every validator naming EVD-AZURE-LOG-STORAGE-IMMUTABILITY, combined the way Paramify combines them.
+evidence_set: EVD-AZURE-LOG-STORAGE-IMMUTABILITY
+cases:
+  - name: compliant
+    expect: PASS
+    artifact: '{"metadata": {"exit_code": 0,"status": "success"},"payload": {"results": {"accounts": [{"account": "stlogarchive01","account_default_policy": null,"account_version_level_immutability": false,"blob_soft_delete_days": 14,"id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-logging/providers/Microsoft.Storage/storageAccounts/stlogarchive01","log_containers": [{"allow_protected_append_writes": true,"container": "insights-activity-logs","legal_hold": false,"locked": true,"log_type": "activity_log","policy_source": "container","protected": true,"retention_days": 730,"time_based_policy_state": "Locked","version_level_immutability": false},{"allow_protected_append_writes": true,"container": "insights-logs-auditevent","legal_hold": false,"locked": true,"log_type": "resource_logs","policy_source": "container","protected": true,"retention_days": 730,"time_based_policy_state": "Locked","version_level_immutability": false}],"versioning_enabled": true},{"account": "stlogarchive02","account_default_policy": null,"account_version_level_immutability": false,"blob_soft_delete_days": 14,"id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-logging/providers/Microsoft.Storage/storageAccounts/stlogarchive02","log_containers": [{"allow_protected_append_writes": true,"container": "insights-logs-signinlogs","legal_hold": false,"locked": true,"log_type": "resource_logs","policy_source": "container","protected": true,"retention_days": 400,"time_based_policy_state": "Locked","version_level_immutability": false}],"versioning_enabled": true}]},"summary": {"accounts_with_log_containers": 2,"legal_hold": 0,"locked_policy": 3,"log_containers": 3,"min_retention_days": 400,"storage_accounts_scanned": 5,"unlocked_policy_only": 0,"unprotected": 0}}}'
+
+  - name: collection_failed
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 1,"status": "failed"},"payload": {}}'

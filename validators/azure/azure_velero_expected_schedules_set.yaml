@@ -1,0 +1,20 @@
+key: azure_velero_expected_schedules_set
+name: 'Azure Velero: Expected Backup Schedules Are Configured'
+type: AUTOMATED
+role: configuration
+source: community
+statement: >
+  At least one expected schedule is configured in expected_schedules (schedule:hours). Velero does not
+  write schedules to backup storage, so a schedule that never produced a backup is only visible when
+  it is listed. Fails while expected_schedules is not set, which marks the setting as unset rather
+  than a backup as broken. Does not check whether the collection run succeeded.
+
+regex: '"expected_schedules":\s*(?<expected_schedules>[1-9]\d*)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-VELERO-BACKUPS

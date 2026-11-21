@@ -1,0 +1,124 @@
+validator: entra_auth_methods_cba_users_mapped
+cases:
+  - name: x509_on_all_users_mapped
+    expect: PASS
+    artifact: '{"schema_version":"1.0","metadata":{"exit_code":0,"status":"success","evidence_set":{"reference_id":"EVD-AZURE-ENTRA-AUTH-METHODS-POLICY"}},"payload":{"metadata":{"partial_failure":false,"api_failures":[]},"results":{"authentication_methods":[],"trusted_certificate_authorities":[],"x509_certificate_users":[]},"summary":{"authentication_methods_policy_readable":true,"enabled_methods":["Fido2","X509Certificate"],"sms_enabled":false,"voice_enabled":false,"weak_methods_enabled":[],"weak_method_enabled":false,"fido2_enabled":true,"x509_certificate_enabled":true,"x509_certificate_multi_factor":true,"phishing_resistant_methods_enabled":["Fido2","X509Certificate"],"phishing_resistant_method_enabled":true,"policy_migration_state":"migrationComplete","legacy_method_policies_apply":false,"security_defaults_enabled":false,"entra_id_tier":"p1","trusted_certificate_authorities":2,"expired_certificate_authorities":0,"certificate_authorities_expiry_unknown":0,"certificate_authorities_without_crl":0,"classic_store_certificate_authorities":1,"classic_store_status":"read","classic_store_missing_permission":null,"pki_store_certificate_authorities":1,"pki_store_status":"read","pki_store_missing_permission":null,"x509_targeted_users":3,"x509_targeted_users_unmapped":0,"x509_targeted_users_mapping_unverified":0,"x509_targeted_users_without_certificate_user_ids":0,"x509_targeted_users_with_weaker_methods":0,"x509_targeted_users_with_weak_methods":0,"x509_certificate_users_truncated":false}}}'
+
+  - name: x509_off
+    expect: PASS
+    note: 'no user signs in by certificate'
+    artifact: '{"schema_version":"1.0","metadata":{"exit_code":0,"status":"success","evidence_set":{"reference_id":"EVD-AZURE-ENTRA-AUTH-METHODS-POLICY"}},"payload":{"metadata":{"partial_failure":false,"api_failures":[]},"results":{"authentication_methods":[],"trusted_certificate_authorities":[],"x509_certificate_users":[]},"summary":{"authentication_methods_policy_readable":true,"enabled_methods":["Fido2","MicrosoftAuthenticator"],"sms_enabled":false,"voice_enabled":false,"weak_methods_enabled":[],"weak_method_enabled":false,"fido2_enabled":true,"x509_certificate_enabled":false,"x509_certificate_multi_factor":null,"phishing_resistant_methods_enabled":["Fido2"],"phishing_resistant_method_enabled":true,"policy_migration_state":"migrationComplete","legacy_method_policies_apply":false,"security_defaults_enabled":false,"entra_id_tier":"p1","trusted_certificate_authorities":null,"expired_certificate_authorities":null,"certificate_authorities_expiry_unknown":null,"certificate_authorities_without_crl":null,"classic_store_certificate_authorities":null,"classic_store_status":"not_authorized","classic_store_missing_permission":"Organization.Read.All","pki_store_certificate_authorities":null,"pki_store_status":"not_authorized","pki_store_missing_permission":"PublicKeyInfrastructure.Read.All","x509_targeted_users":0,"x509_targeted_users_unmapped":0,"x509_targeted_users_mapping_unverified":0,"x509_targeted_users_without_certificate_user_ids":0,"x509_targeted_users_with_weaker_methods":0,"x509_targeted_users_with_weak_methods":0,"x509_certificate_users_truncated":false}}}'
+
+  - name: x509_on_targets_no_one
+    expect: PASS
+    artifact: '{"schema_version":"1.0","metadata":{"exit_code":0,"status":"success","evidence_set":{"reference_id":"EVD-AZURE-ENTRA-AUTH-METHODS-POLICY"}},"payload":{"metadata":{"partial_failure":false,"api_failures":[]},"results":{"authentication_methods":[],"trusted_certificate_authorities":[],"x509_certificate_users":[]},"summary":{"authentication_methods_policy_readable":true,"enabled_methods":["Fido2","X509Certificate"],"sms_enabled":false,"voice_enabled":false,"weak_methods_enabled":[],"weak_method_enabled":false,"fido2_enabled":true,"x509_certificate_enabled":true,"x509_certificate_multi_factor":true,"phishing_resistant_methods_enabled":["Fido2","X509Certificate"],"phishing_resistant_method_enabled":true,"policy_migration_state":"migrationComplete","legacy_method_policies_apply":false,"security_defaults_enabled":false,"entra_id_tier":"p1","trusted_certificate_authorities":2,"expired_certificate_authorities":0,"certificate_authorities_expiry_unknown":0,"certificate_authorities_without_crl":0,"classic_store_certificate_authorities":1,"classic_store_status":"read","classic_store_missing_permission":null,"pki_store_certificate_authorities":1,"pki_store_status":"read","pki_store_missing_permission":null,"x509_targeted_users":0,"x509_targeted_users_unmapped":0,"x509_targeted_users_mapping_unverified":0,"x509_targeted_users_without_certificate_user_ids":0,"x509_targeted_users_with_weaker_methods":0,"x509_targeted_users_with_weak_methods":0,"x509_certificate_users_truncated":false}}}'
+
+  - name: pretty_printed
+    expect: PASS
+    artifact: |
+      {
+        "metadata": {
+          "evidence_set": {
+            "reference_id": "EVD-AZURE-ENTRA-AUTH-METHODS-POLICY"
+          },
+          "exit_code": 0,
+          "status": "success"
+        },
+        "payload": {
+          "metadata": {
+            "api_failures": [],
+            "partial_failure": false
+          },
+          "results": {
+            "authentication_methods": [],
+            "trusted_certificate_authorities": [],
+            "x509_certificate_users": []
+          },
+          "summary": {
+            "authentication_methods_policy_readable": true,
+            "certificate_authorities_expiry_unknown": 0,
+            "certificate_authorities_without_crl": 0,
+            "classic_store_certificate_authorities": 1,
+            "classic_store_missing_permission": null,
+            "classic_store_status": "read",
+            "enabled_methods": [
+              "Fido2",
+              "X509Certificate"
+            ],
+            "entra_id_tier": "p1",
+            "expired_certificate_authorities": 0,
+            "fido2_enabled": true,
+            "legacy_method_policies_apply": false,
+            "phishing_resistant_method_enabled": true,
+            "phishing_resistant_methods_enabled": [
+              "Fido2",
+              "X509Certificate"
+            ],
+            "pki_store_certificate_authorities": 1,
+            "pki_store_missing_permission": null,
+            "pki_store_status": "read",
+            "policy_migration_state": "migrationComplete",
+            "security_defaults_enabled": false,
+            "sms_enabled": false,
+            "trusted_certificate_authorities": 2,
+            "voice_enabled": false,
+            "weak_method_enabled": false,
+            "weak_methods_enabled": [],
+            "x509_certificate_enabled": true,
+            "x509_certificate_multi_factor": true,
+            "x509_certificate_users_truncated": false,
+            "x509_targeted_users": 3,
+            "x509_targeted_users_mapping_unverified": 0,
+            "x509_targeted_users_unmapped": 0,
+            "x509_targeted_users_with_weak_methods": 0,
+            "x509_targeted_users_with_weaker_methods": 0,
+            "x509_targeted_users_without_certificate_user_ids": 0
+          }
+        },
+        "schema_version": "1.0"
+      }
+
+  - name: user_unmapped
+    expect: FAIL
+    artifact: '{"schema_version":"1.0","metadata":{"exit_code":0,"status":"success","evidence_set":{"reference_id":"EVD-AZURE-ENTRA-AUTH-METHODS-POLICY"}},"payload":{"metadata":{"partial_failure":false,"api_failures":[]},"results":{"authentication_methods":[],"trusted_certificate_authorities":[],"x509_certificate_users":[{"id":"00000000-0000-0000-0000-000000000001","user_principal_name":"user1@example.com","certificate_user_ids_count":0,"certificate_user_id_types":[],"mapping":"none","mapped":false,"mapped_high_affinity":false,"weaker_methods_enabled":[],"weaker_methods_unknown":[],"weaker_method_enabled":false,"weak_method_enabled":false}]},"summary":{"authentication_methods_policy_readable":true,"enabled_methods":["Fido2","X509Certificate"],"sms_enabled":false,"voice_enabled":false,"weak_methods_enabled":[],"weak_method_enabled":false,"fido2_enabled":true,"x509_certificate_enabled":true,"x509_certificate_multi_factor":true,"phishing_resistant_methods_enabled":["Fido2","X509Certificate"],"phishing_resistant_method_enabled":true,"policy_migration_state":"migrationComplete","legacy_method_policies_apply":false,"security_defaults_enabled":false,"entra_id_tier":"p1","trusted_certificate_authorities":2,"expired_certificate_authorities":0,"certificate_authorities_expiry_unknown":0,"certificate_authorities_without_crl":0,"classic_store_certificate_authorities":1,"classic_store_status":"read","classic_store_missing_permission":null,"pki_store_certificate_authorities":1,"pki_store_status":"read","pki_store_missing_permission":null,"x509_targeted_users":3,"x509_targeted_users_unmapped":1,"x509_targeted_users_mapping_unverified":0,"x509_targeted_users_without_certificate_user_ids":1,"x509_targeted_users_with_weaker_methods":0,"x509_targeted_users_with_weak_methods":0,"x509_certificate_users_truncated":false}}}'
+
+  - name: user_mapping_unverified
+    expect: FAIL
+    note: 'only a userPrincipalName-style binding could match them'
+    artifact: '{"schema_version":"1.0","metadata":{"exit_code":0,"status":"success","evidence_set":{"reference_id":"EVD-AZURE-ENTRA-AUTH-METHODS-POLICY"}},"payload":{"metadata":{"partial_failure":false,"api_failures":[]},"results":{"authentication_methods":[],"trusted_certificate_authorities":[],"x509_certificate_users":[]},"summary":{"authentication_methods_policy_readable":true,"enabled_methods":["Fido2","X509Certificate"],"sms_enabled":false,"voice_enabled":false,"weak_methods_enabled":[],"weak_method_enabled":false,"fido2_enabled":true,"x509_certificate_enabled":true,"x509_certificate_multi_factor":true,"phishing_resistant_methods_enabled":["Fido2","X509Certificate"],"phishing_resistant_method_enabled":true,"policy_migration_state":"migrationComplete","legacy_method_policies_apply":false,"security_defaults_enabled":false,"entra_id_tier":"p1","trusted_certificate_authorities":2,"expired_certificate_authorities":0,"certificate_authorities_expiry_unknown":0,"certificate_authorities_without_crl":0,"classic_store_certificate_authorities":1,"classic_store_status":"read","classic_store_missing_permission":null,"pki_store_certificate_authorities":1,"pki_store_status":"read","pki_store_missing_permission":null,"x509_targeted_users":3,"x509_targeted_users_unmapped":0,"x509_targeted_users_mapping_unverified":2,"x509_targeted_users_without_certificate_user_ids":2,"x509_targeted_users_with_weaker_methods":0,"x509_targeted_users_with_weak_methods":0,"x509_certificate_users_truncated":false}}}'
+
+  - name: weaker_method_reaches_user
+    expect: FAIL
+    note: 'for example Microsoft Authenticator targets all users'
+    artifact: '{"schema_version":"1.0","metadata":{"exit_code":0,"status":"success","evidence_set":{"reference_id":"EVD-AZURE-ENTRA-AUTH-METHODS-POLICY"}},"payload":{"metadata":{"partial_failure":false,"api_failures":[]},"results":{"authentication_methods":[],"trusted_certificate_authorities":[],"x509_certificate_users":[]},"summary":{"authentication_methods_policy_readable":true,"enabled_methods":["Fido2","X509Certificate"],"sms_enabled":false,"voice_enabled":false,"weak_methods_enabled":[],"weak_method_enabled":false,"fido2_enabled":true,"x509_certificate_enabled":true,"x509_certificate_multi_factor":true,"phishing_resistant_methods_enabled":["Fido2","X509Certificate"],"phishing_resistant_method_enabled":true,"policy_migration_state":"migrationComplete","legacy_method_policies_apply":false,"security_defaults_enabled":false,"entra_id_tier":"p1","trusted_certificate_authorities":2,"expired_certificate_authorities":0,"certificate_authorities_expiry_unknown":0,"certificate_authorities_without_crl":0,"classic_store_certificate_authorities":1,"classic_store_status":"read","classic_store_missing_permission":null,"pki_store_certificate_authorities":1,"pki_store_status":"read","pki_store_missing_permission":null,"x509_targeted_users":3,"x509_targeted_users_unmapped":0,"x509_targeted_users_mapping_unverified":0,"x509_targeted_users_without_certificate_user_ids":0,"x509_targeted_users_with_weaker_methods":3,"x509_targeted_users_with_weak_methods":0,"x509_certificate_users_truncated":false}}}'
+
+  - name: weak_method_reaches_user
+    expect: FAIL
+    artifact: '{"schema_version":"1.0","metadata":{"exit_code":0,"status":"success","evidence_set":{"reference_id":"EVD-AZURE-ENTRA-AUTH-METHODS-POLICY"}},"payload":{"metadata":{"partial_failure":false,"api_failures":[]},"results":{"authentication_methods":[],"trusted_certificate_authorities":[],"x509_certificate_users":[]},"summary":{"authentication_methods_policy_readable":true,"enabled_methods":["Fido2","X509Certificate"],"sms_enabled":false,"voice_enabled":false,"weak_methods_enabled":[],"weak_method_enabled":false,"fido2_enabled":true,"x509_certificate_enabled":true,"x509_certificate_multi_factor":true,"phishing_resistant_methods_enabled":["Fido2","X509Certificate"],"phishing_resistant_method_enabled":true,"policy_migration_state":"migrationComplete","legacy_method_policies_apply":false,"security_defaults_enabled":false,"entra_id_tier":"p1","trusted_certificate_authorities":2,"expired_certificate_authorities":0,"certificate_authorities_expiry_unknown":0,"certificate_authorities_without_crl":0,"classic_store_certificate_authorities":1,"classic_store_status":"read","classic_store_missing_permission":null,"pki_store_certificate_authorities":1,"pki_store_status":"read","pki_store_missing_permission":null,"x509_targeted_users":3,"x509_targeted_users_unmapped":0,"x509_targeted_users_mapping_unverified":0,"x509_targeted_users_without_certificate_user_ids":0,"x509_targeted_users_with_weaker_methods":1,"x509_targeted_users_with_weak_methods":1,"x509_certificate_users_truncated":false}}}'
+
+  - name: no_username_bindings
+    expect: FAIL
+    note: 'the rules that would match a user are unknown'
+    artifact: '{"schema_version":"1.0","metadata":{"exit_code":0,"status":"success","evidence_set":{"reference_id":"EVD-AZURE-ENTRA-AUTH-METHODS-POLICY"}},"payload":{"metadata":{"partial_failure":false,"api_failures":[]},"results":{"authentication_methods":[],"trusted_certificate_authorities":[],"x509_certificate_users":[]},"summary":{"authentication_methods_policy_readable":true,"enabled_methods":["Fido2","X509Certificate"],"sms_enabled":false,"voice_enabled":false,"weak_methods_enabled":[],"weak_method_enabled":false,"fido2_enabled":true,"x509_certificate_enabled":true,"x509_certificate_multi_factor":true,"phishing_resistant_methods_enabled":["Fido2","X509Certificate"],"phishing_resistant_method_enabled":true,"policy_migration_state":"migrationComplete","legacy_method_policies_apply":false,"security_defaults_enabled":false,"entra_id_tier":"p1","trusted_certificate_authorities":2,"expired_certificate_authorities":0,"certificate_authorities_expiry_unknown":0,"certificate_authorities_without_crl":0,"classic_store_certificate_authorities":1,"classic_store_status":"read","classic_store_missing_permission":null,"pki_store_certificate_authorities":1,"pki_store_status":"read","pki_store_missing_permission":null,"x509_targeted_users":3,"x509_targeted_users_unmapped":null,"x509_targeted_users_mapping_unverified":null,"x509_targeted_users_without_certificate_user_ids":0,"x509_targeted_users_with_weaker_methods":0,"x509_targeted_users_with_weak_methods":0,"x509_certificate_users_truncated":false}}}'
+
+  - name: targeted_group_unreadable
+    expect: FAIL
+    note: 'one unread group leaves every user count null'
+    artifact: '{"schema_version":"1.0","metadata":{"exit_code":1,"status":"failed","evidence_set":{"reference_id":"EVD-AZURE-ENTRA-AUTH-METHODS-POLICY"}},"payload":{"metadata":{"partial_failure":true,"api_failures":[]},"results":{"authentication_methods":[],"trusted_certificate_authorities":[],"x509_certificate_users":[]},"summary":{"authentication_methods_policy_readable":true,"enabled_methods":["Fido2","X509Certificate"],"sms_enabled":false,"voice_enabled":false,"weak_methods_enabled":[],"weak_method_enabled":false,"fido2_enabled":true,"x509_certificate_enabled":true,"x509_certificate_multi_factor":true,"phishing_resistant_methods_enabled":["Fido2","X509Certificate"],"phishing_resistant_method_enabled":true,"policy_migration_state":"migrationComplete","legacy_method_policies_apply":false,"security_defaults_enabled":false,"entra_id_tier":"p1","trusted_certificate_authorities":2,"expired_certificate_authorities":0,"certificate_authorities_expiry_unknown":0,"certificate_authorities_without_crl":0,"classic_store_certificate_authorities":1,"classic_store_status":"read","classic_store_missing_permission":null,"pki_store_certificate_authorities":1,"pki_store_status":"read","pki_store_missing_permission":null,"x509_targeted_users":null,"x509_targeted_users_unmapped":null,"x509_targeted_users_mapping_unverified":null,"x509_targeted_users_without_certificate_user_ids":null,"x509_targeted_users_with_weaker_methods":null,"x509_targeted_users_with_weak_methods":null,"x509_certificate_users_truncated":null}}}'
+
+  - name: weaker_reach_unknown
+    expect: FAIL
+    note: 'a weaker method targets a group that could not be read'
+    artifact: '{"schema_version":"1.0","metadata":{"exit_code":0,"status":"success","evidence_set":{"reference_id":"EVD-AZURE-ENTRA-AUTH-METHODS-POLICY"}},"payload":{"metadata":{"partial_failure":false,"api_failures":[]},"results":{"authentication_methods":[],"trusted_certificate_authorities":[],"x509_certificate_users":[]},"summary":{"authentication_methods_policy_readable":true,"enabled_methods":["Fido2","X509Certificate"],"sms_enabled":false,"voice_enabled":false,"weak_methods_enabled":[],"weak_method_enabled":false,"fido2_enabled":true,"x509_certificate_enabled":true,"x509_certificate_multi_factor":true,"phishing_resistant_methods_enabled":["Fido2","X509Certificate"],"phishing_resistant_method_enabled":true,"policy_migration_state":"migrationComplete","legacy_method_policies_apply":false,"security_defaults_enabled":false,"entra_id_tier":"p1","trusted_certificate_authorities":2,"expired_certificate_authorities":0,"certificate_authorities_expiry_unknown":0,"certificate_authorities_without_crl":0,"classic_store_certificate_authorities":1,"classic_store_status":"read","classic_store_missing_permission":null,"pki_store_certificate_authorities":1,"pki_store_status":"read","pki_store_missing_permission":null,"x509_targeted_users":3,"x509_targeted_users_unmapped":0,"x509_targeted_users_mapping_unverified":0,"x509_targeted_users_without_certificate_user_ids":0,"x509_targeted_users_with_weaker_methods":null,"x509_targeted_users_with_weak_methods":0,"x509_certificate_users_truncated":false}}}'
+
+  - name: policy_unreadable
+    expect: FAIL
+    artifact: '{"schema_version":"1.0","metadata":{"exit_code":1,"status":"failed","evidence_set":{"reference_id":"EVD-AZURE-ENTRA-AUTH-METHODS-POLICY"}},"payload":{"metadata":{"partial_failure":true,"api_failures":[]},"results":{"authentication_methods":[],"trusted_certificate_authorities":[],"x509_certificate_users":[]},"summary":{"authentication_methods_policy_readable":false,"enabled_methods":null,"sms_enabled":null,"voice_enabled":null,"weak_methods_enabled":null,"weak_method_enabled":null,"fido2_enabled":null,"x509_certificate_enabled":null,"x509_certificate_multi_factor":null,"phishing_resistant_methods_enabled":null,"phishing_resistant_method_enabled":null,"policy_migration_state":null,"legacy_method_policies_apply":null,"security_defaults_enabled":false,"entra_id_tier":"p1","trusted_certificate_authorities":2,"expired_certificate_authorities":0,"certificate_authorities_expiry_unknown":0,"certificate_authorities_without_crl":0,"classic_store_certificate_authorities":1,"classic_store_status":"read","classic_store_missing_permission":null,"pki_store_certificate_authorities":1,"pki_store_status":"read","pki_store_missing_permission":null,"x509_targeted_users":null,"x509_targeted_users_unmapped":null,"x509_targeted_users_mapping_unverified":null,"x509_targeted_users_without_certificate_user_ids":null,"x509_targeted_users_with_weaker_methods":null,"x509_targeted_users_with_weak_methods":null,"x509_certificate_users_truncated":null}}}'
+
+  - name: unverified_count_renamed
+    expect: FAIL
+    artifact: '{"schema_version":"1.0","metadata":{"exit_code":0,"status":"success","evidence_set":{"reference_id":"EVD-AZURE-ENTRA-AUTH-METHODS-POLICY"}},"payload":{"metadata":{"partial_failure":false,"api_failures":[]},"results":{"authentication_methods":[],"trusted_certificate_authorities":[],"x509_certificate_users":[]},"summary":{"authentication_methods_policy_readable":true,"enabled_methods":["Fido2","X509Certificate"],"sms_enabled":false,"voice_enabled":false,"weak_methods_enabled":[],"weak_method_enabled":false,"fido2_enabled":true,"x509_certificate_enabled":true,"x509_certificate_multi_factor":true,"phishing_resistant_methods_enabled":["Fido2","X509Certificate"],"phishing_resistant_method_enabled":true,"policy_migration_state":"migrationComplete","legacy_method_policies_apply":false,"security_defaults_enabled":false,"entra_id_tier":"p1","trusted_certificate_authorities":2,"expired_certificate_authorities":0,"certificate_authorities_expiry_unknown":0,"certificate_authorities_without_crl":0,"classic_store_certificate_authorities":1,"classic_store_status":"read","classic_store_missing_permission":null,"pki_store_certificate_authorities":1,"pki_store_status":"read","pki_store_missing_permission":null,"x509_targeted_users":3,"x509_targeted_users_unmapped":0,"x509_users_unverified":2,"x509_targeted_users_without_certificate_user_ids":0,"x509_targeted_users_with_weaker_methods":0,"x509_targeted_users_with_weak_methods":0,"x509_certificate_users_truncated":false}}}'
+
+  - name: weaker_count_renamed
+    expect: FAIL
+    artifact: '{"schema_version":"1.0","metadata":{"exit_code":0,"status":"success","evidence_set":{"reference_id":"EVD-AZURE-ENTRA-AUTH-METHODS-POLICY"}},"payload":{"metadata":{"partial_failure":false,"api_failures":[]},"results":{"authentication_methods":[],"trusted_certificate_authorities":[],"x509_certificate_users":[]},"summary":{"authentication_methods_policy_readable":true,"enabled_methods":["Fido2","X509Certificate"],"sms_enabled":false,"voice_enabled":false,"weak_methods_enabled":[],"weak_method_enabled":false,"fido2_enabled":true,"x509_certificate_enabled":true,"x509_certificate_multi_factor":true,"phishing_resistant_methods_enabled":["Fido2","X509Certificate"],"phishing_resistant_method_enabled":true,"policy_migration_state":"migrationComplete","legacy_method_policies_apply":false,"security_defaults_enabled":false,"entra_id_tier":"p1","trusted_certificate_authorities":2,"expired_certificate_authorities":0,"certificate_authorities_expiry_unknown":0,"certificate_authorities_without_crl":0,"classic_store_certificate_authorities":1,"classic_store_status":"read","classic_store_missing_permission":null,"pki_store_certificate_authorities":1,"pki_store_status":"read","pki_store_missing_permission":null,"x509_targeted_users":3,"x509_targeted_users_unmapped":0,"x509_targeted_users_mapping_unverified":0,"x509_targeted_users_without_certificate_user_ids":0,"x509_users_with_weaker_methods":3,"x509_targeted_users_with_weak_methods":0,"x509_certificate_users_truncated":false}}}'

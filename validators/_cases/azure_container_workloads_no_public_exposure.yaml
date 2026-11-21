@@ -1,0 +1,17 @@
+validator: azure_container_workloads_no_public_exposure
+cases:
+  - name: compliant
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"container_apps_without_ip_restrictions":0,"container_groups_public_ip":0}}}'
+
+  - name: container_apps_without_ip_restrictions_nonzero
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"container_apps_without_ip_restrictions":1,"container_groups_public_ip":0}}}'
+
+  - name: container_groups_public_ip_nonzero
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"container_apps_without_ip_restrictions":0,"container_groups_public_ip":1}}}'
+
+  - name: container_apps_without_ip_restrictions_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"container_apps_without_ip_restrictions_renamed":0,"container_groups_public_ip":0}}}'
