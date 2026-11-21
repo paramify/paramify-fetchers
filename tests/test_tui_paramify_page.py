@@ -1087,3 +1087,51 @@ def test_a_capability_filter_that_matches_nothing_says_so(tmp_path, monkeypatch,
     rows, shown, text = run_tui(body, _manifest(tmp_path))
     assert rows == {} and shown
     assert "No capability matches “zzz”." in text
+
+
+def _failing_artifacts(set_id):
+    return [{"created_at": "2026-11-20T09:00:00Z", "title": "new", "validators": [
+        {"name": "check 0", "result": "PASS"}, {"name": "check 1", "result": "FAIL"}]}]
+
+
+def test_an_artifacts_read_error_keeps_the_failing_count(tmp_path, monkeypatch, run_tui):
+    _stub(monkeypatch, _status())
+    monkeypatch.setattr(api, "list_artifacts", _failing_artifacts)
+
+    async def body(app, pilot):
+        page = await _open(app, pilot)
+        before = _cells(page, "alpha")[3]
+
+        def boom(set_id):
+            raise RuntimeError("502 from Paramify")
+
+        monkeypatch.setattr(api, "list_artifacts", boom)
+        page._newest.pop("ev", None)  # so the detail's own read runs again
+        page._artifacts_worker("ev", page._generation)
+        await _settle(app, pilot)
+        return before, _cells(page, "alpha")[3], page._results.get("ev")
+
+    before, after, results = run_tui(body, _manifest(tmp_path))
+    assert before == after == "2/2 · 1 failing"
+    assert results and results["name:check 1"]["result"] == "FAIL"
+
+
+def test_artifacts_read_for_an_older_status_are_dropped(tmp_path, monkeypatch, run_tui):
+    _stub(monkeypatch, _status())
+    monkeypatch.setattr(api, "list_artifacts", _failing_artifacts)
+
+    async def body(app, pilot):
+        page = await _open(app, pilot)
+        old = page._generation
+        page.request_status()  # a newer status lands, and its artifacts read
+        await _settle(app, pilot)
+        newer = page._generation
+        # The older read's worker posts late, with what it saw then: nothing failing.
+        monkeypatch.setattr(api, "list_artifacts", lambda set_id: [])
+        page._all_artifacts_worker(["ev"], old)
+        await _settle(app, pilot)
+        return old, newer, _cells(page, "alpha")[3]
+
+    old, newer, cell = run_tui(body, _manifest(tmp_path))
+    assert newer == old + 1
+    assert cell == "2/2 · 1 failing"

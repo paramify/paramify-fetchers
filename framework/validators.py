@@ -13,6 +13,7 @@ import json
 from pathlib import Path
 from typing import Dict, Iterable, List, Set
 
+import yaml
 from jsonschema import Draft202012Validator
 
 from framework import yaml_io
@@ -170,16 +171,34 @@ def write_regex(path: Path, regex: str) -> None:
     included) as written. Only a one-line `regex:` is replaced, single-quoted as
     the registry writes them; the file is read back to prove the value landed.
 
-    Raises ValueError when the file has no one-line `regex:` to replace.
+    Raises ValueError when the file has no one-line `regex:` to replace (a
+    block scalar, or a quoted or plain one continued on the next lines), or
+    doesn't parse.
     """
     path = Path(path)
-    lines = path.read_text().splitlines(keepends=True)
+    original = path.read_text()
+    lines = original.splitlines(keepends=True)
     at = [i for i, line in enumerate(lines) if line.startswith("regex:")]
-    if len(at) != 1 or lines[at[0]].rstrip().endswith(("|", ">", "|-", ">-")):
-        raise ValueError(f"{path.name} has no one-line regex: to replace. Edit it by hand.")
+    one_line = f"{path.name} has no one-line regex: to replace (it spans several lines). Edit it by hand."
+    if len(at) != 1:
+        raise ValueError(one_line)
+    try:
+        whole = (yaml_io.load(original) or {}).get("regex")
+        alone = (yaml_io.load(lines[at[0]]) or {}).get("regex")
+    except yaml.YAMLError:
+        # A quoted value left open on its line doesn't parse alone: it goes on below.
+        raise ValueError(one_line) from None
+    except AttributeError:
+        raise ValueError(f"{path.name} isn't a validator file. Edit it by hand.") from None
+    if alone != whole:  # the value goes on past its line (a block, or a continued scalar)
+        raise ValueError(one_line)
     quoted = "'" + regex.replace("'", "''") + "'"
     lines[at[0]] = f"regex: {quoted}\n"
     text = "".join(lines)
-    if (yaml_io.load(text) or {}).get("regex") != regex:
+    try:
+        landed = (yaml_io.load(text) or {}).get("regex")
+    except (yaml.YAMLError, AttributeError):
+        landed = None
+    if landed != regex:
         raise ValueError(f"The regex wouldn't read back the same from {path.name}. Edit it by hand.")
     path.write_text(text)

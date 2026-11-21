@@ -3777,16 +3777,21 @@ def latest_validator_results(artifacts: List[dict]) -> Dict[str, dict]:
 
     `artifacts` as list_artifacts returns them, newest first. Validation runs on
     upload, so a validator's latest result is the one on the newest artifact that
-    has one (the reading `pfy validators failing` uses). Keyed by Paramify
-    validator id, and by name too for a validator with no id match:
+    has one (the reading `pfy validators failing` uses): an empty or NOT_SET
+    result is not one, so an older real verdict shows through it. Keyed by
+    Paramify validator id, and by name too for a validator with no id match:
     {id or name: {"id", "name", "result", "at", "artifact"}}, where `result` is
-    PASS, FAIL, ERROR or NOT_SET and `at` is the upload time ("2026-11-19 14:02").
+    PASS, FAIL or ERROR and `at` is the upload time ("2026-11-19 14:02"). A
+    validator no artifact has a real result for is absent (not run).
     """
     out: Dict[str, dict] = {}
     for art in artifacts:
         for v in art.get("validators") or []:
+            result = v.get("result") or ""
+            if result in ("", "NOT_SET"):
+                continue
             found = {"id": v.get("id") or "", "name": v.get("name") or "",
-                     "result": v.get("result") or "NOT_SET",
+                     "result": result,
                      "at": (art.get("created_at") or "")[:16].replace("T", " "),
                      "artifact": art.get("title") or art.get("file_name") or ""}
             for key in (found["id"], f"name:{found['name']}"):

@@ -1,11 +1,13 @@
-"""Ask Claude about a failing validator: `claude -p`, read-only, streamed.
+"""Ask Claude about a failing validator: `claude -p`, no tools, streamed.
 
 Ported from the error card (branch feat/tui-error-card), keeping only the
-runner: Claude Code in print mode as a subprocess, with only the read-only
-tools (Read, Grep, Glob) and a few turns. The prompt is the validator, how it
-failed on the user's own evidence, and that evidence. The answer streams back
-as stream-json, one JSON object per line, which StreamParser turns into small
-events a UI can render.
+runner: Claude Code in print mode as a subprocess. The prompt is the validator,
+how it failed on the user's own evidence, and that evidence, and it is all
+Claude gets: claude runs with no tools at all, in a fresh empty folder, and
+without the variables in the repo's .env or the manifest's secrets, so it can
+read nothing else of the user's. The answer streams back as stream-json, one
+JSON object per line, which StreamParser turns into small events a UI can
+render.
 
 Sends data to Anthropic under the user's own Claude Code login, so:
   * PARAMIFY_ASK_CLAUDE=0 turns it off (enabled()), for teams that cannot send
@@ -20,14 +22,18 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional
+from pathlib import Path
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Set
 
 ENV_SWITCH = "PARAMIFY_ASK_CLAUDE"
 ENV_MODEL = "PARAMIFY_ASK_CLAUDE_MODEL"
-READ_ONLY_TOOLS = "Read,Grep,Glob"
+# No tools: the prompt already holds the validator and the evidence, and a tool
+# could read (and send) any file the user can.
+NO_TOOLS = ""
 MAX_TURNS = 4
 TIMEOUT_SEC = 150.0
 INSTALL_HINT = (
@@ -38,6 +44,9 @@ INSTALL_HINT = (
 # Env vars a nested claude should not inherit: the ones that mark "inside a
 # Claude Code session" and change how it starts.
 _DROP_ENV = ("CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_SSE_PORT")
+# Paramify's own tokens, which need not be in .env (an export works too).
+_PARAMIFY_TOKENS = ("PARAMIFY_API_TOKEN", "PARAMIFY_UPLOAD_API_TOKEN")
+_ENV_REF = re.compile(r"\$\{env:([^}]+)\}")
 
 
 def enabled(env: Optional[Mapping[str, str]] = None) -> bool:
@@ -58,8 +67,7 @@ def build_command(exe: str, *, max_turns: int = MAX_TURNS, model: Optional[str] 
         "--output-format", "stream-json",
         "--verbose",                       # stream-json in print mode requires it
         "--include-partial-messages",      # token-by-token text, so the answer streams
-        "--tools", READ_ONLY_TOOLS,        # the only tools that exist in the session
-        "--allowedTools", READ_ONLY_TOOLS,  # ...and they need no approval
+        "--tools", NO_TOOLS,               # no tools exist in the session: it can't read a file
         "--permission-mode", "dontAsk",    # anything else is refused, never prompted
         "--max-turns", str(max_turns),
         "--strict-mcp-config",             # no MCP servers: faster start, nothing else reachable
@@ -74,7 +82,8 @@ def build_command(exe: str, *, max_turns: int = MAX_TURNS, model: Optional[str] 
 # keys, so the head of the file is nearly always enough to see its shape.
 EVIDENCE_CHARS = 12_000
 
-REGEX_LINE = re.compile(r"^[\s*]*Regex[\s*:]*`(?P<regex>.+)`\s*$", re.M)
+# The first backtick span after "Regex:"; anything after it on the line is ignored.
+REGEX_LINE = re.compile(r"^[\s*]*Regex[\s*:]*`(?P<regex>[^`\n]+)`[^\n]*$", re.M)
 
 
 def build_validator_prompt(validator: Mapping[str, Any], rules: Iterable[str], result: Mapping[str, Any],
@@ -227,8 +236,37 @@ class Outcome:
         return bool(self.answer) and not (self.error or self.cancelled or self.timed_out)
 
 
+def secret_names(root: Optional[Path], manifest: Any = None) -> Set[str]:
+    """The variables claude must not inherit: each one named in the repo's
+    .env (set or not), each one a ${env:...} reference in the manifest reads,
+    and Paramify's tokens. Names only; no value is read here."""
+    names: Set[str] = set(_PARAMIFY_TOKENS)
+    if root is not None:
+        from framework import envgen  # lazy: keeps this module light
+        path = Path(root) / ".env"
+        try:
+            names |= set(envgen.assigned(path.read_text()))
+        except OSError:
+            pass
+
+    def walk(node: Any) -> None:
+        if isinstance(node, str):
+            names.update(m.strip() for m in _ENV_REF.findall(node))
+        elif isinstance(node, Mapping):
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, (list, tuple)):
+            for value in node:
+                walk(value)
+
+    walk(manifest)
+    return names
+
+
 def child_env(env: Optional[Mapping[str, str]] = None, drop: Iterable[str] = ()) -> Dict[str, str]:
-    """The environment claude runs with: ours, minus the fetchers' secrets."""
+    """The environment claude runs with: ours (PATH, HOME and the rest Claude
+    Code needs to start and sign in), minus `drop`: the fetchers' secrets,
+    from secret_names()."""
     out = dict(os.environ if env is None else env)
     for name in (*_DROP_ENV, *drop):
         out.pop(name, None)
@@ -238,24 +276,33 @@ def child_env(env: Optional[Mapping[str, str]] = None, drop: Iterable[str] = ())
 def ask(
     prompt: str,
     *,
-    cwd: str,
     exe: str,
     on_event: Callable[[Event], None],
     cancel: Optional[threading.Event] = None,
     timeout: float = TIMEOUT_SEC,
     model: Optional[str] = None,
     env: Optional[Mapping[str, str]] = None,
+    drop: Iterable[str] = (),
     popen: Callable[..., Any] = subprocess.Popen,
 ) -> Outcome:
     """Run claude -p, stream its events to on_event, and return the outcome.
 
+    claude runs with no tools, in a fresh empty folder removed afterwards, with
+    child_env(env, drop): pass secret_names() as `drop`.
+
     Blocking: call it from a worker thread. Setting `cancel` (or the timeout
     passing) kills the process; the outcome says which.
     """
-    cancel = cancel or threading.Event()
+    with tempfile.TemporaryDirectory(prefix="paramify-ask-claude-") as cwd:
+        return _ask_in(prompt, cwd=cwd, exe=exe, on_event=on_event, cancel=cancel or threading.Event(),
+                       timeout=timeout, model=model, env=child_env(env, drop), popen=popen)
+
+
+def _ask_in(prompt: str, *, cwd: str, exe: str, on_event: Callable[[Event], None], cancel: threading.Event,
+            timeout: float, model: Optional[str], env: Dict[str, str], popen: Callable[..., Any]) -> Outcome:
     cmd = build_command(exe, model=model)
     try:
-        proc = popen(cmd, cwd=cwd, env=dict(env) if env is not None else child_env(),
+        proc = popen(cmd, cwd=cwd, env=env,
                      stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                      text=True, encoding="utf-8", errors="replace", bufsize=1)
     except OSError as exc:

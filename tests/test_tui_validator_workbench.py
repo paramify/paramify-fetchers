@@ -431,3 +431,172 @@ def test_write_regex_keeps_the_file_and_refuses_a_block_regex(tmp_path):
     path.write_text("key: x\nregex: >-\n  abc\n")
     with pytest.raises(ValueError):
         write_regex(path, "x")
+
+
+def test_proposed_regex_takes_the_first_backtick_span_after_regex():
+    assert ask_claude.proposed_regex(f"Why: renamed.\nRegex: `{FIXED}` (matches the new key)") == FIXED
+    assert ask_claude.proposed_regex("Why: x.\n**Regex:** `a+` then `b+`") == "a+"
+    # The answer drops the whole Regex: line, trailing words included.
+    assert ask_claude.REGEX_LINE.sub("", "Why: x.\nRegex: `a+` (tested)").strip() == "Why: x."
+
+
+def test_write_regex_refuses_a_quoted_regex_continued_on_the_next_line(tmp_path):
+    path = tmp_path / "v.yaml"
+    for text in ("key: x\nregex: 'abc\n  def'\nname: n\n",
+                 'key: x\nregex: "abc\n  def"\nname: n\n',
+                 "key: x\nregex: abc\n  def\nname: n\n"):
+        path.write_text(text)
+        with pytest.raises(ValueError, match="spans several lines"):
+            write_regex(path, "x")
+        assert path.read_text() == text  # untouched
+
+
+def test_write_regex_turns_a_yaml_error_into_a_value_error(tmp_path):
+    path = tmp_path / "v.yaml"
+    path.write_text("key: [unclosed\nregex: 'abc'\n")
+    with pytest.raises(ValueError):
+        write_regex(path, "x")
+
+
+# -- the local test across several files ---------------------------------------- #
+
+PAIRED = Validator(
+    key="enrolled_matches_total", name="Enrolled Matches Total", type="AUTOMATED",
+    statement="Every user has enrolled.", evidence_sets=[REF], role="completeness",
+    regex='"enrolled_users":\\s*(?<enrolled>\\d+),\\s*"total_users":\\s*(?<total>\\d+)',
+    # No match-count rule: with no match, nothing equals nothing and it passes vacuously.
+    validation_rules=[{"regexOperation": {"type": "MATCH_GROUP", "groupNumber": 1}, "criteria": "EQUALS",
+                       "value": {"type": "MATCH_GROUP", "groupNumber": 2}}])
+
+
+@needs_node
+def test_a_vacuous_pass_on_a_later_file_is_shown_and_counted(tmp_path):
+    clean, empty = tmp_path / "a_clean.json", tmp_path / "b_empty.json"
+    clean.write_text(json.dumps(EVIDENCE))
+    empty.write_text(json.dumps({"payload": {"results": []}}))
+    local = page_mod.run_local_test(PAIRED, [clean, empty])
+    assert local["verdict"] == "PASS"
+    assert local["shown"][0] == empty and local["shown"][1]["vacuous"]
+    assert local["failing"] == 1 and local["vacuous"] == 1
+    # A FAIL still outranks a vacuous pass.
+    assert page_mod._rank({"verdict": "FAIL"}) > page_mod._rank({"verdict": "PASS", "vacuous": True}) \
+        > page_mod._rank({"verdict": "PASS", "vacuous": False})
+
+    modal = ValidatorModal(PAIRED, True, REF, tmp_path)
+    modal.proposal = {"regex": PAIRED.regex, "test": local}
+    assert not modal._can_write()  # vacuous on one of the files
+    modal.proposal = {"regex": PAIRED.regex, "test": page_mod.run_local_test(PAIRED, [clean, clean])}
+    assert modal._can_write()
+
+
+@needs_node
+def test_paramify_results_reach_the_window_under_the_send_confirmation(tmp_path, monkeypatch, run_tui):
+    manifest, registry = make_workspace(tmp_path)
+    stub(monkeypatch, registry)
+
+    async def body(app, pilot):
+        modal = await open_validator(app, pilot, 2)
+        page = app.screen_stack[-2].query_one(ValidatorsPage)
+        modal.paramify = None  # still reading
+        await pilot.press("a")
+        await pilot.pause()
+        on_top = isinstance(app.screen, ReportModal)
+        page.post_message(page_mod.ResultsReady(REF, PARAMIFY))
+        await _settle(app, pilot)
+        return on_top, modal.paramify, _text(modal._top())
+
+    on_top, paramify, top = run_tui(body, manifest)
+    assert on_top and paramify == PARAMIFY
+    assert "reading the workspace" not in top and "FAIL   on the newest upload" in top
+
+
+@needs_node
+def test_the_window_sends_claude_no_secrets(tmp_path, monkeypatch, run_tui):
+    manifest, registry = make_workspace(tmp_path)
+    stub(monkeypatch, registry)
+    seen = {}
+
+    def ask(prompt, *, on_event, **kw):
+        seen.update(kw)
+        return ask_claude.Outcome(answer="Why: x.\nRegex: none")
+
+    monkeypatch.setattr(ask_claude, "ask", ask)
+
+    async def body(app, pilot):
+        app.ask_claude_confirmed = True
+        await open_validator(app, pilot, 2)
+        await pilot.press("a")
+        await _settle(app, pilot)
+        return ask_claude.secret_names(app.root_path, app.manifest)
+
+    expected = run_tui(body, manifest)
+    assert "cwd" not in seen  # ask() makes its own empty folder
+    assert set(seen["drop"]) == expected and "PARAMIFY_API_TOKEN" in expected
+
+
+# -- what claude runs with ----------------------------------------------------- #
+
+
+class FakeProc:
+    def __init__(self, answer: str) -> None:
+        self.stdin = io.StringIO()
+        self.stdout = io.StringIO(json.dumps({"type": "result", "result": answer}) + "\n")
+        self.stderr = io.StringIO("")
+        self.returncode = None
+
+    def poll(self):
+        return self.returncode
+
+    def wait(self):
+        self.returncode = 0
+        return 0
+
+    def kill(self):
+        self.returncode = -9
+
+
+def test_claude_runs_in_an_empty_folder_with_no_tools_and_no_secrets(tmp_path, monkeypatch):
+    import os
+    import tempfile
+
+    (tmp_path / ".env").write_text("FROM_DOTENV_TOKEN=s3cret\nEMPTY_ONE=\n")
+    monkeypatch.setenv("FROM_DOTENV_TOKEN", "s3cret")  # as load_dotenv leaves it
+    monkeypatch.setenv("OKTA_API_TOKEN", "t0ken")
+    monkeypatch.setenv("CLAUDECODE", "1")
+    manifest = {"run": {"fetchers": [{"use": "okta_mfa", "secrets": {"token": "${env:OKTA_API_TOKEN}"}}]}}
+    seen = {}
+
+    def popen(cmd, *, cwd, env, **kw):
+        seen.update(cmd=cmd, cwd=cwd, env=env, listing=os.listdir(cwd))
+        return FakeProc("Why: x.\nRegex: none")
+
+    outcome = ask_claude.ask("the report", exe="/fake/claude", on_event=lambda ev: None,
+                             drop=ask_claude.secret_names(tmp_path, manifest), popen=popen)
+    assert outcome.ok
+    # A fresh, empty temp folder, not the repo, removed afterwards.
+    assert seen["listing"] == []
+    assert os.path.realpath(seen["cwd"]).startswith(os.path.realpath(tempfile.gettempdir()))
+    assert not Path(seen["cwd"]).exists()
+    # No tools at all, so nothing to approve either.
+    cmd = seen["cmd"]
+    assert cmd[cmd.index("--tools") + 1] == ""
+    assert "--allowedTools" not in cmd and not any("Read" in part for part in cmd)
+    # Neither .env's variables nor the manifest's secrets; what claude needs to start stays.
+    env = seen["env"]
+    assert "FROM_DOTENV_TOKEN" not in env and "OKTA_API_TOKEN" not in env and "CLAUDECODE" not in env
+    assert env.get("PATH") == os.environ["PATH"] and env.get("HOME") == os.environ["HOME"]
+
+
+def test_an_empty_or_not_set_result_does_not_hide_an_older_verdict():
+    artifacts = [  # newest first
+        {"created_at": "2026-11-20T09:00:00Z", "title": "c", "validators": [
+            {"id": "v-1", "name": "A", "result": "NOT_SET"}, {"id": "v-2", "name": "B", "result": ""},
+            {"id": "v-3", "name": "C", "result": "NOT_SET"}]},
+        {"created_at": "2026-11-19T09:00:00Z", "title": "b", "validators": [
+            {"id": "v-1", "name": "A", "result": "FAIL"}, {"id": "v-2", "name": "B", "result": "PASS"}]},
+    ]
+    latest = api.latest_validator_results(artifacts)
+    assert latest["v-1"]["result"] == "FAIL" and latest["v-1"]["at"] == "2026-11-19 09:00"
+    assert latest["v-2"]["result"] == "PASS"
+    # No artifact has a real verdict for C: it reads as not run.
+    assert api.result_for(latest, "v-3", "C") is None

@@ -131,7 +131,8 @@ def describe_rule(rule: dict, groups: list) -> str:
     return f"{subject} {str(rule.get('criteria', '?')).lower().replace('_', ' ')} {shown}"
 
 
-_RANK = {"PASS": 0, "FAIL": 1, "ERROR": 2, "COMPILE_ERROR": 3}
+_RANK = {"PASS": 0, "FAIL": 2, "ERROR": 3, "COMPILE_ERROR": 4}
+VACUOUS_RANK = 1  # a PASS that read nothing: worse than a clean PASS, better than a FAIL
 NO_NODE = ("Node isn't installed, so the regex can't run here. Paramify runs validators as "
            "JavaScript. Install Node (brew install node, or nodejs.org), then press t.")
 CONFIRM_SEND = "Send this to Claude using your Claude Code login?"
@@ -143,22 +144,32 @@ def _payload(v, regex: str | None = None) -> dict:
             "validation_rules": v.validation_rules}
 
 
+def _rank(result: dict) -> int:
+    if result["verdict"] == "PASS" and result.get("vacuous"):
+        return VACUOUS_RANK
+    return _RANK.get(result["verdict"], 9)
+
+
 def run_local_test(v, files: list, regex: str | None = None) -> dict:
     """Evaluate `v` (or `regex` in its place) on each evidence file, as a live
     tenant does today. Returns {"state": "ok", "verdict", "shown": (path, result),
-    "failing": n, "files": n} or {"state": "no_node"}. The shown file is the
-    first one with the worst verdict, so its trace explains the verdict."""
+    "failing": n, "files": n, "vacuous": n} or {"state": "no_node"}. A PASS
+    that read nothing (vacuous) counts as failing and ranks below a clean PASS.
+    The shown file is the first one with the worst result, so its trace explains
+    the verdict."""
     if not node_available():
         return {"state": "no_node"}
     worst = None
-    failing = 0
+    failing = vacuous = 0
     for path in files:
         result = evaluate(_payload(v, regex), Path(path).read_text(), mode="api-today")
-        failing += result["verdict"] != "PASS"
-        if worst is None or _RANK.get(result["verdict"], 9) > _RANK.get(worst[1]["verdict"], 9):
+        empty = result["verdict"] == "PASS" and bool(result.get("vacuous"))
+        vacuous += empty
+        failing += result["verdict"] != "PASS" or empty
+        if worst is None or _rank(result) > _rank(worst[1]):
             worst = (path, result)
     return {"state": "ok", "verdict": worst[1]["verdict"], "shown": worst,
-            "failing": failing, "files": len(files)}
+            "failing": failing, "files": len(files), "vacuous": vacuous}
 
 
 def _read(value) -> str:
@@ -312,7 +323,7 @@ class ValidatorModal(ModalScreen[bool]):
         where = Text(Path(path).name)
         where.append(f"  ·  {Path(path).parent.name}", style=palette.MUTED)
         if local["files"] > 1:
-            where.append(f"\nfails on {local['failing']} of {local['files']} files; this is the first that fails"
+            where.append(f"\nfails on {local['failing']} of {local['files']} files; this is the worst one"
                          if local["failing"] else f"\npasses on all {local['files']} files", style=palette.MUTED)
         note = self._why(result)
         if note:
@@ -376,8 +387,11 @@ class ValidatorModal(ModalScreen[bool]):
         return self._failing() and ask_claude.enabled()
 
     def _can_write(self) -> bool:
+        """Only a proposal that passes cleanly on every file: no FAIL, and no
+        file where it passed without reading anything."""
         test = (self.proposal or {}).get("test") or {}
-        return test.get("state") == "ok" and test["verdict"] == "PASS" and not test["shown"][1].get("vacuous")
+        return (test.get("state") == "ok" and test["verdict"] == "PASS" and not test.get("failing")
+                and not test["shown"][1].get("vacuous"))
 
     def _foot(self) -> Text:
         keys = []
@@ -478,7 +492,9 @@ class ValidatorModal(ModalScreen[bool]):
 
         self.app.push_screen(ReportModal(
             prompt, "Ask Claude",
-            "This is everything that is sent: the validator, how it failed, and your evidence file.",
+            "This is everything that is sent: the validator, how it failed, and your evidence file. "
+            "Claude gets no tools and runs in an empty folder without your .env or the manifest's "
+            "secrets, so it can't read anything else of yours.",
             CONFIRM_SEND, "Send"), done)
 
     def _start_ask(self, exe: str, prompt: str) -> None:
@@ -493,10 +509,11 @@ class ValidatorModal(ModalScreen[bool]):
 
     @work(thread=True, exclusive=True, group="vm-ask")
     def _ask_worker(self, exe: str, prompt: str) -> None:
-        cwd = str(self.root or Path.cwd())
+        # No tools, an empty folder, and none of the fetchers' secrets: the report is all it gets.
         outcome = ask_claude.ask(
-            prompt, cwd=cwd, exe=exe, cancel=self._cancel,
+            prompt, exe=exe, cancel=self._cancel,
             model=os.environ.get(ask_claude.ENV_MODEL) or None,
+            drop=ask_claude.secret_names(self.root, getattr(self.app, "manifest", None)),
             on_event=lambda ev: self.app.call_from_thread(self._on_event, ev),
         )
         proposal = None
@@ -743,9 +760,10 @@ class ValidatorsPage(Vertical):
             self._draw_validators()
             vtable.move_cursor(row=row)
             vtable.scroll_to(y=scroll, animate=False)
-        screen = self.app.screen
-        if isinstance(screen, ValidatorModal) and screen.ref == message.ref:
-            screen.show_paramify(message.results)
+        # The window may be under Ask Claude's report or the write confirmation.
+        for screen in self.app.screen_stack:
+            if isinstance(screen, ValidatorModal) and screen.ref == message.ref:
+                screen.show_paramify(message.results)
 
     def _result(self, item: dict, v) -> dict | None:
         """v's latest result in Paramify, when it has been read and has one."""
@@ -862,9 +880,10 @@ class ValidatorsPage(Vertical):
         edge = Text("▌", style=hue)
         box = Text("[x]" if on else "[ ]", style=hue if on else palette.MUTED)
         changed = item["entry"].get("validators") is not None and on != (v.source == "paramify")
+        # edge + box columns + cell padding + scrollbar, the result column's padding
+        # (always there), and its pill once results are read
         read = (self._results.get(item["ref"]) or {}).get("results")
-        # edge + box columns + cell padding + scrollbar (+ the result column)
-        room = self.query_one("#vs-right").content_size.width - 12 - (3 if changed else 0) - (13 if read else 0)
+        room = self.query_one("#vs-right").content_size.width - 14 - (3 if changed else 0) - (11 if read else 0)
         name = Text(fit(v.name, room), style="bold" if on else palette.MUTED)
         # * = differs from the default (Paramify on, community off), same mark as the fetcher list.
         if changed:

@@ -119,12 +119,17 @@ _SCRIPT_MARKS = {
 
 class ArtifactsReady(Message):
     """The newest artifact date of one evidence set, and each validator's latest
-    result there (api.latest_validator_results), from the worker thread."""
+    result there (api.latest_validator_results), from the worker thread.
+    `results` None: the artifacts couldn't be read, so what is known stays.
+    `generation` is the status read the worker started under; a message from
+    an older read is dropped."""
 
-    def __init__(self, set_id: str, newest: str | None, results: dict | None = None) -> None:
+    def __init__(self, set_id: str, newest: str | None, results: dict | None = None,
+                 generation: int = 0) -> None:
         self.set_id = set_id
         self.newest = newest
-        self.results = results or {}
+        self.results = results
+        self.generation = generation
         super().__init__()
 
 
@@ -304,6 +309,8 @@ class ParamifyPage(ParamifyWriter, Vertical):
         self._stale = True
         self._newest: dict = {}
         self._results: dict = {}  # {set id: api.latest_validator_results(...)}, read with _newest
+        # Bumped by each status read that lands: artifacts read under an older one are dropped.
+        self._generation = 0
         self._rows: dict = {}
         self._filter = ""
         self._hide_ready = False
@@ -457,6 +464,8 @@ class ParamifyPage(ParamifyWriter, Vertical):
             self._rows = {}
             self._error = None
             self._newest = {}
+            self._results = {}
+            self._generation += 1
             self._cap_pairs = {}
             self._cap_others = {}
             for table in ("#pf-grid", "#pf-caps", "#pf-cap-grid", "#pf-pairs"):
@@ -536,6 +545,7 @@ class ParamifyPage(ParamifyWriter, Vertical):
             self._status_clock = datetime.now().strftime("%H:%M")
             self._newest = {}
             self._results = {}
+            self._generation += 1
         # Never focus from here: a read can land while the user is on another tab.
         # When the redraw hides the grid (an empty manifest), Textual moves focus
         # to the next focusable widget: the hint, which takes focus for that.
@@ -547,7 +557,7 @@ class ParamifyPage(ParamifyWriter, Vertical):
                    if r["evidence_set"]["id"] and r["evidence_set"]["artifact_count"]
                    and any(v["paired"] for v in r["validators"])]
             if ids:
-                self._all_artifacts_worker(ids)
+                self._all_artifacts_worker(ids, self._generation)
         if reread:
             self.request_status()
 
@@ -899,7 +909,7 @@ class ParamifyPage(ParamifyWriter, Vertical):
         self._show_caps(row, online)
         set_id = row["evidence_set"]["id"]
         if online and set_id and (row["evidence_set"]["artifact_count"] or 0) and set_id not in self._newest:
-            self._artifacts_worker(set_id)
+            self._artifacts_worker(set_id, self._generation)
 
     def _show_no_match(self) -> None:
         """The filter or w hides every fetcher: say so where the detail was."""
@@ -1002,17 +1012,19 @@ class ParamifyPage(ParamifyWriter, Vertical):
                 table.add_row(label, fn, *marks)
 
     @work(thread=True, exclusive=True, group="paramify-artifacts")
-    def _artifacts_worker(self, set_id: str) -> None:
+    def _artifacts_worker(self, set_id: str, generation: int) -> None:
         try:
             artifacts = api.list_artifacts(set_id)
         except Exception:  # noqa: BLE001 — the count still shows; only the date is lost
-            artifacts = []
+            # No results: a failing count already read stays as it is.
+            self.post_message(ArtifactsReady(set_id, None, None, generation))
+            return
         created = (artifacts[0].get("created_at") or "") if artifacts else ""
         self.post_message(ArtifactsReady(set_id, created[:16].replace("T", " ") or None,
-                                         api.latest_validator_results(artifacts)))
+                                         api.latest_validator_results(artifacts), generation))
 
     @work(thread=True, exclusive=True, group="paramify-results")
-    def _all_artifacts_worker(self, set_ids: list) -> None:
+    def _all_artifacts_worker(self, set_ids: list, generation: int) -> None:
         for set_id in set_ids:
             try:
                 artifacts = api.list_artifacts(set_id)
@@ -1020,9 +1032,15 @@ class ParamifyPage(ParamifyWriter, Vertical):
                 continue
             created = (artifacts[0].get("created_at") or "") if artifacts else ""
             self.post_message(ArtifactsReady(set_id, created[:16].replace("T", " ") or None,
-                                             api.latest_validator_results(artifacts)))
+                                             api.latest_validator_results(artifacts), generation))
 
     def on_artifacts_ready(self, message: ArtifactsReady) -> None:
+        if message.generation != self._generation:
+            return  # read for an older status: newer results may already be here
+        if message.results is None:
+            # The read failed: keep what is known, and don't read it again on every move.
+            self._newest.setdefault(message.set_id, None)
+            return
         self._newest[message.set_id] = message.newest
         self._results[message.set_id] = message.results
         status = self._status or {}
