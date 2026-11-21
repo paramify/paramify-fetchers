@@ -225,8 +225,8 @@ def test_the_entry_editor_says_where_targets_are_edited(tmp_path, run_tui):
         return app.screen._title, app.screen._subtitle
 
     title, subtitle = run_tui(body, manifest)
-    assert "entry config and secrets" in title
-    assert "'t'" in subtitle
+    assert title == f"Edit {name}"
+    assert subtitle == "Targets are edited with t."
     # short enough to survive the card width — a clipped subtitle takes the
     # pointer with it, which is the half that matters here
     assert len(subtitle) <= 66

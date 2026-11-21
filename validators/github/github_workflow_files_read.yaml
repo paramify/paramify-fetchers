@@ -1,0 +1,18 @@
+key: github_workflow_files_read
+name: GitHub Workflow Files Read
+type: AUTOMATED
+role: completeness
+source: community
+statement: >-
+  At least one workflow file on a default branch was read, so the signing checks judge real workflows.
+regex: '"workflow_files":\s*(?<workflow_files>[1-9]\d*)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+- regexOperation:
+    type: MATCH_COUNT
+  criteria: NOT_EQUALS
+  value:
+    type: CUSTOM_TEXT
+    customText: '0'
+evidence_sets:
+- EVD-GITHUB-IMAGE-SIGNING
