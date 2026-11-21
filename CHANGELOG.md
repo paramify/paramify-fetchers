@@ -40,6 +40,11 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`keycloak_admin_events` fetcher.** Reads the sign-in and admin events Keycloak has stored over a window (default 7
+  days), GET only with view-events: successful, failed and blocked sign-ins counted apart, brute-force lockouts, users
+  created and disabled, password resets, role grants and other privileged changes, and how recently events arrived,
+  leaving out the fetcher's own token requests. Usernames, IP addresses and changed objects are never copied. More
+  than 20,000 events in a window leaves counts null rather than undercounted.
 - **`keycloak` category and `keycloak_realm_security` fetcher.** Reads a Keycloak realm through the Admin REST API with a
   read-only service-account client: session and token lifetimes, brute-force lockout, password policy, the browser
   and reset-credentials flows with each step's effective requirement (so a phishing-resistant authenticator counts
