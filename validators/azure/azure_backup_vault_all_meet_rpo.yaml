@@ -2,6 +2,7 @@ key: azure_backup_vault_all_meet_rpo
 name: 'Azure Backup Vaults: Every Protected Resource Meets the Recovery Point Objective'
 type: AUTOMATED
 role: configuration
+source: community
 statement: >
   Every applicable backup instance's newest recovery point is no older than the defined recovery
   point objective (all_backup_instances_meet_recovery_point_objective is true). Fails while

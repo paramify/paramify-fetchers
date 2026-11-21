@@ -2,6 +2,7 @@ key: checkov_kubernetes_checks_ran
 name: 'Checkov Kubernetes: Checks Ran Against the Manifests'
 type: AUTOMATED
 role: completeness
+source: community
 statement: >
   Checkov ran at least one check against the repository's Kubernetes manifests (total_checks is
   above 0). Fails when the repository has no manifests, the clone or scan failed, or the count

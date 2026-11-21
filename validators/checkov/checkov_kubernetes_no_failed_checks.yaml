@@ -2,6 +2,7 @@ key: checkov_kubernetes_no_failed_checks
 name: 'Checkov Kubernetes: No Check Failed'
 type: AUTOMATED
 role: configuration
+source: community
 statement: >
   No Checkov check failed against the repository's Kubernetes manifests (failed_checks is 0). Checks
   in the skip list, and failures moved to skipped for listed resources, are not counted; the

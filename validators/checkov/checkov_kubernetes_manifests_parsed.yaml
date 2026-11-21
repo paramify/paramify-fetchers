@@ -2,6 +2,7 @@ key: checkov_kubernetes_manifests_parsed
 name: 'Checkov Kubernetes: Every Manifest Parsed'
 type: AUTOMATED
 role: integrity
+source: community
 statement: >
   Checkov parsed every Kubernetes manifest it found (parsing_errors is 0), so no manifest was left
   unchecked because it could not be read. Fails when the scan did not run, since Checkov then

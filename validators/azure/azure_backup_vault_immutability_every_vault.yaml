@@ -2,6 +2,7 @@ key: azure_backup_vault_immutability_every_vault
 name: 'Azure Backup Vaults: Immutability Is On for Every Vault'
 type: AUTOMATED
 role: configuration
+source: community
 statement: >
   Every Backup vault has immutability Unlocked or Locked, so recovery points cannot be deleted
   before they expire (immutability_enabled_vaults equals total_backup_vaults, and there is at least

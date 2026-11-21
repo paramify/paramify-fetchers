@@ -2,6 +2,7 @@ key: azure_resource_locks_protected_resources_locked
 name: 'Azure Resource Locks: Every Protected Resource Is Locked Against Deletion'
 type: AUTOMATED
 role: configuration
+source: community
 statement: >
   Every resource of a protected type (protected_types setting, or the default list) has a
   CanNotDelete or ReadOnly lock in effect, placed on the resource, its resource group or the

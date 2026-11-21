@@ -2,6 +2,7 @@ key: azure_backup_vault_soft_delete_every_vault
 name: 'Azure Backup Vaults: Soft Delete Is On for Every Vault'
 type: AUTOMATED
 role: configuration
+source: community
 statement: >
   Every Backup vault has soft delete On or AlwaysOn, so a deleted backup can be recovered for the
   retention period (soft_delete_enabled_vaults equals total_backup_vaults, and there is at least one
