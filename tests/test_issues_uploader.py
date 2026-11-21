@@ -28,6 +28,9 @@ from pathlib import Path
 
 import pytest
 
+from framework.paramify.client import Client
+from framework.paramify.pipelines import Pipelines
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 _UPLOADER_PATH = REPO_ROOT / "uploaders" / "paramify_issues" / "uploader.py"
 _spec = importlib.util.spec_from_file_location("issues_uploader_under_test", _UPLOADER_PATH)
@@ -43,57 +46,14 @@ COUNTS = {"recordsProcessed": 1, "issuesCreated": 1, "issuesUpdated": 0,
           "issuesSeenClosed": 0, "issuesCreatedAndClosed": 0, "issuesExcuseClosed": 0}
 
 
-@pytest.fixture(autouse=True)
-def no_real_waiting(monkeypatch):
-    """Drive the poll loop on a fake clock: each sleep advances it, none blocks."""
-    clock = {"now": 0.0}
-    monkeypatch.setattr(uploader, "_monotonic", lambda: clock["now"])
-    monkeypatch.setattr(uploader, "_sleep", lambda s: clock.__setitem__("now", clock["now"] + s))
-    return clock
-
-
 # --------------------------------------------------------------------------- #
-# Fakes for the HTTP boundary
+# A fake at the pipelines boundary (the HTTP shape is tested in
+# tests/test_paramify_pipelines.py)
 # --------------------------------------------------------------------------- #
-
-class FakeResponse:
-    def __init__(self, status_code=201, json_data=None, text=""):
-        self.status_code = status_code
-        self._json = {"artifact": {"id": "art-1"}, "job": None} if json_data is None else json_data
-        self.text = text
-
-    def json(self):
-        if self._json is _NO_JSON:
-            raise ValueError("not json")
-        return self._json
-
-
-_NO_JSON = object()
-
-
-class FakeSession:
-    """Drop-in for requests.Session that records every request."""
-
-    def __init__(self, responses=None):
-        self.headers = {}
-        self.posts = []
-        self.gets = []
-        self._responses = list(responses or [])
-
-    def _next(self):
-        return self._responses.pop(0) if self._responses else FakeResponse()
-
-    def post(self, url, files=None, json=None, timeout=None):
-        self.posts.append({"url": url, "files": files, "json": json})
-        return self._next()
-
-    def get(self, url, params=None, timeout=None):
-        self.gets.append({"url": url, "params": params})
-        return self._next()
-
 
 class FakeClient:
-    """Drop-in for ParamifyClient at the upload_run level.
+    """Drop-in for framework.paramify.pipelines.Pipelines at the upload_run level,
+    with a fake clock: each sleep advances it, none blocks.
 
     `job_statuses`: the statuses successive polls of each job report, last one
     repeated. Default: COMPLETED on the first poll.
@@ -112,12 +72,19 @@ class FakeClient:
         self.sent = []
         self.processed = []
         self.polls = 0
+        self.clock = 0.0
+
+    def now(self):
+        return self.clock
+
+    def sleep(self, seconds):
+        self.clock += seconds
 
     def intake(self, assessment_id, filename, content, content_type, meta):
         if filename in self.raise_on:
             raise self.raise_on[filename]
         if filename in self.fail_files:
-            raise uploader.ParamifyError(f"HTTP 500 on {filename}")
+            raise uploader.PipelineError(f"HTTP 500 on {filename}")
         self.sent.append({
             "assessment_id": assessment_id, "file": filename, "content": content,
             "content_type": content_type, "meta": meta,
@@ -203,18 +170,13 @@ def make_run(tmp_path, reports, *, run_id="RID", invocations="derive", close_cyc
 
 
 def run_upload(run_dir, client=None, *, config=None, dry_run=False, force=False,
-               wait=True, on_event=None):
-    """upload_run with the client injected and a token/base_url that pass the guards."""
-    original = uploader.ParamifyClient
-    if client is not None:
-        uploader.ParamifyClient = lambda *a, **k: client
-    try:
-        return uploader.upload_run(
-            run_dir, config=config, token="t", base_url="https://example.test/api/v0",
-            dry_run=dry_run, force=force, wait=wait, on_event=on_event,
-        )
-    finally:
-        uploader.ParamifyClient = original
+               wait=True, on_event=None, wait_timeout=None):
+    """upload_run with the pipelines injected and a token/base_url that pass the guards."""
+    return uploader.upload_run(
+        run_dir, config=config, token="t", base_url="https://example.test/api/v0",
+        dry_run=dry_run, force=force, wait=wait, on_event=on_event,
+        wait_timeout=wait_timeout, pipelines=client,
+    )
 
 
 def read_log(run_dir):
@@ -238,78 +200,6 @@ def test_file_is_read_from_disk_unchanged(tmp_path):
     client = FakeClient()
     run_upload(run_dir, client)
     assert client.sent[0]["content"] == RAW_CSV, "the report was altered before upload"
-
-
-def test_file_is_posted_byte_for_byte():
-    """And the client puts those exact bytes in the multipart body."""
-    session = FakeSession()
-    client = uploader.ParamifyClient("token", "https://example.test/api/v0")
-    client.session = session
-    client.intake(ASSESSMENT, "scan.csv", RAW_CSV, "text/csv", {"title": "T"})
-
-    files = session.posts[0]["files"]
-    assert files["file"][1] == RAW_CSV, "the report was altered before upload"
-    assert files["file"][2] == "text/csv"
-
-
-def test_intake_goes_to_the_pipeline_with_no_operation():
-    """Uploads never carry an operation: on an intake it sweeps every unprocessed
-    file on the cycle, and processing is one explicit call per run instead."""
-    session = FakeSession()
-    client = uploader.ParamifyClient("token-abc", "https://example.test/api/v0")
-    client.session = session
-    client.intake(ASSESSMENT, "scan.csv", RAW_CSV, "text/csv", {"title": "T"})
-    assert session.posts[0]["url"] == f"https://example.test/api/v0/pipelines/{ASSESSMENT}/intake"
-    meta = json.loads(session.posts[0]["files"]["artifact"][1])
-    assert "operation" not in meta and "cycle" not in meta
-
-
-def test_intake_returns_the_artifact():
-    session = FakeSession([FakeResponse(201, {"artifact": {"id": "a-9"}, "job": None})])
-    client = uploader.ParamifyClient("t", "https://example.test/api/v0")
-    client.session = session
-    assert client.intake(ASSESSMENT, "scan.csv", RAW_CSV, "text/csv", {})["id"] == "a-9"
-
-
-def test_process_names_the_artifacts_and_the_operation():
-    session = FakeSession([FakeResponse(202, {"id": "job-1", "status": "QUEUED"})])
-    client = uploader.ParamifyClient("t", "https://example.test/api/v0")
-    client.session = session
-    job = client.process(ASSESSMENT, ["a-1", "a-2"], "PROCESS")
-    assert session.posts[0]["url"] == f"https://example.test/api/v0/pipelines/{ASSESSMENT}/process"
-    assert session.posts[0]["json"] == {"artifactIds": ["a-1", "a-2"], "operation": "PROCESS"}
-    assert job["id"] == "job-1"
-
-
-def test_token_goes_on_the_session_as_a_bearer():
-    """Asserted on the real session the constructor built, before any fake
-    replaces it — patching the session first would test the fake, not the client."""
-    client = uploader.ParamifyClient("token-abc", "https://example.test/api/v0")
-    assert client.session.headers["Authorization"] == "Bearer token-abc"
-
-
-def test_filename_is_url_encoded():
-    """The spec asks for it: "filenames containing certain special characters may
-    cause upload errors. URL-encode your filename"."""
-    session = FakeSession()
-    client = uploader.ParamifyClient("t", "https://example.test/api/v0")
-    client.session = session
-    client.intake(ASSESSMENT, "scan report #1.csv", RAW_CSV, "text/csv", {})
-    sent_name = session.posts[0]["files"]["file"][0]
-    assert sent_name == "scan%20report%20%231.csv"
-
-
-def test_artifact_part_is_sent_and_is_json():
-    """The endpoint requires the `artifact` part even though every field in it is
-    optional, so omitting it would fail every upload."""
-    session = FakeSession()
-    client = uploader.ParamifyClient("t", "https://example.test/api/v0")
-    client.session = session
-    client.intake(ASSESSMENT, "scan.csv", RAW_CSV, "text/csv",
-                  {"title": "T", "note": "n", "effectiveDate": "2026-07-01T00:00:00Z"})
-    part = session.posts[0]["files"]["artifact"]
-    assert part[2] == "application/json"
-    assert json.loads(part[1])["title"] == "T"
 
 
 def test_effective_date_is_the_collection_time_not_now(tmp_path):
@@ -498,19 +388,9 @@ def test_a_blocked_job_is_reported_not_waited_on(tmp_path):
 def test_a_job_still_running_at_the_cap_times_out(tmp_path):
     run_dir = make_run(tmp_path, [{"name": "scan.csv"}])
     client = FakeClient(job_statuses=["IN_PROGRESS"])
-    summary = uploader_run_with_timeout(run_dir, client, 60)
+    summary = run_upload(run_dir, client, wait_timeout=60)
     assert summary["assessments"][0]["job"]["timed_out"]
     assert not summary["ok"]
-
-
-def uploader_run_with_timeout(run_dir, client, timeout):
-    original = uploader.ParamifyClient
-    uploader.ParamifyClient = lambda *a, **k: client
-    try:
-        return uploader.upload_run(run_dir, token="t", base_url="https://example.test/api/v0",
-                                   wait_timeout=timeout)
-    finally:
-        uploader.ParamifyClient = original
 
 
 def test_no_wait_queues_and_returns(tmp_path):
@@ -534,18 +414,6 @@ def test_events_describe_the_job(tmp_path):
     assert kinds[-1] == "upload_complete"
 
 
-def test_wait_for_job_retries_a_failed_poll():
-    class Flaky(FakeClient):
-        def get_job(self, job_id):
-            if self.polls == 0:
-                self.polls += 1
-                raise uploader.ParamifyError("HTTP 502")
-            return super().get_job(job_id)
-
-    job, timed_out = uploader.wait_for_job(Flaky(), "job-1", timeout=300)
-    assert job["status"] == "COMPLETED" and not timed_out
-
-
 # --------------------------------------------------------------------------- #
 # Dedup and resume — the only thing making a re-run safe
 # --------------------------------------------------------------------------- #
@@ -567,7 +435,7 @@ def test_a_run_that_died_before_processing_processes_on_re_run(tmp_path):
     """Uploaded, then the process call failed: the re-run sends nothing new and
     processes what is already on the cycle."""
     run_dir = make_run(tmp_path, [{"name": "scan.csv"}])
-    summary = run_upload(run_dir, FakeClient(process_error=uploader.ParamifyError("HTTP 500")))
+    summary = run_upload(run_dir, FakeClient(process_error=uploader.PipelineError("HTTP 500")))
     assert not summary["ok"]
     assert "could not queue processing" in summary["assessments"][0]["error"]
 
@@ -778,49 +646,9 @@ def test_https_is_required_before_the_token_can_leave(tmp_path):
 def test_localhost_may_use_http(tmp_path):
     """So a local stub server works, matching the evidence uploader's exemption."""
     run_dir = make_run(tmp_path, [{"name": "scan.csv"}])
-    original = uploader.ParamifyClient
-    uploader.ParamifyClient = lambda *a, **k: FakeClient()
-    try:
-        summary = uploader.upload_run(run_dir, token="t", base_url="http://localhost:8080/api/v0")
-    finally:
-        uploader.ParamifyClient = original
+    summary = uploader.upload_run(run_dir, token="t", base_url="http://localhost:8080/api/v0",
+                                  pipelines=FakeClient())
     assert summary["ok"]
-
-
-# --------------------------------------------------------------------------- #
-# Error message quality — the requestId is what support needs
-# --------------------------------------------------------------------------- #
-
-def test_error_message_carries_paramifys_message_and_request_id():
-    resp = FakeResponse(
-        400,
-        {"requestId": "req-123", "statusMessage": "Bad Request",
-         "error": {"message": "unsupported file format"}},
-    )
-    msg = uploader._error_message(resp)
-    assert "unsupported file format" in msg
-    assert "req-123" in msg
-
-
-def test_error_message_falls_back_to_body_text_on_non_json():
-    resp = FakeResponse(500, _NO_JSON, text="upstream exploded")
-    assert "upstream exploded" in uploader._error_message(resp)
-
-
-@pytest.mark.parametrize("status,error_type,expected", [
-    (400, "AssessmentRefused", "file intake preset"),
-    (404, "AssessmentRefused", "not found"),
-    (401, "AccessDenied", "PIPELINE_INTAKE"),
-    (403, "AccessDenied", "PIPELINE_CLOSE"),
-    (409, "NoCycleInProgress", "refused .* \\(HTTP 409\\): x"),
-    (501, "IntakeNotEnabled", "not enabled"),
-    (500, "ParamifyError", "failed"),
-])
-def test_http_errors_explain_themselves(status, error_type, expected):
-    client = uploader.ParamifyClient("t", "https://example.test/api/v0")
-    client.session = FakeSession([FakeResponse(status, {"error": {"message": "x"}})])
-    with pytest.raises(getattr(uploader, error_type), match=expected):
-        client.intake(ASSESSMENT, "scan.csv", RAW_CSV, "text/csv", {})
 
 
 # --------------------------------------------------------------------------- #
@@ -887,15 +715,6 @@ def test_rerun_reports_an_earlier_job_that_failed(tmp_path):
     assert summary["assessments"][0]["job"]["status"] == "FAILED"
 
 
-def test_intake_without_an_artifact_id_is_an_error():
-    """Unnamed, the file could never be processed while the run said ok."""
-    session = FakeSession([FakeResponse(201, {"artifact": {}, "job": None})])
-    client = uploader.ParamifyClient("t", "https://example.test/api/v0")
-    client.session = session
-    with pytest.raises(uploader.ParamifyError, match="no artifact id"):
-        client.intake(ASSESSMENT, "scan.csv", RAW_CSV, "text/csv", {})
-
-
 # --------------------------------------------------------------------------- #
 # Path containment: the index is untrusted input
 # --------------------------------------------------------------------------- #
@@ -939,16 +758,18 @@ def test_a_symlink_never_reaches_the_http_layer(tmp_path):
     link.unlink()
     link.symlink_to(_outside_file(tmp_path))
 
-    session = FakeSession()
-    real = uploader.ParamifyClient("t", "https://example.test/api/v0")
-    real.session = session
-    original = uploader.ParamifyClient
-    uploader.ParamifyClient = lambda *a, **k: real
-    try:
-        uploader.upload_run(run_dir, token="t", base_url="https://example.test/api/v0")
-    finally:
-        uploader.ParamifyClient = original
-    assert session.posts == []
+    class Session:
+        headers: dict = {}
+        sent: list = []
+
+        def request(self, *args, **kwargs):
+            self.sent.append(args)
+            raise AssertionError("nothing should reach the HTTP layer")
+
+    session = Session()
+    real = Pipelines(Client("t", "https://example.test/api/v0", session=session))
+    uploader.upload_run(run_dir, token="t", base_url="https://example.test/api/v0", pipelines=real)
+    assert session.sent == []
 
 
 def _point_index_at(run_dir, target):
@@ -1109,3 +930,30 @@ def test_cycles_sharing_a_start_date_are_ordered_by_creation(tmp_path):
     run_upload(run_dir, FakeClient(cycles=same_day), on_event=events.append)
     queued = next(e for e in events if e["event"] == "job_queued")
     assert queued["newer_cycles"] == 1
+
+
+def test_a_job_that_cannot_be_read_is_recorded_not_raised(tmp_path):
+    """The reports are up and the job is queued; a poll failure is the job's
+    outcome to report, not a crash of the upload."""
+    class Unreadable(FakeClient):
+        def get_job(self, job_id):
+            raise uploader.PipelineError("read job failed (HTTP 500)")
+
+    run_dir = make_run(tmp_path, [{"name": "scan.csv"}])
+    summary = run_upload(run_dir, Unreadable())
+    job = summary["assessments"][0]["job"]
+    assert "HTTP 500" in job["poll_error"] and job["artifact_ids"]
+
+
+def test_a_process_with_no_readable_reply_is_not_queued_again(tmp_path):
+    """Its artifacts are logged against a job, so a re-run does not process them twice."""
+    class Bodyless(FakeClient):
+        def process(self, assessment_id, artifact_ids, operation):
+            super().process(assessment_id, artifact_ids, operation)
+            return {}
+
+    run_dir = make_run(tmp_path, [{"name": "scan.csv"}])
+    run_upload(run_dir, Bodyless(), wait=False)
+    second = FakeClient()
+    run_upload(run_dir, second, wait=False)
+    assert second.processed == []

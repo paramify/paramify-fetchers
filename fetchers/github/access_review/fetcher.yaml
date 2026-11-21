@@ -1,5 +1,5 @@
 name: github_access_review
-version: 0.1.0
+version: 0.3.0
 description: >-
   Who can reach an organization's code and with what rights: owners, members,
   outside collaborators, pending invitations, teams and the repositories they
@@ -31,6 +31,14 @@ target_schema:
     description: >-
       Comma-separated repository names to collect. Unset collects every
       repository the token can see; a name the token cannot see fails the run.
+  exclude_repositories:
+    type: string
+    required: false
+    env: GITHUB_EXCLUDE_REPOSITORIES
+    description: >-
+      Comma-separated repository names to leave out, matched without regard
+      to case. Cannot be combined with repositories. The evidence lists the
+      names it left out and any that matched no repository.
   include_archived:
     type: boolean
     required: false
@@ -58,6 +66,30 @@ config_schema:
       custom roles) and who holds them. Needs the Custom organization roles
       (organization) read permission; set false to run without it, and the
       role fields are null.
+  scope_to_repositories:
+    type: boolean
+    required: false
+    default: false
+    env: GITHUB_SCOPE_TO_REPOSITORIES
+    description: >-
+      Limit teams and organization roles to those that reach the collected
+      repositories: teams granted on one of them or holding an organization
+      role with a base role (and teams nested under those), and held roles
+      with a base role or held by an account or team with access. Owners,
+      members and outside collaborators stay. Needs
+      include_organization_roles: with it false the run fails as bad_config,
+      because a team reaching every repository through a role would be left
+      out unseen. Not applied when a repository's grants or the organization
+      roles could not be read. metadata.teams_left_out and
+      metadata.organization_roles_left_out give the counts left out.
+  include_members:
+    type: boolean
+    required: false
+    default: true
+    env: GITHUB_INCLUDE_MEMBERS
+    description: >-
+      Include the list of organization members. Set false to leave the list
+      out (members is null); summary.members_total is still reported.
 
 secrets: []
 

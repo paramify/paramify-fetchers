@@ -271,6 +271,8 @@ def main() -> int:
     exclusions.record_invalid(collector)
     listed = workspaces is not None
     workspaces, excluded = exclusions.split(workspaces or [], "databricks_workspace")
+    if not listed:
+        exclusions.mark_unread()
     exclusions.warn_unmatched(logger)
 
     evidence = build_payload(

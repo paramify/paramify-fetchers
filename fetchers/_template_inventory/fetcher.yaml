@@ -20,6 +20,13 @@ category: <category>                      # matches the parent directory
 
 kind: inventory                           # the one line that makes this an inventory
 
+# Required for an inventory: the Paramify pipeline this output feeds.
+# `id_scheme` names the identifier your records carry in `unique_asset_identifier`,
+# in kebab-case. See docs/pipeline_fetchers_guide.md.
+pipeline:
+  type: inventory
+  id_scheme: category-id                # replace; e.g. github-repository-url
+
 runtime:
   type: python                            # or bash
   entry: fetcher.py
