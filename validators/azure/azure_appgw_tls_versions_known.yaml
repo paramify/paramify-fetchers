@@ -2,6 +2,7 @@ key: azure_appgw_tls_versions_known
 name: "Application Gateway: Every Encrypted Listener's TLS Version Is Known"
 type: AUTOMATED
 role: integrity
+source: community
 statement: >
   Every encrypted listener's effective minimum TLS version could be determined from a set or
   reported policy with a known predefined name (listeners_tls_version_unknown is 0), so the TLS 1.2

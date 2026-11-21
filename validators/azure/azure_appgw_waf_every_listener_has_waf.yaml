@@ -2,6 +2,7 @@ key: azure_appgw_waf_every_listener_has_waf
 name: 'Application Gateway WAF: Every Web Listener Has a WAF'
 type: AUTOMATED
 role: configuration
+source: community
 statement: >
   No web listener, public or private, is without a WAF policy or legacy WAF configuration
   (listeners_without_waf is 0). Says nothing about whether each WAF is in Prevention mode; see

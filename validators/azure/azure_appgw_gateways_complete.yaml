@@ -2,6 +2,7 @@ key: azure_appgw_gateways_complete
 name: 'Application Gateway: Every Gateway Was Read'
 type: AUTOMATED
 role: completeness
+source: community
 statement: >
   The application gateway list was read and its count matches Azure Resource Graph's count of
   gateways in the subscription (completeness_match is true), so the verdicts above cover every

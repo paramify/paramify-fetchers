@@ -2,6 +2,7 @@ key: azure_appgw_waf_public_listeners_enforcing
 name: 'Application Gateway WAF: Every Public Web Listener Blocks Attacks'
 type: AUTOMATED
 role: configuration
+source: community
 statement: >
   Every web listener on a public frontend IP has a WAF Enabled in Prevention mode, counting its own
   policy, else the gateway's policy, else the legacy WAF configuration, and every path-rule policy

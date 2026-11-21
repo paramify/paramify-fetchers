@@ -2,6 +2,7 @@ key: azure_appgw_backend_no_insecure_settings
 name: 'Application Gateway: Every Backend Connection Is Encrypted and Verified'
 type: AUTOMATED
 role: configuration
+source: community
 statement: >
   No backend setting that a routing rule or path rule uses connects unencrypted (HTTP or TCP), or
   turns off certificate validation or the server name check (insecure_backend_settings_in_use is 0).

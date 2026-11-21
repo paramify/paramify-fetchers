@@ -2,6 +2,7 @@ key: azure_appgw_tls_no_plaintext_listeners
 name: 'Application Gateway: No Listener Accepts Plaintext'
 type: AUTOMATED
 role: configuration
+source: community
 statement: >
   Every listener on an in-scope application gateway uses HTTPS or TLS, or is an HTTP listener that
   only redirects to HTTPS (plaintext_listeners is 0). A TCP listener counts as plaintext even when
