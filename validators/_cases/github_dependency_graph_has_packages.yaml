@@ -1,0 +1,14 @@
+validator: github_dependency_graph_has_packages
+cases:
+- name: compliant
+  expect: PASS
+  artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"repositories_dependency_graph_empty":[]}}}'
+- name: listed
+  expect: FAIL
+  artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"repositories_dependency_graph_empty":["example-repo"]}}}'
+- name: unread
+  expect: FAIL
+  artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"repositories_dependency_graph_empty":null}}}'
+- name: renamed
+  expect: FAIL
+  artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"repositories_dependency_graph_empty_renamed":[]}}}'

@@ -2,7 +2,7 @@
 
 This is the integration layer, so unlike the engine it knows the Paramify API.
 It loads the uploader config, builds the providers (evidence sets, then the
-validator sync when asked, then delivery), checks once whether the workspace
+validator sync when asked, then delivery, then the frequency of sets that exist), checks once whether the workspace
 takes batches (when it does not, every entry is sent direct and the plan says
 so in a note), plans and applies under the run lock, and maps the outcomes to
 what front-ends have always read: the `uploaded` / `skipped_duplicate` /
@@ -44,7 +44,9 @@ from framework.sync.providers.delivery import (
 )
 from framework.sync.providers.desired import settings_notes
 from framework.sync.providers.evidence_sets import (
+    FREQUENCY,
     TAGS_UNAVAILABLE,
+    EvidenceFrequencyProvider,
     EvidenceSetsProvider,
 )
 from framework.sync.providers.legacy_validators import LegacyValidatorsProvider
@@ -127,9 +129,9 @@ def manifest_notes(run_dir: Path, root: Path, manifest_path: Optional[Path],
                for e, key in zip(parsed.entries, manifest_loader.entry_keys(parsed.entries))}
     except Exception:  # noqa: BLE001 — advice only; a bad manifest is reported where it is used
         return []
-    if not isinstance(run_settings, dict):
-        return []
-    return settings_notes(run_settings, now, stack_override=stack_override, owner_override=owner_override)
+    return settings_notes(run_settings if isinstance(run_settings, dict) else {}, now,
+                          stack_override=stack_override, owner_override=owner_override,
+                          run_schedule=meta.get("schedule"), manifest_schedule=parsed.schedule)
 
 
 # ---- setup ------------------------------------------------------------------ #
@@ -191,16 +193,19 @@ class _Setup:
                 online=online, custom_tags=custom_tags, on_event=on_event,
             ))
         providers.append(delivery)
+        # After delivery (its runs_after): a frequency change may rebuild a set's requests.
+        providers.append(EvidenceFrequencyProvider())
         return providers, delivery
 
 
 def _plan(providers: Sequence[Any], ctx: Any, reader: Any, capability: Optional[Capability] = None,
           notes: Sequence[str] = ()) -> Plan:
-    """The engine's plan, less the tags of sets that get no delivery, with a note when batches are off
-    and the `notes` given (see manifest_notes).
+    """The engine's plan, less the tags and frequency changes of sets that get no delivery, with a
+    note when batches are off and the `notes` given (see manifest_notes).
 
-    The tag action runs before delivery, so without this an entry that is
-    refused (no request, a stack mismatch) would still tag its set.
+    A set's tags and frequency are planned apart from its delivery, so without
+    this an entry that is refused (no request, a stack mismatch) would still tag
+    its set and change its frequency.
     """
     plan = engine.plan(providers, ctx, reader)
     if capability is not None and not capability.batches:
@@ -213,7 +218,8 @@ def _plan(providers: Sequence[Any], ctx: Any, reader: Any, capability: Optional[
     refused = {ref for ref, vs in verbs.items() if vs and all(v == "refuse" for v in vs)}
     plan.actions = [a for a in plan.actions
                     if not (a.provider == "evidence_sets" and a.verb == "tag"
-                            and a.key.startswith("tags/") and a.key[len("tags/"):] in refused)]
+                            and a.key.startswith("tags/") and a.key[len("tags/"):] in refused)
+                    and not (a.provider == FREQUENCY and a.verb == "update" and a.key in refused)]
     return plan
 
 
@@ -392,11 +398,14 @@ class _Report:
 
     def summary(self, outcomes: Optional[Sequence[Outcome]]) -> Dict[str, Any]:
         entries = self.entries(outcomes)
+        failed_changes = 0  # frequency changes that failed: the files went, the change did not
         if outcomes is None:
             refused = [a.id for a in self.plan.actions if a.verb == "refuse"]
             ok = not refused and self.file_errors == 0
         else:
             refused = [o.action_id for o in outcomes if o.status == "refused"]
+            failed_changes = sum(1 for o in outcomes
+                                 if o.status == "failed" and o.action_id.startswith(f"{FREQUENCY}/"))
             # Tags never block an upload; a failed set or validator sync does.
             others_ok = all(
                 o.status in ("applied", "noop") for o in outcomes
@@ -408,7 +417,7 @@ class _Report:
             "uploaded": self.counts["uploaded"],
             "skipped_duplicate": self.counts["skipped_duplicate"],
             "skipped_failed": self.counts["skipped_failed"],
-            "errors": self._errors(entries, refused, applied=outcomes is not None),
+            "errors": self._errors(entries, refused, applied=outcomes is not None) + failed_changes,
             "dropped": self.counts["dropped"],
             "ok": ok,
             "plan": self.plan.to_json(),

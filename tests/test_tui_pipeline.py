@@ -160,7 +160,7 @@ def test_run_console_points_at_waiting_issue_reports(tmp_path, run_tui):
         banner = page.query_one("#run-banner")
         rendered = banner.render()
         text = rendered.plain if isinstance(rendered, Text) else str(rendered)
-        assert "2 scan report(s) ready" in text
+        assert "2 scan reports to send on the Pipelines tab (i)" in text
 
     run_tui(body, _write_manifest(tmp_path))
 
@@ -438,7 +438,7 @@ def test_a_broken_catalog_does_not_stop_the_tui(tmp_path, monkeypatch, run_tui):
     on_workspace, running, rows, notices = run_tui(body, path)
     assert on_workspace and running
     assert rows == 0
-    assert any("Could not load catalog" in n for n in notices), notices
+    assert any("Couldn't load the catalog" in n for n in notices), notices
 
 
 @pytest.mark.parametrize(

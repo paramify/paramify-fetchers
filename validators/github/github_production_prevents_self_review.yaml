@@ -1,0 +1,19 @@
+key: github_production_prevents_self_review
+name: GitHub Production Environments Prevent Self Review
+type: AUTOMATED
+role: configuration
+source: community
+statement: >-
+  No production environment lets the person who started a deployment approve it. Passes with nothing to
+  judge when no reviewer is required; pair with GitHub Production Environments Require Reviewers.
+regex: '"production_allowing_self_review":\s*\[\s*\]'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+- regexOperation:
+    type: MATCH_COUNT
+  criteria: NOT_EQUALS
+  value:
+    type: CUSTOM_TEXT
+    customText: '0'
+evidence_sets:
+- EVD-GITHUB-DEPLOYMENT-CONTROLS

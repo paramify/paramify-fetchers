@@ -1,0 +1,14 @@
+validator: github_default_branches_no_always_bypass
+cases:
+- name: compliant
+  expect: PASS
+  artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"with_always_bypass":[]}}}'
+- name: listed
+  expect: FAIL
+  artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"with_always_bypass":["example-repo"]}}}'
+- name: unread
+  expect: FAIL
+  artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"with_always_bypass":null}}}'
+- name: renamed
+  expect: FAIL
+  artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"with_always_bypass_renamed":[]}}}'
