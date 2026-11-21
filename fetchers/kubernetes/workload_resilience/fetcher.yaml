@@ -3,6 +3,7 @@ version: 0.1.0
 description: >-
   Shows whether Deployments and StatefulSets can survive losing a pod, a node or a zone: replicas, disruption budgets, zone spread (configured and actual) and health probes.
 category: kubernetes
+source: community
 
 supports_targets: false
 
