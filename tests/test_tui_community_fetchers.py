@@ -52,7 +52,8 @@ def test_schema_takes_paramify_or_community_only():
 def test_catalog_carries_the_source():
     cat = api.catalog(REPO_ROOT)
     sources = {f["source"] for c in cat["categories"] for f in c["fetchers"]}
-    assert sources == {"paramify"}
+    assert "paramify" in sources
+    assert sources <= {"paramify", "community"}
 
 
 # --- the TUI ------------------------------------------------------------------
