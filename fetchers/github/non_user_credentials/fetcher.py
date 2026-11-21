@@ -6,24 +6,40 @@ from pathlib import Path
 from urllib.parse import quote, urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "_shared"))
-from github_client import iso, now_epoch, run, to_epoch  # noqa: E402
+from github_client import iso, now_epoch, run, split_list, to_epoch  # noqa: E402
 
 NAME = "github_non_user_credentials"
 CONFIG = {
     "max_secret_age_days": ("GITHUB_MAX_SECRET_AGE_DAYS", 365),
     "max_unused_days": ("GITHUB_MAX_UNUSED_DAYS", 90),
     "scope_to_repositories": ("GITHUB_SCOPE_TO_REPOSITORIES", False),
+    "apps_confirmed_reaching": ("GITHUB_APPS_CONFIRMED_REACHING", ""),
+    "apps_confirmed_not_reaching": ("GITHUB_APPS_CONFIRMED_NOT_REACHING", ""),
 }
+CONFIRMATION_NOTE = ("GitHub shows the repositories of an app installed on selected repositories to that app alone. "
+                     "The reach of the apps in apps_reach_confirmed_by_organization and "
+                     "apps_left_out_by_confirmation comes from the organization's confirmation in this fetcher's "
+                     "settings, not from GitHub.")
 WRITE_LEVELS = ("write", "admin")
 
 
-def app_reach(install):
-    """Whether an installed app can reach a collected repository: True, or None when it cannot be told.
+def app_reach(install, confirmed_in, confirmed_out):
+    """(whether an installed app can reach a collected repository, where that answer comes from).
 
-    An app on all repositories reaches every one. For an app on selected repositories GitHub gives the list to that
-    app alone (GET /installation/repositories with its own token), so another caller cannot tell: unknown, never no.
+    An app on all repositories reaches every one ("github"). For an app on selected repositories GitHub gives the
+    list to that app alone (GET /installation/repositories with its own token), so another caller cannot tell: unknown,
+    never no, unless the organization confirmed it in the settings ("organization_confirmation"). A confirmation never
+    overrides what GitHub shows, and is not applied to a selection GitHub did not name.
     """
-    return True if install.get("repository_selection") == "all" else None
+    selection = install.get("repository_selection")
+    if selection == "all":
+        return True, "github"
+    slug = str(install.get("app_slug") or "").lower()
+    if selection == "selected" and slug in confirmed_in:
+        return True, "organization_confirmation"
+    if selection == "selected" and slug in confirmed_out:
+        return False, "organization_confirmation"
+    return None, None
 
 
 def secret_reach(client, login, secret, repos, names):
@@ -110,6 +126,18 @@ def repo_record(client, org, repo, now, config):
 
 def collect(client, org, repos, config):
     login, now = org["login"], now_epoch()
+    confirmed_in = {a.lower() for a in split_list(config["apps_confirmed_reaching"])}
+    confirmed_out = {a.lower() for a in split_list(config["apps_confirmed_not_reaching"])}
+    if (confirmed_in or confirmed_out) and not config["scope_to_repositories"]:
+        client.fail("config apps_confirmed_reaching", "BadConfig",
+                    "apps_confirmed_reaching and apps_confirmed_not_reaching only apply with scope_to_repositories",
+                    "bad_config")
+        return None
+    if confirmed_in & confirmed_out:
+        client.fail("config apps_confirmed_reaching", "BadConfig",
+                    "an app is named in both apps_confirmed_reaching and apps_confirmed_not_reaching: "
+                    + ", ".join(sorted(confirmed_in & confirmed_out)), "bad_config")
+        return None
     # Each organization section stands alone: one the token cannot read is null, and the others are kept.
     installs = client.paginate_required(f"orgs/{login}/installations", key="installations")
     org_secrets = client.paginate_required(f"orgs/{login}/actions/secrets", key="secrets")
@@ -141,12 +169,26 @@ def collect(client, org, repos, config):
     # repository. One whose reach cannot be told stays in, marked null: unknown is not out of scope. A section that
     # was not read stays null, and its left-out count with it.
     scoped = bool(config["scope_to_repositories"])
+    confirmation = {"apps_left_out_by_confirmation": None, "apps_confirmed_unmatched": None,
+                    "apps_confirmation_contradicted": None}
     left_out = {"apps": 0 if apps is not None else None, "fine_grained_tokens": 0 if tokens is not None else None,
                 "organization_secrets": 0 if org_secret_rows is not None else None}
     if scoped:
         names = {(r.get("name") or "").lower() for r in repos}
         if apps is not None:
-            apps, left_out["apps"] = in_scope(apps, [app_reach(i) for i in installs])
+            reach = [app_reach(i, confirmed_in, confirmed_out) for i in installs]
+            confirmed_out_apps = sorted(str(a["app"]) for a, (r, src) in zip(apps, reach)
+                                        if r is False and src == "organization_confirmation")
+            apps = [{**a, "reach_source": src} for a, (_, src) in zip(apps, reach)]
+            apps, left_out["apps"] = in_scope(apps, [r for r, _ in reach])
+            installed = {str(i.get("app_slug") or "").lower(): i.get("repository_selection") for i in installs}
+            confirmation = {
+                "apps_left_out_by_confirmation": confirmed_out_apps,
+                # Named in the settings but not installed: a typo, or an app removed since it was confirmed.
+                "apps_confirmed_unmatched": sorted((confirmed_in | confirmed_out) - set(installed)),
+                # Confirmed as not reaching, but GitHub shows it on all repositories: GitHub wins, and it is kept.
+                "apps_confirmation_contradicted": sorted(a for a in confirmed_out if installed.get(a) == "all"),
+            }
         if tokens is not None:
             tokens, left_out["fine_grained_tokens"] = in_scope(
                 tokens, [token_reach(client, login, p, names) for p in pats])
@@ -186,6 +228,9 @@ def collect(client, org, repos, config):
             "webhooks_without_secret": None if org_hooks is None else len([h for h in hooks if not h["has_secret"]]),
             # Kept because their reach into the collected repositories could not be told; null when not scoped.
             "apps_reach_unknown": unknown(apps, "app"),
+            # Kept on the organization's confirmation rather than on what GitHub shows; null when not scoped.
+            "apps_reach_confirmed_by_organization": None if not scoped or apps is None else sorted(
+                str(a["app"]) for a in apps if a["reach_source"] == "organization_confirmation"),
             "fine_grained_tokens_reach_unknown": unknown(tokens, "id"),
             "organization_secrets_reach_unknown": unknown(org_secret_rows, "name"),
             "not_collected": [r["repository"] for r in records if not r["collected"]],
@@ -202,6 +247,8 @@ def collect(client, org, repos, config):
                      "apps_left_out": left_out["apps"],
                      "fine_grained_tokens_left_out": left_out["fine_grained_tokens"],
                      "organization_secrets_left_out": left_out["organization_secrets"],
+                     **confirmation,
+                     **({"apps_confirmation_note": CONFIRMATION_NOTE} if confirmed_in or confirmed_out else {}),
                      **({"fine_grained_tokens_unreadable_because": "listed to GitHub Apps only; this run used a "
                                                                     "personal access token"}
                         if state == "apps_only" else {})},

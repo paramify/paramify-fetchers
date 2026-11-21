@@ -4132,6 +4132,87 @@ def test_credential_scope_follows_the_repository_filter(fake, monkeypatch, tmp_p
     assert [t["owner"] for t in ev["fine_grained_tokens"]] == ["everywhere", "inside"]
 
 
+def confirmed_app_routes():
+    """Apps on selected repositories whose reach only the organization can confirm, next to one on all repositories."""
+    routes = scoped_credential_routes()
+    routes[f"orgs/{ORG}/installations"] = lambda q: (200, {"total_count": 5, "installations": [
+        {"app_slug": "ci-bot", "repository_selection": "all", "permissions": {"contents": "write"}},
+        {"app_slug": "reader", "repository_selection": "selected", "permissions": {"metadata": "read"}},
+        {"app_slug": "collector", "repository_selection": "selected", "permissions": {"metadata": "read"}},
+        {"app_slug": "elsewhere-bot", "repository_selection": "selected", "permissions": {"contents": "write"}},
+        {"app_slug": "odd-app", "permissions": {}}]})
+    return routes
+
+
+def test_confirmed_apps_are_placed_and_named(fake, monkeypatch, tmp_path):
+    _, code, ev, _ = scoped_credentials(fake, monkeypatch, tmp_path, confirmed_app_routes(),
+                                        GITHUB_APPS_CONFIRMED_REACHING="Collector",
+                                        GITHUB_APPS_CONFIRMED_NOT_REACHING="ELSEWHERE-BOT")
+    m, s = ev["metadata"], ev["summary"]
+    assert code == 0 and m["partial_failure"] is False
+    kept = {a["app"]: (a["reaches_collected_repositories"], a["reach_source"]) for a in ev["apps"]}
+    assert kept == {"ci-bot": (True, "github"), "reader": (None, None),
+                    "collector": (True, "organization_confirmation"), "odd-app": (None, None)}
+    assert m["apps_left_out"] == 1 and m["apps_left_out_by_confirmation"] == ["elsewhere-bot"]
+    assert s["apps_reach_confirmed_by_organization"] == ["collector"]
+    assert s["apps_reach_unknown"] == ["odd-app", "reader"] and s["apps_installed"] == 4
+    assert "elsewhere-bot" not in s["apps_with_write"]
+    assert m["apps_confirmed_unmatched"] == [] and m["apps_confirmation_contradicted"] == []
+    assert "organization's confirmation" in m["apps_confirmation_note"]
+
+
+def test_a_confirmation_never_overrides_github(fake, monkeypatch, tmp_path):
+    _, code, ev, _ = scoped_credentials(fake, monkeypatch, tmp_path, confirmed_app_routes(),
+                                        GITHUB_APPS_CONFIRMED_NOT_REACHING="ci-bot,odd-app,gone-app")
+    m = ev["metadata"]
+    kept = {a["app"]: (a["reaches_collected_repositories"], a["reach_source"]) for a in ev["apps"]}
+    # GitHub shows ci-bot on all repositories, so it stays; odd-app's selection was not named, so it stays unknown.
+    assert code == 0 and kept["ci-bot"] == (True, "github") and kept["odd-app"] == (None, None)
+    assert m["apps_left_out"] == 0 and m["apps_left_out_by_confirmation"] == []
+    assert m["apps_confirmation_contradicted"] == ["ci-bot"] and m["apps_confirmed_unmatched"] == ["gone-app"]
+
+
+def test_without_confirmations_nothing_is_claimed(fake, monkeypatch, tmp_path):
+    _, code, ev, _ = scoped_credentials(fake, monkeypatch, tmp_path, confirmed_app_routes())
+    m, s = ev["metadata"], ev["summary"]
+    assert code == 0 and m["apps_left_out"] == 0 and m["apps_left_out_by_confirmation"] == []
+    assert s["apps_reach_confirmed_by_organization"] == [] and "apps_confirmation_note" not in m
+    assert s["apps_reach_unknown"] == ["collector", "elsewhere-bot", "odd-app", "reader"]
+
+
+def test_unscoped_runs_carry_no_confirmation_fields(fake, monkeypatch, tmp_path):
+    fake(confirmed_app_routes())
+    code, ev, _ = run_fetcher("non_user_credentials", monkeypatch, tmp_path)
+    m = ev["metadata"]
+    assert code == 0 and ev["summary"]["apps_reach_confirmed_by_organization"] is None
+    assert (m["apps_left_out_by_confirmation"], m["apps_confirmed_unmatched"],
+            m["apps_confirmation_contradicted"]) == (None, None, None)
+    assert "reach_source" not in json.dumps(ev["apps"])
+
+
+@pytest.mark.parametrize("env,needle", [
+    ({"GITHUB_APPS_CONFIRMED_REACHING": "reader"}, "scope_to_repositories"),
+    ({"GITHUB_SCOPE_TO_REPOSITORIES": "true", "GITHUB_APPS_CONFIRMED_REACHING": "Reader",
+      "GITHUB_APPS_CONFIRMED_NOT_REACHING": "reader"}, "both")])
+def test_conflicting_confirmations_are_bad_config(fake, monkeypatch, tmp_path, env, needle):
+    f = fake(confirmed_app_routes())
+    code, _, status = run_fetcher("non_user_credentials", monkeypatch, tmp_path, **env)
+    assert code == 1 and status["code"] == "bad_config" and needle in status["error"]
+    assert not any(p.endswith("/installations") for p, _ in f.calls)
+
+
+def test_confirmations_with_an_unread_app_list_stay_null(fake, monkeypatch, tmp_path):
+    routes = confirmed_app_routes()
+    routes[f"orgs/{ORG}/installations"] = FAILING
+    _, code, ev, _ = scoped_credentials(fake, monkeypatch, tmp_path, routes,
+                                        GITHUB_APPS_CONFIRMED_NOT_REACHING="elsewhere-bot")
+    m = ev["metadata"]
+    assert code == 1 and m["partial_failure"] is True and ev["apps"] is None and m["apps_left_out"] is None
+    assert (m["apps_left_out_by_confirmation"], m["apps_confirmed_unmatched"],
+            m["apps_confirmation_contradicted"]) == (None, None, None)
+    assert ev["summary"]["apps_reach_confirmed_by_organization"] is None
+
+
 # --- workflow_runs: scheduled runs and include_actors -----------------------------------
 
 def scheduled(id_, days_ago, attempt=1, triggering="cron-editor", **kw):

@@ -85,6 +85,28 @@ config_schema:
       selected repositories (GitHub gives that list to the app alone) or a
       repository list that could not be read. Organization webhooks are not
       scoped. The metadata counts what was left out.
+  apps_confirmed_reaching:
+    type: string
+    required: false
+    default: ""
+    env: GITHUB_APPS_CONFIRMED_REACHING
+    description: >-
+      Comma-separated app slugs, installed on selected repositories, that the
+      organization confirms can reach the collected repositories. They are kept
+      as reaching, with reach_source organization_confirmation and listed in
+      apps_reach_confirmed_by_organization. Needs scope_to_repositories.
+  apps_confirmed_not_reaching:
+    type: string
+    required: false
+    default: ""
+    env: GITHUB_APPS_CONFIRMED_NOT_REACHING
+    description: >-
+      Comma-separated app slugs, installed on selected repositories, that the
+      organization confirms cannot reach the collected repositories. They are
+      left out and named in metadata.apps_left_out_by_confirmation. An app
+      GitHub shows on all repositories is kept regardless and listed in
+      apps_confirmation_contradicted. Needs scope_to_repositories; naming an
+      app in both settings fails the run.
 
 secrets: []
 
@@ -98,8 +120,9 @@ evidence_set:
   instructions: >-
     Script: github/non_user_credentials/fetcher.py. Deploy keys per repository (read-only or write, age, last use), installed
     apps with their permissions, approved fine-grained tokens with expiry and
-    last use (GitHub App tokens only; null otherwise), Actions secrets by name
-    and last update (values are never readable), and webhooks with TLS
-    verification and signing; URLs reduced to host. With scope_to_repositories,
-    apps, tokens and organization secrets are limited to those reaching the
-    collected repositories or of unknown reach.
+    last use (GitHub App tokens only), Actions secrets by name and last update
+    (values never readable), and webhooks with TLS verification and signing;
+    URLs reduced to host.
+    With scope_to_repositories, apps, tokens and organization secrets are
+    limited to those reaching the collected repositories or of unknown reach;
+    apps placed by the organization's confirmation are named in metadata.

@@ -132,12 +132,20 @@ with `reaches_collected_repositories: null` and is named in the summary's
 - An app on `all` repositories reaches every one. For an app on `selected`
   repositories GitHub gives the list to that app alone
   (`GET /installation/repositories` with its own token), so its reach is
-  always unknown to this fetcher. An organization owner can see it under
-  the app's *Configure* page.
+  unknown to this fetcher. An organization owner can see it under the app's
+  *Configure* page. When the organization has confirmed an app's access, name
+  its slug in `apps_confirmed_reaching` or `apps_confirmed_not_reaching`: the
+  app is kept with `reach_source: organization_confirmation`, or left out and
+  named in `metadata.apps_left_out_by_confirmation`, and
+  `metadata.apps_confirmation_note` says this came from the settings, not from
+  GitHub. A confirmation never overrides what GitHub shows (an app on `all`
+  repositories stays, listed in `apps_confirmation_contradicted`), slugs that
+  match no installed app are listed in `apps_confirmed_unmatched`, and naming
+  one app in both settings fails the run.
 
-Organization webhooks are not scoped. The scoping in 0.3.0 is built against
-GitHub's API description and covered by unit tests; the two repository-list
-reads have not yet been measured on a live organization.
+Organization webhooks are not scoped. A token's `subset` repository list has
+been read on a live organization; a `selected` secret's list is covered by
+unit tests only.
 
 A **GitHub App installation token** holding the same read-only permissions
 produced the same evidence as a personal token for those fifteen, with two
