@@ -3,6 +3,7 @@ version: 0.1.0
 description: >-
   Reads OpenSCAP XCCDF and ARF result files and reports, for each scanned target, its latest benchmark evaluation: profile, failed rules by severity, errors, waivers and scan age.
 category: openscap
+source: community
 
 supports_targets: false
 
