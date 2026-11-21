@@ -2,6 +2,7 @@ key: keycloak_users_privileged_have_second_factor
 name: 'Keycloak: Every Privileged Local User Has a Second Factor'
 type: AUTOMATED
 role: configuration
+source: community
 statement: >
   No enabled user holding a privileged role, a realm-management admin role or a realm role the
   organization designates, lacks an OTP or WebAuthn authenticator in Keycloak, counting only users not

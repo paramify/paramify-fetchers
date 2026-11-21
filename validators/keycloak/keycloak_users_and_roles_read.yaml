@@ -2,6 +2,7 @@ key: keycloak_users_and_roles_read
 name: 'Keycloak: Users and Their Roles Were Read'
 type: AUTOMATED
 role: integrity
+source: community
 statement: >
   The realm's users and every user's effective roles were read, so privileged_users is a number
   rather than null. Says nothing about whether any user is privileged or has a second factor. Does

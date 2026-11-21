@@ -2,6 +2,7 @@ key: keycloak_users_no_inactive_accounts
 name: 'Keycloak: No Enabled Account Is Inactive'
 type: AUTOMATED
 role: configuration
+source: community
 statement: >
   No enabled user created before the window has gone without a stored sign-in for inactive_days
   (enabled_users_inactive is 0). Fails while successful sign-ins are not stored, or are kept for less

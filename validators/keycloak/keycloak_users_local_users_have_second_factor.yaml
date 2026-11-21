@@ -2,6 +2,7 @@ key: keycloak_users_local_users_have_second_factor
 name: 'Keycloak: Every Enabled Local User Has a Second Factor'
 type: AUTOMATED
 role: configuration
+source: community
 statement: >
   No enabled user who is not linked to an external identity provider lacks an OTP or WebAuthn
   authenticator in Keycloak (enabled_local_users_without_second_factor is 0). Fails while any
