@@ -2,6 +2,7 @@ key: azure_dns_resolver_policy_present
 name: 'Azure DNS Security Policy: At Least One Policy in Scope'
 type: AUTOMATED
 role: completeness
+source: community
 statement: >
   At least one DNS security policy was read and is in scope (in_scope_dns_resolver_policies is
   above 0). Fails when the policy list could not be read or the subscription has none. Says nothing

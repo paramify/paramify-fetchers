@@ -2,6 +2,7 @@ key: azure_dns_resolver_policy_query_logs_exported
 name: 'Azure DNS Security Policy: Every Policy Exports Its Query Logs'
 type: AUTOMATED
 role: configuration
+source: community
 statement: >
   Every in-scope DNS security policy has a diagnostic setting sending an enabled log category to a
   workspace, storage account, event hub or partner (policies_without_query_logs_exported is 0).

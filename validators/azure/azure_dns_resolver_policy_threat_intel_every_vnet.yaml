@@ -2,6 +2,7 @@ key: azure_dns_resolver_policy_threat_intel_every_vnet
 name: "Azure DNS Security Policy: Every Virtual Network Blocks Azure's Threat-Intelligence Domains"
 type: AUTOMATED
 role: configuration
+source: community
 statement: >
   Every in-scope virtual network is linked to a DNS security policy with an enabled Block rule on
   Azure's threat-intelligence list, AzureDnsThreatIntel (virtual_networks_without_threat_intel_block
