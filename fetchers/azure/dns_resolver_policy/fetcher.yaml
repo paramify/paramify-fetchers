@@ -3,6 +3,7 @@ version: 0.1.0
 description: >-
   Shows each Azure DNS security policy's rules and linked virtual networks, whether it blocks Azure's threat-intelligence domains, whether query logs are exported, and which virtual networks no blocking policy covers.
 category: azure
+source: community
 
 config_schema:
   resource_exclusions:
