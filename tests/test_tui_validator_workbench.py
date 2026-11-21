@@ -1,0 +1,433 @@
+"""TUI: the validator window as a workbench.
+
+Open a validator on the Validators tab (4) and it shows its latest result in
+Paramify and a test on your latest run (validator_eval under Node). When the
+test fails, Ask Claude explains why and proposes a regex, which is tested on the
+same run before it is shown and is written to the registry only on w.
+
+Paramify is stubbed (api.validator_results) and so is Claude (ask_claude.ask):
+nothing here reaches the network or a real `claude`. The local test runs the
+real ECMAScript evaluator, so these tests need `node`.
+"""
+
+from __future__ import annotations
+
+import io
+import json
+from pathlib import Path
+
+import pytest
+
+pytest.importorskip("textual", reason="TUI tests need the 'tui' extra")
+
+from rich.console import Console  # noqa: E402
+from textual.widgets import Label, Static  # noqa: E402
+
+from framework import api, ask_claude  # noqa: E402
+from framework.contract import Validator  # noqa: E402
+from framework.tui.components.table import DataTable  # noqa: E402
+from framework.tui.modals import ConfirmModal, ReportModal  # noqa: E402
+from framework.tui.screens import validators as page_mod  # noqa: E402
+from framework.tui.screens.validators import (  # noqa: E402
+    ValidatorModal,
+    ValidatorsPage,
+)
+from framework.validator_eval import node_available  # noqa: E402
+from framework.validators import write_regex  # noqa: E402
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+REF = "EVD-DEMO-HELLO"
+needs_node = pytest.mark.skipif(not node_available(), reason="validator_eval needs node")
+
+# What demo_hello writes, as an envelope on disk.
+EVIDENCE = {
+    "schema_version": "1.0",
+    "metadata": {"fetcher_name": "demo_hello", "run_id": "2026-11-20T10-31-00Z-a1b2", "status": "success",
+                 "exit_code": 0, "evidence_set": {"reference_id": REF}},
+    "payload": {"results": [
+        {"policy": "require-phishing-resistant-mfa", "enabled": True, "applies_to": "all-users",
+         "enrolled_users": 42, "total_users": 42},
+    ]},
+}
+# The fetcher renamed mfa_enabled to enabled; this regex still looks for the old key.
+STALE = '"mfa_enabled":\\s*(?<mfa_enabled>true|false)'
+FIXED = '"enabled":\\s*(?<mfa_enabled>true|false)'
+ANSWER = ("Why: The evidence now says `\"enabled\": true`, not `mfa_enabled`, so the regex finds "
+          "nothing and the match-count rule fails. The policy itself is on.\n"
+          f"Regex: `{FIXED}`")
+
+YAML = f"""key: mfa_enforced
+name: MFA Enforced For All Users
+type: AUTOMATED
+role: configuration
+statement: Phishing-resistant MFA is required for every user.
+# The policy flag, not the enrolment count.
+regex: '{STALE}'
+validation_rules:
+  - regexOperation: {{ type: MATCH_COUNT }}
+    criteria: NOT_EQUALS
+    value: {{ type: CUSTOM_TEXT, customText: "0" }}
+  - regexOperation: {{ type: MATCH_GROUP, groupNumber: 1 }}
+    criteria: EQUALS
+    value: {{ type: CUSTOM_TEXT, customText: "true" }}
+evidence_sets:
+  - {REF}
+"""
+
+
+def make_workspace(tmp_path: Path, *, evidence: bool = True) -> tuple:
+    """A manifest with demo_hello, a run holding its evidence, and a two-validator
+    registry on its set (one file on disk, so w has something to write)."""
+    out = tmp_path / "evidence"
+    if evidence:
+        run = out / "run-2026-11-20T10-31-00Z-a1b2"
+        run.mkdir(parents=True)
+        (run / "demo_hello.json").write_text(json.dumps(EVIDENCE, indent=2))
+        (run / "_run_metadata.json").write_text(json.dumps({
+            "run_id": "2026-11-20T10-31-00Z-a1b2", "started_at": "2026-11-20T10:31:00Z",
+            "completed_at": "2026-11-20T10:31:02Z",
+            "invocations": [{"fetcher_name": "demo_hello", "exit_code": 0, "target": None,
+                             "outputs": ["demo_hello.json"]}]}))
+    m = api.init_manifest()
+    api.set_output_dir(m, str(out))
+    api.add_entry(m, "demo_hello")
+    manifest = tmp_path / "wb.yaml"
+    api.dump_manifest(m, manifest, REPO_ROOT)
+
+    vfile = tmp_path / "validators" / "demo" / "mfa_enforced.yaml"
+    vfile.parent.mkdir(parents=True)
+    vfile.write_text(YAML)
+    registry = {
+        "mfa_enforced": Validator(
+            key="mfa_enforced", name="MFA Enforced For All Users", type="AUTOMATED",
+            statement="Phishing-resistant MFA is required for every user.", evidence_sets=[REF],
+            role="configuration", regex=STALE, path=vfile, validation_rules=[
+                {"regexOperation": {"type": "MATCH_COUNT"}, "criteria": "NOT_EQUALS",
+                 "value": {"type": "CUSTOM_TEXT", "customText": "0"}},
+                {"regexOperation": {"type": "MATCH_GROUP", "groupNumber": 1}, "criteria": "EQUALS",
+                 "value": {"type": "CUSTOM_TEXT", "customText": "true"}}]),
+        "all_users_enrolled": Validator(
+            key="all_users_enrolled", name="Every User Enrolled In MFA", type="AUTOMATED",
+            statement="Every user has enrolled an MFA factor.", evidence_sets=[REF], role="completeness",
+            regex='"enrolled_users":\\s*(?<enrolled>\\d+),\\s*"total_users":\\s*(?<total>\\d+)',
+            validation_rules=[
+                {"regexOperation": {"type": "MATCH_COUNT"}, "criteria": "NOT_EQUALS",
+                 "value": {"type": "CUSTOM_TEXT", "customText": "0"}},
+                {"regexOperation": {"type": "MATCH_GROUP", "groupNumber": 1}, "criteria": "EQUALS",
+                 "value": {"type": "MATCH_GROUP", "groupNumber": 2}}]),
+    }
+    return manifest, registry
+
+
+PARAMIFY = {"state": "ok", "results": {
+    "mfa_enforced": {"id": "v-1", "name": "MFA Enforced For All Users", "result": "FAIL",
+                     "at": "2026-11-19 14:02", "artifact": "demo_hello.json"},
+    "all_users_enrolled": {"id": "v-2", "name": "Every User Enrolled In MFA", "result": "PASS",
+                           "at": "2026-11-19 14:02", "artifact": "demo_hello.json"},
+}}
+
+
+def fake_claude(answer: str = ANSWER):
+    """A stand-in for ask_claude.ask: streams `answer` word by word, never runs claude."""
+    calls = []
+
+    def ask(prompt, *, on_event, **kw):
+        calls.append(prompt)
+        on_event(ask_claude.Event("turn"))
+        for word in answer.split(" "):
+            on_event(ask_claude.Event("text", word + " "))
+        on_event(ask_claude.Event("final", answer))
+        return ask_claude.Outcome(answer=answer)
+
+    return ask, calls
+
+
+def stub(monkeypatch, registry, paramify=PARAMIFY, answer: str = ANSWER) -> list:
+    monkeypatch.setattr(page_mod, "discover_validators", lambda root: registry)
+    monkeypatch.setattr(api, "validator_results", lambda root, ref, vs: paramify)
+    monkeypatch.setattr(ask_claude, "find_claude", lambda: "/fake/claude")
+    ask, calls = fake_claude(answer)
+    monkeypatch.setattr(ask_claude, "ask", ask)
+    return calls
+
+
+def _text(renderable) -> str:
+    console = Console(file=io.StringIO(), width=220, record=True, color_system=None)
+    console.print(renderable)
+    return console.export_text()
+
+
+async def _settle(app, pilot) -> None:
+    for _ in range(3):
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+
+async def open_validator(app, pilot, row: int) -> ValidatorModal:
+    """Tab 4, into the validators, onto `row` (1 = the first under PARAMIFY), enter."""
+    await pilot.press("4")
+    await _settle(app, pilot)
+    await pilot.press("right")
+    page = app.screen.query_one(ValidatorsPage)
+    page.query_one("#vs-validators", DataTable).move_cursor(row=row)
+    await pilot.pause()
+    await pilot.press("enter")
+    await _settle(app, pilot)
+    return app.screen
+
+
+def _foot(modal) -> str:
+    return _text(modal.query_one("#vm-foot", Label).content)
+
+
+# -- the list ------------------------------------------------------------------ #
+
+
+def test_the_list_shows_each_validators_latest_result_in_paramify(tmp_path, monkeypatch, run_tui):
+    manifest, registry = make_workspace(tmp_path)
+    stub(monkeypatch, registry)
+
+    async def body(app, pilot):
+        await pilot.press("4")
+        await _settle(app, pilot)
+        page = app.screen.query_one(ValidatorsPage)
+        table = page.query_one("#vs-validators", DataTable)
+        rows = [" ".join(_text(c).strip() for c in table.get_row_at(i)).strip() for i in range(table.row_count)]
+        await pilot.press("right")
+        await pilot.pause()
+        return rows, _text(page.query_one("#vs-detail", Static).content)
+
+    rows, detail = run_tui(body, manifest)
+    assert rows[1].endswith("PASS") and "Every User Enrolled" in rows[1]
+    assert rows[2].endswith("FAIL") and "MFA Enforced" in rows[2]
+    assert "in Paramify   PASS   on the newest upload, 2026-11-19 14:02" in detail
+
+
+def test_no_token_shows_no_marks(tmp_path, monkeypatch, run_tui):
+    manifest, registry = make_workspace(tmp_path)
+    stub(monkeypatch, registry, paramify={"state": "no_token", "results": {}})
+
+    async def body(app, pilot):
+        modal = await open_validator(app, pilot, 1)
+        table = app.screen_stack[-2].query_one(ValidatorsPage).query_one("#vs-validators", DataTable)
+        return [_text(c).strip() for c in table.get_row_at(1)], _text(modal._top())
+
+    cells, top = run_tui(body, manifest)
+    assert cells[-1] == ""
+    assert "Not read: no Paramify API token." in top
+
+
+# -- the window: Paramify's result and the local test --------------------------- #
+
+
+@needs_node
+def test_a_passing_validator(tmp_path, monkeypatch, run_tui):
+    manifest, registry = make_workspace(tmp_path)
+    stub(monkeypatch, registry)
+
+    async def body(app, pilot):
+        modal = await open_validator(app, pilot, 1)
+        return modal.local, _text(modal._top()), _foot(modal)
+
+    local, top, foot = run_tui(body, manifest)
+    assert local["verdict"] == "PASS"
+    assert "in Paramify        PASS   on the newest upload, 2026-11-19 14:02" in top
+    assert "on your last run   PASS   demo_hello.json" in top
+    assert "✓  group 1 (enrolled) equals group 2 (total)   read 42 and 42" in top
+    assert "ask Claude" not in foot
+
+
+@needs_node
+def test_a_failing_validator_says_why_and_offers_claude(tmp_path, monkeypatch, run_tui):
+    manifest, registry = make_workspace(tmp_path)
+    stub(monkeypatch, registry)
+
+    async def body(app, pilot):
+        modal = await open_validator(app, pilot, 2)
+        return modal.local, _text(modal._top()), _foot(modal)
+
+    local, top, foot = run_tui(body, manifest)
+    assert local["verdict"] == "FAIL"
+    assert "The regex found nothing in this file." in top
+    assert "✗  number of matches not equals 0   read 0" in top
+    assert "a ask Claude why" in foot
+
+
+@needs_node
+def test_no_evidence_says_to_run_the_fetcher(tmp_path, monkeypatch, run_tui):
+    manifest, registry = make_workspace(tmp_path, evidence=False)
+    stub(monkeypatch, registry)
+
+    async def body(app, pilot):
+        modal = await open_validator(app, pilot, 2)
+        return _text(modal._top())
+
+    assert "No evidence from demo_hello yet. Run it on the Run tab (2), then press t." in run_tui(body, manifest)
+
+
+def test_without_node_it_says_how_to_get_it(tmp_path, monkeypatch, run_tui):
+    manifest, registry = make_workspace(tmp_path)
+    stub(monkeypatch, registry)
+    monkeypatch.setattr(page_mod, "node_available", lambda: False)
+
+    async def body(app, pilot):
+        modal = await open_validator(app, pilot, 2)
+        return _text(modal._top()), _foot(modal)
+
+    top, foot = run_tui(body, manifest)
+    assert "Node isn't installed" in top and "brew install node" in top
+    assert "ask Claude" not in foot
+
+
+# -- Ask Claude ------------------------------------------------------------------ #
+
+
+@needs_node
+def test_ask_claude_shows_what_it_sends_then_a_tested_fix_and_w_writes_it(tmp_path, monkeypatch, run_tui):
+    manifest, registry = make_workspace(tmp_path)
+    calls = stub(monkeypatch, registry)
+    seen = {}
+
+    async def body(app, pilot):
+        modal = await open_validator(app, pilot, 2)
+        await pilot.press("a")
+        await pilot.pause()
+        seen["confirm"] = isinstance(app.screen, ReportModal)
+        seen["sent"] = _text(app.screen.query_one("#preview-text", Static).content)
+        await pilot.press("y")
+        await _settle(app, pilot)
+        seen["proposal"] = modal.proposal
+        seen["claude"] = _text(modal.query_one("#vm-claude", Static).content)
+        seen["foot"] = _foot(modal)
+        await pilot.press("w")
+        await pilot.pause()
+        seen["write_confirm"] = isinstance(app.screen, ConfirmModal)
+        await pilot.press("y")
+        await _settle(app, pilot)
+        seen["after"] = modal.local["verdict"]
+        seen["again"] = app.ask_claude_confirmed
+
+    run_tui(body, manifest)
+    assert seen["confirm"] and len(calls) == 1
+    # What is sent: the validator, its trace, and the evidence itself.
+    assert STALE in seen["sent"] and "FAILS (read nothing)" in seen["sent"] and '"enrolled_users": 42' in seen["sent"]
+    assert seen["proposal"]["regex"] == FIXED and seen["proposal"]["test"]["verdict"] == "PASS"
+    assert "proposed regex   PASS   on demo_hello.json" in seen["claude"]
+    assert "w writes it to" in seen["claude"] and "validators/demo/mfa_enforced.yaml" in seen["claude"]
+    assert "w write the fix" in seen["foot"]
+    assert seen["write_confirm"]
+    text = (tmp_path / "validators" / "demo" / "mfa_enforced.yaml").read_text()
+    assert f"regex: '{FIXED}'" in text and "# The policy flag" in text  # comments kept
+    assert seen["after"] == "PASS"
+    assert seen["again"] is True
+
+
+@needs_node
+def test_a_proposal_that_still_fails_is_not_offered(tmp_path, monkeypatch, run_tui):
+    manifest, registry = make_workspace(tmp_path)
+    stub(monkeypatch, registry, answer='Why: guess.\nRegex: `"nope":\\s*(?<x>true)`')
+
+    async def body(app, pilot):
+        app.ask_claude_confirmed = True
+        modal = await open_validator(app, pilot, 2)
+        await pilot.press("a")
+        await _settle(app, pilot)
+        await pilot.press("w")
+        await pilot.pause()
+        return modal.proposal, _text(modal.query_one("#vm-claude", Static).content), app.screen is modal
+
+    proposal, claude, still = run_tui(body, manifest)
+    assert proposal["test"]["verdict"] == "FAIL"
+    assert "Not offered" in claude
+    assert still  # w did nothing
+    assert STALE in (tmp_path / "validators" / "demo" / "mfa_enforced.yaml").read_text()
+
+
+@needs_node
+def test_ask_claude_can_be_turned_off(tmp_path, monkeypatch, run_tui):
+    manifest, registry = make_workspace(tmp_path)
+    calls = stub(monkeypatch, registry)
+    monkeypatch.setenv(ask_claude.ENV_SWITCH, "0")
+
+    async def body(app, pilot):
+        modal = await open_validator(app, pilot, 2)
+        await pilot.press("a")
+        await _settle(app, pilot)
+        return _foot(modal), app.screen is modal
+
+    foot, still = run_tui(body, manifest)
+    assert "ask Claude" not in foot and still and calls == []
+
+
+@needs_node
+def test_without_claude_code_the_key_says_so_and_c_copies_the_report(tmp_path, monkeypatch, run_tui):
+    manifest, registry = make_workspace(tmp_path)
+    calls = stub(monkeypatch, registry)
+    monkeypatch.setattr(ask_claude, "find_claude", lambda: None)
+    copied = []
+
+    async def body(app, pilot):
+        monkeypatch.setattr(app, "copy_to_clipboard", copied.append)
+        modal = await open_validator(app, pilot, 2)
+        foot = _foot(modal)
+        await pilot.press("a")
+        await _settle(app, pilot)
+        await pilot.press("c")
+        await _settle(app, pilot)
+        return foot, _text(modal.query_one("#vm-claude").render()) if modal.query("#vm-claude") else ""
+
+    foot, claude = run_tui(body, manifest)
+    assert "a ask Claude (not installed)" in foot and "c copy report" in foot
+    assert calls == []  # nothing was sent
+    assert len(copied) == 1 and "MFA Enforced For All Users" in copied[0]
+
+
+@needs_node
+def test_copy_report_works_with_ask_claude_turned_off(tmp_path, monkeypatch, run_tui):
+    manifest, registry = make_workspace(tmp_path)
+    stub(monkeypatch, registry)
+    monkeypatch.setenv(ask_claude.ENV_SWITCH, "0")
+    copied = []
+
+    async def body(app, pilot):
+        monkeypatch.setattr(app, "copy_to_clipboard", copied.append)
+        modal = await open_validator(app, pilot, 2)
+        await pilot.press("c")
+        await _settle(app, pilot)
+        return _foot(modal)
+
+    foot = run_tui(body, manifest)
+    assert "c copy report" in foot and "ask Claude" not in foot
+    assert len(copied) == 1
+
+
+# -- the pieces -------------------------------------------------------------------- #
+
+
+def test_latest_result_is_the_newest_artifact_that_has_one():
+    artifacts = [  # newest first, as list_artifacts returns them
+        {"created_at": "2026-11-20T09:00:00Z", "title": "c", "validators": [{"id": "v-2", "name": "B", "result": "FAIL"}]},
+        {"created_at": "2026-11-19T09:00:00Z", "title": "b", "validators": [{"id": "v-1", "name": "A", "result": "PASS"},
+                                                                          {"id": "v-2", "name": "B", "result": "PASS"}]},
+    ]
+    latest = api.latest_validator_results(artifacts)
+    assert latest["v-2"]["result"] == "FAIL" and latest["v-2"]["at"] == "2026-11-20 09:00"
+    assert api.result_for(latest, "v-1", "A")["result"] == "PASS"
+    assert api.result_for(latest, None, "B")["result"] == "FAIL"  # by name without a lock id
+    assert api.result_for(latest, None, "C") is None
+
+
+def test_proposed_regex_reads_the_regex_line():
+    assert ask_claude.proposed_regex(ANSWER) == FIXED
+    assert ask_claude.proposed_regex("Why: the control is off.\nRegex: none") is None
+    assert ask_claude.proposed_regex("Why: no regex line at all") is None
+
+
+def test_write_regex_keeps_the_file_and_refuses_a_block_regex(tmp_path):
+    path = tmp_path / "v.yaml"
+    path.write_text(YAML)
+    write_regex(path, "it's \\d+")
+    assert "regex: 'it''s \\d+'" in path.read_text() and "# The policy flag" in path.read_text()
+    path.write_text("key: x\nregex: >-\n  abc\n")
+    with pytest.raises(ValueError):
+        write_regex(path, "x")

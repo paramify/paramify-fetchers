@@ -162,6 +162,28 @@ def test_detail_follows_the_cursor(tmp_path, monkeypatch, run_tui):
     assert "bravo" in second and "update" in second
 
 
+def test_detail_shows_each_validators_latest_result(tmp_path, monkeypatch, run_tui):
+    """The artifact read the detail already makes carries each validator's results."""
+    status = _status()
+    status["fetchers"][0]["validators"][0]["id"] = "v-0"
+    _stub(monkeypatch, status)
+    monkeypatch.setattr(api, "list_artifacts", lambda set_id: [
+        {"created_at": "2026-11-20T09:00:00Z", "title": "new", "validators": [
+            {"id": "v-0", "name": "renamed in Paramify", "result": "PASS"},
+            {"id": "v-9", "name": "check 1", "result": "FAIL"}]},
+    ])
+
+    async def body(app, pilot):
+        page = await _open(app, pilot)
+        return _text(page.query_one("#pf-set", Static).content), _cells(page, "alpha")[3]
+
+    detail, cell = run_tui(body, _manifest(tmp_path))
+    assert cell == "2/2 · 1 failing"
+    assert "latest result in Paramify" in detail
+    assert "V1 ✓ check 0  PASS" in detail  # by its Paramify id
+    assert "V2 ✓ check 1  FAIL" in detail  # by name
+
+
 def test_no_token_shows_the_problem_bar(tmp_path, monkeypatch, run_tui):
     _stub(monkeypatch, _status([_row("alpha", set_id=None, script=None, validators=_validators(False))],
                                token=False, capabilities=[]))

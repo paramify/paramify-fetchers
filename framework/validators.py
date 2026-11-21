@@ -163,3 +163,23 @@ def manifest_tracked(manifest: dict, fetchers: Dict[str, Fetcher],
         for v in tracked_for(entry, ref, validators):
             out[v.key] = v
     return list(out.values())
+
+
+def write_regex(path: Path, regex: str) -> None:
+    """Set the `regex:` of one registry file, keeping the rest of it (comments
+    included) as written. Only a one-line `regex:` is replaced, single-quoted as
+    the registry writes them; the file is read back to prove the value landed.
+
+    Raises ValueError when the file has no one-line `regex:` to replace.
+    """
+    path = Path(path)
+    lines = path.read_text().splitlines(keepends=True)
+    at = [i for i, line in enumerate(lines) if line.startswith("regex:")]
+    if len(at) != 1 or lines[at[0]].rstrip().endswith(("|", ">", "|-", ">-")):
+        raise ValueError(f"{path.name} has no one-line regex: to replace. Edit it by hand.")
+    quoted = "'" + regex.replace("'", "''") + "'"
+    lines[at[0]] = f"regex: {quoted}\n"
+    text = "".join(lines)
+    if (yaml_io.load(text) or {}).get("regex") != regex:
+        raise ValueError(f"The regex wouldn't read back the same from {path.name}. Edit it by hand.")
+    path.write_text(text)
