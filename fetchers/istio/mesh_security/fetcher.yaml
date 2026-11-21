@@ -1,0 +1,89 @@
+name: istio_mesh_security
+version: 0.1.0
+description: >-
+  Shows how an Istio mesh is secured: mTLS policy and weaker overrides, default-deny authorization, plaintext or weak-TLS ingress, TLS turned off by destination rules, egress policy and certificates.
+category: istio
+source: community
+
+supports_targets: false
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: istio_mesh_security.json
+
+secrets: []          # credentials come from the kubeconfig or the in-cluster service account (fetchers/_categories/istio.yaml)
+
+ksis:
+  - KSI-SVC-SIN   # mTLS between services
+  - KSI-CNA-MAT   # default-deny authorization between services
+  - KSI-CNA-ULN   # ingress limited to TLS, egress to registered services
+  - KSI-IAM-ELP   # least privilege between workloads
+  - KSI-SVC-VCM   # mesh certificates and their lifetimes
+
+evidence_set:
+  reference_id: EVD-ISTIO-MESH-SECURITY
+  name: Istio Mesh Security
+  description: >-
+    Istio's mTLS policy and weaker overrides, default-deny authorization, ingress gateway TLS, destination rules that
+    turn TLS off, egress policy, the mesh root certificate's expiry and the workload certificate lifetime.
+  instructions: |
+    Script: istio/mesh_security/fetcher.py
+
+    Access: A Kubernetes identity, through a kubeconfig or the in-cluster service account, with a ClusterRole allowing list on namespaces, on peerauthentications and authorizationpolicies (security.istio.io), and on gateways, virtualservices and destinationrules (networking.istio.io); and a Role in the root namespace allowing get on the configmaps istio and istio-ca-root-cert and list on deployments. Nothing else: it reads no secrets and writes nothing. On AKS with Microsoft Entra ID, the kubeconfig can sign in through kubelogin.
+
+    Commands Executed:
+    - GET /api/v1/namespaces — every namespace and whether sidecar injection is on (istio-injection=enabled, or an istio.io/rev label), page by page
+    - GET /apis/security.istio.io/v1/peerauthentications — mTLS mode mesh-wide, per namespace, per workload and per port
+    - GET /apis/security.istio.io/v1/authorizationpolicies — default-deny (allow nothing) policies, allow-all rules and deny policies
+    - GET /apis/networking.istio.io/v1/gateways — each ingress server's protocol, TLS mode, HTTPS redirect and minimum TLS version
+    - GET /apis/networking.istio.io/v1/virtualservices — which routes are bound to a gateway
+    - GET /apis/networking.istio.io/v1/destinationrules — rules that turn TLS off for a host or port
+    - GET /api/v1/namespaces/{root}/configmaps/istio — the mesh configuration's outbound traffic policy
+    - GET /api/v1/namespaces/{root}/configmaps/istio-ca-root-cert — the mesh root certificate (public; no private key)
+    - GET /apis/apps/v1/namespaces/{root}/deployments?labelSelector=app=istiod — istiod's workload certificate lifetime setting
+
+    Output: istio_mesh_security.json — mTLS settings, authorization policies, gateway servers and root certificates, judged by Istio's own rules. Configuration only: it does not show traffic actually encrypted or requests actually denied.
+
+    Summary fields:
+
+    Which namespaces are in the mesh?
+    - namespaces — Number of namespaces other than kube-system, kube-public, kube-node-lease and the root namespace; null if namespaces could not be read, as are the two fields below
+    - namespaces_in_mesh — Number of those with sidecar injection on, by the istio-injection=enabled label or an istio.io/rev label
+    - namespaces_not_in_mesh — List of the namespaces without sidecar injection; their workloads get no mesh mTLS or authorization
+
+    Is mTLS required?
+    - mesh_mtls_mode — Mode of the root namespace's PeerAuthentication with no selector (STRICT, PERMISSIVE, DISABLE or UNSET); NONE when there is none, in which case Istio applies PERMISSIVE; null if PeerAuthentications could not be read, as are the fields below
+    - mtls_weaker_overrides — Number of namespace-, workload- or port-level PeerAuthentication settings of PERMISSIVE or DISABLE
+    - mtls_weaker_overrides_names — List of those settings, each as namespace/name, with :port for a port-level one, and the mode
+    - strict_mtls_everywhere — True if mesh_mtls_mode is STRICT and there are no weaker overrides
+
+    Is authorization default-deny?
+    - authorization_policies — Number of AuthorizationPolicies; null if they could not be read, as are the fields below
+    - mesh_default_deny — True if the root namespace has an allow-nothing policy (ALLOW with no rules and no selector), which denies by default across the mesh
+    - namespaces_in_mesh_with_default_deny — Number of in-mesh namespaces covered by an allow-nothing policy, their own or the mesh-wide one; null if namespaces could not be read
+    - namespaces_in_mesh_without_default_deny — List of in-mesh namespaces with no allow-nothing policy, where requests are allowed unless a policy denies them; null if namespaces could not be read
+    - authorization_policies_allowing_all — List of ALLOW policies with an empty rule, which matches every request to the workloads they select
+    - authorization_deny_policies — Number of DENY policies
+
+    Is ingress encrypted?
+    - gateways — Number of Istio Gateways; null if they could not be read, as are the fields below
+    - gateway_servers — Number of servers across the gateways
+    - gateway_servers_plaintext — List of servers taking HTTP or TCP without TLS and without an HTTPS redirect, each as namespace/gateway:port
+    - gateway_servers_weak_tls — List of servers whose minimum TLS version is below 1.2 (TLSV1_0 or TLSV1_1); unset means Istio's default of 1.2
+    - virtual_services_on_gateways — Number of VirtualServices bound to a gateway, the routes ingress exposes; null if they could not be read
+
+    Is traffic otherwise restricted?
+    - destination_rules_tls_disabled — List of DestinationRules that turn TLS off (tls.mode DISABLE) for a host or a port; null if they could not be read
+    - outbound_traffic_policy — The mesh configuration's outbound traffic policy: REGISTRY_ONLY (only registered services) or ALLOW_ANY, Istio's default; null if the mesh configuration could not be read
+
+    Are mesh certificates current?
+    - root_certificates — Number of certificates in istio-ca-root-cert (more than one during a root rotation); null if it could not be read, as are the two fields below
+    - root_certificate_expires — When the earliest-expiring root certificate expires
+    - root_certificate_days_remaining — Days until then
+    - workload_cert_ttl — istiod's workload certificate lifetime (DEFAULT_WORKLOAD_CERT_TTL), or Istio's default of 24h when not set; null if istiod could not be read or wasn't found
+    - workload_cert_ttl_hours — The same, in hours
+    - workload_cert_ttl_source — setting, default, or istiod_not_found when no Deployment labeled app=istiod is in the root namespace (such as a managed control plane elsewhere)

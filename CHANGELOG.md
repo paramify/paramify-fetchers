@@ -40,6 +40,12 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`istio_mesh_security` fetcher and `istio` category.** Reads an Istio mesh through the Kubernetes API (GET and LIST
+  only), with a kubeconfig (including AKS with kubelogin) or the in-cluster service account: mesh-wide mTLS mode and
+  weaker namespace, workload or port overrides; allow-nothing default-deny policies and allow-all rules; plaintext and
+  sub-TLS 1.2 gateway servers; DestinationRules turning TLS off; the outbound traffic policy; the root certificate's
+  expiry and istiod's workload certificate lifetime. Judgments follow Istio's own rules (no mesh-wide policy means
+  PERMISSIVE). A refused call names the permission it needs; the README has the least-privilege RBAC.
 - **The TUI shows which environment variables a manifest is missing, and stops a run that would fail on them.**
   - The manifest settings row has an `env` button (`✓ all set` or `✗ 2 missing`), each fetcher's status names what it
     needs (`✗ needs OKTA_API_TOKEN`), and the line under the table splits what a run needs from what only an upload needs.

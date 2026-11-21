@@ -1,0 +1,94 @@
+{
+  "apiVersion": "security.istio.io/v1",
+  "items": [
+    {
+      "apiVersion": "security.istio.io/v1",
+      "kind": "AuthorizationPolicy",
+      "metadata": {
+        "name": "allow-everything",
+        "namespace": "monitoring",
+        "uid": "00000000-0000-0000-0000-000000000014"
+      },
+      "spec": {
+        "action": "ALLOW",
+        "rules": [
+          {}
+        ]
+      }
+    },
+    {
+      "apiVersion": "security.istio.io/v1",
+      "kind": "AuthorizationPolicy",
+      "metadata": {
+        "name": "deny-all",
+        "namespace": "payments",
+        "uid": "00000000-0000-0000-0000-000000000015"
+      },
+      "spec": {}
+    },
+    {
+      "apiVersion": "security.istio.io/v1",
+      "kind": "AuthorizationPolicy",
+      "metadata": {
+        "name": "allow-ingress",
+        "namespace": "shop",
+        "uid": "00000000-0000-0000-0000-000000000016"
+      },
+      "spec": {
+        "action": "ALLOW",
+        "rules": [
+          {
+            "from": [
+              {
+                "source": {
+                  "namespaces": [
+                    "ingress"
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "apiVersion": "security.istio.io/v1",
+      "kind": "AuthorizationPolicy",
+      "metadata": {
+        "name": "block-debug",
+        "namespace": "shop",
+        "uid": "00000000-0000-0000-0000-000000000017"
+      },
+      "spec": {
+        "action": "DENY",
+        "rules": [
+          {
+            "to": [
+              {
+                "operation": {
+                  "paths": [
+                    "/debug/*"
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "apiVersion": "security.istio.io/v1",
+      "kind": "AuthorizationPolicy",
+      "metadata": {
+        "name": "deny-all",
+        "namespace": "shop",
+        "uid": "00000000-0000-0000-0000-000000000018"
+      },
+      "spec": {}
+    }
+  ],
+  "kind": "AuthorizationPolicyList",
+  "metadata": {
+    "continue": ""
+  }
+}
