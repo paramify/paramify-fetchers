@@ -1,0 +1,19 @@
+key: keycloak_admin_events_details_enabled
+name: 'Keycloak: Admin Event Details Enabled'
+type: AUTOMATED
+role: configuration
+source: community
+statement: >
+  Keycloak's setting to include the full representation of what changed in admin events is on
+  (admin_events_details_enabled is true). An enabled setting is configuration evidence only: it does not
+  show that events are produced or arrive anywhere. Does not check whether the collection run succeeded.
+
+regex: '"admin_events_details_enabled":\s*true\b'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-KEYCLOAK-REALM-SECURITY
