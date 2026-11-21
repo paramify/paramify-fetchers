@@ -1,0 +1,19 @@
+key: github_workflow_files_all_parsed
+name: GitHub Workflow Files All Parsed
+type: AUTOMATED
+role: integrity
+source: community
+statement: >-
+  Every workflow file read was parsed. A file that could not be parsed fails, because its sign and verify
+  steps are unknown rather than absent.
+regex: '"workflow_files_unparsed":\s*\[\s*\]'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+- regexOperation:
+    type: MATCH_COUNT
+  criteria: NOT_EQUALS
+  value:
+    type: CUSTOM_TEXT
+    customText: '0'
+evidence_sets:
+- EVD-GITHUB-IMAGE-SIGNING

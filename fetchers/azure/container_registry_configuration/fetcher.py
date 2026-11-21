@@ -471,8 +471,10 @@ def main() -> int:
         )
 
     exclusions.record_invalid(collector)
-    exclusions.warn_unmatched(logger)
     listed = registries is not None
+    if not listed:
+        exclusions.mark_unread()
+    exclusions.warn_unmatched(logger)
     registries = registries or []
 
     evidence = build_payload(

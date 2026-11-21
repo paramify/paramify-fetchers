@@ -1,18 +1,7 @@
 name: azure_log_analytics_workspaces
-version: 0.3.0
-description: >
-  Every Log Analytics workspace in the subscription with the configuration that
-  decides how long log data is kept and who can read it: the pricing SKU, the
-  workspace retention (retention_in_days) and daily ingestion cap, public network
-  access for ingestion and for query, the access control mode
-  (enableLogAccessUsingOnlyResourcePermissions — resource-or-workspace permissions
-  versus workspace permissions only), whether shared-key (local) authentication is
-  disabled, and any dedicated cluster link. Per-table retention is summarized rather
-  than dumped — a workspace carries hundreds of built-in tables — as counts by plan
-  and by interactive / total retention, the minimum retention across tables, and the
-  tables whose retention differs from the workspace default or that are custom
-  tables, listed by name. Also each workspace's data export rules and whether
-  Microsoft Sentinel is onboarded (the SecurityInsights solution is enabled).
+version: 0.3.1
+description: >-
+  Shows how long each Log Analytics workspace keeps its logs, who can reach and read them, where they are exported, and whether Microsoft Sentinel is onboarded.
 category: azure
 
 config_schema:
@@ -72,18 +61,51 @@ ksis:
 evidence_set:
   reference_id: EVD-AZURE-LOG-ANALYTICS
   name: Azure Log Analytics Workspaces
-  instructions: >
-    Script: azure/log_analytics_workspaces/fetcher.py. Azure SDK calls (azure-mgmt-loganalytics
-    LogAnalyticsManagementClient): workspaces.list(), then per workspace
-    tables.list_by_workspace(resource_group, workspace),
-    data_exports.list_by_workspace(resource_group, workspace) and
-    intelligence_packs.list(resource_group, workspace). Reader is sufficient — all
-    GETs, and no log data is queried.
-    Resources the resource_exclusions patterns take out are listed under `excluded`
-    instead, each with the pattern that matched, and every count covers only the
-    workspaces in scope, so excluding the workspace Microsoft Sentinel is onboarded
-    to makes `sentinel_onboarded` false. The summary echoes `resource_exclusion_patterns`, lists
-    `resource_exclusion_patterns_unmatched` (patterns that matched no workspace,
-    such as a mistyped name), and counts `excluded_workspaces` and
-    `in_scope_workspaces` (0 when none was read or the patterns took out every
-    workspace, which a check can catch by requiring more than 0).
+  instructions: |
+    Script: azure/log_analytics_workspaces/fetcher.py
+
+    Access: Reader on the subscription. No log data is queried.
+
+    Commands Executed:
+    - subscriptions.list() — picks a subscription when none is set
+    - providers.get("Microsoft.OperationalInsights") — tells "not in use" from "no workspaces"
+    - workspaces.list() — every workspace with its SKU, retention, daily cap, network access and access settings
+    - tables.list_by_workspace() (per in-scope workspace) — each table's plan and retention
+    - data_exports.list_by_workspace() (per in-scope workspace) — data export rules and their destinations
+    - intelligence_packs.list() (per in-scope workspace) — the solutions switched on, including Sentinel (SecurityInsights)
+
+    Output: azure_log_analytics_workspaces_<subscription>.json — each in-scope workspace with its SKU, retention, daily cap, network access, access control mode, shared-key setting, table counts by plan and retention and the shortest table retention, the tables with non-default retention or custom, its dedicated cluster link, its data export rules and whether Sentinel is onboarded, plus the workspaces left out and why.
+
+    Summary fields:
+
+    What was checked?
+    - total_workspaces — Number of in-scope Log Analytics workspaces read
+    - total_tables — Number of tables, built-in and custom, across the in-scope workspaces whose tables were read
+    - provider_registration_status — Whether the Log Analytics provider (Microsoft.OperationalInsights) is registered on the subscription: registered, not_registered or unknown
+
+    Which resources are left out of scope?
+    - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
+    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no workspace, such as a mistyped name; null when the workspace list could not be read
+    - excluded_workspaces — Number of workspaces left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, no other count includes it, and its tables, data exports and solutions are never read; 0 when the workspace list could not be read
+    - in_scope_workspaces — Number of workspaces read and in scope; 0 means none was read or the patterns took out every workspace, which a check can catch by requiring more than 0
+
+    How long are logs kept, and can ingestion stop?
+    - min_workspace_retention_in_days — Days of the shortest workspace retention (how long a workspace keeps data available to query by default) across in-scope workspaces; null when none reports one
+    - max_workspace_retention_in_days — Days of the longest workspace retention across in-scope workspaces; null when none reports one
+    - min_table_total_retention_in_days — Days of the shortest total retention (query retention plus long-term retention) of any table, across in-scope workspaces whose tables were read; null when no table reports one. A table's retention can be set apart from its workspace's
+    - workspaces_with_daily_cap — Number of workspaces with a daily ingestion cap (a daily quota other than -1, which means no cap); data arriving after the cap is reached is dropped for the rest of that day
+
+    Who can reach and read the logs?
+    - workspaces_public_ingestion_enabled — Number of workspaces that accept data from the public internet (public network access for ingestion is Enabled, or not set, which means Enabled)
+    - workspaces_public_query_enabled — Number of workspaces that can be queried from the public internet (public network access for query is Enabled, or not set, which means Enabled)
+    - workspaces_resource_or_workspace_access_mode — Number of workspaces in the "resource or workspace permissions" mode, where someone with read access to an Azure resource can read that resource's logs without any right on the workspace (the enableLogAccessUsingOnlyResourcePermissions setting is true, despite its name)
+    - workspaces_workspace_only_access_mode — Number of workspaces in the "workspace permissions" mode, where reading logs needs a right on the workspace itself (the setting is false or not set)
+    - workspaces_local_auth_disabled — Number of workspaces with shared-key (local) authentication turned off, so callers must sign in with Entra ID; not set means shared keys still work
+
+    Are logs exported?
+    - workspaces_with_data_exports — Number of workspaces with at least one data export rule, enabled or not
+    - total_data_exports — Number of data export rules across in-scope workspaces, enabled or not
+
+    Is Microsoft Sentinel onboarded?
+    - sentinel_onboarded_workspaces — Number of workspaces with Sentinel onboarded, meaning the SecurityInsights solution is switched on in the workspace
+    - sentinel_onboarded — True if at least one in-scope workspace has Sentinel onboarded; false if none does or none was read, including when a resource_exclusions pattern takes out the workspace Sentinel is onboarded to, and when the solutions couldn't be read (the run then fails); never null
