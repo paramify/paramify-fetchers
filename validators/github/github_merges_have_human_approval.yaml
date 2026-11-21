@@ -2,6 +2,7 @@ key: github_merges_have_human_approval
 name: GitHub Merges Have Human Approval
 type: AUTOMATED
 role: configuration
+source: community
 statement: >-
   No pull request merged into a default branch in the window lacked an approving review from a person
   other than its author. Bot approvals do not count. Does not assert the approval was on the final commit.

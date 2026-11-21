@@ -2,6 +2,7 @@ key: github_production_restricts_deployment_branches
 name: GitHub Production Environments Restrict Branches
 type: AUTOMATED
 role: configuration
+source: community
 statement: >-
   No production environment accepts deployments from any branch: each limits them to protected or named
   branches or tags.

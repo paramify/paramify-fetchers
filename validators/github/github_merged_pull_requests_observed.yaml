@@ -2,6 +2,7 @@ key: github_merged_pull_requests_observed
 name: GitHub Merged Pull Requests Observed
 type: AUTOMATED
 role: completeness
+source: community
 statement: >-
   At least one pull request merged into a default branch in the window was read, so the review checks
   judge real merges. A window with no merges fails rather than passing with nothing to judge.

@@ -2,6 +2,7 @@ key: github_default_branch_workflow_runs_observed
 name: GitHub Default Branch Workflow Runs Observed
 type: AUTOMATED
 role: completeness
+source: community
 statement: >-
   At least one workflow run on a default branch in the window was read. A window with no default-branch
   runs fails rather than passing with nothing to judge.

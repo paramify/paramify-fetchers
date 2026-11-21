@@ -2,6 +2,7 @@ key: github_code_scanning_analysis_current
 name: GitHub Code Scanning Analysis Current
 type: AUTOMATED
 role: configuration
+source: community
 statement: >-
   No repository's newest default-branch analysis is older than the configured maximum age. Passes with
   nothing to judge for a repository never analysed; pair with GitHub Code Scanning Covers All Repositories.

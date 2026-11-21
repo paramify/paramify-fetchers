@@ -2,6 +2,7 @@ key: github_dependency_graph_has_packages
 name: GitHub Dependency Graph Has Packages
 type: AUTOMATED
 role: integrity
+source: community
 statement: >-
   The dependency graph of every repository in scope holds at least one package. An empty graph fails,
   because alerts are on but no manifest was parsed, so zero alerts proves nothing.

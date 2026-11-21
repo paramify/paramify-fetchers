@@ -2,6 +2,7 @@ key: github_production_deployment_commits_known
 name: GitHub Production Deployment Commits Known
 type: AUTOMATED
 role: integrity
+source: community
 statement: >-
   The commit of every production deployment in the window was resolved against the default branch. A deployment
   whose commit could not be placed fails rather than reading as on the default branch.

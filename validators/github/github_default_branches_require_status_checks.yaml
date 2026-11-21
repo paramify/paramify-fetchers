@@ -2,6 +2,7 @@ key: github_default_branches_require_status_checks
 name: GitHub Default Branches Require Status Checks
 type: AUTOMATED
 role: configuration
+source: community
 statement: >-
   Every repository in scope requires at least one status check to pass before a change reaches its default
   branch. Does not assert which checks are required or that they test anything.

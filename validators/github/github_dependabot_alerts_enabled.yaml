@@ -2,6 +2,7 @@ key: github_dependabot_alerts_enabled
 name: GitHub Dependabot Alerts Enabled
 type: AUTOMATED
 role: configuration
+source: community
 statement: >-
   Dependabot alerts are on for every repository in scope. A repository with alerts off fails, because
   its zero open alerts mean unmonitored rather than clean.

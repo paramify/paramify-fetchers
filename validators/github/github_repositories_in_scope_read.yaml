@@ -2,6 +2,7 @@ key: github_repositories_in_scope_read
 name: GitHub Repositories in Scope Read
 type: AUTOMATED
 role: completeness
+source: community
 statement: >-
   The fetcher read at least one repository in scope. A scope that matched no repository, or a count that
   was not read, fails. Does not assert the scope is the right one.

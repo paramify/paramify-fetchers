@@ -2,6 +2,7 @@ key: github_no_workflows_failing_on_default_branch
 name: GitHub No Workflows Failing on Default Branch
 type: AUTOMATED
 role: configuration
+source: community
 statement: >-
   No workflow's newest run on a default branch failed. Judges the newest run only, so an earlier failure
   that a later run fixed passes. Does not assert what the workflows test.

@@ -2,6 +2,7 @@ key: github_code_scanning_all_repositories_analysed
 name: GitHub Code Scanning Covers All Repositories
 type: AUTOMATED
 role: configuration
+source: community
 statement: >-
   Every repository in scope has at least one code scanning analysis on its default branch, from any tool.
   A repository where code scanning is unavailable or was never run fails.

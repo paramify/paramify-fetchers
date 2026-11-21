@@ -2,6 +2,7 @@ key: github_workflow_files_all_parsed
 name: GitHub Workflow Files All Parsed
 type: AUTOMATED
 role: integrity
+source: community
 statement: >-
   Every workflow file read was parsed. A file that could not be parsed fails, because its sign and verify
   steps are unknown rather than absent.

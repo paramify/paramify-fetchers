@@ -2,6 +2,7 @@ key: github_workflow_files_read
 name: GitHub Workflow Files Read
 type: AUTOMATED
 role: completeness
+source: community
 statement: >-
   At least one workflow file on a default branch was read, so the signing checks judge real workflows.
 regex: '"workflow_files":\s*(?<workflow_files>[1-9]\d*)'

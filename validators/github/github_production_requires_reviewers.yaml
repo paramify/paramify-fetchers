@@ -2,6 +2,7 @@ key: github_production_requires_reviewers
 name: GitHub Production Environments Require Reviewers
 type: AUTOMATED
 role: configuration
+source: community
 statement: >-
   Every production environment requires a named reviewer to approve a deployment before it runs.
 regex: '"production_without_required_reviewers":\s*\[\s*\]'

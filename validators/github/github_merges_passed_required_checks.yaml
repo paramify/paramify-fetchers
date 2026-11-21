@@ -2,6 +2,7 @@ key: github_merges_passed_required_checks
 name: GitHub Merges Passed Required Checks
 type: AUTOMATED
 role: configuration
+source: community
 statement: >-
   No pull request merged in the window had a required check failing or missing on its merged commit. Passes
   with nothing to judge when no check is required; pair with GitHub Default Branches Require Status Checks.

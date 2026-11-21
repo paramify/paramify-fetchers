@@ -2,6 +2,7 @@ key: github_merges_ran_checks
 name: GitHub Merges Ran Checks
 type: AUTOMATED
 role: configuration
+source: community
 statement: >-
   No pull request merged in the window had no check at all on its merged commit. Does not assert the checks
   passed or were required.

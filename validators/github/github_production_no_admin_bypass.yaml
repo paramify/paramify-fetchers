@@ -2,6 +2,7 @@ key: github_production_no_admin_bypass
 name: GitHub Production Environments Without Admin Bypass
 type: AUTOMATED
 role: configuration
+source: community
 statement: >-
   No production environment lets repository administrators skip its protection rules. Pair with GitHub
   Production Admin Bypass Readable.

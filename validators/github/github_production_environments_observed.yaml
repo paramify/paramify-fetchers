@@ -2,6 +2,7 @@ key: github_production_environments_observed
 name: GitHub Production Environments Observed
 type: AUTOMATED
 role: completeness
+source: community
 statement: >-
   At least one repository in scope has an environment the fetcher treats as production, by name pattern.
   With none, the production checks have nothing to judge and this fails. Does not assert the pattern names

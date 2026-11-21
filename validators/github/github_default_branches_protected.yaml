@@ -2,6 +2,7 @@ key: github_default_branches_protected
 name: GitHub Default Branches Protected
 type: AUTOMATED
 role: configuration
+source: community
 statement: >-
   Every repository in scope has at least one rule enforced on its default branch, from an active ruleset
   or classic branch protection. Does not assert which rules.

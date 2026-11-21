@@ -2,6 +2,7 @@ key: github_production_deployments_made_by_actions
 name: GitHub Production Deployments Made by Actions
 type: AUTOMATED
 role: configuration
+source: community
 statement: >-
   Every production deployment in the window was created by GitHub Actions, not by a person or another
   integration calling the API.

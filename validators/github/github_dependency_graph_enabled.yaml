@@ -2,6 +2,7 @@ key: github_dependency_graph_enabled
 name: GitHub Dependency Graph Enabled
 type: AUTOMATED
 role: configuration
+source: community
 statement: >-
   The dependency graph is on for every repository in scope, so Dependabot has dependencies to match advisories
   against.

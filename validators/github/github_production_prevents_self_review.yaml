@@ -2,6 +2,7 @@ key: github_production_prevents_self_review
 name: GitHub Production Environments Prevent Self Review
 type: AUTOMATED
 role: configuration
+source: community
 statement: >-
   No production environment lets the person who started a deployment approve it. Passes with nothing to
   judge when no reviewer is required; pair with GitHub Production Environments Require Reviewers.

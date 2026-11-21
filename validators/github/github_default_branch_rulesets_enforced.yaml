@@ -2,6 +2,7 @@ key: github_default_branch_rulesets_enforced
 name: GitHub Default Branch Rulesets Enforced
 type: AUTOMATED
 role: configuration
+source: community
 statement: >-
   No repository in scope has a ruleset targeting its default branch that is disabled or in evaluate mode.
   A ruleset that exists but enforces nothing fails.

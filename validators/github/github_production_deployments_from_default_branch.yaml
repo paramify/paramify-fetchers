@@ -2,6 +2,7 @@ key: github_production_deployments_from_default_branch
 name: GitHub Production Deployments From Default Branch
 type: AUTOMATED
 role: configuration
+source: community
 statement: >-
   Every production deployment in the window deployed a commit that is on the default branch. Pair with
   GitHub Production Deployment Commits Known.

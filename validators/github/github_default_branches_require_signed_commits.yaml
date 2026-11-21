@@ -2,6 +2,7 @@ key: github_default_branches_require_signed_commits
 name: GitHub Default Branches Require Signed Commits
 type: AUTOMATED
 role: configuration
+source: community
 statement: >-
   Every repository in scope requires signed commits on its default branch: the count requiring them equals
   the count of repositories read. Does not assert whose keys sign.

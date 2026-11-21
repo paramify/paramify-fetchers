@@ -2,6 +2,7 @@ key: github_required_checks_readable
 name: GitHub Required Checks Readable
 type: AUTOMATED
 role: integrity
+source: community
 statement: >-
   The required checks of every repository in scope were read. A repository whose required checks could
   not be read fails, because its merges cannot be judged against them.
