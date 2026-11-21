@@ -296,7 +296,7 @@ def test_each_row_of_a_fetcher_listed_twice_shows_its_own_entry(tmp_path, run_tu
 
     rows, selected, detail = run_tui(body, path, root)
     first, second = rows[SCAN], rows[f"{SCAN}#1"]
-    assert (first["sends to"], first["config"], first["status"].strip()) == ("Acme Vulns · after_run", "3/3", "✓")
+    assert (first["sends to"], first["config"], first["status"].strip()) == ("Acme Vulns · after_run", "3/3", "✓ ready")
     assert second["sends to"].startswith("Beta Vulns") and second["config"] == "2/3"
     assert second["status"].strip() == "⚠ 1"
     assert selected == f"{SCAN}#1"
