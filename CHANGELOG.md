@@ -50,7 +50,8 @@ schemas and the `paramify` CLI — not the internal code.
 
 - **Evidence set frequency follows how often a manifest runs, and reaches sets that already exist.**
   - The manifest settings row has a `frequency` button (daily, every 3 days, weekly, …), saved as `run.schedule.every`.
-    An entry can override it in its form (`e`).
+    An entry can override it in its form (`e`). On the CLI: `paramify manifest set-frequency MANIFEST FREQUENCY
+    [--fetcher NAME]`.
   - Order, highest first: the entry, a per-fetcher `frequency` in `upload.yaml`, `defaults.frequency` in `upload.yaml`
     (now read), the manifest's frequency, the fetcher's own default (every 3 days).
   - An upload now changes the frequency on an existing evidence set (`PATCH /evidence/{id}`) when one was chosen, and

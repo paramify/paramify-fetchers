@@ -42,6 +42,7 @@ from framework import envgen, patterns, yaml_io
 from framework import samples as _samples
 from framework.config_loader import discover_fetchers, discover_platforms
 from framework.contract import (
+    EVIDENCE_FREQUENCIES,
     ConfigField,
     Fetcher,
     ManifestEntry,
@@ -2199,6 +2200,25 @@ def set_schedule(m: dict, every: Optional[str], at: Optional[str] = None) -> dic
     if at:
         schedule["at"] = at
     run["schedule"] = schedule
+    return m
+
+
+def set_frequency(m: dict, frequency: Optional[str], use: Optional[str] = None) -> dict:
+    """Record how often evidence sets expect a new artifact: manifest-wide
+    (`run.schedule.every`, keeping any `at`), or with `use` for one fetcher entry
+    (its `paramify.frequency`, see _paramify_block). A blank `frequency` removes
+    it. Raises ValueError for a value that isn't one of EVIDENCE_FREQUENCIES.
+    """
+    value = (frequency or "").strip().upper()
+    if value and value not in EVIDENCE_FREQUENCIES:
+        raise ValueError(f"{frequency!r} isn't a frequency; use one of {', '.join(EVIDENCE_FREQUENCIES)}")
+    if use is None:
+        return set_schedule(m, value or None, (_run(m).get("schedule") or {}).get("at") if value else None)
+    block = _paramify_block(m, use)
+    if value:
+        block["frequency"] = value
+    else:
+        block.pop("frequency", None)
     return m
 
 
