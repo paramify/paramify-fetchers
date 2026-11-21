@@ -36,7 +36,7 @@ from framework.tui.modals import (
     PreviewModal,
     TargetsModal,
 )
-from framework.tui.words import agree, plural
+from framework.tui.words import FREQUENCY_CHOICES, agree, frequency, plural
 
 APPROVALS = ("MANUAL", "SUBMISSION_WITH_PASSING_VALIDATORS", "SUBMISSION")
 NO_REQUESTS = ("direct", "evidence", "refuse")
@@ -126,10 +126,12 @@ class ManifestPanel(ButtonRowNav, Vertical):
         yield Static(id="manifest-issues")
 
     def _settings_buttons(self) -> ComposeResult:
-        yield Static("stack:", classes="inline-label")
+        yield Static("stack:", classes="inline-label after-button")
         yield Button("—", id="manifest-stack")
         yield Static("owner:", classes="inline-label after-button")
         yield Button("—", id="manifest-owner")
+        yield Static("frequency:", classes="inline-label after-button")
+        yield Button("—", id="manifest-schedule")
         yield Static("env:", classes="inline-label after-button")
         yield Button("—", id="manifest-env")
         yield Button("Save", id="btn-save")
@@ -213,6 +215,7 @@ class ManifestPanel(ButtonRowNav, Vertical):
 
         self.query_one("#manifest-stack", Button).label = self._stack_label()
         self.query_one("#manifest-owner", Button).label = (self._run().get("paramify") or {}).get("owner") or "—"
+        self.query_one("#manifest-schedule", Button).label = frequency((self._run().get("schedule") or {}).get("every"))
 
         descriptors = self._descriptors()
         entries = self._entries()
@@ -332,7 +335,10 @@ class ManifestPanel(ButtonRowNav, Vertical):
         # Bucket against the full entry list so index-prefixed (entry[i]) errors
         # attribute correctly, then take this entry's slice.
         errs = self._bucket_errors(self._errors, self._entries()).get(key, [])
-        return render.entry_detail(d, entry, errs, self._config_view.get(key))
+        freq = None
+        if d and d.get("evidence_set"):
+            freq = api.entry_frequency(self._manifest, entry, d["evidence_set"].get("frequency"), self.app.root_path)
+        return render.entry_detail(d, entry, errs, self._config_view.get(key), frequency=freq)
 
     @staticmethod
     def _status_cell(errors: List[str], missing: List[str]) -> Text:
@@ -661,6 +667,47 @@ class ManifestPanel(ButtonRowNav, Vertical):
     def action_environment(self) -> None:
         self.app.open_environment()
 
+    @on(Button.Pressed, "#manifest-schedule")
+    def _on_schedule(self) -> None:
+        self.action_pick_schedule()
+
+    def action_pick_schedule(self) -> None:
+        """Choose how often the manifest runs. A time of day (run.schedule.at) is
+        for scheduling, not frequency, so it isn't asked here; one already in the
+        manifest is kept.
+
+        Every evidence set's frequency follows it, unless an entry (e) or
+        upload.yaml sets one. The next upload changes the sets that exist.
+        """
+        m = self._manifest
+        if m is None:
+            return
+        current = self._run().get("schedule") or {}
+        specs = [
+            {"key": "every", "label": "every", "kind": "select", "value": current.get("every"),
+             "options": [(words, value) for value, words in FREQUENCY_CHOICES], "placeholder": "no schedule",
+             "required": False, "help": ""},
+        ]
+
+        def done(result: Optional[dict]) -> None:
+            if result is None:
+                return
+            values = result.get("frequency") or {}
+            every = values.get("every")
+            if every == current.get("every"):
+                return
+            api.set_schedule(m, every, current.get("at") if every else None)
+            self._autosave()
+            self.notify(f"Evidence sets now expect a new artifact {frequency(every)}." if every
+                        else "Frequency removed. Evidence sets keep each fetcher's own.")
+            self.rebuild()
+
+        self.app.push_screen(
+            FormModal("How often does this manifest run?", {"frequency": specs},
+                      subtitle="Evidence sets expect a new artifact this often."),
+            done,
+        )
+
     @on(Button.Pressed, "#btn-save")
     def _on_btn_save(self) -> None:
         self.action_save()
@@ -776,6 +823,10 @@ class ManifestPanel(ButtonRowNav, Vertical):
                       if pipeline else "Blank uses the manifest's.")},
             {"key": "delivery", "label": "delivery", "kind": "select", "value": pf.get("delivery") if pf.get("delivery") in DELIVERIES else None,
              "options": [(v, v) for v in DELIVERIES], "required": False, "help": "Blank uses the manifest's."},
+            {"key": "frequency", "label": "frequency", "kind": "select",
+             "value": pf.get("frequency") if pf.get("frequency") in dict(FREQUENCY_CHOICES) else None,
+             "options": [(words, value) for value, words in FREQUENCY_CHOICES], "required": False,
+             "help": self._schedule_words()},
         ]
         if pipeline:
             # A pipeline file always goes in a batch, so `delivery` does not apply (and
@@ -811,6 +862,10 @@ class ManifestPanel(ButtonRowNav, Vertical):
             FormModal(f"Edit {use}", groups, subtitle=subtitle),
             done,
         )
+
+    def _schedule_words(self) -> str:
+        every = (self._run().get("schedule") or {}).get("every")
+        return f"Blank follows the schedule ({frequency(every)})." if every else "Blank uses the fetcher's default."
 
     def _keyed(self) -> List[tuple]:
         entries = self._entries()

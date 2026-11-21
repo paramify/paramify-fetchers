@@ -619,7 +619,7 @@ def test_entry_editor_shows_the_entry_settings_and_drops_a_name_only_with_its_st
     path, _ = _manifest(tmp_path)
     m = yaml.safe_load(path.read_text())
     settings = {"stack": "stk-1", "stack_name": "Alpha", "owner": "bob", "approval": "MANUAL",
-                "no_request": "refuse", "delivery": "direct"}
+                "no_request": "refuse", "delivery": "direct", "frequency": "WEEKLY"}
     m["run"]["fetchers"][0]["paramify"] = dict(settings)
     path.write_text(yaml.safe_dump(m))
 
@@ -642,9 +642,72 @@ def test_entry_editor_shows_the_entry_settings_and_drops_a_name_only_with_its_st
     shown, options = run_tui(edit, path)
     assert shown == {k: v for k, v in settings.items() if k != "stack_name"}
     assert options == {"approval": ["MANUAL", "SUBMISSION_WITH_PASSING_VALIDATORS", "SUBMISSION"],
-                       "no_request": ["direct", "evidence", "refuse"], "delivery": ["auto", "direct"]}
+                       "no_request": ["direct", "evidence", "refuse"], "delivery": ["auto", "direct"],
+                       "frequency": ["DAILY", "THREE_DAY", "WEEKLY", "BIWEEKLY", "MONTHLY", "QUARTERLY",
+                                     "BIANNUAL", "ANNUAL"]}
     assert _run_block(path)["fetchers"][0]["paramify"] == settings  # saved unchanged, name kept
 
     run_tui(lambda app, pilot: edit(app, pilot, stack="stk-2"), path)
     assert _run_block(path)["fetchers"][0]["paramify"] == {
         **{k: v for k, v in settings.items() if k != "stack_name"}, "stack": "stk-2"}
+
+
+# ---- the schedule ------------------------------------------------------------------
+
+async def _set_schedule(app, pilot, every):
+    await _manifest_page(app, pilot)
+    app.screen.query_one("#manifest-schedule", Button).press()
+    await _settle(app, pilot)
+    assert isinstance(app.screen, FormModal)
+    rows = {r.spec["key"]: r for r in app.screen.query("FieldRow")}
+    assert set(rows) == {"every"}  # frequency only: a time of day is for scheduling, not asked here
+    rows["every"].query_one(Select).value = every
+    await pilot.pause()
+    await pilot.press("ctrl+s")
+    await _settle(app, pilot)
+    return str(app.screen.query_one("#manifest-schedule", Button).label)
+
+
+def test_the_frequency_is_set_shown_and_removed(tmp_path, no_token, run_tui):
+    path, _ = _manifest(tmp_path)
+
+    label = run_tui(lambda app, pilot: _set_schedule(app, pilot, "DAILY"), path)
+    assert label == "daily"
+    assert _run_block(path)["schedule"] == {"every": "DAILY"}
+
+    run_tui(lambda app, pilot: _set_schedule(app, pilot, BLANK), path)
+    assert "schedule" not in _run_block(path)
+
+
+def test_a_time_already_in_the_manifest_is_kept(tmp_path, no_token, run_tui):
+    path, _ = _manifest(tmp_path)
+    m = yaml.safe_load(path.read_text())
+    api.set_schedule(m, "WEEKLY", "02:00")
+    api.dump_manifest(m, path, REPO_ROOT)
+
+    label = run_tui(lambda app, pilot: _set_schedule(app, pilot, "DAILY"), path)
+    assert label == "daily"
+    assert _run_block(path)["schedule"] == {"every": "DAILY", "at": "02:00"}
+
+
+def test_the_detail_says_where_the_frequency_comes_from(tmp_path, no_token, run_tui):
+    path, name = _manifest(tmp_path)
+    m = yaml.safe_load(path.read_text())
+    api.set_schedule(m, "WEEKLY")
+    api.dump_manifest(m, path, REPO_ROOT)
+
+    async def body(app, pilot):
+        panel = await _manifest_page(app, pilot)
+        return _plain(app, panel.current_detail())
+
+    text = run_tui(body, path)
+    assert "weekly  follows the schedule" in text, text
+
+
+def _plain(app, renderable) -> str:
+    from rich.console import Console
+
+    console = Console(width=120, color_system=None)
+    with console.capture() as cap:
+        console.print(renderable)
+    return cap.get()

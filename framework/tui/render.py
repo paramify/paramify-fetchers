@@ -25,7 +25,7 @@ from framework.secret_resolver import (
     is_env_ref_attempt,
     view_runtime_value,
 )
-from framework.tui import kinds, palette
+from framework.tui import kinds, palette, words
 from framework.tui.words import agree
 
 
@@ -153,7 +153,15 @@ def destination_cell(descriptor: Optional[dict], config_view: Optional[List[dict
     return Text("no evidence set", style=palette.WARN)
 
 
-def _destination(f: dict, config_view: Optional[List[dict]] = None, in_manifest: bool = False) -> RenderableType:
+# Where an entry's frequency came from (desired.FREQUENCY_SOURCES), in words.
+_FREQUENCY_FROM = {
+    "entry": "set on this entry", "upload.yaml": "from upload.yaml", "upload.yaml defaults": "from upload.yaml defaults",
+    "schedule": "follows the schedule", "fetcher": "the fetcher's default",
+}
+
+
+def _destination(f: dict, config_view: Optional[List[dict]] = None, in_manifest: bool = False,
+                 frequency: Optional[tuple] = None) -> RenderableType:
     """The "sends to" block. In the catalog a scan report's assessment is not chosen
     yet, so it says how to choose one; in the manifest it shows the choice."""
     rows: List[tuple] = []
@@ -180,6 +188,11 @@ def _destination(f: dict, config_view: Optional[List[dict]] = None, in_manifest:
             if es.get("name"):
                 value.append(f" — {es['name']}", style="dim")
             rows.append(("evidence set", value))
+            if frequency:
+                value, source = frequency
+                cell = Text(words.frequency(value), style=palette.FG)
+                cell.append(f"  {_FREQUENCY_FROM.get(source, source)}", style="dim")
+                rows.append(("frequency", cell))
             pipe = f.get("pipeline")
             if pipe:
                 rows.append(("pipeline", Text(
@@ -287,8 +300,12 @@ def entry_detail(
     entry: dict,
     errors: Optional[List[str]] = None,
     config_view: Optional[List[dict]] = None,
+    frequency: Optional[tuple] = None,
 ) -> RenderableType:
-    """Render one manifest entry: its current config/secrets/targets vs the contract."""
+    """Render one manifest entry: its current config/secrets/targets vs the contract.
+
+    `frequency` is (value, source) from api.entry_frequency: what its evidence set expects.
+    """
     use = entry.get("use", "?")
     if descriptor is None:
         return Group(
@@ -311,7 +328,7 @@ def entry_detail(
     parts: List[RenderableType] = [header]
     if community:
         parts.append(Text(palette.COMMUNITY_NOTE, style=palette.ORANGE))
-    parts += [Text(), _destination(descriptor, config_view, in_manifest=True), Text()]
+    parts += [Text(), _destination(descriptor, config_view, in_manifest=True, frequency=frequency), Text()]
 
     # secrets (non per-target live at entry level)
     top_secrets = [s for s in descriptor.get("secrets", []) if not s.get("per_target")]

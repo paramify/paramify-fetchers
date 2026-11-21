@@ -203,19 +203,19 @@ def test_tab_reaches_every_part_of_the_page(tmp_path, run_tui):
     ]
 
 
-def test_arrows_walk_the_stack_owner_save_row(tmp_path, run_tui):
+def test_arrows_walk_the_settings_row(tmp_path, run_tui):
     async def body(app, pilot):
         app.screen.query_one("#manifest-stack").focus()
         await pilot.pause()
         seen = [_focus_id(app)]
-        for key in ("right", "right", "right", "right"):
+        for key in ("right",) * 5:
             await pilot.press(key)
             await pilot.pause()
             seen.append(_focus_id(app))
         return seen
 
     assert run_tui(body, _manifest_with(tmp_path, "demo_hello")) == [
-        "manifest-stack", "manifest-owner", "manifest-env", "btn-save", "manifest-stack",
+        "manifest-stack", "manifest-owner", "manifest-schedule", "manifest-env", "btn-save", "manifest-stack",
     ]
 
 

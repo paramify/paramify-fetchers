@@ -12,6 +12,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any, Dict, Literal, Optional
 
+from framework.contract import DEFAULT_EVIDENCE_FREQUENCY
 from framework.run_files import RESERVED_RUN_FILES, is_evidence_file
 from framework.sync.state import RunState
 
@@ -66,6 +67,9 @@ class EntryDesired:
     # A Paramify username. It only breaks a tie between channels on the entry's stack.
     owner: Optional[str] = None
     pipeline: Optional[Dict[str, Any]] = None  # the chosen envelope's pipeline block, if any
+    # Where evidence_set["frequency"] came from (see resolve_frequency). Only the
+    # fetcher's own default is not a choice, so only it never changes a set that exists.
+    frequency_source: str = "fetcher"
 
 
 def pipeline_of(metadata: Dict) -> Optional[Dict[str, Any]]:
@@ -96,6 +100,28 @@ def resolve_evidence_set(metadata: Dict, overrides: Dict) -> Optional[Dict]:
         if key in ov:
             resolved[key] = ov[key]
     return resolved
+
+
+# Where a set's frequency can come from, first set wins. An explicit `frequency`
+# beats the schedule, which only implies one; among explicit ones the narrower wins.
+FREQUENCY_SOURCES = ("entry", "upload.yaml", "upload.yaml defaults", "schedule", "fetcher")
+
+
+def resolve_frequency(
+    declared: Optional[str],
+    *,
+    entry: Optional[str] = None,
+    fetcher_override: Optional[str] = None,
+    upload_default: Optional[str] = None,
+    schedule_every: Optional[str] = None,
+) -> tuple[str, str]:
+    """An evidence set's frequency and where it came from: the manifest entry's
+    `paramify.frequency`, upload.yaml's `overrides.<fetcher>.frequency`, upload.yaml's
+    `defaults.frequency`, the manifest's `run.schedule.every`, else the fetcher's own."""
+    for value, source in zip((entry, fetcher_override, upload_default, schedule_every), FREQUENCY_SOURCES):
+        if value:
+            return str(value), source
+    return str(declared or DEFAULT_EVIDENCE_FREQUENCY), "fetcher"
 
 
 def artifact_content(envelope: Dict, mode: str) -> bytes:
@@ -241,10 +267,13 @@ def desired_from_run(
 ) -> list[EntryDesired]:
     run_dir = Path(run_dir)
     overrides = upload_cfg.get("overrides") or {}
+    upload_defaults = upload_cfg.get("defaults") or {}
     skip_failed = bool(upload_cfg.get("skip_failed", False))
     run_meta = _run_metadata(run_dir)
     raw_settings = run_meta.get("paramify")
     settings: Dict = raw_settings if isinstance(raw_settings, dict) else {}
+    raw_schedule = run_meta.get("schedule")
+    schedule: dict = raw_schedule if isinstance(raw_schedule, dict) else {}
 
     file_entry: Dict[str, str] = {}
     # A file that an invocation wrote over holds the last such invocation's data,
@@ -317,6 +346,15 @@ def desired_from_run(
         es_final = (chosen_es if chosen is not None else first_es) or {}
         cfg = settings.get(key) or {}
         pipeline = pipeline_of(md)
+        frequency, frequency_source = resolve_frequency(
+            (md.get("evidence_set") or {}).get("frequency"),
+            entry=cfg.get("frequency"),
+            fetcher_override=override_for(md, overrides).get("frequency"),
+            upload_default=upload_defaults.get("frequency"),
+            schedule_every=schedule.get("every"),
+        )
+        if es_final:
+            es_final = {**es_final, "frequency": frequency}
         result.append(EntryDesired(
             entry_key=key,
             use=cfg.get("use") or md.get("fetcher_name") or key,
@@ -335,5 +373,6 @@ def desired_from_run(
             approval_explicit=bool(cfg.get("approval")),
             owner=owner_override or cfg.get("owner") or None,
             pipeline=pipeline,
+            frequency_source=frequency_source,
         ))
     return result

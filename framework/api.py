@@ -1772,6 +1772,8 @@ def run(
         "started_at": started_at,
         "completed_at": completed_at,
         "invocations": [_invocation_record(r) for r in all_results],
+        # The upload reads `every` as the frequency of each set no entry or upload.yaml sets.
+        "schedule": dict(parsed.schedule),
         "paramify": {
             keys[id(e)]: {"use": e.use, **manifest_loader.resolved_paramify(
                 parsed, e, pipeline=e.use in fetchers and fetchers[e.use].is_pipeline)}
@@ -2181,6 +2183,45 @@ def set_owner(m: dict, owner: Optional[str], use: Optional[str] = None) -> dict:
     else:
         block.pop("owner", None)
     return m
+
+
+def set_schedule(m: dict, every: Optional[str], at: Optional[str] = None) -> dict:
+    """Record how often the manifest runs: `run.schedule: {every, at}`.
+
+    Each evidence set's frequency follows `every` unless the entry or upload.yaml
+    sets one. No `every` removes the schedule; no `at` runs at any time of day.
+    """
+    run = _run(m)
+    if not every:
+        run.pop("schedule", None)
+        return m
+    schedule: Dict[str, Any] = {"every": every}
+    if at:
+        schedule["at"] = at
+    run["schedule"] = schedule
+    return m
+
+
+def entry_frequency(m: dict, entry: Mapping[str, Any], declared: Optional[str], root: Path) -> Tuple[str, str]:
+    """(frequency, source) for one manifest entry's evidence set, as an upload of a
+    run made now would resolve it (see desired.resolve_frequency). upload.yaml is
+    the default one under `root`; one that can't be read counts as empty."""
+    from framework.sync.providers.desired import resolve_frequency
+
+    try:
+        path = default_upload_config(root)
+        cfg = (yaml_io.load_path(path) or {}) if path else {}
+    except Exception:  # noqa: BLE001 — a display value; the upload reports a bad config
+        cfg = {}
+    cfg = cfg if isinstance(cfg, dict) else {}
+    use = str(entry.get("use") or "")
+    return resolve_frequency(
+        declared,
+        entry=(entry.get("paramify") or {}).get("frequency"),
+        fetcher_override=((cfg.get("overrides") or {}).get(use) or {}).get("frequency"),
+        upload_default=(cfg.get("defaults") or {}).get("frequency"),
+        schedule_every=(_run(m).get("schedule") or {}).get("every"),
+    )
 
 
 # --------------------------------------------------------------------------- #

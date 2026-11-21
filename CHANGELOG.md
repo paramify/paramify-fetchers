@@ -48,6 +48,15 @@ schemas and the `paramify` CLI — not the internal code.
   - ctrl+r on the Run tab doesn't start while a variable a fetcher reads is empty, and says which.
   - Only whether a variable has a value is ever checked. The TUI never shows, logs or takes a value.
 
+- **Evidence set frequency follows how often a manifest runs, and reaches sets that already exist.**
+  - The manifest settings row has a `frequency` button (daily, every 3 days, weekly, …), saved as `run.schedule.every`.
+    An entry can override it in its form (`e`).
+  - Order, highest first: the entry, a per-fetcher `frequency` in `upload.yaml`, `defaults.frequency` in `upload.yaml`
+    (now read), the manifest's frequency, the fetcher's own default (every 3 days).
+  - An upload now changes the frequency on an existing evidence set (`PATCH /evidence/{id}`) when one was chosen, and
+    the upload confirm shows it: `~ EVD-IAM-MFA: frequency every 3 days → daily`. A fetcher's default never changes an
+    existing set, and a key that can't edit sets skips the change and still uploads.
+
 - **Choose the validators each fetcher tracks (TUI Validators tab, beta).** The tab lists the manifest's fetchers
   and, for each, every registry validator for its evidence set in a Paramify section and a community section.
   `space` tracks or untracks one and saves the manifest; `enter` shows the claim, regex, rules in plain words,

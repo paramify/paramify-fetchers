@@ -24,6 +24,7 @@ holds the patterns it opened with, else the list as manifest items.
 
 from __future__ import annotations
 
+import re
 from typing import Any, Optional
 
 from textual.app import ComposeResult
@@ -97,7 +98,13 @@ class FieldRow(Vertical):
             )
 
     def problems(self) -> list:
-        """What stops this row from being saved; only a pattern list is checked here."""
+        """What stops this row from being saved: a text value that misses the spec's
+        `pattern` (its `pattern_help` says why), or a bad pattern list."""
+        if self.spec.get("pattern"):
+            value = self.get_value()
+            if value and not re.fullmatch(self.spec["pattern"], str(value)):
+                return [self.spec.get("pattern_help") or "isn't valid"]
+            return []
         if self.spec.get("kind") != "patterns":
             return []
         items, shape = patterns.from_lines(self.query_one(TextArea).text)

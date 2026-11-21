@@ -1,7 +1,7 @@
 """Make sure every evidence set a run needs exists, and tag it.
 
-A missing set is created; an existing one is never changed, only tagged
-(additively). Each action's result carries the set id and its channels, so a
+A missing set is created. An existing one is tagged (additively), and its
+frequency is changed when the manifest or upload.yaml chose a different one. Each action's result carries the set id and its channels, so a
 later provider can name `Ref("evidence_sets/<reference_id>", "id")`.
 """
 from __future__ import annotations
@@ -10,7 +10,11 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import Any, Callable, Dict, List, Mapping, Optional
 
-from framework.contract import DEFAULT_EVIDENCE_FREQUENCY
+from framework.contract import (
+    DEFAULT_EVIDENCE_FREQUENCY,
+    EVIDENCE_FREQUENCIES,
+    FREQUENCY_WORDS,
+)
 from framework.custom_tags import ENTITY_EVIDENCE, Tagger, resolve_tag_policy
 from framework.paramify.client import ApiError, ErrorKind
 from framework.paramify.resources import EvidenceSet
@@ -32,14 +36,29 @@ class SetDesired:
     entry_keys: List[str] = field(default_factory=list)
     approvals: Dict[str, str] = field(default_factory=dict)  # entry key -> approval
     explicit: Dict[str, str] = field(default_factory=dict)  # entry key -> approval set in the manifest
+    frequency_explicit: bool = False  # chosen in the manifest or upload.yaml, not the fetcher's default
 
     @property
     def conflict(self) -> bool:
         return len(set(self.approvals.values())) > 1
 
 
+def _said(frequency: str) -> str:
+    return FREQUENCY_WORDS.get(frequency, frequency)
+
+
+def _cadence(frequency: str) -> int:
+    """Shorter intervals sort first; NOT_SET sorts last."""
+    order = [f for f in EVIDENCE_FREQUENCIES if f != "NOT_SET"]
+    return order.index(frequency) if frequency in order else len(order)
+
+
 def group_by_reference(entries: List[EntryDesired]) -> List[SetDesired]:
-    """One record per distinct reference id, in first-seen order."""
+    """One record per distinct reference id, in first-seen order.
+
+    Entries that share a set and choose different frequencies get the shortest:
+    the set receives an artifact that often.
+    """
     sets: Dict[str, SetDesired] = {}
     for e in entries:
         if not e.reference_id:
@@ -58,6 +77,10 @@ def group_by_reference(entries: List[EntryDesired]) -> List[SetDesired]:
             )
         elif rec.category is None:
             rec.category = e.category
+        wanted = str(es.get("frequency") or DEFAULT_EVIDENCE_FREQUENCY)
+        if e.frequency_source != "fetcher" and (
+                not rec.frequency_explicit or _cadence(wanted) < _cadence(rec.frequency)):
+            rec.frequency, rec.frequency_explicit = wanted, True
         rec.entry_keys.append(e.entry_key)
         rec.approvals[e.entry_key] = e.approval
         if e.approval_explicit:
@@ -147,11 +170,21 @@ class EvidenceSetsProvider:
                         warnings.append(f"approval is {seen.approval} here; this upload's batches get {wanted}")
                 if seen.name != d.name:
                     warnings.append(f"name in Paramify is '{seen.name}'; the fetcher calls it '{d.name}'")
-                actions.append(Action(
-                    id=action_id, provider=self.name, key=d.reference_id, verb="noop",
-                    summary=f"evidence set {d.reference_id} exists", warnings=warnings,
-                    payload={"id": seen.id, "channels": _channels(seen)},
-                ))
+                # Only a frequency someone chose changes a set: the fetcher's default
+                # would undo every change made in the app.
+                if d.frequency_explicit and seen.frequency and seen.frequency != d.frequency:
+                    actions.append(Action(
+                        id=action_id, provider=self.name, key=d.reference_id, verb="update",
+                        summary=(f"{d.reference_id}: frequency {_said(seen.frequency)} → {_said(d.frequency)}"),
+                        changes={"frequency": [seen.frequency, d.frequency]}, warnings=warnings,
+                        payload={"id": seen.id, "channels": _channels(seen), "body": {"frequency": d.frequency}},
+                    ))
+                else:
+                    actions.append(Action(
+                        id=action_id, provider=self.name, key=d.reference_id, verb="noop",
+                        summary=f"evidence set {d.reference_id} exists", warnings=warnings,
+                        payload={"id": seen.id, "channels": _channels(seen)},
+                    ))
             tags = self._tagger.plan(d.category)
             if tags:
                 actions.append(Action(
@@ -170,6 +203,19 @@ class EvidenceSetsProvider:
         if action.verb == "noop":
             result: Dict[str, Any] = {k: action.payload[k] for k in ("id", "channels") if k in action.payload}
             return Outcome(action.id, "noop", result)
+        if action.verb == "update":
+            result = {k: action.payload[k] for k in ("id", "channels")}
+            try:
+                resources.update_evidence(action.payload["id"], dict(action.payload["body"]))
+            except ApiError as exc:
+                # A 403 here is a key without Write Evidences, which an upload of
+                # existing sets never needed: it must not stop the upload.
+                if exc.fatal and exc.status != 403:
+                    raise
+                # The set exists, so delivery goes ahead; only its frequency stays as it was.
+                why = "this key can't edit evidence sets" if exc.status == 403 else exc.message
+                return Outcome(action.id, "noop", result, message=f"frequency not changed: {why}")
+            return Outcome(action.id, "applied", result)
         if action.verb == "tag":
             if self._tags_unavailable:
                 return Outcome(action.id, "noop", message=TAGS_UNAVAILABLE)
