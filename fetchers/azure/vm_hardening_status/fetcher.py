@@ -746,6 +746,8 @@ def main() -> int:
         )
 
     exclusions.record_invalid(collector)
+    if virtual_machines is None or scale_sets is None:
+        exclusions.mark_unread()
     exclusions.warn_unmatched(logger)
     in_scope = {"virtual_machines": None if virtual_machines is None else len(virtual_machines),
                 "scale_sets": None if scale_sets is None else len(scale_sets)}

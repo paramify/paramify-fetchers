@@ -491,12 +491,12 @@ def test_a_failed_eligible_list_leaves_unmatched_patterns_unknown(monkeypatch, t
     assert summary["in_scope_role_assignments"] == 2
 
 
-def test_without_patterns_unmatched_stays_empty_when_a_list_fails(monkeypatch, tmp_path):
+def test_without_patterns_unmatched_is_null_when_a_list_fails(monkeypatch, tmp_path):
     code, evidence = _failing_run(monkeypatch, tmp_path, fail=("at_scope",), patterns=None)
     summary = evidence["summary"]
     assert code == 1
     assert summary["resource_exclusion_patterns"] == []
-    assert summary["resource_exclusion_patterns_unmatched"] == []
+    assert summary["resource_exclusion_patterns_unmatched"] is None
 
 
 def test_every_count_is_numeric_when_every_read_succeeds(monkeypatch, tmp_path):

@@ -45,6 +45,10 @@ variable the fetcher reads: the runner drops any it doesn't know about
 ([upload guide](uploader_guide.md)). To run once per region or project, set
 `supports_targets: true` and add a `target_schema`, as the
 [GitLab pipeline fetcher](../fetchers/gitlab/ci_cd_pipeline_config/fetcher.yaml) does.
+If you're writing it for your own workspace rather than for Paramify to ship,
+add `source: community`. The TUI then labels it COMMUNITY wherever it's listed,
+and its validators are opt-in
+([choosing validators](run_manifest_guide.md#choose-the-validators-each-fetcher-tracks)).
 
 ```yaml
 name: okta_password_policy                # <category>_<short_name>, globally unique
@@ -163,7 +167,9 @@ It fails on:
 
 [`azure/alert_rules`](../fetchers/azure/alert_rules/fetcher.yaml) is a full
 example. `tests/test_contracts.py` checks:
-- the layout, for the fetchers listed in `TEXT_FORMAT_FETCHERS`;
+- the layout, for every fetcher except those on `TEXT_FORMAT_PENDING` (older
+  fetchers that still fail it; the list only shrinks, and a new fetcher is
+  never added to it);
 - that a test calls `assert_summary_documented` for every fetcher whose
   instructions list summary fields. Fetchers that listed them before the check
   existed wait in `SUMMARY_DOCS_PENDING`, which is meant only to shrink. Its
@@ -171,8 +177,8 @@ example. `tests/test_contracts.py` checks:
   raising the count, which shows in review. A new fetcher calls the fixture
   instead.
 
-Until a platform is converted, its instructions only need to open with the
-`Script:` path.
+A fetcher on `TEXT_FORMAT_PENDING` only needs instructions that open with the
+`Script:` path, until its text is rewritten and it leaves the list.
 
 ## 3. Write `fetcher.py` and smoke-test it
 

@@ -307,7 +307,7 @@ def environment(evidence, name):
 
 # --- collect() end to end ---------------------------------------------------------
 
-def test_collects_the_organization_and_exits_zero(tmp_path):
+def test_collects_the_organization_and_exits_zero(tmp_path, assert_summary_documented):
     code, evidence, status, _ = run(tmp_path)
     assert code == 0 and status is None
     assert evidence["metadata"]["partial_failure"] is False
@@ -324,6 +324,7 @@ def test_collects_the_organization_and_exits_zero(tmp_path):
     assert s["pipelines_with_iac_validation"] == 1 and s["pipelines_deploying_infrastructure"] == 1
     assert (s["pipelines_signing_artifacts"], s["pipelines_verifying_signatures"], s["pipelines_generating_sbom"]) == (1, 1, 1)
     assert s["projects_with_classic_pipeline_creation_disabled"] == 1
+    assert_summary_documented("azure/devops_pipelines", s)
 
 
 def test_final_yaml_comes_from_the_preview_run_without_queueing(tmp_path):

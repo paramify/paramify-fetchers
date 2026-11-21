@@ -352,6 +352,90 @@ def test_bad_base_url_fails_before_any_call(monkeypatch, tmp_path, name):
     assert status["code"] == "bad_config" and "evil.example" not in status["error"]
 
 
+SCOPE_401 = {"code": 401, "message": "Unauthorized; scope does not match"}
+JQL_ENV = {
+    "JIRA_REMEDIATION_JQL": "labels = x",
+    "JIRA_CHANGE_JQL": "labels = x",
+    "JIRA_INCIDENT_JQL": "labels = x",
+}
+ALL_JIRA = ["site_inventory", "remediation_items", "audit_records", "access_roles",
+            "change_requests", "incident_postmortems"]
+
+
+def _gateway_run(monkeypatch, tmp_path, name, router, base_url):
+    calls = []
+    monkeypatch.setattr("time.sleep", lambda s: None)
+
+    def fake_request(self, method, url, params=None, json=None, timeout=None, **kw):
+        assert url.startswith(base_url)
+        path = url[len(base_url):]
+        calls.append(path)
+        status, body = router(method, path)
+        return FakeResponse(status, body)
+
+    monkeypatch.setattr(requests.Session, "request", fake_request)
+    for k, v in {"JIRA_BASE_URL": base_url, "JIRA_EMAIL": "svc@example.com", "JIRA_API_TOKEN": "t",
+                 "EVIDENCE_DIR": str(tmp_path), "FETCHER_STATUS_FILE": str(tmp_path / "s.json"),
+                 **JQL_ENV}.items():
+        monkeypatch.setenv(k, v)
+    code = load(name).main()
+    return code, calls, json.loads((tmp_path / "s.json").read_text())
+
+
+@pytest.mark.parametrize("name", ALL_JIRA)
+def test_scoped_token_at_site_url_says_to_use_the_gateway(monkeypatch, tmp_path, name):
+    """A scoped token sent to the site URL gets 'scope does not match' on every call."""
+    code, calls, status = _gateway_run(
+        monkeypatch, tmp_path, name, lambda m, p: (401, SCOPE_401), "https://example.atlassian.net"
+    )
+    assert code == 1 and len(calls) == 1  # stops at the first call, not one failure per endpoint
+    assert status["code"] == "bad_config"
+    assert "https://api.atlassian.com/ex/jira/<cloudId>" in status["error"]
+    assert "https://example.atlassian.net/_edge/tenant_info" in status["error"]
+
+
+def test_scoped_token_at_gov_site_url_names_the_gov_gateway(monkeypatch, tmp_path):
+    _, _, status = _gateway_run(
+        monkeypatch, tmp_path, "audit_records", lambda m, p: (401, SCOPE_401),
+        "https://example.atlassian-us-gov-mod.net",
+    )
+    assert status["code"] == "bad_config"
+    assert "https://api.atlassian-us-gov-mod.com/ex/jira/<cloudId>" in status["error"]
+
+
+def test_scope_mismatch_through_the_gateway_is_a_missing_scope(monkeypatch, tmp_path):
+    """Through the gateway the URL is right; the token lacks a scope for one call."""
+    def router(method, path):
+        if path == "/rest/api/3/myself":
+            return 200, ME
+        return 401, SCOPE_401
+
+    code, _, status = _gateway_run(
+        monkeypatch, tmp_path, "audit_records", router,
+        "https://api.atlassian.com/ex/jira/eadac007-8666-4024-a026-0bfb4d34aa2e",
+    )
+    assert code == 1 and status["code"] == "not_authorized"
+    assert "lacks a scope" in status["error"] and "tenant_info" not in status["error"]
+
+
+def test_scope_mismatch_on_first_gateway_call_is_not_a_bad_url(monkeypatch, tmp_path):
+    code, calls, status = _gateway_run(
+        monkeypatch, tmp_path, "remediation_items", lambda m, p: (401, SCOPE_401),
+        "https://api.atlassian.com/ex/jira/eadac007-8666-4024-a026-0bfb4d34aa2e",
+    )
+    assert code == 1 and len(calls) == 1
+    assert status["code"] == "not_authorized" and "lacks a scope" in status["error"]
+
+
+def test_plain_401_is_still_auth_failed(monkeypatch, tmp_path):
+    _, _, status = _gateway_run(
+        monkeypatch, tmp_path, "audit_records",
+        lambda m, p: (401, {"errorMessages": ["Client must be authenticated"]}),
+        "https://example.atlassian.net",
+    )
+    assert status["code"] == "auth_failed" and "gateway" not in status["error"]
+
+
 def test_redirect_is_not_followed_and_fails(run):
     def router(method, path, params, body):
         if path == "/rest/api/3/myself":

@@ -1,0 +1,128 @@
+name: azure_flexible_server_backups
+version: 0.1.0
+description: >-
+  Shows whether each PostgreSQL and MySQL flexible server completed a recent automatic backup, how long backups are kept, whether they are geo-redundant, and recent point-in-time restores.
+category: azure
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_flexible_server_backups.json
+  aggregation: per_target
+
+config_schema:
+  backup_window_hours:
+    type: integer
+    required: false
+    default: 26
+    env: AZURE_FLEXIBLE_SERVER_BACKUP_WINDOW_HOURS
+    description: >
+      How recent a server's newest completed backup must be to count as a backup within the window. Flexible servers
+      take a full snapshot daily, so the default allows a day plus slack.
+  required_retention_days:
+    type: integer
+    required: false
+    env: AZURE_FLEXIBLE_SERVER_BACKUP_RETENTION_DAYS
+    description: >
+      The minimum authorized backup retention, in days. When set, each server that keeps backups for fewer days is
+      counted in servers_retention_below_required; keeping them longer meets it. Leave it unset and that count is null. A value that is not a whole number above 0
+      fails the run as bad_config.
+  restore_lookback_days:
+    type: integer
+    required: false
+    env: AZURE_FLEXIBLE_SERVER_RESTORE_LOOKBACK_DAYS
+    description: >
+      The adopted restore-test interval in days: how far back a server created by point-in-time restore counts toward
+      restored_servers_within_lookback, up to 3650. There is no default: while it is unset, that count is null rather
+      than judged against an interval nobody adopted. A value that is not a whole number above 0 fails the run as
+      bad_config and leaves it unset.
+  resource_exclusions:
+    type: patterns
+    prefixes: [rg, location, id]
+    bare: false
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Patterns that take database servers out of scope, as for the other Azure fetchers.
+
+target_schema:
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id to collect from. Optional — omit to use the first
+      enabled subscription the ambient credential can see; set one target per
+      subscription to fan out.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: Deployment environment label (e.g. prod) written into the evidence metadata.
+
+secrets: []          # DefaultAzureCredential only — see _categories/azure.yaml
+
+ksis:
+  - KSI-RPL-ABO   # each server's newest completed backup against the window
+  - KSI-RPL-ARP   # geo-redundant backup, which keeps a copy in the paired region
+  - KSI-RPL-TRC   # servers created by point-in-time restore
+  - KSI-SVC-RUD   # backup retention against the authorized period
+
+evidence_set:
+  reference_id: EVD-AZURE-FLEXIBLE-SERVER-BACKUPS
+  name: Azure PostgreSQL and MySQL Backups
+  instructions: |
+    Script: azure/flexible_server_backups/fetcher.py
+
+    Access: Reader on the subscription.
+
+    Commands Executed:
+    - subscriptions.list() — picks a subscription when none is set
+    - GET providers/Microsoft.DBforPostgreSQL and providers/Microsoft.DBforMySQL — whether each provider is registered, and the newest API version this cloud lists for both flexibleServers and flexibleServers/backups, since one version serves both calls
+    - GET Microsoft.DBforPostgreSQL/flexibleServers and Microsoft.DBforMySQL/flexibleServers — every flexible server with its backup retention, geo-redundant backup, earliest restore point, replication role and restore source
+    - GET flexibleServers/{server}/backups (per server that is not a read replica) — the server's completed backups, each classed as automatic, manual (on-demand) or unknown by the exact backupType and source the engine reports: PostgreSQL Full is automatic and Customer On-Demand manual; MySQL FULL from Automatic is automatic; any other label is unknown, never automatic; a MySQL backup named customer_... or customer-... is manual whatever its labels, since MySQL labels an on-demand backup the same as a scheduled one
+
+    Output: azure_flexible_server_backups_<subscription>.json — each PostgreSQL and MySQL flexible server with its backup settings, its newest completed backup judged against the window, and whether it was created by a point-in-time restore.
+
+    Summary fields:
+
+    What was checked?
+    - database_servers_postgresql — Number of PostgreSQL flexible servers in scope; null if a server list could not be read
+    - database_servers_mysql — Number of MySQL flexible servers in scope
+    - replica_servers — Number of read replicas, which take no backups of their own and are not judged
+    - backup_servers — Number of servers that are not read replicas (backup servers)
+    - backup_servers_read — Number of backup servers whose backup list could be read
+    - stopped_servers — Number of backup servers that are stopped; a stopped server takes no backups, so it also appears without an automatic backup within the window
+    - postgresql_provider_registration_status — Whether Microsoft.DBforPostgreSQL is registered: registered, not_registered or unknown
+    - mysql_provider_registration_status — Whether Microsoft.DBforMySQL is registered: registered, not_registered or unknown
+    - resource_exclusion_patterns — List of the resource_exclusions patterns as given
+    - resource_exclusion_patterns_unmatched — List of the patterns that matched nothing, such as a mistyped name; null when a server list could not be read
+    - excluded_database_servers — Number of database servers a pattern took out of scope
+    - in_scope_database_servers — Number of database servers assessed, read replicas included
+
+    Do backups run?
+    - servers_with_automatic_backup_within_window — Number of backup servers whose newest completed automatic backup finished within backup_window_hours (an automatic backup within the window); manual, on-demand backups never count; null unless every backup server's backup list was read
+    - servers_without_automatic_backup_within_window — List of backup server names without an automatic backup within the window
+    - servers_relying_on_manual_backup — Number of backup servers with no automatic backup within the window but a manual one within it, where a manual backup would otherwise hide broken automation
+    - servers_with_manual_backups — Number of backup servers with at least one manual, on-demand backup
+    - servers_with_unknown_backup_types — Number of backup servers with at least one backup whose backupType and source match no known label; such a backup is never counted as automatic, so it cannot hide broken automation (each server lists the labels under unknown_backup_labels)
+    - max_hours_since_automatic_backup — Hours since the newest completed automatic backup of the backup server that has gone longest without one; null if any backup server has no completed automatic backup or could not be read
+    - backup_window_hours — Hours a server's newest completed backup may be old and still count as a backup within the window
+
+    Are backups kept for the authorized period and copied off-site?
+    - min_backup_retention_days — Days of backup retention on the backup server that keeps backups the shortest
+    - max_backup_retention_days — Days of backup retention on the backup server that keeps backups the longest
+    - servers_retention_below_required — Number of backup servers that keep backups for fewer days than required_retention_days; a server that keeps them longer meets it, and one with no retention returned is counted in servers_retention_unknown instead; null when required_retention_days is not set
+    - servers_retention_unknown — Number of backup servers for which Azure returned no backup retention
+    - required_retention_days — The authorized backup retention in days, as configured; null when not set
+    - servers_geo_redundant_backup — Number of backup servers with geo-redundant backup enabled, which keeps a copy of backups in the paired region
+
+    Are restores exercised?
+    - restored_servers_within_lookback — Number of servers created by a point-in-time restore (a restore source and not a read replica) within restore_lookback_days; only servers that still exist are seen, so a restore test that deleted its server when it finished does not count; a server with no creation date never counts; null while restore_lookback_days is not set
+    - restored_servers_date_unknown — Number of servers created by a point-in-time restore whose creation date is missing, reported as unknown rather than recent
+    - restore_lookback_days — Days back that a server created by point-in-time restore counts, as configured; null when not set

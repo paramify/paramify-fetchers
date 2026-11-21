@@ -59,6 +59,11 @@ evidence_sets:
 The [validator schema](../framework/schemas/validator_schema.json) describes
 every field.
 
+A validator you write for your own workspace, rather than one Paramify ships,
+takes `source: community`. Manifests leave community validators out until an
+entry lists them
+([choosing validators](run_manifest_guide.md#choose-the-validators-each-fetcher-tracks)).
+
 ## 3. Write its cases
 
 Pin three verdicts in `validators/_cases/kms_keys_all_rotated.yaml`: compliant,
