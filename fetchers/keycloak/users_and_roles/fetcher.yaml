@@ -3,6 +3,7 @@ version: 0.1.0
 description: >-
   Lists every Keycloak user with their enabled state, authenticators, groups, effective roles and recent sign-ins, and counts privileged users, users without a second factor and inactive accounts.
 category: keycloak
+source: community
 
 supports_targets: false
 
