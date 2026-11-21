@@ -3,6 +3,7 @@ version: 0.1.0
 description: >-
   Shows how an Istio mesh is secured: mTLS policy and weaker overrides, default-deny authorization, plaintext or weak-TLS ingress, TLS turned off by destination rules, egress policy and certificates.
 category: istio
+source: community
 
 supports_targets: false
 
