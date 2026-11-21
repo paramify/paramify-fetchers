@@ -533,7 +533,7 @@ def test_resizing_a_wide_header_down_to_80_keeps_the_clock(monkeypatch):
 
 def test_the_notice_gives_way_when_the_row_is_too_short(monkeypatch):
     monkeypatch.setattr(api, "update_notice", lambda root: "12 new commits on main")
-    got = _header_probe(56)
+    got = _header_probe(42)
     assert not got.notice
     assert got.clock.right <= got.right
     assert got.crumb.width >= 6
@@ -571,7 +571,7 @@ def _late_notice_probe(width):
 
 def test_a_late_notice_on_a_short_row_stays_hidden(monkeypatch):
     monkeypatch.setattr(api, "update_notice", lambda root: None)
-    got = _late_notice_probe(56)
+    got = _late_notice_probe(42)
     assert not got.notice
     assert got.clock.right <= got.right
     assert got.crumb.width >= 6 and got.crumb.right <= got.clock.x

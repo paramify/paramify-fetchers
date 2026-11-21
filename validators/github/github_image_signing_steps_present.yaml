@@ -1,0 +1,20 @@
+key: github_image_signing_steps_present
+name: GitHub Image Signing Steps Present
+type: AUTOMATED
+role: configuration
+source: community
+statement: >-
+  At least one workflow on a default branch runs a cosign sign step. Reads cosign commands in workflow
+  files only: signing done inside a called reusable workflow, a script or another tool reads as absent
+  and fails. Does not assert every image is signed.
+regex: '"signing_steps":\s*(?<signing_steps>[1-9]\d*)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+- regexOperation:
+    type: MATCH_COUNT
+  criteria: NOT_EQUALS
+  value:
+    type: CUSTOM_TEXT
+    customText: '0'
+evidence_sets:
+- EVD-GITHUB-IMAGE-SIGNING
