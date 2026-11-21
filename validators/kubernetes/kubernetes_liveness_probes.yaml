@@ -2,6 +2,7 @@ key: kubernetes_liveness_probes
 name: 'Kubernetes: Liveness Probes Configured'
 type: AUTOMATED
 role: configuration
+source: community
 statement: >
   Every container in every workload has a liveness probe (workloads_without_liveness_probe is empty), so a
   hung container is restarted. A probe being configured is not proof it tests the right thing. Covers

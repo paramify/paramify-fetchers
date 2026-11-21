@@ -2,6 +2,7 @@ key: kubernetes_ready_pods_span_zones
 name: 'Kubernetes: Ready Pods Span More Than One Zone'
 type: AUTOMATED
 role: configuration
+source: community
 statement: >
   No multi-replica workload has all its ready pods on nodes in a single zone
   (workloads_ready_pods_in_one_zone is empty), judged from where pods actually run and their nodes' zone

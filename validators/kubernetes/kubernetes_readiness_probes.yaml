@@ -2,6 +2,7 @@ key: kubernetes_readiness_probes
 name: 'Kubernetes: Readiness Probes Configured'
 type: AUTOMATED
 role: configuration
+source: community
 statement: >
   Every container in every workload has a readiness probe (workloads_without_readiness_probe is empty), so
   traffic reaches a pod only once it is ready. A probe being configured is not proof it tests the right

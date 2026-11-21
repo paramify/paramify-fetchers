@@ -2,6 +2,7 @@ key: kubernetes_workloads_read
 name: 'Kubernetes: Workloads Read'
 type: AUTOMATED
 role: integrity
+source: community
 statement: >
   The cluster's Deployments and StatefulSets were read, so workloads has a count. The resilience checks in
   this set rely on this read. Covers Deployments and StatefulSets outside the excluded namespaces. Does

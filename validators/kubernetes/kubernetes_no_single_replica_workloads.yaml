@@ -2,6 +2,7 @@ key: kubernetes_no_single_replica_workloads
 name: 'Kubernetes: No Single-Replica Workloads'
 type: AUTOMATED
 role: configuration
+source: community
 statement: >
   Every workload with replicas set runs at least two, counting an autoscaler's minimum where one targets
   it (workloads_single_replica is 0), so losing one pod doesn't stop it. Workloads scaled to zero aren't

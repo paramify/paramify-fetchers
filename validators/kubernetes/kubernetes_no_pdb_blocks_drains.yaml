@@ -2,6 +2,7 @@ key: kubernetes_no_pdb_blocks_drains
 name: 'Kubernetes: No Disruption Budget Blocks Node Drains'
 type: AUTOMATED
 role: configuration
+source: community
 statement: >
   No PodDisruptionBudget refuses every eviction (maxUnavailable 0, or minAvailable at least the replicas
   or 100%) (workloads_with_pdb_blocking_drains is empty), so nodes can be drained for maintenance and

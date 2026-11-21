@@ -2,6 +2,7 @@ key: kubernetes_workloads_have_ready_pods
 name: 'Kubernetes: Workloads Have Ready Pods'
 type: AUTOMATED
 role: configuration
+source: community
 statement: >
   Every workload with replicas set has at least one ready pod (workloads_without_ready_pods is empty).
   Covers Deployments and StatefulSets outside the excluded namespaces. Does not check whether the

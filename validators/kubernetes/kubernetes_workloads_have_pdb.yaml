@@ -2,6 +2,7 @@ key: kubernetes_workloads_have_pdb
 name: 'Kubernetes: Multi-Replica Workloads Have Disruption Budgets'
 type: AUTOMATED
 role: configuration
+source: community
 statement: >
   Every multi-replica workload has a PodDisruptionBudget matching its pods (workloads_without_pdb is
   empty), so node drains keep a minimum running. Covers Deployments and StatefulSets outside the excluded
