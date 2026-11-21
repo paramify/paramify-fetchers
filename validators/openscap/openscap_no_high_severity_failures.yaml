@@ -2,6 +2,7 @@ key: openscap_no_high_severity_failures
 name: 'OpenSCAP: No High-Severity Rule Fails'
 type: AUTOMATED
 role: configuration
+source: community
 statement: >
   No high-severity rule fails in any target's latest OpenSCAP result (rules_failed_by_severity.high
   is 0), and at least one target was scanned. A waived rule counts by its new result. Fails when any

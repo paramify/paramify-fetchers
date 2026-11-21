@@ -2,6 +2,7 @@ key: openscap_scans_current
 name: "OpenSCAP: Every Target's Latest Scan Is Current"
 type: AUTOMATED
 role: integrity
+source: community
 statement: >
   Every scanned target's latest OpenSCAP result is no older than the adopted max_age_days
   (targets_scan_older_than_max_age is 0), and at least one target was scanned. Fails while

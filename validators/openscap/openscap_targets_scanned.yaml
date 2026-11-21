@@ -2,6 +2,7 @@ key: openscap_targets_scanned
 name: 'OpenSCAP: At Least One Target Scanned'
 type: AUTOMATED
 role: completeness
+source: community
 statement: >
   At least one target has an OpenSCAP benchmark result (targets_scanned is above 0). Fails when no
   result file was found, any file could not be read, or the count appears other than exactly once.

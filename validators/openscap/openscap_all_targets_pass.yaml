@@ -2,6 +2,7 @@ key: openscap_all_targets_pass
 name: 'OpenSCAP: Every Target Passes Its Benchmark'
 type: AUTOMATED
 role: configuration
+source: community
 statement: >
   No target's latest OpenSCAP result has a failed, error or unknown rule (all_targets_pass is
   true). A waived rule counts by its new result. Fails when any rule fails or could not be judged,

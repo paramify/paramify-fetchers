@@ -2,6 +2,7 @@ key: openscap_expected_targets_scanned
 name: 'OpenSCAP: Every Expected Target Scanned'
 type: AUTOMATED
 role: completeness
+source: community
 statement: >
   Every target in the expected_targets setting has an OpenSCAP benchmark result
   (expected_targets_missing is 0). Fails while expected_targets is unset, any result file could not
