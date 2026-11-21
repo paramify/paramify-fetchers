@@ -1,0 +1,26 @@
+key: github_merges_ran_checks
+name: GitHub Merges Ran Checks
+type: AUTOMATED
+role: configuration
+source: community
+statement: >-
+  No pull request merged in the window had no check at all on its merged commit. Does not assert the checks
+  passed or were required.
+regex: '"merged_without_checks":\s*(?<merged_without_checks>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0
+validation_rules:
+- regexOperation:
+    type: MATCH_COUNT
+  criteria: NOT_EQUALS
+  value:
+    type: CUSTOM_TEXT
+    customText: '0'
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 1
+  criteria: EQUALS
+  value:
+    type: CUSTOM_TEXT
+    customText: '0'
+evidence_sets:
+- EVD-GITHUB-PR-CHECKS

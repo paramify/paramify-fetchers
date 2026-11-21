@@ -294,6 +294,15 @@ USERNAME removes it. The owner is read only where it breaks such a tie. See
 [Owner](uploader_guide.md#owner). `paramify validate --online` gives a note for
 an owner who has no channel in the workspace.
 
+How often evidence sets expect a new artifact follows how often the manifest
+runs. Write it with
+`paramify manifest set-frequency MANIFEST FREQUENCY [--fetcher NAME]`, where
+FREQUENCY is `DAILY`, `THREE_DAY`, `WEEKLY`, `BIWEEKLY`, `MONTHLY`, `QUARTERLY`,
+`BIANNUAL` or `ANNUAL`. An empty FREQUENCY removes it. With `--fetcher` it
+overrides the manifest's for one entry. The next upload changes the frequency
+on evidence sets that already exist. See
+[Set the collection frequency](uploader_guide.md#set-the-collection-frequency).
+
 Uploading the same run again changes nothing. The upload finds the batch it made
 for that run. A new run makes a new batch. If a temporary failure holds a batch
 open, run the same upload again to resume it. Each new batch, and each new

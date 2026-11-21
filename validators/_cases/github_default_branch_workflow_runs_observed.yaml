@@ -1,0 +1,14 @@
+validator: github_default_branch_workflow_runs_observed
+cases:
+- name: compliant
+  expect: PASS
+  artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"default_branch_runs":3}}}'
+- name: none
+  expect: FAIL
+  artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"default_branch_runs":0}}}'
+- name: unread
+  expect: FAIL
+  artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"default_branch_runs":null}}}'
+- name: renamed
+  expect: FAIL
+  artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"default_branch_runs_renamed":3}}}'
