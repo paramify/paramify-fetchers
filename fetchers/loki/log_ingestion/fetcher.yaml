@@ -3,6 +3,7 @@ version: 0.1.0
 description: >-
   Shows whether each expected log source is arriving in Loki and how recently, from line counts, stream counts and the newest entry time, without copying log lines.
 category: loki
+source: community
 
 supports_targets: false
 
