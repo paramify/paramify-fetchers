@@ -1,0 +1,20 @@
+key: github_production_environments_observed
+name: GitHub Production Environments Observed
+type: AUTOMATED
+role: completeness
+source: community
+statement: >-
+  At least one repository in scope has an environment the fetcher treats as production, by name pattern.
+  With none, the production checks have nothing to judge and this fails. Does not assert the pattern names
+  the right environments.
+regex: '"repositories_with_production_environment":\s*(?<repositories_with_production_environment>[1-9]\d*)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+- regexOperation:
+    type: MATCH_COUNT
+  criteria: NOT_EQUALS
+  value:
+    type: CUSTOM_TEXT
+    customText: '0'
+evidence_sets:
+- EVD-GITHUB-DEPLOYMENT-CONTROLS
