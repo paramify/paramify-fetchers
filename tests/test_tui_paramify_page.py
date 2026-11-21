@@ -140,7 +140,7 @@ def test_title_and_totals(tmp_path, monkeypatch, run_tui):
     assert "evidence sets 2/3" in totals and "scripts 1/3" in totals
     # charlie has no validators in the registry: out of the two that do, alpha's are paired
     assert "validators 1/2" in totals and "uploaded 1/3" in totals
-    assert "https://app.paramify.com/api/v0" in summary and "1/3 ready" in summary
+    assert "app.paramify.com" in summary and "api/v0" not in summary and "1/3 ready" in summary
 
 
 def test_detail_follows_the_cursor(tmp_path, monkeypatch, run_tui):
@@ -174,7 +174,7 @@ def test_no_token_shows_the_problem_bar(tmp_path, monkeypatch, run_tui):
 
     problem, summary, cells, caps = run_tui(body, _manifest(tmp_path))
     assert problem
-    assert "No Paramify API token found. Set PARAMIFY_UPLOAD_API_TOKEN" in summary
+    assert "No Paramify API token. Set PARAMIFY_UPLOAD_API_TOKEN" in summary
     assert cells[1:4] == ["—", "—", "1 in registry"]
     assert "Capabilities are read from Paramify." in caps
 
@@ -190,7 +190,7 @@ def test_a_read_error_keeps_the_last_grid(tmp_path, monkeypatch, run_tui):
 
     rows, summary = run_tui(body, _manifest(tmp_path))
     assert rows == 3
-    assert summary.startswith("Could not read the workspace: HTTP 503. This is the status from")
+    assert summary.startswith("Couldn't read the workspace: HTTP 503. This is the status from")
     assert "ctrl+r to try again." in summary
 
 
@@ -208,7 +208,7 @@ def test_an_unreadable_config_shows_as_an_error(tmp_path, monkeypatch, run_tui):
     assert problem and running and rows == 0
     assert summary.startswith("Could not read uploader config upload.yaml: bad indent.")
     assert "Fix it, then press ctrl+r." in summary
-    assert "Could not read the workspace" not in summary
+    assert "Couldn't read the workspace" not in summary
 
 
 def test_a_failed_evidence_set_read_shows_unknowns(tmp_path, monkeypatch, run_tui):
@@ -228,11 +228,11 @@ def test_a_failed_evidence_set_read_shows_unknowns(tmp_path, monkeypatch, run_tu
     cells, totals, detail, caps, summary = run_tui(body, _manifest(tmp_path))
     assert cells == ["alpha", "?", "✓", "?/1", "?", "?", "·"]
     assert "evidence sets ?/1" in totals and "validators ?/1" in totals and "uploaded ?/1" in totals
-    assert "? links" in totals and "scripts 1/1" in totals
+    assert "capability links ?" in totals and "scripts 1/1" in totals
     assert "EVD-ALPHA  ? not read" in detail and "created by the scripts sync" not in detail
     assert "V1 ? check 0" in " ".join(detail.split())
-    assert "Could not read the evidence sets: HTTP 500" in caps
-    assert "Could not read evidence sets: HTTP 500." in summary
+    assert "Couldn't read the evidence sets: HTTP 500" in caps
+    assert "Couldn't read evidence sets: HTTP 500." in summary
 
 
 def test_a_failed_scripts_read_shows_an_unknown_script(tmp_path, monkeypatch, run_tui):
@@ -482,9 +482,9 @@ def test_s_previews_then_syncs_then_refreshes(tmp_path, monkeypatch, run_tui):
         return confirm, _text(page.query_one("#pf-activity", Static).content)
 
     confirm, activity = run_tui(body, _manifest(tmp_path))
-    assert "1 create, 1 update" in confirm
+    assert "(1 new, 1 updated)" in confirm
     assert runs == [(True, ["alpha", "bravo", "charlie"]), (False, ["alpha", "bravo", "charlie"])]
-    assert activity.startswith("scripts sync complete")
+    assert activity.startswith("Scripts: ") and "created" in activity
     assert len(status_calls) == 2, "the sync did not re-read the status"
 
 
@@ -514,7 +514,7 @@ def test_v_previews_validators(tmp_path, monkeypatch, run_tui):
         return confirm
 
     confirm = run_tui(body, _manifest(tmp_path))
-    assert "Create 1 validator(s)" in confirm and "1 exist already" in confirm
+    assert "Create 1 validator in" in confirm and "1 already exists" in confirm
     assert runs == [True], "a declined confirm still synced"
 
 
@@ -539,8 +539,8 @@ def test_u_opens_the_upload_confirm(tmp_path, monkeypatch, run_tui):
         return str(app.screen._message) if isinstance(app.screen, ConfirmModal) else ""
 
     confirm = run_tui(body, _manifest(tmp_path))
-    assert "1 deliver" in confirm
-    assert confirm.endswith("Upload 3 evidence file(s) to https://x.test/api/v0?")
+    assert "x: new set" in confirm
+    assert confirm.endswith("Upload 3 files to x.test?")
 
 
 def test_actions_are_off_without_a_token(tmp_path, monkeypatch, run_tui):
@@ -674,7 +674,7 @@ def test_a_capabilities_error_shows_in_its_lens(tmp_path, monkeypatch, run_tui):
 
     grid_shown, error, pairs_shown = run_tui(body, _manifest(tmp_path))
     assert not grid_shown and not pairs_shown
-    assert "Could not list the workspace's solution capabilities: HTTP 403." in error
+    assert "Couldn't list the workspace's solution capabilities: HTTP 403." in error
     assert "The by-fetcher view still works." in error
 
 
@@ -814,7 +814,7 @@ def test_a_scripts_preview_that_errors_is_a_failure(tmp_path, monkeypatch, run_t
 
     screen, banner, log = run_tui(body, _manifest(tmp_path))
     assert screen == "WorkspaceScreen", "an all-error preview asked to sync"
-    assert banner.plain == "scripts: the preview failed for 3 fetcher script(s), nothing synced"
+    assert banner.plain == "Scripts: the preview failed for 3 scripts, so nothing was synced."
     assert banner.style == palette.FAIL
     assert "[error] alpha  HTTP 403" in log and "[error] charlie  HTTP 403" in log
     assert runs == [True]
@@ -839,8 +839,8 @@ def test_a_scripts_preview_with_some_errors_says_so_in_the_confirm(tmp_path, mon
         return str(app.screen._message) if isinstance(app.screen, ConfirmModal) else ""
 
     confirm = run_tui(body, _manifest(tmp_path))
-    assert "1 create, 0 update" in confirm
-    assert "The preview failed for 1 fetcher script(s)" in confirm
+    assert "(1 new, 0 updated)" in confirm
+    assert "The preview failed for 1 script;" in confirm
 
 
 def test_a_validators_preview_that_errors_is_a_failure(tmp_path, monkeypatch, run_tui):
@@ -862,7 +862,7 @@ def test_a_validators_preview_that_errors_is_a_failure(tmp_path, monkeypatch, ru
 
     screen, banner, log = run_tui(body, _manifest(tmp_path))
     assert screen == "WorkspaceScreen"
-    assert banner.plain.startswith("validators: the preview failed for 1 validator(s), nothing created")
+    assert banner.plain.startswith("Validators: the preview failed for 1 validator, so nothing was created")
     assert banner.style == palette.FAIL
     assert "[error] k0  set lookup failed" in log
 
@@ -882,7 +882,7 @@ def test_v_says_when_sets_do_not_exist_yet(tmp_path, monkeypatch, run_tui):
         return str(app.screen._message) if isinstance(app.screen, ConfirmModal) else ""
 
     confirm = run_tui(body, _manifest(tmp_path))
-    assert "1 evidence set(s) do not exist yet" in confirm and "press s first" in confirm
+    assert "1 evidence set doesn't exist yet" in confirm and "press s first" in confirm
     assert "and pair each one with its evidence sets" not in confirm
 
 
@@ -899,7 +899,7 @@ def test_v_says_how_to_pair_validators_that_exist(tmp_path, monkeypatch, run_tui
         return _text(page.query_one("#pf-activity", Static).content)
 
     activity = run_tui(body, _manifest(tmp_path))
-    assert "1 validator(s) exist but are not paired" in activity and "in Paramify" in activity
+    assert "1 validator exists but isn't paired" in activity and "in Paramify" in activity
 
 
 def test_coming_back_on_the_capability_view_focuses_it(tmp_path, monkeypatch, run_tui):
@@ -982,7 +982,7 @@ def test_pairs_from_outside_the_manifest_count(tmp_path, monkeypatch, run_tui):
     assert rows["SC-AC-06"][2:] == ["2", "alpha  +1 from other evidence sets"]
     assert rows["SC-AU-02"][2:] == ["2", "+2 from other evidence sets"]
     assert rows["SC-CM-02"][2:] == ["—", "no pairs yet"]
-    assert pairs == [["other evidence sets", "—", "2 pair(s), not in this manifest"]]
+    assert pairs == [["other evidence sets", "—", "2 pairs, not in this manifest"]]
 
 
 def test_unread_evidence_sets_leave_the_pair_sources_unknown(tmp_path, monkeypatch, run_tui):
@@ -1001,7 +1001,7 @@ def test_unread_evidence_sets_leave_the_pair_sources_unknown(tmp_path, monkeypat
     rows, pair_row = run_tui(body, _manifest(tmp_path))
     assert rows["SC-AC-06"][2:] == ["2", "? the evidence sets were not read"]
     assert rows["SC-AU-02"][2] == "2"
-    assert pair_row == ["?", "—", "2 pair(s); the evidence sets were not read"]
+    assert pair_row == ["?", "—", "2 pairs; the evidence sets weren't read"]
 
 
 def test_a_manifest_switch_clears_the_old_capabilities(tmp_path, monkeypatch, run_tui):

@@ -12,6 +12,14 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **Plainer TUI wording.**
+  - Results read as sentences instead of key=value: "Uploaded 3 files, 1 already there.", not
+    `uploaded=3 duplicates=1 errors=0`.
+  - The upload confirm lists what is delivered where and anything refused, and leaves out no-op and tag steps.
+  - Counts use real plurals, messages name hosts instead of full API URLs, and `esc leave field` shows only while
+    you are typing.
+  - The Pipelines tab is one line when a manifest has nothing to send.
+  - Fixes: the Evidence tab sent you to tab 3 to run (it's 2), and the welcome screen said "1 fetchers".
 - **TUI tab keys: Validators is tab 4.** Paramify moves from `4` to `5` and Pipelines from `5` to `6`.
 - **`paramify validators sync -m` and the Paramify tab cover only the validators a manifest tracks.** Without a
   `validators:` list an entry tracks every Paramify-made validator for its evidence set, which is every validator

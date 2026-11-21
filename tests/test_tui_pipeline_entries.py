@@ -4,6 +4,7 @@ and the upload log's "waiting for approval" line."""
 from __future__ import annotations
 
 import io
+import re
 from pathlib import Path
 
 import pytest
@@ -62,9 +63,10 @@ def test_entry_form_hides_direct_settings_for_a_pipeline_entry(tmp_path, run_tui
 
     specs = run_tui(body, _manifest(tmp_path, PIPELINE))
     assert set(specs) == {"stack", "owner", "approval", "no_request"}
-    assert specs["approval"]["help"] == "pipeline files always go in a batch; MANUAL waits for a person"
+    assert specs["approval"]["help"] == "MANUAL waits for someone to approve the batch."
     assert specs["no_request"]["options"] == [("evidence", "evidence"), ("refuse", "refuse")]
-    assert specs["no_request"]["help"] == "no artifact request: blank or evidence sends a batch to the set; refuse stops"
+    assert specs["no_request"]["help"] == (
+        "If the set has no artifact request: evidence (or blank) still sends a batch, refuse stops.")
 
 
 def test_saving_the_form_keeps_a_pipeline_entrys_settings(tmp_path, run_tui):
@@ -119,7 +121,7 @@ def test_detail_pane_names_the_pipeline(tmp_path, run_tui):
         console.print(app.screen.query_one("#fetchers-detail").content)
         return console.file.getvalue()
 
-    assert "pipeline: inventory · " in run_tui(body, _manifest(tmp_path, PIPELINE))
+    assert re.search(r"pipeline\s+inventory · ", run_tui(body, _manifest(tmp_path, PIPELINE)))
 
 
 def test_P_opens_the_preset_sheet(tmp_path, run_tui):
@@ -157,7 +159,7 @@ def test_P_on_an_evidence_row_notifies_instead(tmp_path, run_tui):
 
     modal, messages = run_tui(body, _manifest(tmp_path, name))
     assert not modal
-    assert f"{name} is not a pipeline fetcher" in messages
+    assert f"{name} isn't a pipeline fetcher." in messages
 
 
 def test_only_an_unapproved_pipeline_entry_gets_a_warning_line():

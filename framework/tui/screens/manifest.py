@@ -36,6 +36,7 @@ from framework.tui.modals import (
     PreviewModal,
     TargetsModal,
 )
+from framework.tui.words import plural
 
 APPROVALS = ("MANUAL", "SUBMISSION_WITH_PASSING_VALIDATORS", "SUBMISSION")
 NO_REQUESTS = ("direct", "evidence", "refuse")
@@ -71,18 +72,23 @@ class ManifestPanel(ButtonRowNav, Vertical):
     """
 
     # `a` moves to the catalog filter: fetchers are added from the catalog.
+    # `s` saves too, but every change saves itself, so it is not listed.
     _HINTS = [
         ("a", "find to add"), ("e", "entry"), ("x", "remove"), ("t", "targets"),
-        ("A", "assessment"), ("s", "save"), ("v", "validate"), ("p", "preview"),
+        ("v", "validate"), ("p", "preview"),
     ]
 
     @property
     def HINTS(self) -> list:  # noqa: N802 — the workspace reads HINTS off every page
-        # `P` only does something on a pipeline entry, so it is listed only there
-        # (the key stays bound and explains itself on any other row).
-        if self._selected and (self._descriptors().get(self._selected) or {}).get("pipeline"):
-            return self._HINTS[:5] + [("P", "preset")] + self._HINTS[5:]
-        return list(self._HINTS)
+        # `A` only does something on a scan report and `P` on a pipeline entry, so
+        # each is listed only there (the keys stay bound and explain themselves elsewhere).
+        d = self._descriptors().get(self._selected) if self._selected else None
+        extra = []
+        if kinds.kind_of(d) == kinds.SCAN_REPORT:
+            extra.append(("A", "assessment"))
+        if (d or {}).get("pipeline"):
+            extra.append(("P", "preset"))
+        return self._HINTS[:4] + extra + self._HINTS[4:]
 
     BINDINGS = [
         Binding("a", "add_fetcher", "Find to add"),
@@ -191,8 +197,8 @@ class ManifestPanel(ButtonRowNav, Vertical):
         dt = self.query_one("#manifest-entries", DataTable)
         if self._manifest is None:
             dt.clear()
-            self._set_empty(f"no manifest loaded — press [bold {palette.ACCENT}]m[/] to pick one")
-            self._set_issues(["(no manifest loaded)"])
+            self._set_empty(f"No manifest open. Press [bold {palette.ACCENT}]m[/] to pick one.")
+            self._set_issues(["no manifest open"])
             self.post_message(ManifestChanged(set()))
             return
 
@@ -216,7 +222,7 @@ class ManifestPanel(ButtonRowNav, Vertical):
         try:
             self._errors = api.validate(self._manifest, self.app.root_path, **discovered)
         except Exception as exc:  # never let a validation crash kill the UI
-            self._errors = [f"validation error: {exc}"]
+            self._errors = [f"couldn't check the manifest: {exc}"]
         # One row per entry, keyed by entry key (`x`, `x#1`): two entries of one
         # fetcher used to share a key, which the table refuses. Everything a row
         # shows is read by that key too, so each row shows its own entry.
@@ -247,8 +253,8 @@ class ManifestPanel(ButtonRowNav, Vertical):
             dt.add_row(
                 name,
                 render.kind_pill(kinds.kind_of(d)) if d else "—",
-                f"{sset}/{stot}",
-                f"{cset}/{ctot}",
+                f"{sset}/{stot}" if stot else "—",
+                f"{cset}/{ctot}" if ctot else "—",
                 str(ntargets) if fanout else "—",
                 status,
                 render.destination_cell(d, self._config_view.get(ekey)) if d else "—",
@@ -257,9 +263,9 @@ class ManifestPanel(ButtonRowNav, Vertical):
             row_keys.append(ekey)
 
         empty = (
-            f"manifest is empty — press [bold {palette.ACCENT}]a[/] to add fetchers"
+            f"The manifest is empty. Press [bold {palette.ACCENT}]a[/] to add fetchers."
             if self._has_detail
-            else f"press [bold {palette.ACCENT}]a[/] on a fetcher to add it"
+            else f"Press [bold {palette.ACCENT}]a[/] on a fetcher to add it."
         )
         self._set_empty(None if entries else empty)
 
@@ -307,7 +313,7 @@ class ManifestPanel(ButtonRowNav, Vertical):
         """What the detail pane shows for the selected entry."""
         use = self._selected
         if not use or self._manifest is None:
-            return render.empty_detail("No fetcher selected — press 'a' to add one.")
+            return render.empty_detail("No fetcher selected. Press a to add one.")
         # The selected entry (`x#1`), not the first that uses this fetcher.
         key = self._selected_entry_key()
         entry = self._keyed_entry(key)
@@ -320,12 +326,12 @@ class ManifestPanel(ButtonRowNav, Vertical):
     def _set_issues(self, errors: List[str]) -> None:
         issues = self.query_one("#manifest-issues", Static)
         if not errors:
-            issues.update(Text("✓ manifest is runnable", style=palette.OK))
+            issues.update(Text("✓ ready to run", style=palette.OK))
             return
-        head = Text(f"{len(errors)} issue(s):  ", style=palette.WARN)
+        head = Text(f"{plural(len(errors), 'problem')}:  ", style=palette.WARN)
         head.append("   ·   ".join(errors[:3]), style="dim")
         if len(errors) > 3:
-            head.append(f"   (+{len(errors) - 3} more — press p to preview)", style="dim")
+            head.append(f"   (+{len(errors) - 3} more: p shows the manifest)", style="dim")
         issues.update(head)
 
     # -- per-entry summaries --------------------------------------------- #
@@ -486,7 +492,7 @@ class ManifestPanel(ButtonRowNav, Vertical):
         try:
             stacks = api.list_stacks(self.app.root_path)
         except Exception as exc:
-            self.app.call_from_thread(self.notify, f"Could not list stacks: {exc}", severity="error")
+            self.app.call_from_thread(self.notify, f"Couldn't list stacks: {exc}", severity="error")
             return
         self.app.call_from_thread(self._show_stack_picker, m, stacks)
 
@@ -510,7 +516,7 @@ class ManifestPanel(ButtonRowNav, Vertical):
         current = (self._run().get("paramify") or {}).get("stack") or ""
         spec = {"key": "stack", "label": "stack", "kind": "text", "value": current,
                 "placeholder": "stack id or name", "required": False,
-                "help": "no API token: the value is stored as typed"}
+                "help": "Without an API token it's saved as you type it."}
 
         def done(result: Optional[dict]) -> None:
             if result is None:
@@ -551,7 +557,7 @@ class ManifestPanel(ButtonRowNav, Vertical):
         try:
             owners = api.list_channel_owners(self.app.root_path)
         except Exception as exc:
-            self.app.call_from_thread(self.notify, f"Could not list channel owners: {exc}", severity="error")
+            self.app.call_from_thread(self.notify, f"Couldn't list channel owners: {exc}", severity="error")
             return
         self.app.call_from_thread(self._show_owner_picker, m, owners)
 
@@ -580,7 +586,7 @@ class ManifestPanel(ButtonRowNav, Vertical):
         current = (self._run().get("paramify") or {}).get("owner") or ""
         spec = {"key": "owner", "label": "owner", "kind": "text", "value": current,
                 "placeholder": "Paramify username", "required": False,
-                "help": "no API token: the value is stored as typed; blank removes it"}
+                "help": "Without an API token it's saved as you type it. Leave it blank to remove it."}
 
         def done(result: Optional[dict]) -> None:
             if result is None:
@@ -639,11 +645,12 @@ class ManifestPanel(ButtonRowNav, Vertical):
             inputs = len(added) - len(asked)
             message = f"Added {', '.join(asked) or ', '.join(added)}"
             if asked and inputs:
-                message += f" + {inputs} input{'s' if inputs != 1 else ''}"
+                message += f" and {plural(inputs, 'input')}"
+            message += "."
             if wired:
                 # On the Fetchers page focus stays in the catalog, where e does nothing.
                 how = "e to change" if self._has_detail else "tab, then e to change"
-                message += f" — secrets wired to default env vars ({how})."
+                message += f" Its secrets use their default env vars ({how})."
             self.notify(message)
         return added
 
@@ -668,7 +675,7 @@ class ManifestPanel(ButtonRowNav, Vertical):
             return
         d = self._descriptors().get(use)
         if d is None:
-            self.notify("Unknown fetcher — cannot edit.", severity="warning")
+            self.notify("Unknown fetcher, so it can't be edited.", severity="warning")
             return
         # Every write below targets this exact entry, not the first with this fetcher.
         ekey = self._selected_entry_key()
@@ -694,21 +701,21 @@ class ManifestPanel(ButtonRowNav, Vertical):
         no_requests = PIPELINE_NO_REQUESTS if pipeline else NO_REQUESTS
         paramify_specs = [
             {"key": "stack", "label": "stack", "kind": "text", "value": pf.get("stack"),
-             "placeholder": "inherit", "required": False, "help": "stack id or name; blank inherits"},
+             "placeholder": "inherit", "required": False, "help": "Stack id or name. Blank uses the manifest's."},
             {"key": "owner", "label": "owner", "kind": "text", "value": pf.get("owner"),
              "placeholder": "inherit", "required": False,
-             "help": "Paramify username; picks the channel when a stack has one per owner; blank inherits"},
+             "help": "Paramify username, for a stack with one channel per owner. Blank uses the manifest's."},
             {"key": "approval", "label": "approval", "kind": "select", "value": pf.get("approval") if pf.get("approval") in APPROVALS else None,
              "options": [(v, v) for v in APPROVALS], "required": False,
-             "help": ("pipeline files always go in a batch; MANUAL waits for a person"
-                      if pipeline else "blank inherits")},
+             "help": ("MANUAL waits for someone to approve the batch."
+                      if pipeline else "Blank uses the manifest's.")},
             {"key": "no_request", "label": "no_request", "kind": "select",
              "value": pf.get("no_request") if pf.get("no_request") in no_requests else None,
              "options": [(v, v) for v in no_requests], "required": False,
-             "help": ("no artifact request: blank or evidence sends a batch to the set; refuse stops"
-                      if pipeline else "blank inherits")},
+             "help": ("If the set has no artifact request: evidence (or blank) still sends a batch, refuse stops."
+                      if pipeline else "Blank uses the manifest's.")},
             {"key": "delivery", "label": "delivery", "kind": "select", "value": pf.get("delivery") if pf.get("delivery") in DELIVERIES else None,
-             "options": [(v, v) for v in DELIVERIES], "required": False, "help": "blank inherits"},
+             "options": [(v, v) for v in DELIVERIES], "required": False, "help": "Blank uses the manifest's."},
         ]
         if pipeline:
             # A pipeline file always goes in a batch, so `delivery` does not apply (and
@@ -738,14 +745,10 @@ class ManifestPanel(ButtonRowNav, Vertical):
         # Short enough to survive the card width — a subtitle that clips takes the
         # targets pointer with it, which is the half that answers "why is this
         # form only secrets?". The ENV-VAR rule is also on the secrets group label.
-        subtitle = "Secrets take the ENV VAR NAME, not the value."
-        if d.get("supports_targets"):
-            # Leads, and the secrets note is trimmed to fit beside it: the card
-            # clips rather than wraps, and this is the half that answers "why is
-            # this form only secrets?". The ENV-VAR rule is also on the group label.
-            subtitle = "Targets: press 't'.   ·   Secrets take the ENV VAR NAME."
+        # The env-var rule is said once, on the secrets group's label.
+        subtitle = "Targets are edited with t." if d.get("supports_targets") else ""
         self.app.push_screen(
-            FormModal(f"Edit {use} — entry config and secrets", groups, subtitle=subtitle),
+            FormModal(f"Edit {use}", groups, subtitle=subtitle),
             done,
         )
 
@@ -850,7 +853,7 @@ class ManifestPanel(ButtonRowNav, Vertical):
             FormModal(
                 f"Edit target {index} — {use}",
                 {"values": value_specs, "secrets": secret_specs},
-                subtitle="target fields + per-target secrets",
+                subtitle="its fields, and any secrets just for this target",
             ),
             done,
         )
@@ -905,14 +908,14 @@ class ManifestPanel(ButtonRowNav, Vertical):
             ]
             if missing:
                 self.notify(
-                    f"Target added — required field(s) still unset: {', '.join(missing)}",
+                    f"Target added. Still required: {', '.join(missing)}.",
                     severity="warning",
                 )
             else:
                 self.notify(f"Added target to {use}.")
 
         self.app.push_screen(
-            FormModal(f"Add target to {use}", groups, subtitle="target fields + per-target secrets"),
+            FormModal(f"Add target to {use}", groups, subtitle="its fields, and any secrets just for this target"),
             done,
         )
 
@@ -936,8 +939,8 @@ class ManifestPanel(ButtonRowNav, Vertical):
         d = self._descriptors().get(use)
         if not d or kinds.kind_of(d) != kinds.SCAN_REPORT:
             self.notify(
-                "Only scan reports go to an assessment; evidence goes to the "
-                "evidence set its fetcher names.", severity="warning"
+                "Only scan reports go to an assessment. Evidence goes to its fetcher's evidence set.",
+                severity="warning"
             )
             return
 
@@ -953,7 +956,7 @@ class ManifestPanel(ButtonRowNav, Vertical):
             assessments = api.list_assessments(assessment_type)
         except (RuntimeError, ValueError) as exc:
             self.app.call_from_thread(
-                self.notify, f"Cannot list assessments: {exc}", severity="error", timeout=12
+                self.notify, f"Couldn't list assessments: {exc}", severity="error", timeout=12
             )
             return
         self.app.call_from_thread(self._show_assessment_picker, use, assessment_type, assessments)
@@ -1002,11 +1005,8 @@ class ManifestPanel(ButtonRowNav, Vertical):
         if m is None:
             return
         options = [
-            (CLOSE_AFTER_RUN,
-             "after_run — one report per cycle: close after each complete run"),
-            (CLOSE_NEVER,
-             "never — several files per cycle: close in Paramify or with "
-             "`paramify issues close`"),
+            (CLOSE_AFTER_RUN, "After each run: one report per cycle"),
+            (CLOSE_NEVER, "By hand: several reports per cycle (C on the Pipelines tab)"),
         ]
 
         def done(policy: Optional[str]) -> None:
@@ -1016,13 +1016,14 @@ class ManifestPanel(ButtonRowNav, Vertical):
             api.set_close_cycle(m, use, policy)
             self._autosave()
             self.rebuild()
-            self.notify(f"{use} → {assessment_label}, close_cycle={policy}")
+            how = "closes after each run" if policy == CLOSE_AFTER_RUN else "closes by hand"
+            self.notify(f"{use} → {assessment_label}; its cycle {how}.")
 
         self.app.push_screen(
             PickerModal(
                 f"How is {assessment_label}'s cycle closed?",
                 options,
-                subtitle="Closing auto-closes every open issue the cycle never saw",
+                subtitle="Closing a cycle auto-closes every open issue it never saw.",
             ),
             done,
         )
@@ -1064,7 +1065,7 @@ class ManifestPanel(ButtonRowNav, Vertical):
             api.dump_manifest(m, self.app.manifest_path, self.app.root_path)
         except Exception as exc:  # noqa: BLE001 — every failure keeps the edit
             self.notify(
-                f"Change not saved: {exc} — fix, then press 's'.",
+                f"Change not saved: {exc}. Fix it, then press s.",
                 severity="error",
                 timeout=12,
             )
@@ -1076,17 +1077,17 @@ class ManifestPanel(ButtonRowNav, Vertical):
         try:
             api.dump_manifest(m, self.app.manifest_path, self.app.root_path)
         except ValueError as exc:
-            self.notify(f"Cannot save: {exc}", severity="error", timeout=12)
+            self.notify(f"Couldn't save: {exc}", severity="error", timeout=12)
             return
         except Exception as exc:
             self.notify(f"Save failed: {exc}", severity="error", timeout=12)
             return
-        self.notify(f"Saved → {self.app.manifest_path}")
+        self.notify(f"Saved {self.app.manifest_path}.")
 
     def action_validate(self) -> None:
         self.rebuild()
         n = len(self._errors)
-        self.notify("Manifest is runnable." if n == 0 else f"{n} issue(s) — see the detail pane.")
+        self.notify("Ready to run." if n == 0 else f"{plural(n, 'problem')}: see the detail pane.")
 
     def action_preview(self) -> None:
         if self._manifest is None:
@@ -1099,7 +1100,7 @@ class ManifestPanel(ButtonRowNav, Vertical):
         if not use or self._manifest is None:
             return
         if not (self._descriptors().get(use) or {}).get("pipeline"):
-            self.notify(f"{use} is not a pipeline fetcher")
+            self.notify(f"{use} isn't a pipeline fetcher.")
             return
         run = self._manifest.get("run") or {}
         out = run.get("output_dir")

@@ -44,6 +44,33 @@ def render_plan(plan: Plan) -> List[str]:
     return lines
 
 
+def confirm_lines(plan: Plan) -> List[str]:
+    """The plan as a confirm dialog shows it: what is delivered where, what gets
+    created or changed, and anything refused with its fix. Steps that change
+    nothing (noop) are left out, and tags are counted, not listed."""
+    lines: List[str] = [f"! {n}" for n in plan.notes]
+    tags = 0
+    for a in plan.actions:
+        if a.verb == "noop":
+            continue
+        if a.verb == "tag":
+            tags += 1
+            continue
+        if a.verb == "refuse":
+            lines.append(f"✗ {a.key}: {a.summary}")
+            if a.fix:
+                lines.append(f"    fix: {a.fix}")
+        elif a.provider == DELIVERY:
+            summary = a.summary[len("deliver "):] if a.summary.startswith("deliver ") else a.summary
+            lines.append(f"{a.key}: {summary}")
+        else:
+            lines.append(f"+ {a.summary}")
+        lines.extend(f"    ! {w}" for w in a.warnings)
+    if tags:
+        lines.append(f"Also tags {tags} evidence set{'s' if tags != 1 else ''}.")
+    return lines
+
+
 def _totals(plan: Plan) -> str:
     delivery: List[str] = [a.verb for a in plan.actions if a.provider == DELIVERY]
     parts = [f"{delivery.count(v)} {v}" for v in _DELIVERY_VERBS]

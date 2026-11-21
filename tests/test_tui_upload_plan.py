@@ -303,7 +303,7 @@ def _confirm_text(app) -> str:
     return str(app.screen._message)
 
 
-def test_confirm_shows_the_plan_totals(tmp_path, monkeypatch, no_token, run_tui):
+def test_confirm_shows_the_plan(tmp_path, monkeypatch, no_token, run_tui):
     _upload_ready(tmp_path, monkeypatch, token=True)
     seen = {}
 
@@ -315,7 +315,7 @@ def test_confirm_shows_the_plan_totals(tmp_path, monkeypatch, no_token, run_tui)
 
     text = _open_confirm(tmp_path, run_tui, _confirm_text, monkeypatch)
     assert seen["online"] is True
-    assert "1 deliver" in text and "evidence file(s)" in text
+    assert "x: new set" in text and "Upload 1 file to" in text
 
 
 def test_the_plan_compares_the_run_with_the_open_manifest(tmp_path, monkeypatch, no_token, run_tui):
@@ -503,8 +503,8 @@ def _notes(app) -> list:
 
 
 @pytest.mark.parametrize("button, lister, message", [
-    ("#manifest-stack", "list_stacks", "Could not list stacks: HTTP 401: token expired"),
-    ("#manifest-owner", "list_channel_owners", "Could not list channel owners: HTTP 401: token expired"),
+    ("#manifest-stack", "list_stacks", "Couldn't list stacks: HTTP 401: token expired"),
+    ("#manifest-owner", "list_channel_owners", "Couldn't list channel owners: HTTP 401: token expired"),
 ])
 def test_a_listing_error_is_shown_and_changes_nothing(tmp_path, token, no_network, monkeypatch, run_tui,
                                                       button, lister, message):

@@ -31,6 +31,7 @@ from framework.tui.components.keys import (
     FilterListNav,
 )
 from framework.tui.components.table import DataTable
+from framework.tui.words import plural
 
 
 class FormModal(ButtonRowNav, ModalScreen[dict]):
@@ -43,7 +44,7 @@ class FormModal(ButtonRowNav, ModalScreen[dict]):
     # Friendlier section headings; the dict key stays the result key.
     GROUP_LABELS = {
         "config": "config",
-        "secrets": "secrets  ·  enter the ENV VAR NAME, not the value",
+        "secrets": "secrets  ·  env var names, not the values",
         "values": "target fields",
     }
 
@@ -69,11 +70,15 @@ class FormModal(ButtonRowNav, ModalScreen[dict]):
                 yield Label(self._subtitle, id="modal-subtitle")
             with VerticalScroll(id="modal-body"):
                 any_fields = False
+                shown = [g for g, fields in self._groups.items() if fields]
                 for gname, fields in self._groups.items():
                     if not fields:
                         continue
                     any_fields = True
-                    yield Label(self.GROUP_LABELS.get(gname, gname), classes="group-label")
+                    # One section: the title already says what it is (secrets keep theirs: it says
+                    # the fields take env var names).
+                    if len(shown) > 1 or gname == "secrets":
+                        yield Label(self.GROUP_LABELS.get(gname, gname), classes="group-label")
                     for spec in fields:
                         yield FieldRow(spec, group=gname)
                 if not any_fields:
@@ -261,9 +266,7 @@ class TargetsModal(ModalScreen[None]):
         if rows:
             table.move_cursor(row=min(cursor, len(rows) - 1))
         self.query_one("#targets-count", Static).update(
-            f"{len(rows)} target(s) · fields come from the fetcher's target_schema"
-            if rows
-            else "no targets yet — press 'a' to add one"
+            plural(len(rows), "target") if rows else "No targets yet. Press a to add one."
         )
 
     def _index(self) -> int:
