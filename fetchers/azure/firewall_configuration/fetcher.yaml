@@ -1,5 +1,5 @@
 name: azure_firewall_configuration
-version: 0.1.0
+version: 0.1.1
 description: >-
   Shows what each Azure Firewall allows and denies, whether threat intelligence, IDPS, TLS inspection and DNS proxy are on, and whether its logs are exported.
 category: azure
@@ -132,7 +132,7 @@ evidence_set:
 
     What was left out of scope?
     - resource_exclusion_patterns — List of the resource_exclusions patterns as given
-    - resource_exclusion_patterns_unmatched — List of the patterns that matched nothing, such as a mistyped name
+    - resource_exclusion_patterns_unmatched — List of the patterns that matched nothing, such as a mistyped name, or null when a list could not be read
     - excluded_firewalls — Number of firewalls a pattern took out of scope; null if the firewall list was not read
     - excluded_firewall_policies — Number of firewall policies a pattern took out of scope; null if the policy list was not read
     - in_scope_firewalls — Number of firewalls assessed; null if the firewall list was not read

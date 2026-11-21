@@ -16,6 +16,9 @@ output:
 secrets:
 - name: api_token
   env: RIPPLING_API_TOKEN
+  description: >-
+    Rippling API token from the Rippling Developer Hub, read-only on employee data
+    (employee fetchers) and device data (rippling_devices).
 
 ksis:
   - KSI-PIY-GIV

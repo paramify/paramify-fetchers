@@ -16,8 +16,11 @@ output:
 secrets:
 - name: api_token
   env: OKTA_API_TOKEN
+  description: >-
+    Okta SSWS API token created by a read-only admin (Security → API → Tokens).
 - name: org_url
   env: OKTA_ORG_URL
+  description: Okta org base URL, no trailing slash (e.g. https://your-org.okta.com).
 
 ksis:
   - KSI-IAM-APM

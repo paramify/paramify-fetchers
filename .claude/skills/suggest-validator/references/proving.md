@@ -55,6 +55,15 @@ that gets skipped.
    silent false pass — worse than a false failure, because nobody investigates
    a green check.
 
+Two more cases belong in every case file:
+
+- **Null:** the key present with a `null` value (a failed read). It must not
+  pass.
+- **Scaled:** the compliant artifact with every count multiplied by ten, still
+  fully compliant. It must pass, and one item made non-compliant at that size
+  must fail. A validator that fails the scaled compliant case has today's
+  inventory written into it.
+
 ## The one case a single validator cannot carry
 
 **A violation-counting validator cannot pass direction 3 on its own** — zero

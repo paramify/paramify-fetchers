@@ -54,6 +54,33 @@ Two bundled scripts save re-deriving the same thing every run:
   assert, and when it correctly fails.** A regex without its failure mode is a
   false sense of coverage. The first two go in `statement`; the third is
   Phase 5.
+- **One validator, one check.** Each validator asserts exactly one condition,
+  and its name says which. A regex that reads two posture fields ("HTTPS only
+  and TLS 1.2") is two validators. The one thing allowed to share a regex with
+  the check is a **precondition that gives it meaning**: the population is not
+  empty, or the source is present. Without it, "zero Critical findings" passes
+  when nothing was scanned. When a set fails, a single-check validator says
+  exactly what broke.
+- **Short enough to read at a glance: 150 characters at most.** Key plus value
+  pattern, nothing else. A regex over 150 characters is not handed back
+  silently: warn the user ("Regex is N characters (limit 150). Consider
+  splitting it into one validator per field, or dropping a precondition another
+  validator already proves") and offer the split as a concrete alternative.
+- **It must keep working as the company grows.** Never write the size or
+  contents of today's environment into a validator. Compare the evidence to
+  itself: compliant count equals total (`encrypted_buckets` = `total_buckets`),
+  a percentage is 100, a violation count is 0, a population is at least one.
+  Not "encrypted buckets = 27", and no resource names, ids or account numbers
+  in the regex. A **policy threshold** ("TLS 1.2 or later", "at most 3
+  Owners", "365-day credentials") is fine because it does not change with size;
+  name its source in the `statement`. The test: if a number would have to change
+  when the company adds resources, users or accounts, it is inventory, not
+  policy.
+- **Claim only what the field establishes.** Describe what the collector
+  reports, not a stronger real-world fact: "an approvalId reference", not
+  "approved"; "classified Contributor-equivalent by the collector's wildcard
+  heuristic", not "has Contributor permissions"; "a modeled path", not
+  "reachable". Say what the field cannot show.
 
 ---
 
@@ -182,12 +209,14 @@ Present each candidate as: **what it asserts**, **the field it reads**, and
 > 2. **No bucket is publicly readable** — zero matches for `"isPublic": true`.
 >    The narrative claims access is restricted, and a public bucket contradicts
 >    it regardless of encryption.
-> 3. **The collection succeeded** — `exit_code` is 0. Not a compliance claim;
->    it stops a failed collection from reading as a clean verdict.
+> 3. **The collection succeeded** — already asserted by the shared
+>    `validators/common/collection_succeeded.yaml`. Add this set's
+>    `reference_id` to it rather than writing a new one (registry step 3).
 
-Rank them by how directly they bear on the narrative, and say which ones you
-would pick and why. Note what each one does *not* cover — that gap is what the
-next candidate in the list is for.
+Each candidate is one check (golden rule), so a narrative with four conditions
+gets four candidates, not one combined regex. Rank them by how directly they
+bear on the narrative, and say which ones you would pick and why. Note what each
+one does *not* cover — that gap is what the next candidate in the list is for.
 
 **Prefer the strongest anchor available:**
 
@@ -224,7 +253,9 @@ collection-health guards are written positively.
 
 The three directions are compliant (it passes), non-compliant (it fails), and
 **key renamed** (it does not pass). The third is the one that gets skipped and
-the one the whole phase exists for.
+the one the whole phase exists for. Add the **scale case** from the same file:
+the compliant artifact with every count multiplied by ten must still pass. A
+validator that fails it has today's inventory written into it.
 
 **Then run it against the real evidence, and report the result.**
 
@@ -255,12 +286,38 @@ reuse-before-you-create, and the registry gate
 (`pytest tests/test_validators_registry.py -q`).
 
 When you hand back, report for each validator: its key, its role, what it
-asserts, and when it correctly fails. Say plainly that these are derived from
+asserts, when it correctly fails, and its regex length, with the 150-character
+warning on any that run over. Say plainly that these are derived from
 one evidence sample — templates to confirm against more runs.
 
 **Syncing is a separate, explicit step and the user's call.**
 `paramify validators sync` writes to a live workspace, often production. Offer
 it; do not run it as the closing move of an interview.
+
+---
+
+## Simplifying existing validators
+
+When the job is to bring existing validators in line with the golden rules
+(split combined checks, shorten regexes) rather than author new ones, the
+results must not change. For each original:
+
+1. **List every condition it checks**, including any outside the summary, such
+   as a scan of `results` for a `null` classification. Each becomes its own
+   validator, or the precondition of one, so nothing is dropped silently.
+2. **Prove equivalence.** From the real evidence, generate variants that set
+   each field either version reads to zero, low, high, mismatched, the other
+   boolean, a wrong enum value, `null` and missing, plus pairs of fields and a
+   failed run. Score the original and its replacements with `score.mjs`; the
+   replacements together (all must pass) must give the original's verdict.
+3. **Explain every difference and get the user's agreement.** A replacement
+   must never be stricter than the original, and the verdict on the real
+   evidence must be identical. Dropping a guard on purpose is the user's call,
+   not a side effect.
+4. **Check at the set level too** with a set-level case file, so a guard that
+   moved to a sibling validator is confirmed rather than assumed.
+
+Report the scenario count and the differences grouped by cause.
 
 ---
 
@@ -293,3 +350,14 @@ it; do not run it as the closing move of an interview.
 - **Copying a validator to a second file** because it applies to a second
   evidence set. Add the `reference_id` to the existing file's `evidence_sets`.
 - **Syncing on your own initiative.** It writes to a live workspace.
+- **One validator checking two or three conditions.** When it fails, nobody can
+  tell which part broke, and fixing one part still shows red.
+- **Combining checks to keep the set small.** Add validators instead.
+- **Handing back a regex over 150 characters** without the warning and a split
+  alternative.
+- **Writing today's inventory into a validator:** "27 buckets", a list of
+  resource names, an account id. It breaks the day the company grows.
+- **Folding `exit_code` into a compliance validator,** or writing a second
+  collection-health validator. Reuse the shared one.
+- **Splitting an existing validator without proving equivalence,** and losing a
+  condition it read outside the summary.

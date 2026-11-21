@@ -580,6 +580,8 @@ def collect(client, subscription_id: str, collector) -> tuple:
         "sql.managedInstances.list", lambda: client.list(f"{base}/Microsoft.Sql/managedInstances", SQL_API))
     instances, out = exclusions.split(listed_instances or [], "managed_instance")
     excluded += out
+    if listed is None or listed_instances is None:
+        exclusions.mark_unread()
     exclusions.warn_unmatched(logger)
     databases = {
         id_key(mi["id"]): collector.guard(
