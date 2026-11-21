@@ -2,6 +2,7 @@ key: keycloak_sign_in_events_stored
 name: 'Keycloak: Sign-In Events Stored'
 type: AUTOMATED
 role: configuration
+source: community
 statement: >
   Keycloak actually stored at least one sign-in event within the lookback window (lookback_days, 7 by
   default), not counting the fetcher's own token requests (newest_login_event has a time). This shows
