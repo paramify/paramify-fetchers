@@ -40,6 +40,12 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`loki_log_ingestion` 0.1.0 and the `loki` category: whether expected log sources are arriving in Loki.** Each
+  expected source is a name and a LogQL stream selector (`LOKI_EXPECTED_SOURCES`). For each one the fetcher counts the
+  lines and streams in a recent window and finds the time of the newest line within a longer search window, through
+  GET calls to Loki's query API. `max_age_minutes` has no default, so `sources_stale` stays null until it is set. Log
+  lines and stream labels are never copied. The category sends `LOKI_TENANT_ID` as `X-Scope-OrgID` and an optional
+  bearer token for a proxy.
 - **The TUI shows which environment variables a manifest is missing, and stops a run that would fail on them.**
   - The manifest settings row has an `env` button (`✓ all set` or `✗ 2 missing`), each fetcher's status names what it
     needs (`✗ needs OKTA_API_TOKEN`), and the line under the table splits what a run needs from what only an upload needs.
