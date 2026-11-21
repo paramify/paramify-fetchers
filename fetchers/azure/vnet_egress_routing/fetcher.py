@@ -34,7 +34,7 @@ from azure_common import (  # noqa: E402
     vnet_id_of,
     write_evidence,
 )
-from azure_rest import int_config  # noqa: E402
+from azure_rest import int_config, target_subscription_scope  # noqa: E402
 from resource_exclusions import ResourceExclusions  # noqa: E402
 from scope_exclusions import excluded_item  # noqa: E402
 
@@ -790,7 +790,10 @@ def collect(subscription_id, cred, collector: Collector):
     """VNets, peerings, route tables, NICs, Azure Firewalls and policies, and Virtual WAN hub routing."""
     from azure.mgmt.network import NetworkManagementClient
 
+    strict = target_subscription_scope() is not None
     search = new_hub_search()
+    if strict:
+        search.update(read_scope="target_subscription", cross_subscription_search_skipped=True)
     client = collector.guard(
         "network.NetworkManagementClient (init)",
         lambda: NetworkManagementClient(
@@ -853,7 +856,7 @@ def collect(subscription_id, cred, collector: Collector):
     # A spoke's hub often lives in a separate connectivity subscription; look in every other one this credential sees.
     unresolved = unresolved_spokes(vnets, peers_by_vnet, hubs)
     search["spokes_needing_search"] = len(unresolved)
-    if unresolved:
+    if unresolved and not strict:
         others = _attempt(
             search, "subscription.subscriptions.list",
             lambda: [s for s in enabled_subscription_ids(cred) if s.lower() != subscription_id.lower()], [],
@@ -875,6 +878,7 @@ def main() -> int:
     )
     logging.getLogger("azure").setLevel(logging.WARNING)
     load_dotenv()
+    target_subscription_scope()
 
     output_dir = Path(os.environ.get("EVIDENCE_DIR", "./evidence"))
     collector = Collector(logger)
@@ -909,6 +913,13 @@ def main() -> int:
     vnets, subnets, tables, nics, firewalls, hubs, excluded = split_records(
         exclusions, vnets, subnets, tables, nics, firewalls, hubs
     )
+    unread_ops = (
+        "network.NetworkManagementClient (init)", "network.virtual_networks.list_all", "network.route_tables.list_all",
+        "network.network_interfaces.list_all", "network.azure_firewalls.list_all", "network.firewall_policies.list_all",
+        "network.virtual_hubs.list",
+    )
+    if not (subscription_id and cred is not None) or any(f["operation"].startswith(unread_ops) for f in collector.failures):
+        exclusions.mark_unread()
     exclusions.warn_unmatched(logger)
     evidence = build_payload(
         subscription_id=subscription_id,

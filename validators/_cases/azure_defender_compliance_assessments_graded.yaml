@@ -1,0 +1,38 @@
+validator: azure_defender_compliance_assessments_graded
+cases:
+  - name: graded_some_failing
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"assessments_by_state":{"Failed":3,"Passed":5,"Skipped":1,"Unsupported":0},"control_pass_percentage":60}}}'
+
+  - name: graded_all_passing
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"assessments_by_state":{"Failed":0,"Passed":4,"Skipped":0,"Unsupported":0},"control_pass_percentage":100}}}'
+
+  - name: graded_all_failing
+    expect: PASS
+    note: The check is that assessments were graded; it does not judge the results.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"assessments_by_state":{"Failed":4,"Passed":0,"Skipped":0,"Unsupported":0},"control_pass_percentage":0}}}'
+
+  - name: only_skipped_and_unsupported
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"assessments_by_state":{"Failed":0,"Passed":0,"Skipped":2,"Unsupported":3},"control_pass_percentage":0}}}'
+
+  - name: no_assessments_listed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"assessments_by_state":{"Failed":0,"Passed":0,"Skipped":0,"Unsupported":0},"control_pass_percentage":0}}}'
+
+  - name: assessments_by_state_null
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"assessments_by_state":null,"control_pass_percentage":0}}}'
+
+  - name: assessments_by_state_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"assessments_by_state_renamed":{"Failed":3,"Passed":5,"Skipped":1,"Unsupported":0},"control_pass_percentage":60}}}'
+
+  - name: scale_x10_graded
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"assessments_by_state":{"Failed":30,"Passed":50,"Skipped":10,"Unsupported":0},"control_pass_percentage":60}}}'
+
+  - name: scale_x10_only_skipped_and_unsupported
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"assessments_by_state":{"Failed":0,"Passed":0,"Skipped":20,"Unsupported":30},"control_pass_percentage":0}}}'

@@ -148,6 +148,8 @@ def build(raw_gateways: list | None, collector: Collector, subscription_id, cred
     exclusions.record_invalid(collector)
     listed = raw_gateways is not None
     raw_gateways, excluded = split_gateways(raw_gateways or [], exclusions)
+    if not listed:
+        exclusions.mark_unread()
     exclusions.warn_unmatched(logger)
     gateways, settings = [], []
     for gateway in raw_gateways:

@@ -1,0 +1,14 @@
+validator: github_merged_pull_requests_observed
+cases:
+- name: compliant
+  expect: PASS
+  artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"merged_pull_requests":3}}}'
+- name: none
+  expect: FAIL
+  artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"merged_pull_requests":0}}}'
+- name: unread
+  expect: FAIL
+  artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"merged_pull_requests":null}}}'
+- name: renamed
+  expect: FAIL
+  artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"merged_pull_requests_renamed":3}}}'

@@ -1,5 +1,5 @@
 name: azure_service_health_advisories
-version: 0.1.0
+version: 0.1.1
 description: >-
   Lists the Microsoft service issues, planned maintenance, health and security
   advisories reported to the subscription, with their status, recommended

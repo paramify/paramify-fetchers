@@ -1,0 +1,26 @@
+key: azure_inventory_required_resources_present
+name: 'Azure Resource Inventory: Every Required Resource Is Present'
+type: AUTOMATED
+role: completeness
+source: community
+statement: >
+  Every id in the required_resources list is itself in the subscription's in-scope Resource Graph
+  inventory, or for a resource group id among its in-scope resource groups (required_resources_missing
+  is 0). A child resource, another resource in the same group or an allowed_resources match never
+  stands in for a required one, and a resource or resource group that resource_exclusions leaves out
+  of scope reads as missing. Fails while neither list is set, the inventory could not be read, or
+  the count appears other than exactly once. Does not judge resources outside the list; see 'No
+  Unexpected Resources'. Does not check whether the collection run succeeded.
+
+regex: '"required_resources_missing":\s*(?<required_resources_missing>\d+)'
+rules_summary: MATCH_COUNT EQUALS 1; MATCH_GROUP[1] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "1" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # required_resources_missing
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-RESOURCE-INVENTORY

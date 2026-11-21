@@ -1,0 +1,20 @@
+key: keycloak_admin_events_enabled
+name: 'Keycloak: Admin Event Storage Enabled'
+type: AUTOMATED
+role: configuration
+source: community
+statement: >
+  Keycloak's setting to store admin events, every change made through the admin console or API including
+  account, role and credential changes, is on (admin_events_enabled is true). An enabled setting is
+  configuration evidence only: it does not show that events are produced, that they reach a SIEM, or how
+  long they are kept. Does not check whether the collection run succeeded.
+
+regex: '"admin_events_enabled":\s*true\b'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-KEYCLOAK-REALM-SECURITY

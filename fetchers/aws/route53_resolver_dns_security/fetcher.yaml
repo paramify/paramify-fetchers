@@ -1,0 +1,52 @@
+name: aws_route53_resolver_dns_security
+version: 0.1.0
+description: Shows, for each VPC, whether Route 53 Resolver validates DNSSEC, which DNS Firewall rule groups and rules filter its queries, and whether its DNS queries are logged.
+category: aws
+
+supports_targets: true
+
+runtime:
+  type: bash
+  entry: fetcher.sh
+
+output:
+  type: json
+  path: aws_route53_resolver_dns_security.json
+  aggregation: per_target
+
+target_schema:
+  region:
+    type: string
+    required: false
+    env: AWS_DEFAULT_REGION
+    description: AWS region to collect from.
+  profile:
+    type: string
+    required: false
+    env: AWS_PROFILE
+    description: AWS named profile (credentials resolved from ~/.aws / SSO).
+secrets: []
+
+ksis:
+  - KSI-SVC-VCM
+  - KSI-CNA-RNT
+  - KSI-MLA-LET
+
+evidence_set:
+  reference_id: EVD-R53-RESOLVER-DNS-SECURITY
+  name: Route 53 Resolver DNS Security
+  instructions: |
+    Script: aws/route53_resolver_dns_security/fetcher.sh
+
+    Access: Read access in the region to ec2:DescribeVpcs and to route53resolver ListResolverDnssecConfigs, ListFirewallRuleGroupAssociations, ListFirewallRules, ListFirewallDomainLists and ListResolverQueryLogConfigAssociations. Without one of them the run fails and the fields that call feeds read null.
+
+    Commands Executed:
+    - aws sts get-caller-identity — the account and identity recorded with the evidence
+    - aws ec2 describe-vpcs — every VPC in the region, its Name tag and whether it is the default VPC
+    - aws route53resolver list-resolver-dnssec-configs — the DNSSEC validation status of each VPC that has a Resolver DNSSEC config
+    - aws route53resolver list-firewall-rule-group-associations — the DNS Firewall rule groups associated with each VPC and the state of each association
+    - aws route53resolver list-firewall-rules (per associated rule group) — each rule's action, priority, and domain list or DNS Firewall Advanced threat protection
+    - aws route53resolver list-firewall-domain-lists — the names of the domain lists the rules use, including AWS managed lists such as AWSManagedDomainsAggregateThreatList
+    - aws route53resolver list-resolver-query-log-config-associations — the query log configs associated with each VPC and the state of each association
+
+    Output: aws_route53_resolver_dns_security_<profile>_<region>.json — one record per VPC in results (Id, Name, Default, DnssecValidation, DnsFirewall, QueryLogging), plus OrphanedDnssecConfigs. DnssecValidation is the ValidationStatus AWS reports for the VPC's Resolver DNSSEC config: ENABLED (validation is on), ENABLING, DISABLING, DISABLED, USE_LOCAL_RESOURCE_SETTING or UPDATING_TO_USE_LOCAL_RESOURCE_SETTING (the config defers to the resource's local setting), or NOT_CONFIGURED when the VPC has no Resolver DNSSEC config, which leaves validation at its default of off; only ENABLED shows validation is on. DnsFirewall.Associated is true when at least one of the VPC's rule group associations has Status COMPLETE; associations in any other state (such as UPDATING or DELETING) are listed in RuleGroups with their Status but do not count. Each rule group lists its Rules with Name, Priority, Action (BLOCK, ALERT or ALLOW), BlockResponse, DomainListId and DomainListName; DomainListName is unknown when the list could not be named, and DomainListId and DomainListName are null for a DNS Firewall Advanced rule, which carries FirewallThreatProtectionId, DnsThreatProtection and ConfidenceThreshold instead; Rules is null when the rule group's rules could not be read. QueryLogging.Enabled is true when at least one query log config association has Status ACTIVE; Associations lists each one with its ConfigId, Status (CREATING, ACTIVE, ACTION_NEEDED, DELETING or FAILED) and Error (NONE, DESTINATION_NOT_FOUND, ACCESS_DENIED or INTERNAL_SERVICE_ERROR). OrphanedDnssecConfigs lists Resolver DNSSEC configs whose ResourceId matches no VPC in the region. Settings a VPC gets through a Route 53 Profile are not read, so such a VPC can read as not covered (DnsFirewall.Associated or QueryLogging.Enabled false). A field whose AWS call failed reads null rather than off or empty, and the run fails.

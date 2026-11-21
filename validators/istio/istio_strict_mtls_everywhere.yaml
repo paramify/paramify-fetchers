@@ -1,0 +1,20 @@
+key: istio_strict_mtls_everywhere
+name: 'Istio: Strict mTLS Everywhere'
+type: AUTOMATED
+role: configuration
+source: community
+statement: >
+  The mesh-wide PeerAuthentication is STRICT and no namespace-, workload- or port-level setting weakens it
+  to PERMISSIVE or DISABLE (strict_mtls_everywhere is true), so sidecars accept only mTLS. Covers
+  workloads in the mesh only; namespaces_not_in_mesh lists those outside it. Configuration evidence: it
+  does not show traffic actually encrypted. Does not check whether the collection run succeeded.
+
+regex: '"strict_mtls_everywhere":\s*true\b'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-ISTIO-MESH-SECURITY

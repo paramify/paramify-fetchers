@@ -1,0 +1,27 @@
+key: azure_backup_vault_immutability_every_vault
+name: 'Azure Backup Vaults: Immutability Is On for Every Vault'
+type: AUTOMATED
+role: configuration
+source: community
+statement: >
+  Every Backup vault has immutability Unlocked or Locked, so recovery points cannot be deleted
+  before they expire (immutability_enabled_vaults equals total_backup_vaults, and there is at least
+  one vault). Unlocked immutability can still be turned off; the evidence lists each vault's state.
+  Fails when the vault list was not read or the counts appear other than exactly once. Does not
+  check whether the collection run succeeded.
+
+regex: '"immutability_enabled_vaults":\s*(?<immutability_enabled_vaults>\d+)[\s\S]*?"total_backup_vaults":\s*(?<total_backup_vaults>\d+)'
+rules_summary: MATCH_COUNT EQUALS 1; MATCH_GROUP[1] EQUALS MATCH_GROUP[2]; MATCH_GROUP[2] GREATER_THAN 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "1" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # immutability_enabled_vaults
+    criteria: EQUALS
+    value: { type: MATCH_GROUP, groupNumber: 2 }            # total_backup_vaults
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }   # total_backup_vaults
+    criteria: GREATER_THAN
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-BACKUP-VAULT-PROTECTION

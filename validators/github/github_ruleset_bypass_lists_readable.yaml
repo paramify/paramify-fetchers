@@ -1,0 +1,19 @@
+key: github_ruleset_bypass_lists_readable
+name: GitHub Ruleset Bypass Lists Readable
+type: AUTOMATED
+role: integrity
+source: community
+statement: >-
+  The bypass list of every ruleset enforced on a default branch was read. A repository whose bypass list
+  GitHub would not show fails, because who can skip its rules is unknown rather than nobody.
+regex: '"bypass_actors_unreadable":\s*\[\s*\]'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+- regexOperation:
+    type: MATCH_COUNT
+  criteria: NOT_EQUALS
+  value:
+    type: CUSTOM_TEXT
+    customText: '0'
+evidence_sets:
+- EVD-GITHUB-BRANCH-PROTECTION

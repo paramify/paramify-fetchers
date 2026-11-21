@@ -1,0 +1,22 @@
+key: azure_backup_vault_all_instances_backed_up
+name: 'Azure Backup Vaults: Every Protected Resource Was Backed Up Recently'
+type: AUTOMATED
+role: configuration
+source: community
+statement: >
+  Every backup instance a Backup vault protects has a recovery point newer than
+  recovery_point_window_hours (all_backup_instances_backed_up is true). Instances with operational
+  blob backup, which has no recovery points, are not judged. Fails when any instance's recovery
+  points could not be read, when there are no instances, or when a vault's instance list was not
+  read. A recent recovery point shows a backup completed, not that it restores. Does not check
+  whether the collection run succeeded.
+
+regex: '"all_backup_instances_backed_up":\s*true\b'
+rules_summary: MATCH_COUNT EQUALS 1
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "1" }
+
+evidence_sets:
+  - EVD-AZURE-BACKUP-VAULT-PROTECTION

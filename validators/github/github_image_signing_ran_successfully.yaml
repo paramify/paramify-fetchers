@@ -1,0 +1,19 @@
+key: github_image_signing_ran_successfully
+name: GitHub Image Signing Ran Successfully
+type: AUTOMATED
+role: configuration
+source: community
+statement: >-
+  At least one run of a signing workflow succeeded in the window, pull request runs left out. Fails when
+  runs were not read, because unread is not zero. Does not assert the sign step itself ran in that run.
+regex: '"signing_workflow_runs_successful":\s*(?<signing_workflow_runs_successful>[1-9]\d*)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+- regexOperation:
+    type: MATCH_COUNT
+  criteria: NOT_EQUALS
+  value:
+    type: CUSTOM_TEXT
+    customText: '0'
+evidence_sets:
+- EVD-GITHUB-IMAGE-SIGNING

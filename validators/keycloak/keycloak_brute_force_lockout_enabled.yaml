@@ -1,0 +1,19 @@
+key: keycloak_brute_force_lockout_enabled
+name: 'Keycloak: Repeated Failed Sign-Ins Lock the Account'
+type: AUTOMATED
+role: configuration
+source: community
+statement: >
+  Brute-force detection is on for the realm (brute_force_protected is true), so repeated failed
+  sign-ins lock the account; the threshold and lockout length are in the evidence. Does not
+  check whether the collection run succeeded.
+
+regex: '"brute_force_protected":\s*true\b'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-KEYCLOAK-REALM-SECURITY

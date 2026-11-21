@@ -1,0 +1,19 @@
+key: keycloak_self_registration_disabled
+name: 'Keycloak: Self-Registration Is Off'
+type: AUTOMATED
+role: configuration
+source: community
+statement: >
+  Users cannot register themselves on the sign-in page (registration_allowed is false), so accounts
+  come only from administrators or federation. Does not show that every identity comes from one
+  directory. Does not check whether the collection run succeeded.
+
+regex: '"registration_allowed":\s*false\b'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-KEYCLOAK-REALM-SECURITY

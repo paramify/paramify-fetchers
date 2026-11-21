@@ -1,0 +1,23 @@
+key: openscap_scans_current
+name: "OpenSCAP: Every Target's Latest Scan Is Current"
+type: AUTOMATED
+role: integrity
+source: community
+statement: >
+  Every scanned target's latest OpenSCAP result is no older than the adopted max_age_days
+  (targets_scan_older_than_max_age is 0), and at least one target was scanned. Fails while
+  max_age_days is unset, any result file could not be read, no target was scanned, or the counts
+  appear other than exactly once. Does not check whether the collection run succeeded.
+
+regex: '"targets_scan_older_than_max_age":\s*(?<targets_scan_older_than_max_age>\d+)[\s\S]*?"targets_scanned":\s*(?<targets_scanned>[1-9]\d*)'
+rules_summary: MATCH_COUNT EQUALS 1; MATCH_GROUP[1] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "1" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # targets_scan_older_than_max_age
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-OPENSCAP-BENCHMARK-RESULTS
