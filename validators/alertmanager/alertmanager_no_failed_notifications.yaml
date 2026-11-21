@@ -2,6 +2,7 @@ key: alertmanager_no_failed_notifications
 name: 'Alertmanager: No Failed Notifications Since Start'
 type: AUTOMATED
 role: configuration
+source: community
 statement: >
   No notification attempt failed since Alertmanager's process started (notifications_failed is 0),
   retries included: every integration accepted what it was sent. notification_failures names any

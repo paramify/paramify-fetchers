@@ -2,6 +2,7 @@ key: alertmanager_default_route_delivers
 name: 'Alertmanager: Default Route Reaches a Receiver That Delivers'
 type: AUTOMATED
 role: configuration
+source: community
 statement: >
   The top-level route's receiver, used by every alert no child route matches, has at least one
   integration such as a webhook, email or paging service (default_receiver_has_integrations is true),

@@ -2,6 +2,7 @@ key: alertmanager_config_read
 name: 'Alertmanager: Configuration Read'
 type: AUTOMATED
 role: integrity
+source: community
 statement: >
   Alertmanager's loaded configuration was read and parsed (config_read is true), so the routing checks
   for this set describe the configuration actually in use. Receiver settings are never copied, only

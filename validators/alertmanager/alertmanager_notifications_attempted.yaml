@@ -2,6 +2,7 @@ key: alertmanager_notifications_attempted
 name: 'Alertmanager: Notifications Sent Since Start'
 type: AUTOMATED
 role: configuration
+source: community
 statement: >
   Alertmanager attempted at least one notification since its process started (notifications_attempted
   is 1 or more), so alerts are flowing to integrations rather than going nowhere. An attempt may have
