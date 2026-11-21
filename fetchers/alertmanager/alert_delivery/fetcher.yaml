@@ -3,6 +3,7 @@ version: 0.1.0
 description: >-
   Shows whether Alertmanager routes alerts to receivers that can deliver them, what is firing or suppressed, and how many notifications integrations accepted or rejected.
 category: alertmanager
+source: community
 
 supports_targets: false
 
