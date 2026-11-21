@@ -1,0 +1,14 @@
+validator: github_production_environments_observed
+cases:
+- name: compliant
+  expect: PASS
+  artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"repositories_with_production_environment":3}}}'
+- name: none
+  expect: FAIL
+  artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"repositories_with_production_environment":0}}}'
+- name: unread
+  expect: FAIL
+  artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"repositories_with_production_environment":null}}}'
+- name: renamed
+  expect: FAIL
+  artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"repositories_with_production_environment_renamed":3}}}'

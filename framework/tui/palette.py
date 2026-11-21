@@ -92,3 +92,15 @@ def status_pill(status: str) -> Text:
     if tone is None:
         return Text(status.upper(), style=MUTED)
     return pill(status.upper(), tone)
+
+
+# A validator's verdict, from Paramify or from validator_eval.
+_VERDICT_LABEL = {"COMPILE_ERROR": "BAD REGEX", "NOT_SET": "NOT RUN"}
+_VERDICT_TONE = {"PASS": "ok", "FAIL": "fail", "ERROR": "fail", "COMPILE_ERROR": "fail"}
+
+
+def verdict_pill(result: str) -> Text:
+    """PASS / FAIL / ERROR as pills; NOT_SET and anything new as muted text."""
+    label = _VERDICT_LABEL.get(result, result)
+    tone = _VERDICT_TONE.get(result)
+    return pill(label, tone) if tone else Text(label, style=MUTED)
