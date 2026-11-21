@@ -1,5 +1,5 @@
 name: github_pull_request_checks
-version: 0.1.0
+version: 0.2.0
 description: >-
   How changes reached each repository's default branch in a recent window:
   every merged pull request with its approvals and check results, and every
@@ -30,6 +30,14 @@ target_schema:
     description: >-
       Comma-separated repository names to collect. Unset collects every
       repository the token can see; a name the token cannot see fails the run.
+  exclude_repositories:
+    type: string
+    required: false
+    env: GITHUB_EXCLUDE_REPOSITORIES
+    description: >-
+      Comma-separated repository names to leave out, matched without regard
+      to case. Cannot be combined with repositories. The evidence lists the
+      names it left out and any that matched no repository.
   include_archived:
     type: boolean
     required: false
@@ -68,6 +76,22 @@ config_schema:
     default: 5000
     env: GITHUB_MAX_COMMITS_PER_REPOSITORY
     description: Default-branch commits per repository before the run fails as truncated.
+  include_titles:
+    type: boolean
+    required: false
+    default: true
+    env: GITHUB_PR_INCLUDE_TITLES
+    description: >-
+      Include each merged pull request's title. Set false to leave titles out;
+      approvals, checks and the summary are unchanged.
+  include_commit_messages:
+    type: boolean
+    required: false
+    default: true
+    env: GITHUB_PR_INCLUDE_COMMIT_MESSAGES
+    description: >-
+      Include the first line (up to 120 characters) of each direct push's
+      commit message. Set false to leave messages out; the push is still listed.
 
 secrets: []
 

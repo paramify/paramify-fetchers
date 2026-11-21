@@ -248,13 +248,14 @@ def _tenant():
     )
 
 
-def test_owners_and_privileged_permissions(monkeypatch, tmp_path):
+def test_owners_and_privileged_permissions(monkeypatch, tmp_path, assert_summary_documented):
     graph = FakeGraph(**_tenant())
     code, evidence, _ = _run(monkeypatch, tmp_path, graph)
 
     assert code == 0
     summary = evidence["summary"]
     assert V010_SUMMARY_KEYS <= set(summary)
+    assert_summary_documented("azure/entra_service_principals", summary)
     assert summary["owners_readable"] is True
     assert summary["owner_details_readable"] is True
     assert summary["owner_eligible_service_principals"] == 3

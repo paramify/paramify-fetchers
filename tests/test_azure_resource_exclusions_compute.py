@@ -121,6 +121,11 @@ def test_aks_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_
     assert summary["private_clusters"] == 2 and summary["total_agent_pools"] == 6
 
 
+def test_aks_summary_matches_the_instructions(monkeypatch, tmp_path, assert_summary_documented):
+    _, evidence = run_aks(monkeypatch, tmp_path, "rg:rg-out")
+    assert_summary_documented("azure/aks_cluster_configuration", evidence["summary"])
+
+
 def test_aks_excludes_by_group_and_region_and_recounts(monkeypatch, tmp_path):
     code, evidence = run_aks(monkeypatch, tmp_path, "rg:rg-out, location:regioneast, rg:typo")
     summary = evidence["summary"]
@@ -159,10 +164,11 @@ def run_acr(monkeypatch, tmp_path, patterns):
     return code, evidence, reads
 
 
-def test_acr_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_path):
+def test_acr_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_path, assert_summary_documented):
     code, evidence, _ = run_acr(monkeypatch, tmp_path, None)
     summary = evidence["summary"]
     assert code == 0 and evidence["results"]["excluded"] == []
+    assert_summary_documented("azure/container_registry_configuration", evidence["summary"])
     assert _added(summary) == _empty(("registries", 3))
     assert _rest(summary) == {**acr.summarize(evidence["results"]["registries"]), "provider_registration_status": "registered"}
     assert summary["admin_user_enabled_registries"] == 2
@@ -228,10 +234,11 @@ def run_workloads(monkeypatch, tmp_path, patterns, extra_envs=(), extra_apps=())
     return code, evidence, auth_reads, diag_reads
 
 
-def test_workloads_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_path):
+def test_workloads_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_path, assert_summary_documented):
     code, evidence, _, _ = run_workloads(monkeypatch, tmp_path, None)
     summary, results = evidence["summary"], evidence["results"]
     assert code == 0 and results["excluded"] == []
+    assert_summary_documented("azure/container_workloads_configuration", evidence["summary"])
     assert _added(summary) == {
         "resource_exclusion_patterns": [], "resource_exclusion_patterns_unmatched": [],
         "excluded_environments": 0, "excluded_container_apps": 0, "excluded_jobs": 0, "excluded_container_groups": 0,
@@ -302,10 +309,11 @@ def run_functions(monkeypatch, tmp_path, patterns):
     return code, evidence, reads
 
 
-def test_functions_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_path):
+def test_functions_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_path, assert_summary_documented):
     code, evidence, _ = run_functions(monkeypatch, tmp_path, None)
     summary = evidence["summary"]
     assert code == 0 and evidence["results"]["excluded"] == []
+    assert_summary_documented("azure/function_app_configuration", evidence["summary"])
     assert _added(summary) == _empty(("function_apps", 3))
     assert _rest(summary) == {**functions.summarize(evidence["results"]["function_apps"]),
                               "provider_registration_status": "registered"}
@@ -360,9 +368,10 @@ def run_vms(monkeypatch, tmp_path, patterns, extra=()):
     return code, evidence, reads
 
 
-def test_vms_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_path):
+def test_vms_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_path, assert_summary_documented):
     code, evidence, _ = run_vms(monkeypatch, tmp_path, None)
     summary, results = evidence["summary"], evidence["results"]
+    assert_summary_documented("azure/vm_hardening_status", summary)
     assert code == 0 and results["excluded"] == []
     assert _added(summary) == _empty(("virtual_machines", 3), ("scale_sets", 3))
     assert _rest(summary) == {**vms.summarize(results["virtual_machines"], results["virtual_machine_scale_sets"]),
@@ -436,9 +445,10 @@ def run_disks(monkeypatch, tmp_path, patterns):
     return _run(disks, monkeypatch, tmp_path, patterns, "azure_disk_encryption_status")
 
 
-def test_disks_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_path):
+def test_disks_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_path, assert_summary_documented):
     code, evidence = run_disks(monkeypatch, tmp_path, None)
     summary = evidence["summary"]
+    assert_summary_documented("azure/disk_encryption_status", summary)
     assert code == 0 and evidence["results"]["excluded"] == []
     assert _added(summary) == _empty(("disks", 4))
     assert _rest(summary) == {**disks.summarize(evidence["results"]["disks"]), "provider_registration_status": "registered"}
@@ -497,10 +507,11 @@ def run_apim(monkeypatch, tmp_path, patterns):
     return code, evidence, reads
 
 
-def test_apim_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_path):
+def test_apim_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_path, assert_summary_documented):
     code, evidence, _ = run_apim(monkeypatch, tmp_path, None)
     summary = evidence["summary"]
     assert code == 0 and evidence["results"]["excluded"] == []
+    assert_summary_documented("azure/api_management_configuration", evidence["summary"])
     assert _added(summary) == _empty(("services", 3))
     assert _rest(summary) == {**apim.summarize(evidence["results"]["services"]), "provider_registration_status": "registered"}
     assert (summary["total_services"], summary["total_apis"]) == (3, 6)
@@ -689,6 +700,7 @@ def test_identities_a_refused_role_list_keeps_every_matched_identity(monkeypatch
     results = evidence["results"]
     # Which identities reach in is unknown, so none leaves; the run still fails.
     assert code == 1 and results["excluded"] == []
+    assert evidence["summary"]["resource_exclusion_patterns_unmatched"] is None
     marks = {i["name"]: i.get("kept_by_identity_rule") for i in results["user_assigned_identities"]}
     assert marks == {"id-in": None, "id-out": "rg:rg-out", "id-east": None}
     marks = {i["resource_name"]: i.get("kept_by_identity_rule") for i in results["system_assigned_identities"]}
@@ -714,11 +726,14 @@ def test_identities_a_refused_role_list_keeps_every_matched_identity(monkeypatch
     (run_identities, identities, "resourcegraph.resources(identity)", "system_assigned_identities"),
 ], ids=["clusters", "registries", "environments", "container_apps", "jobs", "container_groups", "function_apps",
         "virtual_machines", "scale_sets", "disks", "services", "user_assigned", "system_assigned"])
-def test_a_refused_list_leaves_its_exclusion_counts_null(runner, module, operation, plural, monkeypatch, tmp_path):
+def test_a_refused_list_leaves_its_exclusion_counts_null(runner, module, operation, plural, monkeypatch, tmp_path,
+                                                         caplog):
     _refuse(monkeypatch, module, operation)
     code, evidence = runner(monkeypatch, tmp_path, "rg:rg-out")[:2]
     summary = evidence["summary"]
     assert code == 1
+    assert summary["resource_exclusion_patterns_unmatched"] is None
+    assert "matched nothing" not in caplog.text
     assert (summary[f"in_scope_{plural}"], summary[f"excluded_{plural}"]) == (None, None)
     # The other lists were read, so their counts stay numbers.
     assert all(v is not None for k, v in summary.items() if k.startswith(("in_scope_", "excluded_")) and
@@ -736,9 +751,11 @@ def test_a_refused_list_leaves_its_exclusion_counts_null(runner, module, operati
     (run_identities, identities, "managed identity clients (init)"),
 ], ids=["aks", "acr", "workloads", "functions", "vms", "disks", "apim", "identities"])
 def test_a_client_that_couldnt_be_built_leaves_every_exclusion_count_null(runner, module, operation, monkeypatch,
-                                                                          tmp_path):
+                                                                          tmp_path, caplog):
     _refuse(monkeypatch, module, operation)
     code, evidence = runner(monkeypatch, tmp_path, "rg:rg-out")[:2]
+    assert evidence["summary"]["resource_exclusion_patterns_unmatched"] is None
+    assert "matched nothing" not in caplog.text
     counts = {k: v for k, v in evidence["summary"].items() if k.startswith(("in_scope_", "excluded_"))}
     assert code == 1 and counts and set(counts.values()) == {None}
 

@@ -6,6 +6,8 @@ import csv
 import importlib.util
 import json
 import sys
+import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import Mock
 from urllib.parse import urlencode
@@ -74,10 +76,14 @@ def kb(qid="1001", cves=("CVE-2026-10001", "CVE-2026-10002")):
     )
 
 
-def qvs(cve="CVE-2026-10001", score="99", due="1706918400000"):
+def qvs(cve="CVE-2026-10001", score="99", due="1706918400000", changed=None):
     return {
         cve: {
-            "base": {"id": cve, "qvs": score},
+            "base": {
+                "id": cve,
+                "qvs": score,
+                "qvsLastChangedDate": int(time.time()) if changed is None else changed,
+            },
             "contributingFactors": {
                 "cisaVuln": ["YES"],
                 "cisaDueDate": due,
@@ -176,7 +182,11 @@ def vm_responses(qvs_body=None):
                 "KNOWLEDGE_BASE_VULN_LIST_OUTPUT", "<VULN_LIST>" + kb() + "</VULN_LIST>"
             )
         ),
+        # The QVS walk: the newest change window, then empty windows until the walk
+        # stops, then the individual lookup of any CVE the walk did not return.
         Response(qvs() if qvs_body is None else qvs_body),
+        *[Response([]) for _ in range(qr.QVS_EMPTY_WINDOWS_TO_STOP)],
+        Response({}),
     ]
 
 
@@ -247,13 +257,91 @@ def test_partial_qvs_retains_available_details():
     )
 
 
-def test_qvs_batches_deduplicate_and_never_call_with_empty_cves():
+def test_qvs_lookup_batches_deduplicate_and_never_call_with_empty_cves():
     cves = [f"CVE-2026-{i:05}" for i in range(26)]
     c = client(Response({}), Response({}))
-    assert qr.qvs_records(c, cves + cves) == {}
+    assert qr.qvs_lookup(c, cves + cves) == {}
     assert [len(params["cve"].split(",")) for _, params in c.session.calls] == [25, 1]
     assert qr.qvs_records(c, []) == {}
     assert len(c.session.calls) == 2
+
+
+NOW = datetime(2026, 6, 1, tzinfo=timezone.utc)
+
+
+def stamp(moment):
+    return int(moment.timestamp())
+
+
+def test_qvs_walk_requests_change_windows_newest_first_and_stops_when_complete():
+    needed = ["CVE-2026-10001", "CVE-2026-10002"]
+    older = NOW - timedelta(days=100)
+    c = client(
+        Response(
+            {
+                **qvs("CVE-2026-10001", changed=stamp(NOW - timedelta(days=1))),
+                **qvs("CVE-2099-00001", changed=stamp(NOW - timedelta(days=2))),
+            }
+        ),
+        Response(qvs("CVE-2026-10002", "100", changed=stamp(older))),
+    )
+    records = qr.qvs_records(c, needed, now=NOW)
+    assert set(records) == set(needed)
+    assert len(c.session.calls) == 2
+    first, second = (params for _, params in c.session.calls)
+    assert c.session.calls[0][0] == BASE + "/api/3.0/fo/knowledge_base/qvs/"
+    assert "cve" not in first and first["details"] == "All"
+    assert first["qvs_last_modified_before"] == "2026-06-01T01:00:00Z"
+    assert first["qvs_last_modified_after"] == second["qvs_last_modified_before"]
+    assert second["qvs_last_modified_after"] < first["qvs_last_modified_after"]
+
+
+def test_qvs_walk_splits_a_window_too_large_for_one_response(monkeypatch):
+    monkeypatch.setattr(qc, "MAX_RESPONSE_BYTES", 400)
+    big = {
+        f"CVE-2099-{i:05}": qvs(f"CVE-2099-{i:05}", changed=stamp(NOW))[
+            f"CVE-2099-{i:05}"
+        ]
+        for i in range(5)
+    }
+    c = client(
+        Response(big),
+        Response(qvs("CVE-2026-10001", changed=stamp(NOW - timedelta(days=1)))),
+        Response([]),
+    )
+    records = qr.qvs_records(c, ["CVE-2026-10001"], now=NOW)
+    assert set(records) == {"CVE-2026-10001"}
+    windows = [
+        (p["qvs_last_modified_after"], p["qvs_last_modified_before"])
+        for _, p in c.session.calls
+    ]
+    assert windows[1][1] == windows[0][1] and windows[2][0] == windows[0][0]
+    assert windows[1][0] == windows[2][1]
+
+
+def test_qvs_walk_fails_on_a_record_outside_its_window():
+    c = client(Response(qvs(changed=stamp(NOW - timedelta(days=400)))))
+    with pytest.raises(qc.QualysError, match="outside the requested change window"):
+        qr.qvs_records(c, ["CVE-2026-10001"], now=NOW)
+
+
+def test_qvs_walk_fails_when_too_many_cves_are_missing(monkeypatch):
+    monkeypatch.setattr(qr, "QVS_MAX_LOOKUPS", 1)
+    c = client(*[Response([]) for _ in range(qr.QVS_EMPTY_WINDOWS_TO_STOP)])
+    with pytest.raises(qc.QualysError, match="lacked 2 CVEs"):
+        qr.qvs_records(c, ["CVE-2026-10001", "CVE-2026-10002"], now=NOW)
+    assert len(c.session.calls) == qr.QVS_EMPTY_WINDOWS_TO_STOP
+
+
+def test_qvs_walk_looks_up_cves_it_did_not_return():
+    c = client(
+        Response(qvs("CVE-2026-10001", changed=stamp(NOW))),
+        *[Response([]) for _ in range(qr.QVS_EMPTY_WINDOWS_TO_STOP)],
+        Response(qvs("CVE-2026-10002", changed=stamp(NOW - timedelta(days=3000)))),
+    )
+    records = qr.qvs_records(c, ["CVE-2026-10001", "CVE-2026-10002"], now=NOW)
+    assert set(records) == {"CVE-2026-10001", "CVE-2026-10002"}
+    assert c.session.calls[-1][1]["cve"] == "CVE-2026-10002"
 
 
 @pytest.mark.parametrize(
@@ -261,7 +349,6 @@ def test_qvs_batches_deduplicate_and_never_call_with_empty_cves():
     [
         b"<html>error</html>",
         {"error": "forbidden"},
-        [],
         {"CVE-2026-10001": {}},
         qvs(score="NaN"),
     ],
@@ -437,9 +524,34 @@ def test_rate_limits_retry_then_succeed():
 
 def test_long_retry_delay_fails_instead_of_retrying_early():
     c = client(Response(status=429, headers={"Retry-After": "300"}), retries=1)
-    with pytest.raises(qc.QualysError, match="60 seconds"):
+    with pytest.raises(qc.QualysError, match="60 second") as exc:
         c.request(qc.QVS, {"action": "list"})
     assert len(c.session.calls) == 1
+    assert "wait 300 seconds" in str(exc.value)
+    assert qc.QVS in str(exc.value)
+
+
+def test_long_retry_delay_reports_rate_limit_headers_but_not_body():
+    body = xml(
+        "SIMPLE_RETURN",
+        "<CODE>1965</CODE><TEXT>private-response</TEXT><ITEM_LIST><ITEM>"
+        "<KEY>SECONDS_TO_WAIT</KEY><VALUE>1800</VALUE></ITEM></ITEM_LIST>",
+    )
+    headers = {
+        "X-RateLimit-Limit": "300",
+        "X-RateLimit-Window-Sec": "3600",
+        "X-RateLimit-Remaining": "0",
+        "X-Concurrency-Limit-Limit": "not-a-number",
+    }
+    c = client(Response(body, status=409, headers=headers), retries=1)
+    with pytest.raises(qc.QualysError) as exc:
+        c.request(qc.QVS, {"action": "list"})
+    message = str(exc.value)
+    assert exc.value.code == "rate_limited"
+    assert "HTTP 409, code 1965" in message
+    assert "limit=300, window=3600, remaining=0, to_wait=1800" in message
+    assert "concurrency_limit" not in message
+    assert "private-response" not in message
 
 
 def test_entity_expansion_rejected():
@@ -475,7 +587,7 @@ def test_entrypoint_never_publishes_partial_report(monkeypatch, tmp_path, failur
             Response(status=503),
         ]
     elif failure == "qvs":
-        replies[-1] = Response(status=503)
+        replies[2] = Response(status=503)
     elif failure == "interrupted":
         replies[0].interrupted = True
     else:

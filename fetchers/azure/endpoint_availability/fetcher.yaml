@@ -1,0 +1,122 @@
+name: azure_endpoint_availability
+version: 0.1.0
+description: >-
+  Shows whether customer-facing endpoints are tested for availability from outside and how available they were, and whether Standard load balancers kept their data path and backend health probes up.
+category: azure
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_endpoint_availability.json
+  aggregation: per_target
+
+config_schema:
+  lookback_days:
+    type: integer
+    required: false
+    default: 7
+    env: AZURE_ENDPOINT_AVAILABILITY_LOOKBACK_DAYS
+    description: >
+      How many days of hourly availability to read, from 1 to 30. Azure Monitor keeps platform metrics for 93 days; a
+      larger value is read as 30. A value that is not a whole number above 0 fails the run as bad_config.
+  availability_target_percentage:
+    type: string
+    required: false
+    env: AZURE_AVAILABILITY_TARGET_PERCENTAGE
+    description: >
+      The adopted availability objective, as a percentage above 0 and up to 100 (decimals allowed). There is no
+      default: while it is unset, every below-target count is null rather than judged against an objective nobody
+      adopted. A test or load balancer whose average over the lookback is lower counts as below target. A value
+      outside that range fails the run as bad_config and leaves it unset.
+  resource_exclusions:
+    type: patterns
+    prefixes: [rg, location, id]
+    bare: false
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Patterns that take availability tests or load balancers out of scope, as for the other Azure fetchers.
+
+target_schema:
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id to collect from. Optional — omit to use the first
+      enabled subscription the ambient credential can see; set one target per
+      subscription to fan out.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: Deployment environment label (e.g. prod) written into the evidence metadata.
+
+secrets: []          # DefaultAzureCredential only — see _categories/azure.yaml
+
+ksis:
+  - KSI-CNA-OFA   # measured availability of customer-facing endpoints and the load balancers in front of them
+
+evidence_set:
+  reference_id: EVD-AZURE-ENDPOINT-AVAILABILITY
+  name: Azure Endpoint Availability
+  instructions: |
+    Script: azure/endpoint_availability/fetcher.py
+
+    Access: Reader on the subscription, which includes reading Azure Monitor metrics.
+
+    Commands Executed:
+    - subscriptions.list() — picks a subscription when none is set
+    - GET Microsoft.Insights/webtests — every Application Insights availability test, its URL (for a classic URL ping test, from its WebTest XML), locations, frequency, component, and the status code, content and certificate checks it validates
+    - GET components/{component}/providers/Microsoft.Insights/metrics (per enabled test) — hourly availabilityResults/availabilityPercentage for that test
+    - GET Microsoft.Network/loadBalancers — every load balancer, its SKU, whether it has a public frontend, and how many load-balancing rules, inbound NAT rules and health probes it has
+    - GET loadBalancers/{lb}/providers/Microsoft.Insights/metrics (per Standard load balancer) — hourly VipAvailability when it has load-balancing rules and DipAvailability when it has health probes; a load balancer without them (outbound-only, say) reports no data for that metric, so it is not read
+
+    Output: azure_endpoint_availability_<subscription>.json — each availability test (with what it validates) and Standard load balancer with its hourly availability and measurement coverage over the lookback, which ends at the start of the last complete hour (that hour is not included, because Azure Monitor publishes it a few minutes after it closes); each is judged against the availability target when one is set and every hour was measured.
+
+    Summary fields:
+
+    What was checked?
+    - availability_tests_enabled — Number of availability tests that are enabled; null if the test list could not be read
+    - availability_tests_results_unread — Number of enabled availability tests whose results could not be read, including a test with no link to its Application Insights component
+    - load_balancers_standard — Number of Standard load balancers, the only SKU that reports availability metrics
+    - load_balancers_public — Number of load balancers with a public frontend IP address
+    - load_balancers_metrics_unread — Number of Standard load balancers whose data-path or health-probe metric could not be read
+    - load_balancers_without_measured_traffic — Number of Standard load balancers with neither load-balancing rules nor health probes, such as an outbound-only load balancer, which report no availability metrics and are not judged
+    - lookback_days — Days of hourly availability read
+    - availability_target_percentage — The adopted availability objective each average is compared with; null when not set
+    - resource_exclusion_patterns — List of the resource_exclusions patterns as given
+    - resource_exclusion_patterns_unmatched — List of the patterns that matched nothing, such as a mistyped name; null when the test or load balancer list could not be read
+    - excluded_availability_tests — Number of availability tests a pattern took out of scope
+    - excluded_load_balancers — Number of load balancers a pattern took out of scope
+    - in_scope_availability_tests — Number of availability tests assessed, enabled or not
+    - in_scope_load_balancers — Number of load balancers assessed
+
+    Are customer endpoints tested from outside, and do the tests check the application works?
+    - endpoints_tested — Number of distinct URLs that enabled availability tests request
+    - availability_tests_checking_application — Number of enabled availability tests that check both an expected HTTP status code and the response content, so they show the application works and not only that it answers
+    - availability_tests_reachability_only — Number of enabled availability tests that do not check both the status code and the content
+    - availability_tests_without_data — Number of enabled availability tests with no result in any hour of the lookback; null unless every enabled test's results were read
+
+    Is every hour measured?
+    - availability_tests_with_missing_measurements — Number of enabled availability tests with at least one hour of the lookback that has no result; null unless every enabled test's results were read
+    - lowest_measurement_coverage_percentage — Percentage of the lookback's hours with a result, for the enabled test with the fewest (measurement coverage)
+    - load_balancers_with_missing_measurements — Number of Standard load balancers missing at least one hour of data-path data (when it has load-balancing rules) or health-probe data (when it has health probes)
+    - lowest_load_balancer_measurement_coverage_percentage — Measurement coverage of the Standard load balancer metric with the fewest hours of data
+
+    Were the endpoints available?
+    - lowest_availability_percentage — Percentage of successful test runs for the enabled test with the lowest average over the hours that have data (the mean of its hourly averages; read it with the measurement coverage); null if no test has data or any test's results could not be read
+    - availability_tests_below_target — Number of enabled availability tests with every hour of the lookback measured whose average is lower than availability_target_percentage (below target); a test missing an hour or unread is not judged and is counted in availability_tests_not_judged, so a few good hours never stand for the whole lookback; null while no target is set or the test list could not be read
+    - availability_tests_not_judged — Number of enabled availability tests not judged against the target because an hour of the lookback has no result or the results could not be read; null while no target is set or the test list could not be read
+    - availability_tests_below_target_latest_hour — Number of enabled availability tests whose most recent hour with data is lower than availability_target_percentage; a test with no data is not counted; null while no target is set or the test list could not be read
+
+    Did the load balancers stay up?
+    - lowest_data_path_availability — Percentage for the Standard load balancer with the lowest average data-path availability (VipAvailability: whether traffic reaches the load balancer's frontend) over the lookback; null if none has data or any could not be read
+    - lowest_health_probe_availability — Percentage for the Standard load balancer with the lowest average health-probe status (DipAvailability: whether its backend instances answer the health probe) over the lookback; null if none has data or any could not be read
+    - load_balancers_below_target — Number of Standard load balancers, with every hour of each metric that applies measured, whose average data-path availability or health-probe status is lower than availability_target_percentage; one missing an hour or unread is counted in load_balancers_not_judged instead; null while no target is set or the load balancer list could not be read
+    - load_balancers_not_judged — Number of Standard load balancers with load-balancing rules or health probes that are not judged against the target because an hour of a metric is missing or could not be read; null while no target is set or the load balancer list could not be read

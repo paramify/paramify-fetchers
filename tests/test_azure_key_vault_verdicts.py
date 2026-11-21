@@ -444,3 +444,17 @@ def test_new_summary_keys_overwrite_nothing_and_results_keep_their_keys():
         "provider_registration_status", "web_provider_registration_status"}
     assert (summary["provider_registration_status"], summary["web_provider_registration_status"]) == (
         "registered", "not_registered")
+
+
+@pytest.mark.parametrize("authority, suffix", [
+    ("https://login.microsoftonline.com/", "vault.azure.net"),
+    ("https://login.microsoftonline.us/", "vault.usgovcloudapi.net"),
+    ("https://login.chinacloudapi.cn/", "vault.azure.cn"),
+    ("https://login.partner.microsoftonline.cn/", "vault.azure.cn"),
+    ("https://login.microsoftonline.de/", "vault.microsoftazure.de"),
+])
+def test_missing_vault_uri_uses_the_selected_cloud(monkeypatch, authority, suffix):
+    monkeypatch.setenv("AZURE_AUTHORITY_HOST", authority)
+    assert kv.vault_data_plane_uri({"name": "synthetic"}) == f"https://synthetic.{suffix}/"
+    assert kv.vault_data_plane_uri({"name": "synthetic", "vault_uri": "https://arm-supplied.example/"}) == "https://arm-supplied.example/"
+    assert kv.vault_data_plane_uri({}) is None

@@ -15,9 +15,14 @@ Thank you for your help. Most contributions start in one of three places:
 ```bash
 git clone https://github.com/paramify/paramify-fetchers.git
 cd paramify-fetchers
-python -m venv .venv && source .venv/bin/activate
+python3 -m venv .venv && source .venv/bin/activate   # Python 3.11 or later
 pip install -e '.[dev,tui]'
 ```
+
+If `python3` is older than 3.11, use a versioned command such as `python3.12`, or let uv
+supply Python: `uv venv --seed --python 3.12 && uv pip install -e '.[dev,tui]'`. The
+README's [Install](README.md#install) section covers the common errors under
+Troubleshooting.
 
 To work on Azure or GCP fetchers, add `azure` or `gcp` to the extras.
 
@@ -59,8 +64,9 @@ pytest tests/test_tui_snapshots.py --snapshot-update
 A mismatch writes `snapshot_report.html`, which shows the old and new screen
 side by side. In CI, download it from the job's `snapshot-report-*` artifact.
 
-The smoke job compares `paramify run`, `validate` and `upload --dry-run` on
-`examples/demo.yaml` with `tests/goldens/cli/`. After an intended output
+The smoke job compares `paramify run`, `validate`, `upload --dry-run`,
+`manifest set-stack` and `set-owner` on `examples/demo.yaml` with
+`tests/goldens/cli/`. After an intended output
 change, run `python tools/cli_goldens.py --update`.
 
 ## Adding a fetcher
