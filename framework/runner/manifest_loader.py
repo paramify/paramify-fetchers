@@ -2,7 +2,7 @@
 
 import json
 from pathlib import Path
-from typing import List
+from typing import Any, Dict, List, Sequence
 
 from jsonschema import Draft202012Validator
 
@@ -56,9 +56,61 @@ def parse_manifest(data: dict) -> Manifest:
             config=entry.get("config") or {},
             secrets=entry.get("secrets") or {},
             targets=targets,
+            paramify=entry.get("paramify") or {},
+            concurrency=entry.get("concurrency") or 1,
         ))
 
-    return Manifest(output_dir=output_dir, entries=entries, platforms=platforms)
+    return Manifest(output_dir=output_dir, entries=entries, platforms=platforms,
+                    paramify=run.get("paramify") or {})
+
+
+def entry_keys(entries: Sequence[ManifestEntry]) -> List[str]:
+    """A stable key per manifest entry: the fetcher name, with `#n` added to the
+    second and later entries that use the same fetcher (`aws_iam_mfa`, `aws_iam_mfa#1`)."""
+    seen: Dict[str, int] = {}
+    keys = []
+    for e in entries:
+        n = seen.get(e.use, 0)
+        seen[e.use] = n + 1
+        keys.append(e.use if n == 0 else f"{e.use}#{n}")
+    return keys
+
+
+#: What a pipeline entry uses in place of a `direct` it inherits from run.paramify:
+#: a pipeline file always goes in a batch (a direct upload builds nothing).
+PIPELINE_DEFAULTS = {"delivery": "auto", "no_request": "evidence"}
+
+
+def ignored_run_direct(manifest: Manifest, entry: ManifestEntry) -> List[str]:
+    """The settings a pipeline entry inherits as `direct` from run.paramify, and so ignores.
+
+    The same setting on the entry itself is its own choice: validate refuses it.
+    """
+    return [k for k in PIPELINE_DEFAULTS
+            if manifest.paramify.get(k) == "direct" and k not in entry.paramify]
+
+
+def resolved_paramify(manifest: Manifest, entry: ManifestEntry, *, pipeline: bool = False) -> Dict[str, Any]:
+    """The `paramify` settings that apply to one entry: its own values win over the
+    manifest's. A key set in neither is absent.
+
+    `stack` and `stack_name` are a pair: the label comes only from the level that
+    set the stack, so an entry's own stack never takes the run-level label (that
+    would warn of a rename that never happened).
+
+    `pipeline`: the entry's fetcher feeds a Paramify pipeline. A `direct` it would
+    inherit from run.paramify is replaced by the pipeline default (`delivery: auto`,
+    `no_request: evidence`); its own `direct` stays.
+    """
+    merged = {**manifest.paramify, **entry.paramify}
+    if pipeline:
+        for key in ignored_run_direct(manifest, entry):
+            merged[key] = PIPELINE_DEFAULTS[key]
+    source = entry.paramify if "stack" in entry.paramify else manifest.paramify
+    merged.pop("stack_name", None)
+    if "stack" in source and "stack_name" in source:
+        merged["stack_name"] = source["stack_name"]
+    return merged
 
 
 def load_manifest(path: Path, repo_root: Path) -> Manifest:

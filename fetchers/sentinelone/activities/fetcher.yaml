@@ -16,8 +16,14 @@ output:
 secrets:
 - name: api_token
   env: SENTINELONE_API_TOKEN
+  description: >-
+    API token of a SentinelOne service user with the Viewer role at Account scope
+    (Settings → Users → Service Users → Generate API Token).
 - name: api_url
   env: SENTINELONE_API_URL
+  description: >-
+    SentinelOne console base URL, no trailing slash (e.g.
+    https://your-instance.s1gov.net).
 
 ksis:
   - KSI-MLA-RVL

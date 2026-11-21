@@ -25,13 +25,13 @@ paramify manifest set-secret okta_phishing_resistant_mfa org_url OKTA_ORG_URL
 # Keep going until it says the manifest is runnable.
 
 # 3. Set your credentials and run
-export OKTA_API_TOKEN=<your token>
-export OKTA_ORG_URL=https://your-org.okta.com
+paramify env                          # lists the variables the manifest reads
+# In production your secret manager sets them; to try it locally:
+paramify env --write                  # adds them to .env, then fill in OKTA_API_TOKEN, ...
 paramify validate manifest.yaml
 paramify run     manifest.yaml         # evidence → ./evidence/run-<timestamp>/
 
-# 4. Upload to Paramify
-export PARAMIFY_UPLOAD_API_TOKEN=<your token>   # see uploaders/paramify_evidence/README.md for setup
+# 4. Upload to Paramify (PARAMIFY_UPLOAD_API_TOKEN; see uploaders/paramify_evidence/README.md)
 paramify upload                                  # push the latest run
 ```
 
@@ -52,11 +52,15 @@ paramify describe <fetcher>    # one fetcher's config / secrets / target fields
 paramify ksi                   # FedRAMP KSI coverage
 paramify doctor   [manifest]   # preflight: Python, CLIs/packages, manifest, upload
 paramify manifests             # discovered run manifests (manifests/*.yaml)
+paramify env      [-m manifest] # the variables a manifest needs; --write adds them to .env for testing
 paramify validate <manifest>   # validate a manifest without running
 paramify run      <manifest>   # run it
 paramify runs                  # past runs under an output dir (newest first)
 paramify evidence <file>       # read one evidence file, or an issue-report sidecar
+paramify preset   <fetcher>    # settings for a pipeline fetcher's Paramify preset
 paramify upload   [run-dir]    # push a run's evidence to Paramify (default: latest run)
+paramify stacks                # list the workspace's stacks (name, id)
+paramify status   <manifest>   # what each fetcher has in Paramify; exit 1 until all are ready, 2 on errors
 paramify issues   <sub>        # send a run's issue reports into assessment pipelines; list/close their jobs
 paramify programs <sub>        # list workspace programs; turn them into targets
 paramify assessments <sub>     # list workspace assessments; point issue reports at one
@@ -203,6 +207,49 @@ Every `manifest` subcommand also accepts `--json` and returns a stable
 `{"ok", "path", "errors"}` object. Thus an agent can build a manifest step by
 step and read `errors` to find what is still missing.
 
+## What a manifest needs: `paramify env`
+
+`paramify env` prints the environment variables a manifest reads, grouped by
+tool, each with a one-line note saying what it is and whether it is required.
+Paramify's own upload token comes first. Use it to know what to put in your
+secret manager, which is where these belong in production: the runner reads
+its own environment, wherever the values come from. For local testing,
+`--write` puts them in a `.env` file instead. A run never needs `.env`.
+
+```bash
+paramify env                          # print what ./manifest.yaml needs (writes nothing)
+paramify env -m manifests/prod.yaml   # another manifest
+paramify env --json                   # the same as JSON, for a script that fills your secret manager
+paramify env --write                  # for local testing: append the missing variables to ./.env
+```
+
+`--json` gives one entry per variable (`name`, `tool`, `required`, `default`,
+`note`, the `fetchers` that read it, and whether it is `set` in the
+environment or the file) plus `unmapped`, the required secrets the manifest
+doesn't map yet. It never contains a value.
+
+- It lists what a run actually reads: the `${env:}` references the manifest
+  maps its secrets to (`set-secret ... OKTA_PROD_TOKEN`, a token per target),
+  `${env:}` references in config values, and the passthrough variables of
+  the category and of `run.platforms` (optional). A required secret the
+  manifest does not map yet is listed apart, with how to map it
+  (`paramify manifest set-secret`, or a line under a target's `secrets:`):
+  a run stops on it whatever `.env` holds. A config field's own `env` name is not listed; the
+  runner sets it for the fetcher from the manifest.
+- `--write` only appends. A line already in the file is never changed,
+  reordered or printed, so the output never shows a secret. New variables for a
+  tool that already has a section go under a `(continued)` header.
+- Optional variables are written commented out (with their default, if they
+  have one): an empty `AWS_ACCESS_KEY_ID=` would hide the ambient
+  credentials, and a default written out would override a later one.
+- It ends with the required variables that still have no value, in the file
+  or exported in your shell.
+- When there is a `.env` in the repo root, `run` and `doctor` fill any
+  variable that is unset or empty from it; a variable set in the environment
+  (by your secret manager, CI or shell) always wins, and without the file
+  nothing changes. The deploy image never contains one (`.dockerignore`).
+  `--path` merges into another file instead; nothing here reads that one for you.
+
 ## Collect, then upload
 
 Collection and upload are separate stages on purpose. The runner only
@@ -216,18 +263,126 @@ paramify upload                     # upload the latest run (get-or-create evide
 ```
 
 `paramify upload` takes an optional run directory. The default is the latest
-run under `--output-dir`. It supports `--dry-run`, `--config` and `--json`. You
-can also call the same uploader directly as
-`python -m uploaders.paramify_evidence <run-dir>`.
+run under `--output-dir`. It sends one batch for each fetcher entry in the run.
+The batch goes through the channel of the evidence set when the set has one.
+When a batch cannot be used, the upload sends the entry
+[direct](uploader_guide.md#when-a-batch-cannot-be-used), the way it did before
+batches.
 
-The uploader is idempotent within a run. It talks to Paramify REST v0 over HTTPS
-only, and it reads `PARAMIFY_UPLOAD_API_TOKEN` (and the optional
-`PARAMIFY_API_BASE_URL`).
+| Flag | Effect |
+|---|---|
+| `--dry-run` | Lists what would upload. Makes no API calls and needs no token. Routing shows as unknown. |
+| `--plan` | Reads the workspace (no changes) and prints the full plan. Applies nothing. |
+| `--stack STACK` | Sends every entry to this stack (an id or a name). It replaces the stack the run recorded. |
+| `--owner USERNAME` | Where a stack has one channel per owner, uses this owner's channel. It replaces the owner the run recorded. |
+| `--with-validators` | Syncs validators for the evidence sets of the run before the batches go out. If the sync fails, the upload sends no batch. With `--dry-run`, it only names the sync it would do. |
+| `--no-tags` | Skips the default custom tags for this upload. |
+| `--config`, `-f`, `-o` | Choose the uploader config, the manifest, and the output directory. |
+| `--json` | Prints the summary: the legacy counts, plus `dropped`, `plan`, `entries`, `outcomes`, `batches` and, with `--with-validators`, `validators`. |
+
+Set the stack in the manifest under `run.paramify` (`stack`, `stack_name`,
+`owner`, `approval`, `delivery`, `no_request`). An entry can set the same keys in its own `paramify`
+block. List the stacks in the workspace with `paramify stacks`. Write one into a
+manifest with `paramify manifest set-stack MANIFEST STACK [--fetcher NAME]`.
+With a token, the command looks up the stack and stores its id and name. Check
+the stack ids against the workspace with `paramify validate --online`.
+
+When an evidence set has two channels on the stack, one for each owner, the
+upload needs an owner. Write one with
+`paramify manifest set-owner MANIFEST USERNAME [--fetcher NAME]`. An empty
+USERNAME removes it. The owner is read only where it breaks such a tie. See
+[Owner](uploader_guide.md#owner). `paramify validate --online` gives a note for
+an owner who has no channel in the workspace.
+
+Uploading the same run again changes nothing. The upload finds the batch it made
+for that run. A new run makes a new batch. If a temporary failure holds a batch
+open, run the same upload again to resume it. Each new batch, and each new
+evidence set, gets the approval mode `SUBMISSION` unless `approval` says
+otherwise: Paramify approves the batch when the upload submits it, whatever
+mode the set has. The upload never changes an existing set. The routing rules and each
+refusal are in [`uploader_guide.md`](uploader_guide.md#how-a-run-is-delivered).
+
+The upload talks to Paramify REST v0 over HTTPS only, and it reads
+`PARAMIFY_UPLOAD_API_TOKEN` (and the optional `PARAMIFY_API_BASE_URL`).
 [`uploaders/paramify_evidence/README.md`](../uploaders/paramify_evidence/README.md)
 shows how to create a Paramify API key with the necessary permissions.
 
+`uploaders/paramify_evidence/uploader.py` still works for old schedules, but it
+is deprecated. It hands the run to the same upload and prints a notice. Use
+`paramify upload`.
+
 The runner does not chain the two stages. That is the customer's job, and
-`run_and_upload.sh` at the repo root is a sample script for it.
+`deploy/run-and-upload.sh <manifest> [stack]` is a sample script for it. It
+uploads the run it just collected.
+
+A script that chains the stages needs the run directory. Two flags of
+`paramify run` give it:
+
+| Flag | Stdout | Stderr |
+|---|---|---|
+| `--print-run-dir` | The run directory, on one line. | The usual progress output: each result, the reason for each failure, and each skipped entry, setup error and note. |
+| `--json` | The run summary. | Nothing. |
+
+The run summary has `run_dir`, `ok` and one record for each invocation in
+`invocations`. A failed invocation has `error`: the reason the fetcher gave, or
+else its last stderr line. It can also have `error_code`. Three lists name the
+entries that need attention. Each item has `entry_key` and `fetcher`:
+
+- `skipped`: the entry did not run. `reason` tells why, for example
+  `not discovered`.
+- `setup_errors`: the setup failed before the fetcher started. `error` tells why.
+- `notes`: the run changed something for the entry, for example it dropped an
+  optional secret. `note` tells what.
+
+## Check the setup in Paramify
+
+`paramify status` reads the workspace and reports, for each evidence fetcher in
+a manifest, what Paramify has for it. It changes nothing.
+
+```bash
+paramify status manifests/acme.yaml
+```
+
+| Column | Meaning |
+|---|---|
+| evidence set | `ok` when the set exists. `create` when the first scripts sync makes it. |
+| script | The state that `paramify scripts sync --dry-run` reports: `ok`, `update`, `create`, `drift` or `error`. |
+| validators | The registry validators that Paramify pairs with the set, out of all of them. `none` when the registry has none for the set. |
+| capabilities | The solution capabilities that hold a pair from this set. |
+| artifacts | The artifacts on the set. |
+| ready | The set exists, its script is in sync, it has each registry validator, and it has an artifact. |
+
+A line under the table counts each column across the fetchers. Scan-report
+fetchers go to an assessment, not to an evidence set, so the table leaves them out.
+
+Every read goes to one workspace: the base URL from `paramify.base_url` in the
+uploader config (`upload.yaml` or `--config`), else `PARAMIFY_API_BASE_URL`,
+else app.paramify.com. The first line of the output names it.
+
+`?` in a cell means the read for it failed, so the value is unknown. The error
+is shown under the table. `-` means nothing was read, because there is no API
+token. Without a token, the command shows only what the manifest and the
+registry hold, and leaves out the line of counts.
+
+`--json` prints the full status. In it, an unknown value is `null`: the
+evidence set's `exists` and `artifact_count`, and each validator's `paired`.
+
+### Exit codes
+
+| Code | Meaning |
+|---|---|
+| 0 | Every fetcher is ready. |
+| 1 | Some fetchers are not ready yet. A sync, a validator pair or an upload can fix it. |
+| 2 | The command cannot tell, and waiting will not change that: the manifest or the uploader config cannot be read, there is no API token, a workspace read failed (for example, an expired token gets HTTP 401), the manifest names a fetcher that does not exist, or the manifest has no evidence fetchers. |
+
+A deployment can wait for 0 before it runs headless, and stop on 2:
+
+```bash
+until paramify status manifests/acme.yaml >/dev/null; do
+  [ $? -eq 2 ] && exit 2
+  sleep 60
+done
+```
 
 ## Scan results, not evidence
 
@@ -261,6 +416,17 @@ uploads to an evidence set like any other evidence. Then an inventory pipeline o
 that set turns each record into an Inventory item. The pipeline reads the file as
 the full estate, so `paramify upload` sends an inventory only when the run
 collected all of it. See [`inventory_fetchers_guide.md`](inventory_fetchers_guide.md).
+
+### `paramify preset <fetcher>`
+
+Building the inventory pipeline's preset in Paramify takes a sample file, a data
+path, a unique ID field and a rule for the parent component. `paramify preset
+sophos_endpoint_inventory` prints them from the fetcher's `pipeline:` block and
+its newest run, and lists the other fetchers that share the same ID scheme. With
+no run yet, the sample and the `asset_type` values are missing, so run the
+fetcher first. It reads runs from `<repo>/evidence`; `-f MANIFEST` uses that
+manifest's `output_dir`, and `--output-dir` overrides both. `--json` prints the
+same facts as data.
 
 ## See what a platform has (discovery)
 

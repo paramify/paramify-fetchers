@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, Dict, NoReturn
 
 from framework import inventory
-from framework.contract import Fetcher, InvocationResult
+from framework.contract import Fetcher, InvocationResult, pipeline_dict
 
 logger = logging.getLogger("framework.envelope")
 
@@ -65,6 +65,8 @@ def build_metadata(result: InvocationResult, fetcher: Fetcher, run_id: str) -> d
         if es.description is not None:
             es_meta["description"] = es.description
         meta["evidence_set"] = es_meta
+    if fetcher.pipeline:
+        meta["pipeline"] = pipeline_dict(fetcher.pipeline)
     if result.inputs is not None:
         meta["inputs"] = result.inputs
     # Only when the fetcher received a pattern: a run without patterns writes the envelope it always has.
@@ -74,12 +76,17 @@ def build_metadata(result: InvocationResult, fetcher: Fetcher, run_id: str) -> d
 
 
 def wrap_outputs(
-    result: InvocationResult, fetcher: Fetcher, run_id: str, run_dir: Path
+    result: InvocationResult, fetcher: Fetcher, run_id: str, run_dir: Path,
+    skip: frozenset = frozenset(),
 ) -> None:
     """Wrap each JSON output file from one invocation in an envelope, in place.
 
     Non-JSON files and already-enveloped files are left untouched. A failure to
     wrap a single file is logged and skipped — it never aborts the run.
+
+    Names in `skip` are left raw: a later invocation of the run wrote over them,
+    so they hold that invocation's data, not this one's (see
+    `InvocationResult.overwritten`).
 
     An issue-report fetcher is skipped entirely. Its output is the source tool's
     own file, which Paramify's file intake preset parses directly, so wrapping it
@@ -96,7 +103,7 @@ def wrap_outputs(
 
     meta = build_metadata(result, fetcher, run_id)
     for name in result.outputs:
-        if not name.endswith(".json"):
+        if not name.endswith(".json") or name in skip:
             continue
         path = run_dir / name
         try:

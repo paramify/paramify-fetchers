@@ -51,21 +51,18 @@ import json
 import logging
 import os
 import sys
-import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
-from urllib.parse import quote, urlparse
 
-import requests
-import yaml
 from dotenv import load_dotenv
 
 # Runnable directly (`python uploaders/paramify_issues/uploader.py`) from any cwd,
 # where only its own directory lands on sys.path. Its position in the repo is
-# fixed, so derive the root rather than duplicating the token-resolution rule.
+# fixed, so derive the root.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from framework import yaml_io  # noqa: E402
 from framework.issue_reports import (  # noqa: E402
     CLOSE_AFTER_RUN,
     CLOSE_CYCLE_FIELD,
@@ -74,18 +71,25 @@ from framework.issue_reports import (  # noqa: E402
     ISSUE_REPORTS_DIR,
     SIDECAR_NAME,
 )
-from framework.paramify_auth import (  # noqa: E402
-    READ_TOKEN_ENV,
-    UPLOAD_TOKEN_ENV,
-    resolve_base_url,
-    resolve_upload_token,
+from framework.paramify.connection import open_workspace  # noqa: E402
+from framework.paramify.pipelines import (  # noqa: E402
+    DEFAULT_WAIT_TIMEOUT,
+    JOB_CANCELLED,
+    JOB_COMPLETED,
+    PROCESS,
+    PROCESS_CLOSE,
+    TERMINAL,
+    AccessDenied,
+    AssessmentRefused,
+    IntakeNotEnabled,
+    PipelineError,
+    Pipelines,
+    is_blocked,
+    job_summary,
+    wait_for_job,
 )
 
 logger = logging.getLogger("paramify_issues_uploader")
-
-# Generous next to the evidence uploader's 30s: the endpoint accepts files up to
-# 10 GB, and a full Nessus export is routinely hundreds of megabytes.
-_REQUEST_TIMEOUT = 600
 
 # requests buffers the entire multipart body in memory — RequestEncodingMixin
 # ._encode_files calls .read() on file objects and hands the result to
@@ -111,259 +115,14 @@ _CONTENT_TYPES = {
     "nessus": "application/xml",
 }
 
-PROCESS = "PROCESS"
-PROCESS_CLOSE = "PROCESS_CLOSE"
-
-# Job polling. Processing a large scan takes minutes, so start quick and back off.
-DEFAULT_WAIT_TIMEOUT = 900
-_POLL_FIRST = 5.0
-_POLL_MAX = 30.0
-_POLL_BACKOFF = 1.5
-# Consecutive failed polls tolerated before giving up on a job. A poll is a GET,
-# so retrying it is safe — unlike an intake, which adds an artifact every time.
-_POLL_RETRIES = 3
-
-JOB_COMPLETED = "COMPLETED"
-JOB_FAILED = "FAILED"
-JOB_CANCELLED = "CANCELLED"
-JOB_QUEUED = "QUEUED"
-_TERMINAL = frozenset({JOB_COMPLETED, JOB_FAILED, JOB_CANCELLED})
-
-# Indirection so tests can drive the poll loop without real time passing.
-_sleep = time.sleep
-_monotonic = time.monotonic
-
-
 def _utc_now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 # --------------------------------------------------------------------------- #
-# Paramify API client
-# --------------------------------------------------------------------------- #
-class ParamifyError(RuntimeError):
-    pass
-
-
-class IntakeNotEnabled(ParamifyError):
-    """HTTP 501 — pipeline intake is not enabled for this workspace.
-
-    Its own type because it is not a per-file problem: every subsequent upload in
-    the batch will fail the same way, so the run stops instead of issuing one
-    identical error per report.
-    """
-
-
-class AccessDenied(ParamifyError):
-    """HTTP 401/403 — the key is missing a pipeline permission. Stops the batch:
-    every later call with the same key fails the same way."""
-
-
-class AssessmentRefused(ParamifyError):
-    """HTTP 400/404 on an assessment — no preset, wrong id. Stops that assessment:
-    its other reports would be refused identically, but other assessments may be
-    fine."""
-
-
-class NoCycleInProgress(ParamifyError):
-    """HTTP 409 — the pipeline has no cycle in progress (the last one was closed
-    and nothing has been uploaded since)."""
-
-
-class ParamifyClient:
-    """Thin client over the Paramify REST API v0 pipeline endpoints."""
-
-    def __init__(self, token: str, base_url: str, timeout: int = _REQUEST_TIMEOUT):
-        self.base_url = base_url.rstrip("/")
-        self.timeout = timeout
-        self.session = requests.Session()
-        self.session.headers.update({"Authorization": f"Bearer {token}"})
-
-    def intake(
-        self, assessment_id: str, filename: str, content: bytes, content_type: str,
-        artifact_meta: Dict,
-    ) -> Dict:
-        """Upload one report to the pipeline's current cycle. Returns the artifact.
-
-        Sent with no `operation`: processing is one explicit call per run, so it
-        covers exactly this run's files (see the module docstring).
-        """
-        files = {
-            # The spec asks for a URL-encoded filename ("certain special
-            # characters may cause upload errors"); Paramify decodes it. safe=""
-            # so a slash in a vendor-generated name cannot escape the field.
-            "file": (quote(filename, safe=""), content, content_type),
-            "artifact": ("artifact.json", json.dumps(artifact_meta), "application/json"),
-        }
-        r = self.session.post(
-            f"{self.base_url}/pipelines/{assessment_id}/intake",
-            files=files,
-            timeout=self.timeout,
-        )
-        _raise_for(r, f"intake of {filename}", assessment_id, (200, 201, 202))
-        body = _json(r)
-        artifact = body.get("artifact") if isinstance(body, dict) else None
-        if not isinstance(artifact, dict) or not artifact.get("id"):
-            # Without the id the file cannot be named in the process call, so it
-            # would sit on the cycle unprocessed while the run reported success.
-            raise ParamifyError(
-                f"intake of {filename} returned no artifact id (HTTP {r.status_code}); "
-                f"it may be on the cycle unprocessed — check the assessment in "
-                f"Paramify before re-running, which uploads it again"
-            )
-        return artifact
-
-    def process(self, assessment_id: str, artifact_ids: List[str], operation: str) -> Dict:
-        """Queue one job over exactly these artifacts. Returns the job."""
-        r = self.session.post(
-            f"{self.base_url}/pipelines/{assessment_id}/process",
-            json={"artifactIds": list(artifact_ids), "operation": operation},
-            timeout=self.timeout,
-        )
-        _raise_for(r, "process", assessment_id, (200, 202))
-        return _json(r)
-
-    def close(self, assessment_id: str) -> Dict:
-        """Queue a close of the pipeline's current cycle. Returns the job."""
-        r = self.session.post(
-            f"{self.base_url}/pipelines/{assessment_id}/close", timeout=self.timeout
-        )
-        _raise_for(r, "close", assessment_id, (200, 202))
-        return _json(r)
-
-    def list_cycles(self, assessment_id: str) -> List[Dict]:
-        """The assessment's cycles (id, name, startDate, ...). Read-only."""
-        r = self.session.get(
-            f"{self.base_url}/assessment/{assessment_id}/cycle", timeout=self.timeout
-        )
-        _raise_for(r, "list cycles", assessment_id, (200,))
-        body = _json(r)
-        cycles = body.get("cycles") if isinstance(body, dict) else None
-        return cycles if isinstance(cycles, list) else []
-
-    def get_job(self, job_id: str) -> Dict:
-        r = self.session.get(f"{self.base_url}/pipeline-jobs/{job_id}", timeout=self.timeout)
-        _raise_for(r, f"read job {job_id}", None, (200,))
-        return _json(r)
-
-    def list_jobs(
-        self, assessment_id: Optional[str] = None, status: Optional[str] = None,
-        limit: int = 50,
-    ) -> List[Dict]:
-        params: Dict[str, object] = {"limit": limit}
-        if assessment_id:
-            params["assessmentId"] = assessment_id
-        if status:
-            params["status"] = status
-        r = self.session.get(
-            f"{self.base_url}/pipeline-jobs", params=params, timeout=self.timeout
-        )
-        _raise_for(r, "list jobs", None, (200,))
-        body = _json(r)
-        jobs = body.get("pipelineJobs") if isinstance(body, dict) else None
-        return jobs if isinstance(jobs, list) else []
-
-    def retry_job(self, job_id: str) -> Dict:
-        r = self.session.post(
-            f"{self.base_url}/pipeline-jobs/{job_id}/retry", timeout=self.timeout
-        )
-        _raise_for(r, f"retry job {job_id}", None, (200, 202))
-        return _json(r)
-
-    def cancel_job(self, job_id: str) -> Dict:
-        r = self.session.post(
-            f"{self.base_url}/pipeline-jobs/{job_id}/cancel", timeout=self.timeout
-        )
-        _raise_for(r, f"cancel job {job_id}", None, (200, 202))
-        return _json(r)
-
-
-def _json(resp) -> Dict:
-    try:
-        body = resp.json()
-    except ValueError:
-        return {}
-    return body if isinstance(body, dict) else {}
-
-
-def _raise_for(resp, what: str, assessment_id: Optional[str], ok: Tuple[int, ...]) -> None:
-    """Map a pipeline response to the error type that says how far it reaches."""
-    code = resp.status_code
-    if code in ok:
-        return
-    msg = _error_message(resp)
-    if code == 501:
-        raise IntakeNotEnabled(
-            f"pipeline intake is not enabled for this workspace (HTTP 501): {msg}"
-        )
-    if code in (401, 403):
-        raise AccessDenied(
-            f"Paramify rejected the token for {what} (HTTP {code}). A pipeline key needs "
-            f"PIPELINE_INTAKE, plus PIPELINE_PROCESS to process and PIPELINE_CLOSE to "
-            f"close. {msg}"
-        )
-    if code == 404 and assessment_id:
-        raise AssessmentRefused(
-            f"assessment {assessment_id} not found (HTTP 404) — the id may belong to "
-            f"another workspace, or the assessment was deleted. Re-pick it with "
-            f"`paramify assessments select`. {msg}"
-        )
-    if code == 400 and assessment_id:
-        raise AssessmentRefused(
-            f"{what} refused for assessment {assessment_id} (HTTP 400). The usual cause "
-            f"is an assessment with no file intake preset configured — set one up in "
-            f"Paramify. {msg}"
-        )
-    if code == 409 and assessment_id:
-        # 409 covers more than "no cycle in progress": work aimed at a cycle other
-        # than the in-progress one is refused the same way. Paramify's own message
-        # says which, so it leads.
-        raise NoCycleInProgress(
-            f"{what} refused for assessment {assessment_id} (HTTP 409): {msg}. "
-            f"Work can only be queued on the in-progress cycle (the oldest open one), "
-            f"or there is no cycle in progress."
-        )
-    raise ParamifyError(f"{what} failed (HTTP {code}): {msg}")
-
-
-def _error_message(resp) -> str:
-    """Pull Paramify's own error message out of a response, with the requestId.
-
-    The requestId is the only thing that lets support find the failure, so it is
-    always carried through to the operator rather than dropped for brevity.
-    """
-    try:
-        body = resp.json()
-    except ValueError:
-        return resp.text[:300]
-    if not isinstance(body, dict):
-        return str(body)[:300]
-    error = body.get("error")
-    msg = ""
-    if isinstance(error, dict):
-        msg = error.get("message") or ""
-    msg = msg or body.get("statusMessage") or resp.text[:300]
-    request_id = body.get("requestId")
-    return f"{msg} (requestId={request_id})" if request_id else str(msg)
-
-
-# --------------------------------------------------------------------------- #
 # Jobs
 # --------------------------------------------------------------------------- #
-def job_summary(job: Dict) -> Dict:
-    """The fields of a job worth recording and showing."""
-    return {
-        "job_id": job.get("id"),
-        "type": job.get("type"),
-        "status": job.get("status"),
-        "counts": job.get("counts"),
-        "error": job.get("error"),
-        "blocked_by": job.get("blockedByJobId"),
-        "cycle_id": job.get("cycleId"),
-    }
-
-
-def cycle_placement(client: "ParamifyClient", aid: str, cycle_id: Optional[str]) -> Dict:
+def cycle_placement(pipelines: Pipelines, aid: str, cycle_id: Optional[str]) -> Dict:
     """Name the cycle a job landed on, and how many cycles start after it.
 
     Uploads land on the pipeline's oldest open cycle, not the newest, so an
@@ -374,7 +133,7 @@ def cycle_placement(client: "ParamifyClient", aid: str, cycle_id: Optional[str])
     if not cycle_id:
         return {}
     try:
-        cycles = client.list_cycles(aid)
+        cycles = pipelines.list_cycles(aid)
     except Exception as e:  # noqa: BLE001 - informational only
         logger.debug("assessment %s: could not list cycles: %s", aid, e)
         return {}
@@ -387,55 +146,6 @@ def cycle_placement(client: "ParamifyClient", aid: str, cycle_id: Optional[str])
 
     newer = [c for c in cycles if order(c) > order(mine)]
     return {"cycle_name": mine.get("name"), "newer_cycles": len(newer)}
-
-
-def is_blocked(job: Dict) -> bool:
-    """A queued job waiting behind a failed one — an API job or a logged one."""
-    return job.get("status") == JOB_QUEUED and bool(
-        job.get("blockedByJobId") or job.get("blocked_by")
-    )
-
-
-def wait_for_job(
-    client: ParamifyClient,
-    job_id: str,
-    *,
-    timeout: float = DEFAULT_WAIT_TIMEOUT,
-    on_status: Optional[Callable[[Dict], None]] = None,
-) -> Tuple[Dict, bool]:
-    """Poll a job until it finishes, is blocked, or `timeout` passes.
-
-    Returns (last job seen, timed_out). A job queued behind a failed one is
-    returned at once rather than waited on: it cannot move until a person
-    retries or cancels the blocker, and doing either automatically would be
-    this uploader deciding what happens to someone else's job.
-    """
-    deadline = _monotonic() + timeout
-    delay = _POLL_FIRST
-    last_status = None
-    misses = 0
-    job: Dict = {"id": job_id}
-    while True:
-        try:
-            job = client.get_job(job_id)
-            misses = 0
-        except (requests.RequestException, ParamifyError) as e:
-            misses += 1
-            if misses > _POLL_RETRIES:
-                raise ParamifyError(f"could not read job {job_id}: {e}") from e
-            logger.warning("reading job %s failed (%s); retrying", job_id, e)
-        else:
-            status = job.get("status")
-            if status != last_status:
-                last_status = status
-                if on_status is not None:
-                    on_status(job)
-            if status in _TERMINAL or is_blocked(job):
-                return job, False
-        if _monotonic() + delay > deadline:
-            return job, True
-        _sleep(delay)
-        delay = min(delay * _POLL_BACKOFF, _POLL_MAX)
 
 
 # --------------------------------------------------------------------------- #
@@ -574,25 +284,12 @@ def build_artifact_meta(record: dict) -> Dict:
 
 
 def load_config(path: Optional[str]) -> Dict:
-    if not path:
-        return {}
-    data = yaml.safe_load(Path(path).read_text())
-    return data or {}
+    return (yaml_io.load_path(Path(path)) or {}) if path else {}
 
 
 def _emit(on_event: Optional[Callable[[dict], None]], event: dict) -> None:
     if on_event is not None:
         on_event(event)
-
-
-def _base_url_error(base_url: str) -> Optional[str]:
-    parsed = urlparse(base_url)
-    if parsed.scheme != "https" and (parsed.hostname or "") not in ("localhost", "127.0.0.1", "::1"):
-        return (
-            "base_url must be https to protect the API token "
-            f"(got {base_url!r}); only localhost may use http"
-        )
-    return None
 
 
 # --------------------------------------------------------------------------- #
@@ -713,7 +410,7 @@ def _processed_ids(jobs: List[dict]) -> set:
     }
 
 
-def _refresh_jobs(client: "ParamifyClient", jobs: List[dict]) -> None:
+def _refresh_jobs(pipelines: Pipelines, jobs: List[dict]) -> None:
     """Re-read logged jobs that may have moved since they were recorded (a
     failed one retried, a queued one finished), in place. Best effort: a job
     that cannot be read keeps its logged state."""
@@ -721,8 +418,8 @@ def _refresh_jobs(client: "ParamifyClient", jobs: List[dict]) -> None:
         if job.get("status") in (JOB_COMPLETED, JOB_CANCELLED) or not job.get("job_id"):
             continue
         try:
-            job.update(job_summary(client.get_job(job["job_id"])))
-        except (requests.RequestException, ParamifyError) as e:
+            job.update(job_summary(pipelines.get_job(job["job_id"])))
+        except PipelineError as e:
             logger.warning("could not re-read job %s (%s)", job.get("job_id"), e)
 
 
@@ -740,6 +437,7 @@ def upload_run(
     wait: bool = True,
     wait_timeout: Optional[float] = None,
     on_event: Optional[Callable[[dict], None]] = None,
+    pipelines: Optional[Pipelines] = None,
 ) -> Dict:
     """Send every issue report in one completed run into its assessment's pipeline.
 
@@ -751,15 +449,7 @@ def upload_run(
     and processes them again. Only use it when a previous intake was parsed
     incorrectly.
     """
-    load_dotenv()
     config = config or {}
-    paramify_cfg = config.get("paramify") or {}
-    base_url, _ = resolve_base_url(paramify_cfg.get("base_url") or base_url)
-
-    url_error = _base_url_error(base_url)
-    if url_error:
-        logger.error(url_error)
-        raise ValueError(url_error)
 
     # Unlike the evidence uploader this defaults to True. A failed evidence fetch
     # still documents the attempt, but a truncated scan report is parsed into
@@ -785,12 +475,10 @@ def upload_run(
         logger.error(msg)
         raise ValueError(msg)
 
-    if not token:
-        token, _ = resolve_upload_token()
-    if not token and not dry_run:
-        msg = f"{UPLOAD_TOKEN_ENV} is not set (or {READ_TOKEN_ENV} as a fallback)"
-        logger.error(msg)
-        raise ValueError(msg)
+    base_url, made = open_workspace(config, base_url=base_url, token=token, use=pipelines,
+                                    dry_run=dry_run, wrap=Pipelines, log=logger)
+    # A dry run makes no API calls at all: the intake log predicts what it can.
+    pipelines = None if dry_run else made
 
     records = index.get("reports") or []
     logger.info(
@@ -805,7 +493,6 @@ def upload_run(
         "files": len(records),
     })
 
-    client = None if dry_run else ParamifyClient(token, base_url)
     # Read the log in dry-run too. Skipping it made the preview promise to send
     # files the real run skips as duplicates — and predicting duplicates is the
     # main thing a preview is for. A corrupt log must still not crash a preview,
@@ -977,7 +664,7 @@ def upload_run(
                 # would reorder keys and rewrite numbers, and the file is supposed
                 # to be the vendor's own artifact.
                 content = _read_report_bytes(path)
-                artifact = client.intake(aid, name, content, content_type, meta)
+                artifact = pipelines.intake(aid, name, content, content_type, meta)
                 artifact_id = artifact.get("id")
                 uploaded += 1
                 entry["uploaded"] += 1
@@ -1029,8 +716,8 @@ def upload_run(
         # of ours has taken yet — including uploads from an earlier attempt that
         # died before its process call.
         assessment_jobs = jobs.setdefault(aid, [])
-        if client is not None and assessment_jobs:
-            _refresh_jobs(client, assessment_jobs)
+        if pipelines is not None and assessment_jobs:
+            _refresh_jobs(pipelines, assessment_jobs)
             save_log()
         taken = _processed_ids(assessment_jobs)
         pending = [
@@ -1061,8 +748,8 @@ def upload_run(
                 _emit(on_event, {"event": "process_skipped", "assessment_id": aid,
                                  "reason": "nothing new to process"})
                 continue
-            if last.get("status") not in _TERMINAL and wait and client:
-                last = _wait_and_record(client, aid, last, wait_timeout, on_event)
+            if last.get("status") not in TERMINAL and wait and pipelines:
+                last = _wait_and_record(pipelines, aid, last, wait_timeout, on_event)
                 save_log()
             else:
                 _emit(on_event, {"event": "process_skipped", "assessment_id": aid,
@@ -1071,14 +758,14 @@ def upload_run(
             entry["operation"] = last.get("operation")
             entry["job"] = last
             still_running = (
-                not wait and last.get("status") not in _TERMINAL and not is_blocked(last)
+                not wait and last.get("status") not in TERMINAL and not is_blocked(last)
             )
             if last.get("status") != JOB_COMPLETED and not still_running:
                 jobs_failed += 1
             continue
 
         try:
-            job = client.process(aid, pending, operation)
+            job = pipelines.process(aid, pending, operation)
         except (IntakeNotEnabled, AccessDenied) as e:
             logger.error("%s", e)
             errors += 1
@@ -1100,7 +787,7 @@ def upload_run(
             "operation": operation,
             "artifact_ids": pending,
             "queued_at": _utc_now(),
-            **cycle_placement(client, aid, job.get("cycleId")),
+            **cycle_placement(pipelines, aid, job.get("cycleId")),
         }
         assessment_jobs.append(job_state)
         save_log()
@@ -1117,7 +804,7 @@ def upload_run(
                          "newer_cycles": job_state.get("newer_cycles", 0)})
 
         if wait:
-            job_state = _wait_and_record(client, aid, job_state, wait_timeout, on_event)
+            job_state = _wait_and_record(pipelines, aid, job_state, wait_timeout, on_event)
             if job_state.get("status") != JOB_COMPLETED:
                 jobs_failed += 1
             save_log()
@@ -1150,7 +837,7 @@ def upload_run(
 
 
 def _wait_and_record(
-    client: ParamifyClient, aid: str, job_state: dict, timeout: float,
+    pipelines: Pipelines, aid: str, job_state: dict, timeout: float,
     on_event: Optional[Callable[[dict], None]],
 ) -> dict:
     """Wait on one job and fold its outcome into the logged job state (in place)."""
@@ -1160,9 +847,9 @@ def _wait_and_record(
 
     try:
         job, timed_out = wait_for_job(
-            client, job_state["job_id"], timeout=timeout, on_status=on_status
+            pipelines, job_state["job_id"], timeout=timeout, on_status=on_status
         )
-    except ParamifyError as e:
+    except PipelineError as e:
         job_state["poll_error"] = str(e)[:300]
         _emit(on_event, {"event": "job_complete", "assessment_id": aid, **job_state})
         return job_state
