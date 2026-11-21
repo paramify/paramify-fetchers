@@ -2,6 +2,7 @@ key: loki_no_stale_sources
 name: 'Loki Log Ingestion: No Stale Source'
 type: AUTOMATED
 role: configuration
+source: community
 statement: >
   No expected log source's newest line is older than the adopted maximum age, and every source
   was seen in the search window (sources_stale is 0). Fails while no maximum age is set, while any

@@ -2,6 +2,7 @@ key: loki_expected_sources_ingesting
 name: 'Loki Log Ingestion: Every Expected Source Arriving'
 type: AUTOMATED
 role: configuration
+source: community
 statement: >
   Every expected log source sent at least one line to Loki in the recent window
   (all_expected_sources_ingesting is true). Fails when any source is quiet, any source's queries

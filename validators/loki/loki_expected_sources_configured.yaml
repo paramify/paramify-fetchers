@@ -2,6 +2,7 @@ key: loki_expected_sources_configured
 name: 'Loki Log Ingestion: Expected Sources Set'
 type: AUTOMATED
 role: completeness
+source: community
 statement: >
   At least one expected log source was set and checked (expected_sources_count is above 0). Fails
   when none is set or the count appears other than exactly once. Which sources should be expected
