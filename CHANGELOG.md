@@ -12,6 +12,10 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **TUI tab keys: Validators is tab 4.** Paramify moves from `4` to `5` and Pipelines from `5` to `6`.
+- **`paramify validators sync -m` and the Paramify tab cover only the validators a manifest tracks.** Without a
+  `validators:` list an entry tracks every Paramify-made validator for its evidence set, which is every validator
+  the registry ships today, so nothing changes until an entry lists its own or a community validator is added.
 - **`aws_inspector_ecr_findings` and `aws_inspector_ecr_report` 0.3.0: image counts and an opt-in for an empty scope.**
   - The evidence summary adds `repository_image_count`, every image in the selected repositories before tag,
     push-date and usage filters, next to `image_count`, the images that match them. Both are logged. No new API calls.
@@ -28,6 +32,16 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **Choose the validators each fetcher tracks (TUI Validators tab, beta).** The tab lists the manifest's fetchers
+  and, for each, every registry validator for its evidence set in a Paramify section and a community section.
+  `space` tracks or untracks one and saves the manifest; `enter` shows the claim, regex, rules in plain words,
+  evidence sets and YAML file; `a` goes back to the defaults. The choice is saved as a `validators:` list on the
+  manifest entry. Validators gain an optional `source: paramify | community` field (absent = `paramify`);
+  community-made validators are tracked only when an entry lists them. Untracking never changes Paramify.
+- **Community-made fetchers are labelled in the TUI.** `fetcher.yaml` takes an optional
+  `source: paramify | community` (absent = `paramify`), also in `paramify catalog --json`. A community fetcher gets an
+  orange COMMUNITY label in the catalog, the manifest table and the Validators tab, and its detail says it was made
+  by the community and to read its code before giving it secrets.
 - **One-line install.** `curl -fsSL https://raw.githubusercontent.com/paramify/paramify-fetchers/main/install.sh |
   bash` clones the repo to `~/paramify-fetchers`, installs the CLI and TUI into the clone's `.venv`, and links
   `paramify` into `~/.local/bin`. In a terminal it shows a spinner and elapsed time for each step, offers to add

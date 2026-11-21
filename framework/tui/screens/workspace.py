@@ -21,10 +21,11 @@ from framework.tui.screens.fetchers import FetchersPage
 from framework.tui.screens.paramify import ParamifyPage
 from framework.tui.screens.pipelines import PipelinesPage
 from framework.tui.screens.run import RunPage
+from framework.tui.screens.validators import ValidatorsPage
 
 
 class WorkspaceScreen(Screen):
-    TAB_IDS = ["tab-fetchers", "tab-run", "tab-evidence", "tab-paramify", "tab-pipelines"]
+    TAB_IDS = ["tab-fetchers", "tab-run", "tab-evidence", "tab-validators", "tab-paramify", "tab-pipelines"]
 
     # A one-shot callable that overrides the default focus for the next pane
     # activation (used by the search shortcut to land on the filter box instead
@@ -36,14 +37,15 @@ class WorkspaceScreen(Screen):
     # esc is listed because it is the only way out of a focused text field back
     # to the shortcut keys: an Input consumes every printable key, so while one
     # holds focus none of the hints above it are live.
-    WORKSPACE_HINTS = [("1-5", "tabs"), ("m", "manifest"), ("esc", "leave field"), ("q", "quit")]
+    WORKSPACE_HINTS = [("1-6", "tabs"), ("m", "manifest"), ("esc", "leave field"), ("q", "quit")]
 
     BINDINGS = [
         Binding("1", "go_tab(0)", "Fetchers"),
         Binding("2", "go_tab(1)", "Run"),
         Binding("3", "go_tab(2)", "Evidence"),
-        Binding("4", "go_tab(3)", "Paramify"),
-        Binding("5", "go_tab(4)", "Pipelines"),
+        Binding("4", "go_tab(3)", "Validators"),
+        Binding("5", "go_tab(4)", "Paramify"),
+        Binding("6", "go_tab(5)", "Pipelines"),
         Binding("slash", "focus_search", "Search"),
         Binding("escape", "unfocus", "Unfocus", show=False),
         Binding("m", "switch_manifest", "Manifest…"),
@@ -60,9 +62,11 @@ class WorkspaceScreen(Screen):
                 yield RunPage(id="run-page")
             with TabPane("Evidence", id="tab-evidence"):
                 yield EvidencePage(id="evidence-page")
+            # "beta": a tag after the name, in the theme's warning color.
+            with TabPane("Validators [$warning]beta[/]", id="tab-validators"):
+                yield ValidatorsPage(id="validators-page")
             with TabPane("Paramify", id="tab-paramify"):
                 yield ParamifyPage(id="paramify-page")
-            # "beta": a tag after the name, in the theme's warning color.
             with TabPane("Pipelines [$warning]beta[/]", id="tab-pipelines"):
                 yield PipelinesPage(id="pipelines-page")
         yield HintFooter()
@@ -81,7 +85,7 @@ class WorkspaceScreen(Screen):
             self.query_one(EvidencePage).rebuild_runs()
         except Exception:
             pass
-        for page in (ParamifyPage, PipelinesPage):
+        for page in (ParamifyPage, PipelinesPage, ValidatorsPage):
             try:
                 self.query_one(page).rebuild()
             except Exception:
