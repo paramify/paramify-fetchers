@@ -49,6 +49,7 @@ validation_rules:
 # Every evidence set that wants a collection-health check. Add a line per set as
 # validators are authored for it.
 evidence_sets:
+  - EVD-ALERTMANAGER-ALERT-DELIVERY
   - EVD-KEYCLOAK-ADMIN-EVENTS
   - EVD-ISTIO-MESH-SECURITY
   - EVD-KUBERNETES-WORKLOAD-RESILIENCE
