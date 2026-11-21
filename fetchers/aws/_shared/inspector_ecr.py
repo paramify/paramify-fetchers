@@ -1,8 +1,9 @@
 """Read ECR inventory, Inspector coverage and findings for one account/region.
 
-Uses the AWS CLI credential chain already installed for this category. Every
-request is read-only. Evidence and issue reports share filters and pagination;
-neither collector contacts Paramify. The existing uploader owns intake/jobs.
+Uses boto3 with the standard AWS credential chain (profile, role, SSO, ECS task
+role, environment). Every request is read-only. Evidence and issue reports share
+filters and pagination; neither collector contacts Paramify. The existing
+uploader owns intake/jobs.
 """
 
 from __future__ import annotations
@@ -14,12 +15,13 @@ import json
 import logging
 import os
 import re
-import subprocess
 import sys
 import tempfile
-from collections import Counter
-from contextlib import contextmanager
-from datetime import datetime, timezone
+from collections import Counter, deque
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import closing, contextmanager
+from datetime import date, datetime, timedelta, timezone
+from itertools import islice
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -28,7 +30,52 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "_lib"))
 from fetcher_status import report_failure
 
 RESOURCE_TYPE = "AWS_ECR_CONTAINER_IMAGE"
-SEVERITIES = ("CRITICAL", "HIGH", "MEDIUM", "LOW", "INFORMATIONAL", "UNTRIAGED")
+# Highest first, after UNTRIAGED: a min_severity threshold keeps every severity
+# up to its own, so an untriaged finding (which may be anything) is always kept.
+SEVERITIES = ("UNTRIAGED", "CRITICAL", "HIGH", "MEDIUM", "LOW", "INFORMATIONAL")
+# Multi-architecture parents. Inspector scans the per-platform images an index
+# points to, never the index itself, so an index can never have ACTIVE coverage.
+INDEX_MEDIA_TYPES = frozenset(
+    {
+        "application/vnd.oci.image.index.v1+json",
+        "application/vnd.docker.distribution.manifest.list.v2+json",
+    }
+)
+PAGE_SIZES = {
+    ("ecr", "describe-repositories"): 1000,
+    ("ecr", "describe-images"): 1000,
+    ("inspector2", "list-coverage"): 200,
+    ("inspector2", "list-findings"): 100,
+}
+IMAGE_WORKERS = 8
+FINDING_QUERIES_AHEAD = 2 * IMAGE_WORKERS
+INDEX_BATCH = 100
+HASHES_PER_QUERY = 10
+IMAGE_FIELDS = (
+    "imageDigest",
+    "imageTags",
+    "imagePushedAt",
+    "lastRecordedPullTime",
+    "imageSizeInBytes",
+    "imageManifestMediaType",
+)
+SHARED_FINDING_FIELDS = (
+    "description",
+    "remediation",
+    "epss",
+    "exploitabilityDetails",
+    "inspectorScoreDetails",
+)
+SHARED_PACKAGE_FIELDS = (
+    "source",
+    "sourceUrl",
+    "cvss",
+    "referenceUrls",
+    "relatedVulnerabilities",
+    "vendorSeverity",
+    "vendorCreatedAt",
+    "vendorUpdatedAt",
+)
 CSV_COLUMNS = [
     "ID",
     "Finding ARN",
@@ -41,6 +88,7 @@ CSV_COLUMNS = [
     "Region",
     "Asset ID",
     "Repository",
+    "Repository ARN",
     "Image Digest",
     "Image Tags",
     "First Observed At",
@@ -83,62 +131,73 @@ def error_code(stderr):
     return "partial_failure"
 
 
+def plain(value):
+    """boto3 values as the JSON the AWS CLI prints: timestamps become ISO 8601."""
+    if isinstance(value, dict):
+        return {k: plain(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [plain(v) for v in value]
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    return value
+
+
 class Aws:
     def __init__(self):
+        try:
+            import boto3
+            from botocore.config import Config
+        except ImportError as exc:
+            raise CollectionError(
+                "boto3 is required for the Inspector ECR fetchers (pip install -r requirements.txt)",
+                "bad_config",
+            ) from exc
+        try:
+            session = boto3.Session(profile_name=os.environ.get("AWS_PROFILE") or None)
+        except Exception as exc:
+            raise CollectionError(f"AWS session: {exc}", "bad_config") from exc
         # The runner maps target.region to AWS_DEFAULT_REGION; pin it explicitly
         # so an ambient AWS_REGION cannot override a manifest target.
-        self.region = os.environ.get("AWS_DEFAULT_REGION") or os.environ.get("AWS_REGION")
-        if not self.region:
-            self.region = self.run(["configure", "get", "region"]).strip()
+        self.region = (
+            os.environ.get("AWS_DEFAULT_REGION")
+            or os.environ.get("AWS_REGION")
+            or session.region_name
+        )
         if not self.region:
             raise CollectionError("Set a region in the target or AWS configuration", "bad_config")
+        self.session = session
+        self.config = Config(
+            region_name=self.region,
+            retries={"mode": "standard", "max_attempts": 4},
+            connect_timeout=30,
+            read_timeout=180,
+            max_pool_connections=IMAGE_WORKERS + 2,
+        )
+        self.clients = {}
 
-    def run(self, args):
-        try:
-            response = subprocess.run(
-                ["aws", *args],
-                capture_output=True,
-                text=True,
-                timeout=180,
-                env={
-                    **os.environ,
-                    "AWS_PAGER": "",
-                    "AWS_RETRY_MODE": "standard",
-                    "AWS_MAX_ATTEMPTS": "4",
-                },
-            )
-        except subprocess.TimeoutExpired as exc:
-            raise CollectionError("AWS request timed out", "target_unreachable") from exc
-        except OSError as exc:
-            raise CollectionError(f"Could not execute AWS CLI: {exc}", "bad_config") from exc
-        if response.returncode:
-            reason = response.stderr.strip()[-1000:] or f"exit {response.returncode}"
-            raise CollectionError(f"aws {' '.join(args[:2])}: {reason}", error_code(reason))
-        return response.stdout
+    def client(self, service):
+        # Clients are thread-safe; sessions are not. collect() creates the ECR
+        # client on the main thread before its workers share it.
+        if service not in self.clients:
+            self.clients[service] = self.session.client(service, config=self.config)
+        return self.clients[service]
 
     def call(self, service, operation, **params):
-        text = self.run(
-            [
-                service,
-                operation,
-                "--region",
-                self.region,
-                "--output",
-                "json",
-                "--no-paginate",
-                "--cli-input-json",
-                json.dumps(params),
-            ]
-        )
         try:
-            result = json.loads(text)
-        except ValueError as exc:
-            raise CollectionError(f"{operation} returned invalid JSON") from exc
+            method = getattr(self.client(service), operation.replace("-", "_"))
+            result = method(**params)
+        except Exception as exc:
+            reason = str(exc).strip()[-1000:] or type(exc).__name__
+            raise CollectionError(f"aws {service} {operation}: {reason}", error_code(reason)) from exc
         if not isinstance(result, dict):
             raise CollectionError(f"{operation} returned a non-object response")
-        return result
+        result.pop("ResponseMetadata", None)
+        return plain(result)
 
     def pages(self, service, operation, key, **params):
+        size = PAGE_SIZES.get((service, operation))
+        if size:
+            params = {"maxResults": size, **params}
         tokens = set()
         for _ in range(10000):
             response = self.call(service, operation, **params)
@@ -169,6 +228,52 @@ def read_list(name):
     return values
 
 
+def read_bool(name):
+    value = os.environ.get(name, "false").strip().lower()
+    if value not in ("true", "false"):
+        raise CollectionError(f"{name} must be true or false", "bad_config")
+    return value == "true"
+
+
+def read_days(name):
+    value = os.environ.get(name, "").strip() or "0"
+    if not re.fullmatch(r"\d+", value) or int(value) > 3650:
+        raise CollectionError(f"{name} must be a whole number of days from 0 to 3650", "bad_config")
+    return int(value)
+
+
+def read_severity(name):
+    value = os.environ.get(name, "").strip().upper()
+    if value and value not in SEVERITIES[1:]:
+        raise CollectionError(
+            f"{name} must be one of {', '.join(SEVERITIES[1:])}, or empty", "bad_config"
+        )
+    return value or None
+
+
+def read_scope():
+    """Every scope setting, validated before any AWS request."""
+    return {
+        "repositories": read_list("AWS_INSPECTOR_REPOSITORIES"),
+        "image_tags": read_list("AWS_INSPECTOR_IMAGE_TAGS"),
+        "in_use_only": read_bool("AWS_INSPECTOR_IN_USE_ONLY"),
+        "last_in_use_days": read_days("AWS_INSPECTOR_LAST_IN_USE_DAYS"),
+        "pushed_within_days": read_days("AWS_INSPECTOR_PUSHED_WITHIN_DAYS"),
+        "min_severity": read_severity("AWS_INSPECTOR_MIN_SEVERITY"),
+    }
+
+
+def default_scope(repositories=(), image_tags=()):
+    return {
+        "repositories": list(repositories),
+        "image_tags": list(image_tags),
+        "in_use_only": False,
+        "last_in_use_days": 0,
+        "pushed_within_days": 0,
+        "min_severity": None,
+    }
+
+
 def equal(values):
     return [{"comparison": "EQUALS", "value": value} for value in values]
 
@@ -177,8 +282,139 @@ def nonempty_strings(*values):
     return all(isinstance(value, str) and value for value in values)
 
 
-def collect(aws, repositories, image_tags, *, allow_partial=False):
+def parse_time(value):
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def severities_at_or_above(minimum):
+    return list(SEVERITIES[: SEVERITIES.index(minimum) + 1])
+
+
+def canonical_digest(record):
+    text = json.dumps(record, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(text.encode()).digest()
+
+
+def compact_finding(finding, vulnerabilities):
+    """The finding without the fields stored for its vulnerability ID.
+
+    The first finding of an ID sets the stored fields. A later finding keeps
+    any field whose value differs, and lists in `absent_fields` any stored
+    field it does not have, so expand_finding() rebuilds every record exactly.
+    """
+    package = finding["packageVulnerabilityDetails"]
+    vulnerability_id = package["vulnerabilityId"]
+    if vulnerability_id not in vulnerabilities:
+        vulnerabilities[vulnerability_id] = {
+            **{k: finding[k] for k in SHARED_FINDING_FIELDS if k in finding},
+            "packageVulnerabilityDetails": {
+                k: package[k] for k in SHARED_PACKAGE_FIELDS if k in package
+            },
+        }
+    shared = vulnerabilities[vulnerability_id]
+    shared_package = shared["packageVulnerabilityDetails"]
+    compact = {
+        k: v for k, v in finding.items() if k not in shared or (k in SHARED_FINDING_FIELDS and shared[k] != v)
+    }
+    compact["packageVulnerabilityDetails"] = {
+        k: v for k, v in package.items() if k not in shared_package or shared_package[k] != v
+    }
+    absent = sorted(
+        [k for k in shared if k != "packageVulnerabilityDetails" and k not in finding]
+        + [f"packageVulnerabilityDetails.{k}" for k in shared_package if k not in package]
+    )
+    if absent:
+        compact["absent_fields"] = absent
+    return compact
+
+
+def expand_finding(finding, vulnerabilities):
+    """The full Inspector record: a compact finding plus its vulnerability's fields."""
+    finding = dict(finding)
+    absent = set(finding.pop("absent_fields", ()))
+    package = finding["packageVulnerabilityDetails"]
+    shared = vulnerabilities.get(package["vulnerabilityId"], {})
+    full = {
+        k: v for k, v in shared.items() if k != "packageVulnerabilityDetails" and k not in absent
+    }
+    full.update(finding)
+    full["packageVulnerabilityDetails"] = {
+        **{
+            k: v
+            for k, v in shared.get("packageVulnerabilityDetails", {}).items()
+            if f"packageVulnerabilityDetails.{k}" not in absent
+        },
+        **package,
+    }
+    return full
+
+
+def selected(image, scope, cutoff):
+    """Whether an ECR image is a candidate for the inventory, before any Inspector query.
+
+    DescribeImages cannot filter by tag or push date, so the ECR listing is
+    narrowed here. Repositories are already filtered. With image_tags, an
+    image is selected by its own tags or by the tags of an index that points
+    to it (`index_tags`, set by collect()). Usage filters are applied later,
+    from Inspector coverage.
+    """
+    if cutoff is not None:
+        pushed = parse_time(image.get("imagePushedAt"))
+        if pushed is None or pushed < cutoff:
+            return False
+    if scope["image_tags"]:
+        tags = set(image.get("imageTags") or []) | set(image.get("index_tags") or [])
+        return bool(set(scope["image_tags"]) & tags)
+    return True
+
+
+def index_images(manifest):
+    """The digests of the runnable images an image index or manifest list points to.
+
+    Attestation entries (platform os "unknown", or a Docker attestation
+    reference) and nested indexes are not images Inspector scans.
+    """
+    for entry in manifest.get("manifests") or []:
+        if not isinstance(entry, dict) or not nonempty_strings(entry.get("digest")):
+            continue
+        if entry.get("mediaType") in INDEX_MEDIA_TYPES:
+            continue
+        if (entry.get("platform") or {}).get("os") == "unknown":
+            continue
+        if (entry.get("annotations") or {}).get("vnd.docker.reference.type") == "attestation-manifest":
+            continue
+        yield entry["digest"]
+
+
+def in_order(pool, fn, items, ahead):
+    """fn(item) for each item on the pool, yielded in item order.
+
+    At most `ahead` calls are submitted but not yet consumed, so results held in
+    memory stay bounded. Calls not yet started are cancelled if the consumer stops.
+    """
+    items = iter(items)
+    pending = deque(pool.submit(fn, item) for item in islice(items, ahead))
+    try:
+        while pending:
+            result = pending.popleft().result()
+            for item in islice(items, 1):
+                pending.append(pool.submit(fn, item))
+            yield result
+    finally:
+        for future in pending:
+            future.cancel()
+
+
+def collect(aws, scope, *, allow_partial=False, now=None):
     started = utc_now()
+    now = now or datetime.now(timezone.utc)
+    repositories, image_tags = scope["repositories"], scope["image_tags"]
     failures = []
 
     @contextmanager
@@ -199,7 +435,10 @@ def collect(aws, repositories, image_tags, *, allow_partial=False):
             )
 
     account, arn, scan_status, ecr_state = None, None, None, None
-    repo_list, inventory, coverage, findings = [], [], [], {}
+    repo_list, ecr_images, coverage, findings = [], [], [], {}
+    finding_digests, vulnerabilities = {}, {}
+    index_digests = 0
+    tagged_indexes = {}
     with attempt("sts get-caller-identity"):
         identity = aws.call("sts", "get-caller-identity")
         if not nonempty_strings(identity.get("Account"), identity.get("Arn")) or not re.fullmatch(
@@ -232,6 +471,8 @@ def collect(aws, repositories, image_tags, *, allow_partial=False):
                 raise CollectionError(
                     f"Requested repositories not found: {', '.join(sorted(missing))}", "bad_config"
                 )
+
+    wanted = []
     for repo in repo_list:
         name = repo.get("repositoryName")
         with attempt("ecr describe-repositories", repository=name):
@@ -242,18 +483,91 @@ def collect(aws, repositories, image_tags, *, allow_partial=False):
                 raise CollectionError("ECR returned invalid repository identity")
             if repositories and name not in repositories:
                 continue
-            with attempt("ecr describe-images", repository=name):
-                for image in aws.pages(
-                    "ecr", "describe-images", "imageDetails", repositoryName=name
-                ):
-                    if image_tags and not set(image_tags).intersection(image.get("imageTags", [])):
-                        continue
-                    if not nonempty_strings(image.get("imageDigest")):
-                        raise CollectionError(f"ECR returned an image without a digest in {name}")
-                    inventory.append(
-                        {**image, "repository": name, "repository_arn": repo["repositoryArn"]}
-                    )
+            wanted.append(repo)
 
+    def describe(repo):
+        """Every page of one repository's images; earlier pages survive a failure."""
+        images, error = [], None
+        try:
+            for image in aws.pages(
+                "ecr", "describe-images", "imageDetails", repositoryName=repo["repositoryName"]
+            ):
+                if not nonempty_strings(image.get("imageDigest")):
+                    raise CollectionError(
+                        f"ECR returned an image without a digest in {repo['repositoryName']}"
+                    )
+                images.append(image)
+        except Exception as exc:
+            error = exc
+        return images, error
+
+    if wanted:
+        aws.client("ecr")
+        with ThreadPoolExecutor(max_workers=min(IMAGE_WORKERS, len(wanted))) as pool:
+            described = list(pool.map(describe, wanted))
+        # Handled in repository order, so evidence and failures stay deterministic
+        # and report mode raises the first failure in that order.
+        for repo, (images, error) in zip(wanted, described):
+            name = repo["repositoryName"]
+            for image in images:
+                if image.get("imageManifestMediaType") in INDEX_MEDIA_TYPES:
+                    index_digests += 1
+                    if set(image_tags) & set(image.get("imageTags") or []):
+                        tagged_indexes.setdefault(name, []).append(image)
+                    continue
+                ecr_images.append(
+                    {
+                        **{k: image[k] for k in IMAGE_FIELDS if k in image},
+                        "repository": name,
+                        "repository_arn": repo["repositoryArn"],
+                        "resource_id": f"{repo['repositoryArn']}/{image['imageDigest']}",
+                    }
+                )
+            if error is not None:
+                with attempt("ecr describe-images", repository=name):
+                    raise error
+
+    # A tag usually sits on an index, while Inspector scans the untagged images
+    # it points to. Read each tagged index to give those images its tags.
+    index_tags = {}
+    for name, indexes in tagged_indexes.items():
+        with attempt("ecr batch-get-image", repository=name):
+            for start in range(0, len(indexes), INDEX_BATCH):
+                chunk = indexes[start : start + INDEX_BATCH]
+                response = aws.call(
+                    "ecr",
+                    "batch-get-image",
+                    repositoryName=name,
+                    imageIds=[{"imageDigest": i["imageDigest"]} for i in chunk],
+                    acceptedMediaTypes=sorted(INDEX_MEDIA_TYPES),
+                )
+                if response.get("failures"):
+                    reasons = "; ".join(
+                        f"{f.get('imageId', {}).get('imageDigest')}: {f.get('failureCode')}"
+                        for f in response["failures"]
+                    )
+                    raise CollectionError(f"ECR could not read index manifests in {name}: {reasons}")
+                tags_of = {
+                    i["imageDigest"]: set(image_tags) & set(i.get("imageTags") or []) for i in chunk
+                }
+                for image in response.get("images") or []:
+                    try:
+                        manifest = json.loads(image["imageManifest"])
+                    except (KeyError, TypeError, ValueError) as exc:
+                        raise CollectionError(f"ECR returned an unreadable index manifest in {name}") from exc
+                    tags = tags_of.get((image.get("imageId") or {}).get("imageDigest"), set())
+                    for child in index_images(manifest):
+                        index_tags.setdefault((name, child), set()).update(tags)
+    for image in ecr_images:
+        tags = index_tags.get((image["repository"], image["imageDigest"]))
+        if tags:
+            image["index_tags"] = sorted(tags)
+
+    cutoff = (
+        now - timedelta(days=scope["pushed_within_days"]) if scope["pushed_within_days"] else None
+    )
+    inventory = [i for i in ecr_images if selected(i, scope, cutoff)]
+    inventory_keys = {(i["repository"], i["imageDigest"]) for i in inventory}
     finding_filter = {
         "awsAccountId": equal([account]),
         "resourceType": equal([RESOURCE_TYPE]),
@@ -264,13 +578,43 @@ def collect(aws, repositories, image_tags, *, allow_partial=False):
         "resourceType": equal([RESOURCE_TYPE]),
         "scanType": equal(["PACKAGE"]),
     }
-    for values, finding_key, coverage_key in (
-        (repositories, "ecrImageRepositoryName", "ecrRepositoryName"),
-        (image_tags, "ecrImageTags", "ecrImageTags"),
-    ):
-        if values:
-            finding_filter[finding_key] = equal(values)
-            coverage_filter[coverage_key] = equal(values)
+    if repositories:
+        finding_filter["ecrImageRepositoryName"] = equal(repositories)
+        coverage_filter["ecrRepositoryName"] = equal(repositories)
+    if scope["in_use_only"]:
+        finding_filter["ecrImageInUseCount"] = [{"lowerInclusive": 1}]
+        coverage_filter["ecrImageInUseCount"] = [{"lowerInclusive": 1}]
+    if scope["last_in_use_days"]:
+        since = now - timedelta(days=scope["last_in_use_days"])
+        finding_filter["ecrImageLastInUseAt"] = [{"startInclusive": since}]
+        coverage_filter["ecrImageLastInUseAt"] = [{"startInclusive": since}]
+    if cutoff is not None:
+        # Coverage has no push-date filter; the inventory applies the cutoff locally.
+        finding_filter["ecrImagePushedAt"] = [{"startInclusive": cutoff}]
+    if scope["min_severity"]:
+        finding_filter["severity"] = equal(severities_at_or_above(scope["min_severity"]))
+    # With image_tags, the selected images are named by digest: an image that
+    # inherits its index's tags is untagged in Inspector, so a tag filter misses
+    # it. Coverage has no digest filter and is matched to the inventory below.
+    # Each query also names the repository: a digest is content-addressed, so
+    # the same image in another repository would otherwise come back too.
+    if image_tags:
+        by_repository = {}
+        for image in inventory:
+            by_repository.setdefault(image["repository"], set()).add(image["imageDigest"])
+        finding_filters = []
+        for name, digests in sorted(by_repository.items()):
+            hashes = sorted(digests)
+            finding_filters.extend(
+                {
+                    **finding_filter,
+                    "ecrImageRepositoryName": equal([name]),
+                    "ecrImageHash": equal(hashes[start : start + HASHES_PER_QUERY]),
+                }
+                for start in range(0, len(hashes), HASHES_PER_QUERY)
+            )
+    else:
+        finding_filters = [finding_filter]
 
     if account and ecr_state in (None, "ENABLED"):
         with attempt("inspector2 list-coverage"):
@@ -289,63 +633,94 @@ def collect(aws, repositories, image_tags, *, allow_partial=False):
                 ):
                     raise CollectionError("Inspector returned invalid coverage identity/status")
                 coverage.append(resource)
-        with attempt("inspector2 list-findings"):
-            for finding in aws.pages(
-                "inspector2", "list-findings", "findings", filterCriteria=finding_filter
-            ):
-                if finding.get("awsAccountId") != account or finding.get("status") != "ACTIVE":
-                    raise CollectionError(
-                        "Inspector returned a finding outside the requested account/status scope"
-                    )
-                if not nonempty_strings(
-                    finding.get("findingArn"),
-                    finding.get("packageVulnerabilityDetails", {}).get("vulnerabilityId"),
-                ):
-                    raise CollectionError(
-                        "Inspector returned a finding without its identity/vulnerability ID"
-                    )
-                resources = finding.get("resources")
-                if not resources:
-                    raise CollectionError("Inspector returned a finding without affected resources")
-                for resource in resources:
-                    detail = resource.get("details", {}).get("awsEcrContainerImage", {})
-                    if (
-                        resource.get("type") != RESOURCE_TYPE
-                        or resource.get("region") != aws.region
-                        or not nonempty_strings(
-                            detail.get("repositoryName"), detail.get("imageHash")
+
+        def list_findings(query):
+            """Every page of one query; earlier pages survive a failure."""
+            records, error = [], None
+            try:
+                records.extend(
+                    aws.pages("inspector2", "list-findings", "findings", filterCriteria=query)
+                )
+            except Exception as exc:
+                error = exc
+            return records, error
+
+        def queried_findings(pool):
+            # Handled in query order, so evidence and failures stay deterministic
+            # and report mode raises the first failure in that order.
+            for records, error in in_order(pool, list_findings, finding_filters, FINDING_QUERIES_AHEAD):
+                yield from records
+                if error is not None:
+                    raise error
+
+        with attempt("inspector2 list-findings"), ThreadPoolExecutor(
+            max_workers=max(1, min(IMAGE_WORKERS, len(finding_filters)))
+        ) as pool:
+            # Created here, before the workers share it: clients are thread-safe, sessions are not.
+            aws.client("inspector2")
+            # closing() cancels unstarted queries as soon as a failure stops the loop.
+            with closing(queried_findings(pool)) as found:
+                for finding in found:
+                    if finding.get("awsAccountId") != account or finding.get("status") != "ACTIVE":
+                        raise CollectionError(
+                            "Inspector returned a finding outside the requested account/status scope"
                         )
-                        or (repositories and detail["repositoryName"] not in repositories)
-                        or (
-                            image_tags
-                            and not set(image_tags).intersection(detail.get("imageTags", []))
-                        )
+                    if not nonempty_strings(
+                        finding.get("findingArn"),
+                        finding.get("packageVulnerabilityDetails", {}).get("vulnerabilityId"),
                     ):
                         raise CollectionError(
-                            "Inspector returned incomplete or out-of-scope ECR resource details"
+                            "Inspector returned a finding without its identity/vulnerability ID"
                         )
-                # Duplicate pages may overlap while Inspector updates its live dataset.
-                previous = findings.get(finding["findingArn"])
-                if previous is not None and previous != finding:
-                    raise CollectionError(
-                        "Inspector finding changed between pages; retry for a consistent report"
-                    )
-                findings[finding["findingArn"]] = finding
+                    resources = finding.get("resources")
+                    if not resources:
+                        raise CollectionError("Inspector returned a finding without affected resources")
+                    for resource in resources:
+                        detail = resource.get("details", {}).get("awsEcrContainerImage", {})
+                        if (
+                            resource.get("type") != RESOURCE_TYPE
+                            or resource.get("region") != aws.region
+                            or not nonempty_strings(
+                                detail.get("repositoryName"), detail.get("imageHash")
+                            )
+                            or (repositories and detail["repositoryName"] not in repositories)
+                            or (
+                                image_tags
+                                and (detail["repositoryName"], detail["imageHash"]) not in inventory_keys
+                            )
+                        ):
+                            raise CollectionError(
+                                "Inspector returned incomplete or out-of-scope ECR resource details"
+                            )
+                    # Duplicate pages may overlap while Inspector updates its live dataset.
+                    # A digest stands in for the full record, which is not kept.
+                    digest = canonical_digest(finding)
+                    previous = finding_digests.get(finding["findingArn"])
+                    if previous is not None and previous != digest:
+                        raise CollectionError(
+                            "Inspector finding changed between pages; retry for a consistent report"
+                        )
+                    if previous is None:
+                        finding_digests[finding["findingArn"]] = digest
+                        findings[finding["findingArn"]] = compact_finding(finding, vulnerabilities)
 
     by_resource = {c.get("resourceId"): c for c in coverage}
+    if scope["in_use_only"] or scope["last_in_use_days"]:
+        inventory = [i for i in inventory if i["resource_id"] in by_resource]
+        inventory_keys = {(i["repository"], i["imageDigest"]) for i in inventory}
+    in_scope = {i["resource_id"] for i in inventory}
+    coverage = [c for c in coverage if c.get("resourceId") in in_scope]
     gaps = []
     for image in inventory:
-        key = f"{image['repository_arn']}/{image['imageDigest']}"
-        scanned = by_resource.get(key)
-        image["inspector_coverage"] = scanned
+        scanned = by_resource.get(image["resource_id"])
         if (
             not scanned
             or scanned.get("scanStatus", {}).get("statusCode") != "ACTIVE"
             or not scanned.get("lastScannedAt")
         ):
-            gaps.append(key)
+            gaps.append(image["resource_id"])
     findings_list = sorted(findings.values(), key=lambda f: f["findingArn"])
-    known_images = {(i["repository"], i["imageDigest"]) for i in inventory}
+    known_images = inventory_keys
     inventory_mismatches = sorted(
         {
             f["findingArn"]
@@ -368,6 +743,7 @@ def collect(aws, repositories, image_tags, *, allow_partial=False):
             r["details"]["awsEcrContainerImage"]["repositoryName"] for r in finding["resources"]
         }:
             per_repository[repository] += 1
+    complete = ecr_state == "ENABLED" and not failures
     return {
         "metadata": {
             "account_id": account,
@@ -381,8 +757,8 @@ def collect(aws, repositories, image_tags, *, allow_partial=False):
         },
         "results": {
             "scope": {
-                "repositories": repositories,
-                "image_tags": image_tags,
+                **scope,
+                "pushed_after": cutoff.isoformat() if cutoff else None,
                 "finding_status": ["ACTIVE"],
                 "resource_type": RESOURCE_TYPE,
             },
@@ -392,13 +768,14 @@ def collect(aws, repositories, image_tags, *, allow_partial=False):
             if failures
             else ("collected" if ecr_state == "ENABLED" else "not_enabled"),
             "summary": {
-                "finding_count": len(findings_list)
-                if ecr_state == "ENABLED" and not failures
-                else None,
+                "finding_count": len(findings_list) if complete else None,
                 "severity_counts": {s: severities[s] for s in (*SEVERITIES, "UNKNOWN")}
-                if ecr_state == "ENABLED" and not failures
+                if complete
                 else None,
+                "vulnerability_count": len(per_vulnerability) if complete else None,
+                "repository_image_count": len(ecr_images) if not failures else None,
                 "image_count": len(inventory) if not failures else None,
+                "index_digest_count": index_digests if not failures else None,
                 "coverage_gap_count": len(gaps) if not failures else None,
                 "findings_by_repository": dict(sorted(per_repository.items()))
                 if not failures
@@ -411,6 +788,7 @@ def collect(aws, repositories, image_tags, *, allow_partial=False):
             "images": inventory,
             "coverage": coverage,
             "findings_missing_from_inventory": inventory_mismatches,
+            "vulnerabilities": dict(sorted(vulnerabilities.items())),
             "findings": findings_list,
         },
     }
@@ -418,7 +796,10 @@ def collect(aws, repositories, image_tags, *, allow_partial=False):
 
 def csv_rows(evidence):
     meta = evidence["metadata"]
-    for finding in evidence["results"]["findings"]:
+    vulnerabilities = evidence["results"]["vulnerabilities"]
+    repository_arns = {i["repository"]: i["repository_arn"] for i in evidence["results"]["images"]}
+    for compact in evidence["results"]["findings"]:
+        finding = expand_finding(compact, vulnerabilities)
         package = finding["packageVulnerabilityDetails"]
         for resource in finding["resources"]:
             image = resource["details"]["awsEcrContainerImage"]
@@ -435,6 +816,7 @@ def csv_rows(evidence):
                 "Region": meta["region"],
                 "Asset ID": asset,
                 "Repository": image["repositoryName"],
+                "Repository ARN": repository_arns[image["repositoryName"]],
                 "Image Digest": image["imageHash"],
                 "Image Tags": json.dumps(image.get("imageTags", [])),
                 "First Observed At": finding.get("firstObservedAt", ""),
@@ -460,16 +842,39 @@ def csv_safe(value):
     return value
 
 
-def write_output(evidence, report, directory, allow_empty=False):
+def scope_suffix(meta, scope):
+    """Short hash of profile and scope, so distinct targets never share a file name.
+
+    Settings added after 0.1.0 count only when set, so a target that does not
+    use them keeps the file name it had before they existed.
+    """
+    original = ("repositories", "image_tags", "finding_status", "resource_type")
+    keyed = {
+        k: v for k, v in scope.items() if k in original or (k != "pushed_after" and v)
+    }
+    text = json.dumps({"profile": meta["profile"], **keyed}, sort_keys=True)
+    return hashlib.sha256(text.encode()).hexdigest()[:12]
+
+
+def write_output(evidence, report, directory, allow_empty=False, allow_no_images=False):
     results = evidence["results"]
     if report:
         if not results["collection_complete"] or evidence["metadata"].get("partial_failure"):
             raise CollectionError("Inspector collection is incomplete; no issue report written")
         if results["findings_collection_status"] != "collected":
             raise CollectionError("Inspector ECR scanning is not enabled; no issue report written")
-        if not results["images"] or results["coverage_gaps"]:
+        if not results["images"] and not allow_no_images:
+            total = results.get("summary", {}).get("repository_image_count")
             raise CollectionError(
-                "Selected images have missing/inactive scan coverage, or none matched; no issue report written"
+                f"No images matched the scope ({total} images in the selected repositories); "
+                "set allow_no_images=true and allow_empty=true only after verifying scope",
+                "bad_config",
+            )
+        if results["coverage_gaps"]:
+            gaps = results["coverage_gaps"]
+            raise CollectionError(
+                f"{len(gaps)} of {len(results['images'])} selected images have missing or inactive "
+                f"scan coverage (first: {', '.join(gaps[:3])}); no issue report written"
             )
         if results["findings_missing_from_inventory"]:
             raise CollectionError(
@@ -481,8 +886,7 @@ def write_output(evidence, report, directory, allow_empty=False):
                 "bad_config",
             )
     meta = evidence["metadata"]
-    scope = json.dumps({"profile": meta["profile"], **results["scope"]}, sort_keys=True)
-    suffix = hashlib.sha256(scope.encode()).hexdigest()[:12]
+    suffix = scope_suffix(meta, results["scope"])
     name = "aws_inspector_ecr_report" if report else "aws_inspector_ecr_findings"
     target = re.sub(r"[^A-Za-z0-9._-]", "_", f"{meta['account_id']}_{meta['region']}_{suffix}")
     directory.mkdir(parents=True, exist_ok=True)
@@ -509,7 +913,8 @@ def write_output(evidence, report, directory, allow_empty=False):
                     for row in csv_rows(evidence)
                 )
             else:
-                json.dump(evidence, stream, indent=2)
+                # Compact separators: indentation alone inflates large evidence severalfold.
+                json.dump(evidence, stream, separators=(",", ":"))
             stream.close()
             try:
                 temporary.replace(dest)
@@ -530,17 +935,27 @@ def main(report=False):
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     load_dotenv()
     try:
-        repositories = read_list("AWS_INSPECTOR_REPOSITORIES")
-        tags = read_list("AWS_INSPECTOR_IMAGE_TAGS")
-        allow_empty = os.environ.get("AWS_INSPECTOR_ALLOW_EMPTY", "false").lower()
-        if allow_empty not in ("true", "false"):
-            raise CollectionError("allow_empty must be true or false", "bad_config")
-        evidence = collect(Aws(), repositories, tags, allow_partial=not report)
+        scope = read_scope()
+        allow_empty = read_bool("AWS_INSPECTOR_ALLOW_EMPTY")
+        allow_no_images = read_bool("AWS_INSPECTOR_ALLOW_NO_IMAGES")
+        if report and allow_no_images and not allow_empty:
+            raise CollectionError(
+                "allow_no_images=true requires allow_empty=true: a report with no images has no findings",
+                "bad_config",
+            )
+        evidence = collect(Aws(), scope, allow_partial=not report)
+        summary = evidence["results"]["summary"]
+        logging.info(
+            "Images: %s in the selected repositories, %s matched the scope",
+            summary["repository_image_count"],
+            summary["image_count"],
+        )
         dest = write_output(
             evidence,
             report,
             Path(os.environ.get("EVIDENCE_DIR", "./evidence")),
-            allow_empty == "true",
+            allow_empty,
+            allow_no_images,
         )
     except CollectionError as exc:
         report_failure(str(exc), exc.code)

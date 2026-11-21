@@ -1,5 +1,5 @@
 name: azure_rbac_role_assignments
-version: 0.4.2
+version: 0.4.3
 description: >-
   Lists who holds which Azure role at every scope of a subscription, flags over-broad and access-granting roles, and shows whether each grant is permanent or just-in-time through PIM.
 category: azure
@@ -192,7 +192,7 @@ evidence_set:
 
     Which grants are left out of scope?
     - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every grant is in scope
-    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no resource group or resource a role assignment or PIM-eligible assignment is made on, such as a mistyped name; null if patterns are set and a role-assignment list or the PIM-eligible assignments couldn't be read
+    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no resource group or resource a role assignment or PIM-eligible assignment is made on, such as a mistyped name; null if a role-assignment list or the PIM-eligible assignments couldn't be read
     - excluded_role_assignments — Number of role assignments left out of scope because a pattern matched the resource group or resource they are made on; each is listed under excluded with the pattern, and no other count includes them; null if a role-assignment list couldn't be read
     - excluded_eligible_role_assignments — Number of PIM-eligible assignments left out of scope the same way; null if they couldn't be read
     - in_scope_role_assignments — Number of role assignments read and in scope, at every scope (the same as all_scopes_total_role_assignments); null if a role-assignment list couldn't be read

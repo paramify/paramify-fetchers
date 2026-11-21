@@ -23,6 +23,7 @@ from pathlib import Path
 import pytest
 
 from framework import api
+from framework.envelope import is_enveloped
 from framework.contract import (
     ConfigField,
     Fetcher,
@@ -41,6 +42,7 @@ from framework.runner.executor import (
     merged_config,
     run_entry,
 )
+from framework.runner import manifest_loader
 from framework.secret_resolver import SecretResolutionError, UnsetSecretError
 
 # --------------------------------------------------------------------------- #
@@ -341,6 +343,24 @@ def test_effective_config_skips_an_unset_reference_like_the_runner(tmp_path, mon
                  "platforms": {"testcat": {"config": {"patterns": "qa.*"}}}}}
     [field] = api.effective_config(m, ["t_fetcher"], tmp_path, {"t_fetcher": fetcher}, {})["t_fetcher"]
     assert (field["value"], field["source"]) == ("qa.*", "platforms.testcat")
+
+
+def test_effective_config_keys_two_entries_of_one_fetcher_apart(tmp_path):
+    fetcher = make_fetcher(tmp_path, config_schema={"hosts": cfg("hosts", "HOSTS")})
+    m = {"run": {"fetchers": [{"use": "t_fetcher", "config": {"hosts": "first"}},
+                              {"use": "t_fetcher", "config": {"hosts": "second"}}]}}
+    view = api.effective_config(m, ["t_fetcher", "t_fetcher#1"], tmp_path, {"t_fetcher": fetcher}, {})
+    # The plain name is the first entry's key, the entry a write by fetcher name reaches.
+    assert [(k, [f["value"] for f in v]) for k, v in view.items()] == [
+        ("t_fetcher", ["first"]), ("t_fetcher#1", ["second"])]
+
+
+def test_validate_names_the_entry_an_error_is_about(tmp_path):
+    fetcher = make_fetcher(tmp_path, config_schema={"hosts": cfg("hosts", "HOSTS", required=True)})
+    m = {"run": {"fetchers": [{"use": "t_fetcher", "config": {"hosts": "h"}}, {"use": "t_fetcher"}]}}
+    errors = api.validate(m, REPO_ROOT, {"t_fetcher": fetcher}, {})
+    assert [e for e in errors if "'hosts'" in e] == [
+        f"t_fetcher#1: required config 'hosts' not set ({api.config_hint(fetcher, 'hosts')})"]
 
 
 LEAK_PROBE = "leak-probe-aaaaaaaa"
@@ -1111,3 +1131,395 @@ def test_shadowed_credentials_are_reported(tmp_path, monkeypatch):
     seen: list = []
     _emit_shadowed(shadowed, seen.append)
     assert "CLOUD_ACCESS_KEY_ID" in seen[0] and "CLOUD_PROFILE" in seen[0]
+
+
+# --------------------------------------------------------------------------- #
+# An output that overwrites an earlier one in the same run
+# --------------------------------------------------------------------------- #
+
+_CLOBBER_MESSAGE = ("overwrote demo_hello.json, which an earlier entry or target wrote in this run. "
+                    "Give each entry its own target, or remove the duplicate entry.")
+
+
+def test_a_second_entry_that_overwrites_the_first_entrys_file_fails(tmp_path):
+    m = {"run": {"output_dir": str(tmp_path / "evidence"),
+                 "fetchers": [{"use": "demo_hello"}, {"use": "demo_hello"}]}}
+    events: list = []
+
+    summary = api.run(m, REPO_ROOT, on_event=events.append)
+
+    first, second = summary["invocations"]
+    assert summary["ok"] is False
+    assert (first["entry_key"], first["exit_code"], first["outputs"]) == ("demo_hello", 0, ["demo_hello.json"])
+    assert second["entry_key"] == "demo_hello#1"
+    assert second["exit_code"] != 0 and second["outputs"] == []
+    assert second["overwritten"] == ["demo_hello.json"] and "overwritten" not in first
+    assert _CLOBBER_MESSAGE in second["stderr_tail"]
+    results = [e for e in events if e["event"] == "fetcher_result"]
+    assert "error" not in results[0]
+    assert results[1]["error"] == _CLOBBER_MESSAGE
+    assert results[1]["error_code"] == "output_overwritten"
+
+
+def _target_fetcher(tmp_path, file_name_expr):
+    fdir = tmp_path / "fetcher"
+    fdir.mkdir()
+    (fdir / "fetcher.py").write_text(
+        "import os\n"
+        f"name = {file_name_expr}\n"
+        "open(os.path.join(os.environ['EVIDENCE_DIR'], name), 'w').write('{}')\n"
+    )
+    return make_fetcher(fdir, supports_targets=True,
+                        target_schema={"region": TargetField(name="region", type="string", env="REGION")})
+
+
+def _two_regions():
+    return ManifestEntry(use="t_fetcher",
+                         targets=[TargetInstance(values={"region": r}, secrets={}) for r in ("a", "b")])
+
+
+def test_a_fan_out_that_writes_one_name_per_target_passes(tmp_path):
+    fetcher = _target_fetcher(tmp_path, "'out_' + os.environ['REGION'] + '.json'")
+
+    results = run_entry(fetcher, _two_regions(), tmp_path / "out")
+
+    assert [(r.exit_code, r.outputs, r.error) for r in results] == [
+        (0, ["out_a.json"], None), (0, ["out_b.json"], None)]
+
+
+def test_a_fan_out_that_writes_the_same_name_for_each_target_fails_the_second(tmp_path):
+    fetcher = _target_fetcher(tmp_path, "'out.json'")
+
+    first, second = run_entry(fetcher, _two_regions(), tmp_path / "out")
+
+    assert (first.exit_code, first.outputs, first.error) == (0, ["out.json"], None)
+    assert second.exit_code == 1 and second.outputs == []
+    assert second.error == ("overwrote out.json, which an earlier entry or target wrote in this run. "
+                            "Give each entry its own target, or remove the duplicate entry.")
+    assert second.error_code == "output_overwritten"
+    assert (first.overwritten, second.overwritten) == ([], ["out.json"])
+
+
+def test_a_file_a_later_target_overwrote_is_left_unwrapped(tmp_path):
+    # Wrapping runs after every target of an entry. Target a's result still names
+    # out.json, which now holds target b's data: wrapping it would label b's data
+    # as a's, with a's status. Left raw, the upload refuses it.
+    fetcher = _target_fetcher(tmp_path, "'out.json'")
+    out = tmp_path / "out"
+    results = run_entry(fetcher, _two_regions(), out)
+
+    api._wrap_results(results, fetcher, "RID", out)
+
+    assert not is_enveloped(json.loads((out / "out.json").read_text()))
+
+
+def test_files_of_a_clean_fan_out_are_wrapped(tmp_path):
+    fetcher = _target_fetcher(tmp_path, "'out_' + os.environ['REGION'] + '.json'")
+    out = tmp_path / "out"
+    results = run_entry(fetcher, _two_regions(), out)
+
+    api._wrap_results(results, fetcher, "RID", out)
+
+    for region in ("a", "b"):
+        doc = json.loads((out / f"out_{region}.json").read_text())
+        assert is_enveloped(doc) and doc["metadata"]["target"] == {"region": region}
+
+
+def test_two_fetchers_with_different_file_names_in_one_run_dir_pass(tmp_path):
+    out = tmp_path / "out"
+    for name in ("one", "two"):
+        fdir = tmp_path / name
+        fdir.mkdir()
+        (fdir / "fetcher.py").write_text(
+            f"import os\nopen(os.path.join(os.environ['EVIDENCE_DIR'], '{name}.json'), 'w').write('{{}}')\n")
+        [r] = run_entry(make_fetcher(fdir, name=name), ManifestEntry(use=name), out)
+        assert (r.exit_code, r.outputs, r.error) == (0, [f"{name}.json"], None)
+
+
+def test_deleting_an_earlier_output_fails_the_invocation(tmp_path):
+    out = tmp_path / "out"
+    out.mkdir()
+    (out / "earlier.json").write_text("{}")
+    fdir = tmp_path / "fetcher"
+    fdir.mkdir()
+    (fdir / "fetcher.py").write_text("import os\nos.remove(os.path.join(os.environ['EVIDENCE_DIR'], 'earlier.json'))\n")
+
+    [r] = run_entry(make_fetcher(fdir), ManifestEntry(use="t_fetcher"), out)
+
+    assert r.exit_code == 1 and r.outputs == []
+    assert r.error == ("deleted earlier.json, which an earlier entry or target wrote in this run. "
+                       "Give each entry its own target, or remove the duplicate entry.")
+
+
+def test_a_fetcher_that_fails_and_overwrites_keeps_its_exit_code_and_reason(tmp_path):
+    out = tmp_path / "out"
+    out.mkdir()
+    (out / "t_fetcher.json").write_text('{"earlier": true}')
+    fdir = tmp_path / "fetcher"
+    fdir.mkdir()
+    (fdir / "fetcher.py").write_text(_REPORTING_FETCHER)
+
+    [r] = run_entry(make_fetcher(fdir), ManifestEntry(use="t_fetcher"), out)
+
+    assert r.exit_code == 1 and r.outputs == []
+    assert r.error_code == "target_unreachable"
+    assert r.error.startswith("the real reason; overwrote t_fetcher.json, which an earlier entry")
+
+
+def test_validate_notes_two_entries_of_a_fetcher_with_no_targets(tmp_path):
+    m = {"run": {"output_dir": str(tmp_path / "evidence"),
+                 "fetchers": [{"use": "demo_hello"}, {"use": "demo_hello"}]}}
+
+    assert api.validate(m, REPO_ROOT) == []
+    assert api.validate_notes(m, REPO_ROOT) == [
+        "entries demo_hello and demo_hello#1 run the same fetcher with no targets; "
+        "they write the same files, so the second entry's run fails."]
+
+
+def test_validate_notes_nothing_for_one_entry_per_fetcher(tmp_path):
+    m = {"run": {"output_dir": str(tmp_path / "evidence"), "fetchers": [{"use": "demo_hello"}]}}
+
+    assert api.validate_notes(m, REPO_ROOT) == []
+
+
+# --------------------------------------------------------------------------- #
+# Concurrent targets (entry.concurrency)
+# --------------------------------------------------------------------------- #
+
+# Sleeps SLEEP_<REGION> seconds between recording its start and end, then writes
+# one file per target (or the same file, with SAME_NAME set) holding both times.
+_TIMED_FETCHER = """\
+import json, os, sys, time
+region = os.environ['REGION']
+start = time.monotonic()
+print('working on ' + region, flush=True)
+time.sleep(float(os.environ.get('SLEEP_' + region.upper(), '0')))
+name = 'out.json' if os.environ.get('SAME_NAME') else 'out_' + region + '.json'
+body = {'region': region, 'start': start, 'end': time.monotonic(), 'evidence_dir': os.environ['EVIDENCE_DIR']}
+open(os.path.join(os.environ['EVIDENCE_DIR'], name), 'w').write(json.dumps(body))
+"""
+
+
+def _timed_fetcher(tmp_path, sleeps, same_name=False, **overrides):
+    fdir = tmp_path / "fetcher"
+    fdir.mkdir()
+    (fdir / "fetcher.py").write_text(_TIMED_FETCHER)
+    # The runner passes only whitelisted env through; config fields carry the knobs.
+    schema = {f"sleep_{r}": cfg(f"sleep_{r}", f"SLEEP_{r.upper()}", default=str(s)) for r, s in sleeps.items()}
+    if same_name:
+        schema["same_name"] = cfg("same_name", "SAME_NAME", default="1")
+    return make_fetcher(fdir, supports_targets=True, config_schema=schema,
+                        target_schema={"region": TargetField(name="region", type="string", env="REGION")},
+                        **overrides)
+
+
+def _regions(*names, concurrency=1):
+    return ManifestEntry(use="t_fetcher", concurrency=concurrency,
+                         targets=[TargetInstance(values={"region": r}, secrets={}) for r in names])
+
+
+def test_concurrent_targets_overlap_and_keep_target_order(tmp_path, monkeypatch):
+    # The first target is the slowest, so it finishes last; its result still comes first.
+    fetcher = _timed_fetcher(tmp_path, {"a": 0.6, "b": 0.3, "c": 0.0})
+    out = tmp_path / "out"
+
+    results = run_entry(fetcher, _regions("a", "b", "c", concurrency=3), out)
+
+    assert [r.target for r in results] == [{"region": r} for r in "abc"]
+    assert [(r.exit_code, r.outputs, r.error) for r in results] == [
+        (0, [f"out_{r}.json"], None) for r in "abc"]
+    times = {r: json.loads((out / f"out_{r}.json").read_text()) for r in "abc"}
+    # Every target started before the slowest one finished.
+    assert max(t["start"] for t in times.values()) < times["a"]["end"]
+    assert [p.name for p in out.iterdir() if p.name.startswith(".")] == []
+
+
+def test_concurrency_one_runs_targets_one_after_another_in_the_run_dir(tmp_path, monkeypatch):
+    fetcher = _timed_fetcher(tmp_path, {"a": 0.2, "b": 0.0})
+    out = tmp_path / "out"
+
+    results = run_entry(fetcher, _regions("a", "b"), out)
+
+    assert [r.outputs for r in results] == [["out_a.json"], ["out_b.json"]]
+    a, b = (json.loads((out / f"out_{r}.json").read_text()) for r in "ab")
+    assert a["end"] <= b["start"]
+    assert a["evidence_dir"] == b["evidence_dir"] == str(out.resolve())
+
+
+def test_concurrent_targets_that_share_a_file_name_fail_the_later_target(tmp_path, monkeypatch):
+    # b finishes first, but a is the earlier target: b is the one that overwrote,
+    # and the file holds b's data, as a serial run would leave it.
+    fetcher = _timed_fetcher(tmp_path, {"a": 0.3, "b": 0.0}, same_name=True)
+    out = tmp_path / "out"
+
+    first, second = run_entry(fetcher, _regions("a", "b", concurrency=2), out)
+
+    assert (first.exit_code, first.outputs, first.overwritten, first.error) == (0, ["out.json"], [], None)
+    assert second.exit_code == 1 and second.outputs == [] and second.overwritten == ["out.json"]
+    assert second.error_code == "output_overwritten"
+    assert second.error == ("overwrote out.json, which an earlier entry or target wrote in this run. "
+                            "Give each entry its own target, or remove the duplicate entry.")
+    assert json.loads((out / "out.json").read_text())["region"] == "b"
+
+
+def test_concurrent_target_overwriting_an_earlier_entrys_file_fails(tmp_path, monkeypatch):
+    fetcher = _timed_fetcher(tmp_path, {"a": 0.0, "b": 0.0})
+    out = tmp_path / "out"
+    out.mkdir()
+    (out / "out_b.json").write_text('{"earlier": true}')
+
+    first, second = run_entry(fetcher, _regions("a", "b", concurrency=2), out)
+
+    assert (first.exit_code, first.outputs) == (0, ["out_a.json"])
+    assert (second.exit_code, second.outputs, second.overwritten) == (1, [], ["out_b.json"])
+
+
+def test_concurrent_target_writing_a_file_where_an_earlier_one_wrote_a_dir_fails(tmp_path, monkeypatch):
+    # A serial fetcher could not open the directory sub/out_b.json as a file, so it would fail.
+    fdir = tmp_path / "fetcher"
+    fdir.mkdir()
+    (fdir / "fetcher.py").write_text(
+        "import os\n"
+        "sub = os.path.join(os.environ['EVIDENCE_DIR'], 'sub')\n"
+        "os.makedirs(sub, exist_ok=True)\n"
+        "open(os.path.join(sub, 'out_' + os.environ['REGION'] + '.json'), 'w').write('{}')\n")
+    fetcher = make_fetcher(fdir, supports_targets=True,
+                           target_schema={"region": TargetField(name="region", type="string", env="REGION")})
+    out = tmp_path / "out"
+    (out / "sub" / "out_b.json").mkdir(parents=True)
+
+    first, second = run_entry(fetcher, _regions("a", "b", concurrency=2), out)
+
+    assert (first.exit_code, first.error) == (0, None)
+    assert second.exit_code == 1
+    assert "wrote sub/out_b.json, which an earlier entry or target wrote in this run as a different kind of file" in second.error
+    assert (out / "sub" / "out_a.json").is_file() and (out / "sub" / "out_b.json").is_dir()
+
+
+def test_concurrent_issue_report_outputs_are_named_relative_to_the_run_dir(tmp_path, monkeypatch):
+    fetcher = _timed_fetcher(tmp_path, {"a": 0.0, "b": 0.0}, kind="issue_report")
+    out = tmp_path / "out"
+
+    results = run_entry(fetcher, _regions("a", "b", concurrency=2), out)
+
+    assert [r.outputs for r in results] == [["issue-reports/out_a.json"], ["issue-reports/out_b.json"]]
+    assert sorted(p.name for p in (out / "issue-reports").iterdir()) == ["out_a.json", "out_b.json"]
+
+
+def test_concurrent_log_lines_name_their_target(tmp_path, monkeypatch):
+    fetcher = _timed_fetcher(tmp_path, {"a": 0.0, "b": 0.0})
+    lines: list = []
+
+    run_entry(fetcher, _regions("a", "b", concurrency=2), tmp_path / "out", on_line=lines.append)
+
+    assert sorted(lines) == ["[region=a] working on a", "[region=b] working on b"]
+
+
+def test_a_concurrent_target_that_cannot_be_set_up_fails_in_its_place(tmp_path, monkeypatch):
+    fetcher = _timed_fetcher(tmp_path, {"a": 0.0})
+    fetcher.target_schema["region"] = TargetField(name="region", type="string", env="REGION", required=True)
+    entry = ManifestEntry(use="t_fetcher", concurrency=2, targets=[
+        TargetInstance(values={"region": "a"}, secrets={}), TargetInstance(values={}, secrets={})])
+
+    ok, failed = run_entry(fetcher, entry, tmp_path / "out")
+
+    assert (ok.exit_code, ok.outputs) == (0, ["out_a.json"])
+    assert (failed.exit_code, failed.error_code, failed.outputs) == (255, "runner_setup_failed", [])
+
+
+@pytest.mark.parametrize("entry_extra, ok", [
+    ({"concurrency": 4}, True),
+    ({"concurrency": 32}, True),
+    ({"concurrency": 0}, False),
+    ({"concurrency": 33}, False),
+    ({"concurrency": "4"}, False),
+])
+def test_manifest_schema_bounds_concurrency(tmp_path, entry_extra, ok):
+    m = {"run": {"output_dir": str(tmp_path), "fetchers": [{"use": "demo_hello", **entry_extra}]}}
+
+    assert (api.validate(m, REPO_ROOT) == []) is ok
+
+
+def test_parse_manifest_reads_concurrency():
+    parsed = manifest_loader.parse_manifest({"run": {"fetchers": [{"use": "x", "concurrency": 6}, {"use": "y"}]}})
+
+    assert [e.concurrency for e in parsed.entries] == [6, 1]
+
+
+def test_validate_notes_concurrency_the_runner_ignores(tmp_path):
+    m = {"run": {"output_dir": str(tmp_path), "fetchers": [
+        {"use": "demo_hello", "concurrency": 4},
+        {"use": "aws_acm_certificate_status", "concurrency": 4, "targets": [{"region": "us-east-1"}]},
+        {"use": "aws_acm_certificate_status", "concurrency": 4, "targets": [{"region": "us-east-1"}, {"region": "us-west-2"}]},
+    ]}}
+
+    notes = api.validate_notes(m, REPO_ROOT)
+
+    assert "demo_hello: concurrency 4 has no effect; the fetcher takes no targets" in notes
+    assert "aws_acm_certificate_status: concurrency 4 has no effect with fewer than two targets" in notes
+    assert not any(n.startswith("aws_acm_certificate_status#1: concurrency") for n in notes)
+
+
+# A child process runs the fan-out, so the test can signal it the way a terminal
+# or a container stop would. Each fetcher records its pid, then sleeps far past
+# the test's own deadline: only a kill ends it in time.
+_SIGNALLED_RUN = """\
+import sys
+from pathlib import Path
+root, tmp, concurrency = Path(sys.argv[1]), Path(sys.argv[2]), int(sys.argv[3])
+sys.path[:0] = [str(root), str(root / 'tests')]
+import test_executor as te
+from framework.runner.executor import run_entry, sigterm_exits
+fdir = tmp / 'fetcher'
+fdir.mkdir()
+(fdir / 'fetcher.py').write_text(
+    "import os, time\\n"
+    f"open(os.path.join({str(tmp / 'pids')!r}, str(os.getpid())), 'w').close()\\n"
+    "time.sleep(60)\\n"
+)
+fetcher = te.make_fetcher(fdir, supports_targets=True, target_schema={
+    'region': te.TargetField(name='region', type='string', env='REGION')})
+with sigterm_exits():
+    run_entry(fetcher, te._regions('a', 'b', 'c', 'd', concurrency=concurrency), tmp / 'out')
+"""
+
+
+def _alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    return True
+
+
+@pytest.mark.skipif(not hasattr(os, "killpg"), reason="process groups are POSIX")
+@pytest.mark.parametrize("signum", ["SIGINT", "SIGTERM"])
+@pytest.mark.parametrize("concurrency", [1, 2])
+def test_a_signalled_run_stops_its_fetchers_and_starts_no_more(tmp_path, signum, concurrency):
+    import signal
+    import subprocess
+    import sys
+    import time
+
+    (tmp_path / "pids").mkdir()
+    script = tmp_path / "run.py"
+    script.write_text(_SIGNALLED_RUN)
+    proc = subprocess.Popen([sys.executable, str(script), str(REPO_ROOT), str(tmp_path), str(concurrency)])
+    try:
+        deadline = time.monotonic() + 20
+        while len(list((tmp_path / "pids").iterdir())) < concurrency:
+            assert time.monotonic() < deadline, "the fetchers never started"
+            time.sleep(0.05)
+        proc.send_signal(getattr(signal, signum))
+        # An unhandled Ctrl-C ends Python by SIGINT again; SIGTERM ends it through SystemExit(143).
+        assert proc.wait(timeout=10) == (-signal.SIGINT if signum == "SIGINT" else 128 + signal.SIGTERM)
+    finally:
+        proc.kill()
+    pids = [int(p.name) for p in (tmp_path / "pids").iterdir()]
+    # Only the targets running at the signal ever started, and none outlived the run.
+    assert len(pids) == concurrency
+    deadline = time.monotonic() + 5
+    while any(_alive(pid) for pid in pids) and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert not any(_alive(pid) for pid in pids)
+    assert not list((tmp_path / "out").glob(".paramify-staging-*"))

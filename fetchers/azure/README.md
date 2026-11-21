@@ -1,7 +1,7 @@
 # Azure
 
 Azure fetchers pull evidence from your Azure subscriptions, Microsoft Entra ID and
-Azure DevOps with Microsoft's Python SDKs and REST APIs. All 98 fetchers are
+Azure DevOps with Microsoft's Python SDKs and REST APIs. All 104 fetchers are
 read-only and sign in with azure-identity's `DefaultAzureCredential`, so no key file
 or stored secret is required. Install the SDKs with `pip install -e '.[azure]'` (see
 [Install](../../README.md#install)).
@@ -68,6 +68,7 @@ otherwise.
 
 | Access | Needed by | If it is missing |
 |---|---|---|
+| Azure Kubernetes Service Cluster User Role and Azure Kubernetes Service RBAC Reader on each cluster, and a network path to its API server | `azure_aks_workload_security` | The cluster's workload fields read null and the run fails |
 | A custom role with `Microsoft.Web/sites/host/listkeys/action` and `Microsoft.Web/sites/config/list/action` | `azure_function_app_configuration` | Access keys and app settings read `not_authorized` per app; the run succeeds |
 | `Microsoft.Web/sites/config/list/action` (optional) | `azure_app_service_backups` | The custom backup configuration reads `not_authorized`; the run succeeds |
 | Key Vault Reader (RBAC vaults), or an access policy with key List and Get Rotation Policy (optional) | `azure_key_vault_key_rotation` | The vault reports `data_plane_status: inaccessible`; rotation policies still come from the management plane |
@@ -196,6 +197,24 @@ Ready-to-edit manifests:
 - [`examples/azure_keys_and_monitoring.yaml`](../../examples/azure_keys_and_monitoring.yaml)
   — Key Vault, Activity Log export and alerts, Recovery Services vaults.
 
+### Limit mixed Entra reads to one subscription
+
+`azure_entra_emergency_accounts` and `azure_entra_dormant_identities` accept
+`config.target_subscription_only: true`. Supply an explicit `subscription_id`
+target and pass `AZURE_TENANT_ID` through the manifest's Azure authentication
+configuration. The option defaults to false.
+
+With it enabled, ARM requests and continuation URLs stay in the selected
+subscription. The subscription tenant must match `AZURE_TENANT_ID`, and Graph's
+organization must confirm the same tenant before further directory reads.
+Missing, denied or mismatched tenant reads remain failures. Graph data remains
+tenant-wide; selecting a subscription does not filter that directory population.
+
+The shared Graph clients reject continuations outside the configured HTTPS
+origin and refuse redirects. The selected-subscription ARM transports also
+refuse redirects. These checks do not grant access or replace read-only IAM.
+Unsupported cloud APIs and licensing gaps remain visible in the original result.
+
 ## Smoke test
 
 ```bash
@@ -221,8 +240,8 @@ Identity and access:
 | `azure_entra_authentication_policy` | Allowed sign-in methods (weak and phishing-resistant flagged), registration campaign, security defaults, password protection, the Entra ID licence tier, the CAs trusted for certificate sign-in (expired, without a CRL), and whether the users X.509 targets are matched to certificates or still reached by weaker methods |
 | `azure_entra_conditional_access_policies` | Conditional Access policies: state (on, report-only, off), included and excluded users, groups, roles and apps, conditions, grant and session controls |
 | `azure_entra_mfa_status` | Each user's enabled state, last sign-in and MFA capability, with coverage for admins, members and guests |
-| `azure_entra_privileged_roles` | Activated directory roles and their holders, with Global Administrators counted and tenant-wide admin roles flagged |
-| `azure_entra_pim_assignments` | PIM for directory roles: who is eligible for each role, active assignments marked permanent, time-bound or activated, and each privileged role's activation rules (MFA or authentication context, justification, approval and approvers, maximum hours), with roles that allow permanent assignments flagged |
+| `azure_entra_privileged_roles` | Activated directory roles and their holders, with Global Administrators counted, tenant-wide admin roles flagged, and holders checked against an optional approved list |
+| `azure_entra_pim_assignments` | PIM for directory roles: who is eligible for each role, active assignments marked permanent, time-bound or activated, and each privileged role's activation rules (MFA or authentication context, justification, approval and approvers, maximum hours), with roles that allow permanent assignments flagged and eligible holders checked against an optional approved list |
 | `azure_entra_dormant_identities` | Users and service principals holding a directory role or an Azure role in the subscription, with their last sign-in: dormant, never-used, guest and deleted identities flagged |
 | `azure_entra_emergency_accounts` | Users that Conditional Access MFA policies exclude and whether another policy still covers them, and each emergency account's exclusions, last sign-in, phishing-resistant methods (multi-factor certificates included) and the Sentinel or Azure Monitor alert rules that name it |
 | `azure_entra_groups` | Groups with their members and owners: kind, whether they can hold directory roles, and dynamic (paused flagged), assigned or synced membership, with groups that have no owner, only disabled owners, guests or disabled users flagged |
@@ -230,6 +249,7 @@ Identity and access:
 | `azure_entra_risky_users` | Users Entra ID Protection flags as risky, the privileged directory roles each holds directly, and privileged users with open risk who can still sign in; groups holding a privileged role are counted, not expanded |
 | `azure_entra_access_reviews` | Access review series: what each reviews (group membership, app assignment, directory role or access package), recurrence, default decision, auto-apply and reviewers, with series that aren't monthly, deny-by-default and auto-applying flagged, and what each active series' latest cycle decided and applied |
 | `azure_rbac_role_assignments` | Role assignments at the subscription and above, and separately below it, with Owner, Contributor, User Access Administrator and RBAC Administrator flagged; whether each is permanent, time-bound or activated through PIM, PIM-eligible assignments, and the over-broad roles' PIM activation settings |
+| `azure_pim_activations` | PIM activity on the subscription: every role assignment schedule request Azure still holds (self-activations, admin assignments, extensions, renewals and removals) with requester, role, scope, duration, justification, ticket, approval and outcome, and the activations in force now, with activations of the over-broad roles and requests without a justification, ticket or approval counted |
 | `azure_rbac_custom_roles` | Custom role definitions with their full permission sets, flagged for wildcards and for permissions that allow privilege escalation |
 | `azure_managed_identity_configuration` | Managed identities: attached resources, federated credentials, Azure roles judged by their permissions, and Microsoft Graph app permissions |
 
@@ -263,6 +283,7 @@ Compute, containers and apps:
 |---|---|
 | `azure_vm_hardening_status` | VMs and scale sets: Trusted Launch, encryption at host, managed disks, SSH-key-only Linux sign-in, source image |
 | `azure_aks_cluster_configuration` | AKS control planes: private cluster or authorized IP ranges, Kubernetes RBAC and Entra integration, local accounts, workload identity, network policy |
+| `azure_aks_workload_security` | AKS workloads read from each cluster's Kubernetes API: container security contexts (non-root, privilege escalation, read-only root filesystem, capabilities, privileged), host namespaces and host paths, Pod Security Admission levels per namespace, and network policies with default-deny and uncovered workloads |
 | `azure_container_registry_configuration` | Container registries: admin account, anonymous pull, network access and private endpoints |
 | `azure_container_workloads_configuration` | Container Apps environments, apps and jobs, and Container Instances: exposure, encryption between containers, identities, logging |
 | `azure_app_service_configuration` | Web apps: HTTPS-only, minimum TLS, FTP state, client certificates, App Service Authentication, managed identity, network access |
@@ -296,9 +317,11 @@ Backup and recovery:
 | Fetcher | Evidence |
 |---|---|
 | `azure_backup_recovery_status` | Recovery Services vaults: backup policies and retention, protected items and their last backup |
+| `azure_backup_vault_protection` | Backup vaults: whether each backup instance has a recent recovery point, how long each policy keeps backups, and the vault's soft delete, immutability and geo-redundant storage |
 | `azure_app_service_backups` | Whether each web app is actually backed up: newest restore point, gaps, custom backup schedule and history |
 | `azure_sql_managed_instance_backups` | SQL Managed Instance backup storage redundancy, zone redundancy, retention and failover groups |
 | `azure_service_availability` | When each App Service app and SQL Managed Instance was unavailable over the last 30 days, for how long and why, against the recovery time objective; Front Door origin probe failures and each app's health-check results |
+| `azure_zone_redundancy` | Whether each compute, network, storage, database and backup resource is spread across availability zones, the regions it runs in, and whether those regions support zones |
 
 Logging and monitoring:
 
@@ -336,6 +359,7 @@ Defender for Cloud and Azure Policy:
 |---|---|
 | `azure_defender_plans` | Defender for Cloud plans: tier, sub-plan, enablement and coverage |
 | `azure_defender_assessments` | Every Defender for Cloud assessment result per resource, with status and severity |
+| `azure_defender_vulnerability_findings` | Defender for Cloud CVE findings on each container image and server: open findings by severity, how many have a fix, latest scan, and per finding the CVE, CVSS score, package, fixed version and age since the CVE was published |
 | `azure_defender_regulatory_compliance` | Regulatory compliance standards, their controls and assessments, with passed, failed and skipped counts |
 | `azure_policy_assignments` | Policy assignments in effect, own and inherited: enforcement mode, scope, exclusions, and whether each actually enforces |
 | `azure_policy_compliance` | Non-compliant resources and policies, evaluation details, and remediation tasks with their deployments |

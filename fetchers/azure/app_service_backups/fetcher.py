@@ -612,6 +612,8 @@ def collect(subscription_id, cred, collector: Collector, settings: dict, now: da
     }
     client = web_client(subscription_id, cred, collector)
     if client is None:
+        if scope is not None:
+            scope.mark_unread()
         return [], None, exclusions, []
     sites = list_sites(client, collector)
 
@@ -620,6 +622,8 @@ def collect(subscription_id, cred, collector: Collector, settings: dict, now: da
         "resourcegraph.resources (web sites and slots)", lambda: query_all(graph, subscription_id, SITES_QUERY)
     )
     rows = None if result is None else result["rows"]
+    if scope is not None and (sites is None or rows is None):
+        scope.mark_unread()
     if scope:
         sites, rows, out = exclude_sites(scope, sites, rows)
         if excluded is not None:
@@ -693,6 +697,8 @@ def main() -> int:
                 "ambient Azure credential that can list subscriptions)"
             ),
         )
+    if not (subscription_id and cred is not None):
+        scope.mark_unread()
     scope.warn_unmatched(logger)
 
     not_authorized = sum(1 for a in apps if a["custom_backup_configuration_status"] == CONFIG_NOT_AUTHORIZED)

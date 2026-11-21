@@ -14,6 +14,10 @@ secrets:
   - name: token
     env: SPLUNK_TOKEN
     per_target: true
+    description: >-
+      Splunk Enterprise authentication token for a collection user with the role in
+      fetchers/splunk/README.md (Settings → Tokens → New Token, once token
+      authentication is on).
 
 config_schema:
   max_silence_minutes:

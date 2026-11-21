@@ -1,0 +1,26 @@
+key: keycloak_users_privileged_have_second_factor
+name: 'Keycloak: Every Privileged Local User Has a Second Factor'
+type: AUTOMATED
+role: configuration
+source: community
+statement: >
+  No enabled user holding a privileged role, a realm-management admin role or a realm role the
+  organization designates, lacks an OTP or WebAuthn authenticator in Keycloak, counting only users not
+  linked to an external identity provider (privileged_local_users_without_second_factor is 0). Fails
+  while any privileged user's roles, links or authenticators are unread. A registered authenticator
+  shows the user can sign in with it, not that the sign-in flow requires it. Users brokered from an
+  external identity provider are counted apart, since their second factor is not visible here. Does
+  not check whether the collection run succeeded.
+
+regex: '"privileged_local_users_without_second_factor":\s*(?<privileged_local_users_without_second_factor>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # privileged_local_users_without_second_factor
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-KEYCLOAK-USERS-AND-ROLES

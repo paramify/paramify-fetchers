@@ -512,7 +512,7 @@ def test_a_half_written_input_is_missing_not_compared(tmp_path):
 ])
 def test_an_inventory_input_the_runner_marked_incomplete_is_not_complete(tmp_path, payload, state, reason):
     left = input_fetcher(tmp_path, "left")
-    right = input_fetcher(tmp_path, "right", raw=json.dumps(payload), extra="kind: inventory\n")
+    right = input_fetcher(tmp_path, "right", raw=json.dumps(payload), extra="kind: inventory\npipeline: {type: inventory, id_scheme: t-id}\n")
     cmp = template_comparator(tmp_path, left, right)
     _, run_dir, _ = run(tmp_path, manifest(tmp_path, left, right, cmp))
 
@@ -620,7 +620,8 @@ def test_effective_config_gives_a_comparator_only_its_own_fields(tmp_path):
     assert [(f["name"], f["value"], f["source"]) for f in fields] == [("environments", "production", "entry")]
 
 
-def test_doctor_leaves_out_a_comparators_category(tmp_path):
+def test_doctor_leaves_out_a_comparators_category(tmp_path, monkeypatch):
+    monkeypatch.setenv("PYTHON_DOTENV_DISABLED", "1")  # doctor loads `.env`; never the developer's own
     src = input_fetcher(tmp_path, "src")
     (tmp_path / "fetchers" / "_categories").mkdir(parents=True)
     (tmp_path / "fetchers" / "_categories" / "cmpcat.yaml").write_text("requires:\n  tools:\n    - cmpcat-cli\n")

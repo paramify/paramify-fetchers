@@ -48,6 +48,9 @@ secrets:
 - name: api_token
   env: GITLAB_API_TOKEN
   per_target: true
+  description: >-
+    GitLab project access token with read_api (plus read_repository if your instance
+    needs it) and the Reporter role (project Settings → Access Tokens).
 
 ksis:
   - KSI-CMT-LMC

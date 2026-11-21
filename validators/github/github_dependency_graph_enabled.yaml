@@ -1,0 +1,19 @@
+key: github_dependency_graph_enabled
+name: GitHub Dependency Graph Enabled
+type: AUTOMATED
+role: configuration
+source: community
+statement: >-
+  The dependency graph is on for every repository in scope, so Dependabot has dependencies to match advisories
+  against.
+regex: '"repositories_dependency_graph_disabled":\s*\[\s*\]'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+- regexOperation:
+    type: MATCH_COUNT
+  criteria: NOT_EQUALS
+  value:
+    type: CUSTOM_TEXT
+    customText: '0'
+evidence_sets:
+- EVD-GITHUB-DEPENDABOT-ALERTS
