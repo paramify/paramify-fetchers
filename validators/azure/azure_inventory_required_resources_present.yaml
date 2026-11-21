@@ -2,6 +2,7 @@ key: azure_inventory_required_resources_present
 name: 'Azure Resource Inventory: Every Required Resource Is Present'
 type: AUTOMATED
 role: completeness
+source: community
 statement: >
   Every id in the required_resources list is itself in the subscription's in-scope Resource Graph
   inventory, or for a resource group id among its in-scope resource groups (required_resources_missing

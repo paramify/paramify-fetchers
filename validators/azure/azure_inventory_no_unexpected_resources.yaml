@@ -2,6 +2,7 @@ key: azure_inventory_no_unexpected_resources
 name: 'Azure Resource Inventory: No Unexpected Resources'
 type: AUTOMATED
 role: completeness
+source: community
 statement: >
   Every in-scope resource and resource group, an empty group included, is either required or
   matched by an allowed_resources pattern (unexpected_resources is 0), and the inventory is not
