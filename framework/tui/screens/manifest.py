@@ -9,7 +9,7 @@ modal -> api.* mutator -> rebuild, mirroring the Bagels write path.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence
 
 import yaml
 from rich.console import RenderableType
@@ -145,6 +145,8 @@ class ManifestPanel(ButtonRowNav, Vertical):
         self._config_view: Dict[str, List[dict]] = {}
         # api.generate_env()'s variables: names, notes and whether each is set, never a value
         self._env_vars: List[dict] = []
+        # The default upload.yaml, parsed once per rebuild for the detail's frequency row.
+        self._upload_cfg: Optional[dict] = None
         self.query_one("#manifest-entries-panel", Vertical).border_title = "fetchers"
         if self._has_detail:
             self.query_one("#manifest-detail-scroll", VerticalScroll).border_title = "detail"
@@ -208,6 +210,7 @@ class ManifestPanel(ButtonRowNav, Vertical):
             self.post_message(ManifestChanged(set()))
             return
 
+        self._upload_cfg = None  # read again, at most once, for this rebuild's details
         out = self._run().get("output_dir", "") or ""
         odi = self.query_one("#manifest-output-dir", Input)
         if odi.value != out:
@@ -337,7 +340,10 @@ class ManifestPanel(ButtonRowNav, Vertical):
         errs = self._bucket_errors(self._errors, self._entries()).get(key, [])
         freq = None
         if d and d.get("evidence_set"):
-            freq = api.entry_frequency(self._manifest, entry, d["evidence_set"].get("frequency"), self.app.root_path)
+            if self._upload_cfg is None:
+                self._upload_cfg = api.default_upload_values(self.app.root_path)
+            freq = api.entry_frequency(self._manifest, entry, d["evidence_set"].get("frequency"),
+                                       self.app.root_path, upload_cfg=self._upload_cfg)
         return render.entry_detail(d, entry, errs, self._config_view.get(key), frequency=freq)
 
     @staticmethod
@@ -683,8 +689,10 @@ class ManifestPanel(ButtonRowNav, Vertical):
         if m is None:
             return
         current = self._run().get("schedule") or {}
+        # Only a value the select offers can be shown (an older NOT_SET can't); unchanged, it stays.
+        shown = current.get("every") if current.get("every") in dict(FREQUENCY_CHOICES) else None
         specs = [
-            {"key": "every", "label": "every", "kind": "select", "value": current.get("every"),
+            {"key": "every", "label": "every", "kind": "select", "value": shown,
              "options": [(words, value) for value, words in FREQUENCY_CHOICES], "placeholder": "no schedule",
              "required": False, "help": ""},
         ]
@@ -693,8 +701,8 @@ class ManifestPanel(ButtonRowNav, Vertical):
             if result is None:
                 return
             values = result.get("frequency") or {}
-            every = values.get("every")
-            if every == current.get("every"):
+            every = values.get("every") or None
+            if every == shown:
                 return
             api.set_schedule(m, every, current.get("at") if every else None)
             self._autosave()
@@ -833,6 +841,7 @@ class ManifestPanel(ButtonRowNav, Vertical):
             # no_request offers no `direct`). The save leaves a key the form hides alone.
             paramify_specs = [s for s in paramify_specs if s["key"] != "delivery"]
         shown = [s["key"] for s in paramify_specs]
+        opened = {s["key"]: s["value"] for s in paramify_specs}
         groups = {"config": config_specs, "secrets": secret_specs, "paramify": paramify_specs}
 
         def done(result: Optional[dict]) -> None:
@@ -845,7 +854,7 @@ class ManifestPanel(ButtonRowNav, Vertical):
                     api.set_fetcher_config(m, use, k, v, entry_key=ekey)
             for name, env in (result.get("secrets") or {}).items():
                 api.set_secret(m, use, name, env, entry_key=ekey)
-            self._set_entry_paramify(entry, result.get("paramify") or {}, shown)
+            self._set_entry_paramify(entry, result.get("paramify") or {}, shown, opened)
             self._autosave()
             self.rebuild()
             self.notify(f"Updated {use}.")
@@ -871,13 +880,18 @@ class ManifestPanel(ButtonRowNav, Vertical):
         entries = self._entries()
         return list(zip(entry_keys([ManifestEntry(use=str(e.get("use", "?"))) for e in entries]), entries))
 
-    def _set_entry_paramify(self, entry: dict, values: dict, shown: Sequence[str]) -> None:
+    def _set_entry_paramify(self, entry: dict, values: dict, shown: Sequence[str],
+                            opened: Optional[Dict[str, Any]] = None) -> None:
         """Write the entry's `paramify` block from the form; a blank field removes its key.
 
         Only the keys the form `shown` are touched: one it hid keeps its value.
+        A field still at the value it `opened` with is left alone too, so a value
+        the form can't show (an older frequency NOT_SET) isn't removed unasked.
         """
         block = dict(entry.get("paramify") or {})
         for key in shown:
+            if opened is not None and key in opened and (values.get(key) or None) == (opened[key] or None):
+                continue
             if values.get(key):
                 block[key] = values[key]
             else:

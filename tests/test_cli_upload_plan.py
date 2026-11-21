@@ -636,9 +636,10 @@ def test_set_frequency_for_one_fetcher_and_removing_it(tmp_path):
     assert read(path)["run"]["fetchers"][0]["paramify"] == {}
 
 
-def test_set_frequency_refuses_an_unknown_value(tmp_path):
+@pytest.mark.parametrize("value", ["hourly", "NOT_SET"])
+def test_set_frequency_refuses_an_unknown_value(tmp_path, value):
     path = manifest_file(tmp_path, a_fetcher())
-    res = cli("manifest", "set-frequency", str(path), "hourly")
+    res = cli("manifest", "set-frequency", str(path), value)
     assert res.exit_code == 1 and "isn't a frequency" in res.output and "DAILY" in res.output
     assert "schedule" not in read(path)["run"]
 

@@ -12,7 +12,11 @@ from datetime import date
 from pathlib import Path
 from typing import Any, Dict, Literal, Optional
 
-from framework.contract import DEFAULT_EVIDENCE_FREQUENCY
+from framework.contract import (
+    DEFAULT_EVIDENCE_FREQUENCY,
+    EVIDENCE_FREQUENCIES,
+    FREQUENCY_WORDS,
+)
 from framework.run_files import RESERVED_RUN_FILES, is_evidence_file
 from framework.sync.state import RunState
 
@@ -70,6 +74,8 @@ class EntryDesired:
     # Where evidence_set["frequency"] came from (see resolve_frequency). Only the
     # fetcher's own default is not a choice, so only it never changes a set that exists.
     frequency_source: str = "fetcher"
+    # Why the chosen frequency can't be sent (a bad upload.yaml value); None when it can.
+    frequency_problem: Optional[str] = None
 
 
 def pipeline_of(metadata: Dict) -> Optional[Dict[str, Any]]:
@@ -117,11 +123,26 @@ def resolve_frequency(
 ) -> tuple[str, str]:
     """An evidence set's frequency and where it came from: the manifest entry's
     `paramify.frequency`, upload.yaml's `overrides.<fetcher>.frequency`, upload.yaml's
-    `defaults.frequency`, the manifest's `run.schedule.every`, else the fetcher's own."""
+    `defaults.frequency`, the manifest's `run.schedule.every`, else the fetcher's own.
+    Values are upper-cased (`daily` is DAILY), not checked: see frequency_problem."""
     for value, source in zip((entry, fetcher_override, upload_default, schedule_every), FREQUENCY_SOURCES):
         if value:
-            return str(value), source
+            return str(value).strip().upper(), source
     return str(declared or DEFAULT_EVIDENCE_FREQUENCY), "fetcher"
+
+
+def frequency_problem(frequency: str, source: str, use: str, written: Any = None) -> Optional[str]:
+    """Why a frequency resolve_frequency chose from upload.yaml can't be sent, else None.
+
+    The manifest's values are checked by its schema; upload.yaml has none, so a
+    typo there would reach every evidence set the upload touches. `written` is
+    the value as upload.yaml has it, for the message.
+    """
+    if source not in ("upload.yaml", "upload.yaml defaults") or frequency in EVIDENCE_FREQUENCIES:
+        return None
+    where = f"overrides.{use}.frequency" if source == "upload.yaml" else "defaults.frequency"
+    return (f"upload.yaml sets {where}: {written if written is not None else frequency}, which isn't a "
+            f"frequency; use one of {', '.join(EVIDENCE_FREQUENCIES)}")
 
 
 def artifact_content(envelope: Dict, mode: str) -> bytes:
@@ -202,6 +223,18 @@ _SETTING_DEFAULTS = (
 )
 
 
+def _upper(value: Any) -> Optional[str]:
+    return (str(value).strip().upper() or None) if value else None
+
+
+def _every(schedule: Any) -> Optional[str]:
+    return _upper(schedule.get("every")) if isinstance(schedule, dict) else None
+
+
+def _frequency_label(value: Optional[str]) -> str:
+    return FREQUENCY_WORDS.get(value, value) if value else "none"
+
+
 def _stack_label(cfg: Dict) -> str:
     return str(cfg.get("stack_name") or cfg.get("stack") or "none")
 
@@ -212,6 +245,8 @@ def settings_notes(
     *,
     stack_override: Optional[str] = None,
     owner_override: Optional[str] = None,
+    run_schedule: Optional[Dict] = None,
+    manifest_schedule: Optional[Dict] = None,
 ) -> list[str]:
     """One plan note per setting the manifest now sets differently from the run.
 
@@ -221,8 +256,20 @@ def settings_notes(
     The run's settings still win: these notes only say that they differ.
     The stack is not compared when `--stack` was given, since that wins over both;
     the owner likewise with `--owner`.
+
+    `run_schedule` and `manifest_schedule` are the run's and the manifest's
+    `run.schedule`: only `every` is compared, since it is the frequency of each
+    set no entry or upload.yaml sets. An upload of an older run changes sets back
+    to the frequency it recorded, so a difference is noted like the stack's.
     """
     notes: list[str] = []
+    then_every = _every(run_schedule)
+    later_every = _every(manifest_schedule)
+    if then_every != later_every:
+        notes.append(
+            f"the manifest now sets frequency {_frequency_label(later_every)}; this run was made with "
+            f"{_frequency_label(then_every)}. Run the manifest again to use it."
+        )
     for key, run_cfg in run_settings.items():
         now = manifest_settings.get(key)
         if not isinstance(run_cfg, dict) or now is None:
@@ -246,6 +293,12 @@ def settings_notes(
             notes.append(
                 f"the manifest now sets owner {now.get('owner') or 'none'} for {key}; this run was made with "
                 f"{run_cfg.get('owner') or 'none'}. {fix}"
+            )
+        then_freq, later_freq = _upper(run_cfg.get("frequency")), _upper(now.get("frequency"))
+        if then_freq != later_freq:
+            notes.append(
+                f"the manifest now sets frequency {_frequency_label(later_freq)} for {key}; this run was made with "
+                f"{_frequency_label(then_freq)}. Run the manifest again to use it."
             )
         for field, default in _SETTING_DEFAULTS:
             then, later = run_cfg.get(field) or default, now.get(field) or default
@@ -346,10 +399,11 @@ def desired_from_run(
         es_final = (chosen_es if chosen is not None else first_es) or {}
         cfg = settings.get(key) or {}
         pipeline = pipeline_of(md)
+        fetcher_override = override_for(md, overrides).get("frequency")
         frequency, frequency_source = resolve_frequency(
             (md.get("evidence_set") or {}).get("frequency"),
             entry=cfg.get("frequency"),
-            fetcher_override=override_for(md, overrides).get("frequency"),
+            fetcher_override=fetcher_override,
             upload_default=upload_defaults.get("frequency"),
             schedule_every=schedule.get("every"),
         )
@@ -374,5 +428,8 @@ def desired_from_run(
             owner=owner_override or cfg.get("owner") or None,
             pipeline=pipeline,
             frequency_source=frequency_source,
+            frequency_problem=frequency_problem(
+                frequency, frequency_source, str(md.get("fetcher_name") or key),
+                fetcher_override if frequency_source == "upload.yaml" else upload_defaults.get("frequency")),
         ))
     return result

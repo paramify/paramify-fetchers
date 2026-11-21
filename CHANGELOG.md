@@ -56,7 +56,7 @@ schemas and the `paramify` CLI — not the internal code.
     (now read), the manifest's frequency, the fetcher's own default (every 3 days).
   - An upload now changes the frequency on an existing evidence set (`PATCH /evidence/{id}`) when one was chosen, and
     the upload confirm shows it: `~ EVD-IAM-MFA: frequency every 3 days → daily`. A fetcher's default never changes an
-    existing set, and a key that can't edit sets skips the change and still uploads.
+    existing set, and a key that can't edit sets skips the change, says so, and still uploads.
 
 - **Choose the validators each fetcher tracks (TUI Validators tab, beta).** The tab lists the manifest's fetchers
   and, for each, every registry validator for its evidence set in a Paramify section and a community section.

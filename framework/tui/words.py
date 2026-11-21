@@ -5,13 +5,13 @@ from __future__ import annotations
 from typing import Optional
 from urllib.parse import urlparse
 
-from framework.contract import FREQUENCY_WORDS
+from framework.contract import FREQUENCY_WORDS, SCHEDULE_FREQUENCIES
 from framework.update_view import plural
 
 __all__ = ["agree", "frequency", "host", "plural", "schedule", "FREQUENCY_CHOICES"]
 
 #: (value, words) for a select, shortest first. NOT_SET is left out: a schedule always has a cadence.
-FREQUENCY_CHOICES = [(v, w) for v, w in FREQUENCY_WORDS.items() if v != "NOT_SET"]
+FREQUENCY_CHOICES = [(v, FREQUENCY_WORDS[v]) for v in SCHEDULE_FREQUENCIES]
 
 
 def frequency(value: Optional[str]) -> str:

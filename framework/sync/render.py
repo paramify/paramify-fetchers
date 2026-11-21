@@ -90,14 +90,15 @@ def _totals(plan: Plan) -> str:
 
 
 def render_outcomes(outcomes: Sequence[Outcome]) -> List[str]:
-    """One line per delivery entry (state, batch, message), plus any other action that did not complete."""
+    """One line per delivery entry (state, batch, message), plus any other action that did not complete
+    or completed with a warning (a frequency change this key can't make)."""
     lines: List[str] = []
     for o in outcomes:
         state = outcome_state(o)
         if o.action_id.startswith(f"{DELIVERY}/"):
             batch = o.result.get("batch_reference") or o.result.get("batch_id") if o.result else None
             head = f"{state} {_key(o.action_id)}" + (f" {batch}" if batch else "")
-        elif o.status in ("failed", "refused", "skipped"):
+        elif o.status in ("failed", "refused", "skipped") or state == "warning":
             head = f"{state} {o.action_id}"
         else:
             continue

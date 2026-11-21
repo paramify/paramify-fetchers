@@ -13,6 +13,7 @@ from rich.text import Text
 from textual.message import Message
 
 from framework import api
+from framework.sync.providers.evidence_sets import FREQUENCY
 from framework.tui import palette
 from framework.tui.words import plural
 
@@ -130,6 +131,13 @@ def upload_event_lines(ev: dict, noun: str) -> list[Text]:
         reason = ev.get("reason") or ev.get("error")
         suffix = f"  {reason}" if reason else ""
         return [Text(f"  [{icon}] {ev.get('file', '?')}  {outcome}{ref}{suffix}", style=style)]
+    if etype == "action_end" and str(ev.get("action_id", "")).startswith(f"{FREQUENCY}/") and ev.get("message"):
+        # A frequency change that didn't happen: the CLI lists it after the upload too.
+        if ev.get("status") == "noop":
+            return [Text(f"  [WARN] {ev['message']}", style=palette.WARN)]
+        if ev.get("status") in ("failed", "refused"):
+            return [Text(f"  [FAIL] {ev['message']}", style=palette.FAIL)]
+        return []
     if etype == "process_plan" and ev.get("operation"):
         return [Text(
             f"  [DRY] would {ev['operation']} {plural(ev.get('artifacts', 0), 'file')}"

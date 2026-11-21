@@ -93,8 +93,8 @@ run:
 ```
 
 The values are `DAILY`, `THREE_DAY`, `WEEKLY`, `BIWEEKLY`, `MONTHLY`,
-`QUARTERLY`, `BIANNUAL`, `ANNUAL` and `NOT_SET`. In the TUI, press the **runs**
-button on the Fetchers tab.
+`QUARTERLY`, `BIANNUAL` and `ANNUAL`. In the TUI, press the button after
+**frequency:** on the Fetchers tab.
 
 A set can differ from the schedule. The first of these that is set wins:
 
@@ -105,17 +105,22 @@ A set can differ from the schedule. The first of these that is set wins:
 5. The fetcher's own default, `THREE_DAY` for most.
 
 A `frequency` that you write down beats the schedule, which only implies one.
-When two entries send to one set, the set gets the shorter frequency.
+When two entries send to one set, a written frequency beats the schedule's, and
+between two of the same kind the set gets the shorter one. In `upload.yaml`,
+`daily` is read as `DAILY`. Any other value is refused in the plan, and that
+frequency isn't sent.
 
 - **Sets that exist change too.** The upload changes a set's frequency when one
-  of the first four chose a different one. The confirm shows it as
-  `~ EVD-X: frequency every 3 days → daily`. The fetcher's default never changes
+  of the first four chose a different one. It does this after it sends the
+  files. The confirm shows it as `~ EVD-X: frequency every 3 days → daily`. The fetcher's default never changes
   a set that exists, so a change that you made in the app stays until you choose
   a frequency here.
 - **A key without Write Evidences** can't change a set. The upload still sends
-  the files and leaves the frequency as it was.
+  the files, leaves the frequency as it was, and says so. Any other failed
+  change is an error of the upload, after the files are sent.
 - **The run's schedule is used.** `paramify run` records the schedule and each
-  entry's settings. Run the manifest again after you change them.
+  entry's settings. Run the manifest again after you change them. The plan
+  notes a frequency that the manifest now sets differently.
 - **Scheduled uploads need `--config`.** `deploy/run-and-upload.sh` does not read
   `upload.yaml` by default ([troubleshooting](#troubleshooting)).
 

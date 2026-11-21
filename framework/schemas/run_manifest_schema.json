@@ -141,7 +141,6 @@
   "$defs": {
     "frequency": {
       "enum": [
-        "NOT_SET",
         "DAILY",
         "THREE_DAY",
         "WEEKLY",
@@ -151,7 +150,7 @@
         "BIANNUAL",
         "ANNUAL"
       ],
-      "description": "How often an evidence set expects a new artifact (Paramify's evidence `frequency`)."
+      "description": "How often an evidence set expects a new artifact (Paramify's evidence `frequency`). NOT_SET isn't offered: a schedule always has a cadence."
     },
     "paramify": {
       "$ref": "#/$defs/paramify_fields",

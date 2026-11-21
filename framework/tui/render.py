@@ -153,9 +153,11 @@ def destination_cell(descriptor: Optional[dict], config_view: Optional[List[dict
     return Text("no evidence set", style=palette.WARN)
 
 
-# Where an entry's frequency came from (desired.FREQUENCY_SOURCES), in words.
+# Where an entry's frequency came from (desired.FREQUENCY_SOURCES), in words. The TUI
+# reads the default upload.yaml, so it says so: an upload with --config may differ.
 _FREQUENCY_FROM = {
-    "entry": "set on this entry", "upload.yaml": "from upload.yaml", "upload.yaml defaults": "from upload.yaml defaults",
+    "entry": "set on this entry", "upload.yaml": "from the default upload.yaml",
+    "upload.yaml defaults": "from the default upload.yaml's defaults",
     "schedule": "follows the schedule", "fetcher": "the fetcher's default",
 }
 

@@ -86,6 +86,9 @@ EVIDENCE_FREQUENCIES = (
     "MONTHLY", "QUARTERLY", "BIANNUAL", "ANNUAL",
 )
 DEFAULT_EVIDENCE_FREQUENCY = "THREE_DAY"
+# What a manifest can choose (run.schedule.every, an entry's paramify.frequency), shortest
+# first. NOT_SET is left out: a schedule always has a cadence.
+SCHEDULE_FREQUENCIES = tuple(f for f in EVIDENCE_FREQUENCIES if f != "NOT_SET")
 # Each value as a person says it, for messages and the TUI.
 FREQUENCY_WORDS = {
     "NOT_SET": "not set", "DAILY": "daily", "THREE_DAY": "every 3 days", "WEEKLY": "weekly",
