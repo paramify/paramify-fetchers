@@ -1,5 +1,5 @@
 name: azure_resource_locks
-version: 0.1.0
+version: 0.1.1
 description: >-
   Shows every management lock in the subscription and whether each log workspace, backup vault, key vault and storage account is locked against deletion.
 category: azure
@@ -114,6 +114,6 @@ evidence_set:
 
     What was left out of scope?
     - resource_exclusion_patterns — List of the resource_exclusions patterns as given
-    - resource_exclusion_patterns_unmatched — List of the patterns that matched nothing, such as a mistyped name
+    - resource_exclusion_patterns_unmatched — List of the patterns that matched nothing, such as a mistyped name; null if the resource list was not read
     - excluded_resources — Number of resources a pattern took out of scope; null if the resource list was not read
     - in_scope_resources — Number of resources assessed; null if the resource list was not read

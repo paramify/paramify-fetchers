@@ -1,0 +1,60 @@
+{
+  "solutionCapabilities": [
+    {
+      "id": "3d9c4f5b-8eaa-4b6d-8fb4-5c7a9ebd3b44",
+      "templateReferenceId": "SC-AC-06",
+      "referenceId": null,
+      "name": "Least privilege",
+      "implementationStatus": "PARTIALLY_IMPLEMENTED",
+      "family": "Access Control",
+      "subfamily": "Least Privilege",
+      "risk": null,
+      "riskFamily": null,
+      "mainComponent": null,
+      "owner": null,
+      "functions": [
+        {
+          "type": "PROVIDER",
+          "name": "Provider",
+          "narrative": "",
+          "implementationStatus": "IMPLEMENTED",
+          "responsibleRole": null,
+          "owners": [],
+          "validatorEvidencePairs": [
+            {
+              "validatorEvidencePairId": "5d3c7e91-2a4b-4f6e-8d10-a7b9c2e4f601",
+              "validatorId": "9b2e4d6f-1a3c-4e5b-8f70-c1d3e5a7b902",
+              "evidenceId": "0a6f1c2e-5b7d-4e3a-9c81-2f4d6b8a0e11",
+              "source": "MANUAL"
+            }
+          ]
+        },
+        {
+          "type": "INTEGRATOR",
+          "name": "Integrator",
+          "narrative": "",
+          "implementationStatus": "NOT_SET",
+          "responsibleRole": null,
+          "owners": [],
+          "validatorEvidencePairs": []
+        },
+        {
+          "type": "END_USER",
+          "name": "End user",
+          "narrative": "Hello greets everyone.",
+          "implementationStatus": "PLANNED",
+          "responsibleRole": null,
+          "owners": [],
+          "validatorEvidencePairs": [
+            {
+              "validatorEvidencePairId": "6e4d8fa2-3b5c-4a7f-9e21-b8cad3f5a712",
+              "validatorId": "ac3f5e7a-2b4d-4f6c-9a81-d2e4f6b8ca13",
+              "evidenceId": "0a6f1c2e-5b7d-4e3a-9c81-2f4d6b8a0e11",
+              "source": "MENTION"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

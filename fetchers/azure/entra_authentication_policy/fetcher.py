@@ -466,6 +466,7 @@ def password_protection(
 
     With no Password Rule Settings object, the template defaults are what the tenant
     runs on, so that is not a gap in collection. `settings_source` says which was read.
+    A failed settings read is not an absent object: the source and values are null.
     A custom banned-password list is reported as enforced only when it is switched on,
     non-empty, AND the tenant is licensed for it (P1). Otherwise a Free tenant would
     read as protected by a list it cannot enforce.
@@ -474,11 +475,11 @@ def password_protection(
         (s for s in settings or [] if str(s.get("template_id") or "").lower() == PASSWORD_RULE_TEMPLATE_ID),
         None,
     )
-    if configured is None and template_defaults is None:
+    if settings is None or (configured is None and template_defaults is None):
         source = None
     else:
         source = "directory_setting" if configured is not None else "template_defaults"
-    values = dict(template_defaults or {})
+    values = dict(template_defaults or {}) if source else {}
     values.update((configured or {}).get("values") or {})
 
     banned_list = str(values.get("BannedPasswordList") or "")

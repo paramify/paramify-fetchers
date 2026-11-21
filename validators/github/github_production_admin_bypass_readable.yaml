@@ -1,0 +1,19 @@
+key: github_production_admin_bypass_readable
+name: GitHub Production Admin Bypass Readable
+type: AUTOMATED
+role: integrity
+source: community
+statement: >-
+  The admin bypass setting of every production environment was read. An environment whose setting is unknown
+  fails rather than reading as no bypass.
+regex: '"production_admin_bypass_unknown":\s*\[\s*\]'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+- regexOperation:
+    type: MATCH_COUNT
+  criteria: NOT_EQUALS
+  value:
+    type: CUSTOM_TEXT
+    customText: '0'
+evidence_sets:
+- EVD-GITHUB-DEPLOYMENT-CONTROLS
