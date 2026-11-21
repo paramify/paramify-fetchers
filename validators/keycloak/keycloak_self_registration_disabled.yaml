@@ -2,6 +2,7 @@ key: keycloak_self_registration_disabled
 name: 'Keycloak: Self-Registration Is Off'
 type: AUTOMATED
 role: configuration
+source: community
 statement: >
   Users cannot register themselves on the sign-in page (registration_allowed is false), so accounts
   come only from administrators or federation. Does not show that every identity comes from one

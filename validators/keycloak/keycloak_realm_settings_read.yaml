@@ -2,6 +2,7 @@ key: keycloak_realm_settings_read
 name: 'Keycloak: Realm Settings Read and Realm Enabled'
 type: AUTOMATED
 role: integrity
+source: community
 statement: >
   The realm's settings were read and the realm is enabled (realm_enabled is true). The other Keycloak
   checks on this set read the same settings, so a null here means they are judged on nothing. Does not

@@ -2,6 +2,7 @@ key: keycloak_admin_events_details_enabled
 name: 'Keycloak: Admin Event Details Enabled'
 type: AUTOMATED
 role: configuration
+source: community
 statement: >
   Keycloak's setting to include the full representation of what changed in admin events is on
   (admin_events_details_enabled is true). An enabled setting is configuration evidence only: it does not

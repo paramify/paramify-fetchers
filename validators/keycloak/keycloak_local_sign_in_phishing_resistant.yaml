@@ -2,6 +2,7 @@ key: keycloak_local_sign_in_phishing_resistant
 name: 'Keycloak: Local Sign-In Requires a Phishing-Resistant Authenticator'
 type: AUTOMATED
 role: configuration
+source: community
 statement: >
   Every local way through the realm's browser flow passes a phishing-resistant authenticator, such as a
   WebAuthn security key or passkey or an X.509 client certificate

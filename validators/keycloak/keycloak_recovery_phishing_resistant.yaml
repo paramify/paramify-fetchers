@@ -2,6 +2,7 @@ key: keycloak_recovery_phishing_resistant
 name: 'Keycloak: Account Recovery Requires a Phishing-Resistant Authenticator'
 type: AUTOMATED
 role: configuration
+source: community
 statement: >
   Every way through the realm's reset-credentials flow, the recovery path that restores access, passes a
   phishing-resistant authenticator (recovery_requires_phishing_resistant is true). Fails when access can

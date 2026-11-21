@@ -2,6 +2,7 @@ key: keycloak_session_idle_within_max
 name: 'Keycloak: Idle Sessions End Within the Adopted Maximum'
 type: AUTOMATED
 role: configuration
+source: community
 statement: >
   An idle sign-in session ends within the organization's adopted maximum (sso_session_idle_within_max is
   true: the realm's idle timeout is above 0 and at most max_idle_timeout_minutes). Fails while no maximum

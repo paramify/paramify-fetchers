@@ -2,6 +2,7 @@ key: keycloak_login_events_enabled
 name: 'Keycloak: Sign-In Event Storage Enabled'
 type: AUTOMATED
 role: configuration
+source: community
 statement: >
   Keycloak is set to store successful and failed sign-ins: event storage is on and LOGIN and LOGIN_ERROR
   are both saved event types (login_events_enabled is true). This is configuration evidence only: it
