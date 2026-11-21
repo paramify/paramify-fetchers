@@ -1,0 +1,24 @@
+key: keycloak_users_no_inactive_accounts
+name: 'Keycloak: No Enabled Account Is Inactive'
+type: AUTOMATED
+role: configuration
+source: community
+statement: >
+  No enabled user created before the window has gone without a stored sign-in for inactive_days
+  (enabled_users_inactive is 0). Fails while successful sign-ins are not stored, or are kept for less
+  than the window, since inactivity cannot then be judged. A brokered user signing in through an
+  external identity provider still records a sign-in in Keycloak. Does not check whether the
+  collection run succeeded.
+
+regex: '"enabled_users_inactive":\s*(?<enabled_users_inactive>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # enabled_users_inactive
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-KEYCLOAK-USERS-AND-ROLES

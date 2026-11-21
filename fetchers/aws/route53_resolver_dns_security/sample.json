@@ -1,0 +1,63 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "aws_route53_resolver_dns_security",
+  "fetcher_version": "0.1.0",
+  "source": "live",
+  "captured_on": "2026-11-11",
+  "reviewed": true,
+  "collections": [
+    {
+      "path": "results[]",
+      "records": 3,
+      "fields": {
+        "Id": 3,
+        "Name": 2,
+        "Default": 3,
+        "DnssecValidation": 3,
+        "DnsFirewall": 3,
+        "QueryLogging": 3
+      }
+    },
+    {
+      "path": "OrphanedDnssecConfigs[]",
+      "records": 1,
+      "fields": {
+        "Id": 1,
+        "ResourceId": 1,
+        "ValidationStatus": 1
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "profile": "example-profile",
+      "region": "us-gov-west-1",
+      "datetime": "2026-11-11T21:53:02Z",
+      "account_id": "111111111111",
+      "arn": "arn:aws-us-gov:sts::111111111111:assumed-role/AWSReservedSSO_ReadOnlyAccess_0000000000000000/user1@example.com"
+    },
+    "results": [
+      {
+        "Id": "vpc-11111111111111111",
+        "Name": "example-vpc",
+        "Default": false,
+        "DnssecValidation": "ENABLED",
+        "DnsFirewall": {
+          "Associated": false,
+          "RuleGroups": []
+        },
+        "QueryLogging": {
+          "Enabled": false,
+          "Associations": []
+        }
+      }
+    ],
+    "OrphanedDnssecConfigs": [
+      {
+        "Id": "rdsc-1111111111111111",
+        "ResourceId": "vpc-22222222222222222",
+        "ValidationStatus": "ENABLED"
+      }
+    ]
+  }
+}

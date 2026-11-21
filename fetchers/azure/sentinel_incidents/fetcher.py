@@ -749,6 +749,8 @@ def main() -> int:
         listed = found is not None
         found = found or []
         exclusions.record_invalid(collector)
+        if not listed:
+            exclusions.mark_unread()
         exclusions.warn_unmatched(logger)
         workspaces: List[Dict[str, Any]] = []
         without_sentinel: List[str] = []

@@ -405,6 +405,15 @@ def test_a_failed_resource_graph_query_leaves_every_resource_count_null(arm, tmp
     assert (evidence["results"]["resources"], evidence["results"]["regions"]) == (None, None)
 
 
+def test_a_failed_resource_graph_query_leaves_the_unmatched_patterns_null(arm, tmp_path, monkeypatch, caplog):
+    monkeypatch.setenv("AZURE_RESOURCE_EXCLUSIONS", "rg:typo")
+    arm(graph_ok=False)
+    assert zr.main() == 1
+    summary = _evidence(tmp_path)["summary"]
+    assert (summary["resource_exclusion_patterns"], summary["resource_exclusion_patterns_unmatched"]) == (["rg:typo"], None)
+    assert "matched nothing" not in caplog.text
+
+
 def test_exclusions_take_a_resource_group_out_of_every_count(arm, tmp_path, monkeypatch):
     monkeypatch.setenv("AZURE_RESOURCE_EXCLUSIONS", "rg:rg-lab")
     arm()

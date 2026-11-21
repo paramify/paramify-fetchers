@@ -42,6 +42,11 @@ from vpn_crypto import (  # noqa: E402
 logger = logging.getLogger("azure_vpn_gateway_configuration")
 
 IPSEC_CONNECTION_TYPES = ("ipsec", "vnet2vnet")
+GROUP_LIST_OPERATIONS = (
+    "network.virtual_network_gateways.list(",
+    "network.virtual_network_gateway_connections.list(",
+    "network.local_network_gateways.list(",
+)
 
 
 def project_gateway(gw) -> dict:
@@ -158,11 +163,13 @@ def summarize(gateways: list[dict], connections: list[dict], local_gateways: lis
     tunnels = [c for c in connections if c["is_ipsec_tunnel"]]
     ikev2 = sum(1 for c in tunnels if c["ikev2"] is True)
     ikev1 = sum(1 for c in tunnels if c["ikev2"] is False)
+    vpn = [g for g in gateways if str(g.get("gateway_type") or "").lower() == "vpn"]
     return {
         "total_gateways": len(gateways),
-        "vpn_gateways": sum(1 for g in gateways if str(g.get("gateway_type") or "").lower() == "vpn"),
-        "active_active_gateways": sum(1 for g in gateways if g["active_active"]),
-        "p2s_enabled_gateways": sum(1 for g in gateways if g["p2s_enabled"]),
+        "vpn_gateways": len(vpn),
+        # Vpn-type gateways only: an ExpressRoute gateway has neither mode.
+        "active_active_gateways": sum(1 for g in vpn if g["active_active"]),
+        "p2s_enabled_gateways": sum(1 for g in vpn if g["p2s_enabled"]),
         "total_connections": len(connections),
         "ipsec_connections": len(tunnels),
         "ikev2_connections": ikev2,
@@ -312,6 +319,8 @@ def main() -> int:
             ),
         )
 
+    if gateways is None or any(f["operation"].startswith(GROUP_LIST_OPERATIONS) for f in collector.failures):
+        exclusions.mark_unread()
     exclusions.warn_unmatched(logger)
     listed = gateways is not None
     gateways, connections, local_gateways = gateways or [], connections or [], local_gateways or []

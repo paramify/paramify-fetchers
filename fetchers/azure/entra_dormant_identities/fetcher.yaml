@@ -1,5 +1,5 @@
 name: azure_entra_dormant_identities
-version: 0.2.0
+version: 0.3.0
 description: >-
   Shows whether any dormant, never-used, guest or deleted user or service principal still holds an Entra directory role or an Azure role in the subscription.
 category: azure
@@ -16,6 +16,16 @@ output:
   aggregation: per_target
 
 config_schema:
+  target_subscription_only:
+    type: boolean
+    required: false
+    default: false
+    env: AZURE_TARGET_SUBSCRIPTION_ONLY
+    description: >
+      Reject ARM reads and continuations outside the explicit subscription and
+      reject redirects. Requires AZURE_TENANT_ID; the subscription tenant and
+      Microsoft Graph organization must both match it before directory data
+      is read. Missing or mismatched tenant reads fail closed.
   dormant_days:
     type: integer
     required: false
@@ -65,7 +75,7 @@ evidence_set:
   instructions: |
     Script: azure/entra_dormant_identities/fetcher.py
 
-    Access: Microsoft Graph Directory.Read.All (or the Directory Readers role) and AuditLog.Read.All with an Entra ID P1 or P2 licence, and Reader on the subscription. Without AuditLog.Read.All or the licence, the users holding a role and the guests are still listed, with their roles, and the dormancy fields read null. The service principal sign-in report exists only in Microsoft's global cloud, so in US Government and China clouds service principal dormancy reads null. The credential must sign in to the subscription's own tenant; if Microsoft Graph answers for another tenant, the run fails without reading the directory.
+    Access: Microsoft Graph Directory.Read.All (or the Directory Readers role) and AuditLog.Read.All with an Entra ID P1 or P2 licence, and Reader on the subscription. Without AuditLog.Read.All or the licence, the users holding a role and the guests are still listed, with their roles, and the dormancy fields read null. The service principal sign-in report exists only in Microsoft's global cloud, so in US Government and China clouds service principal dormancy reads null. The credential must sign in to the subscription's own tenant; if Microsoft Graph answers for another tenant, the run fails without reading the directory. Strict scope: set target_subscription_only to true with an explicit subscription_id and AZURE_TENANT_ID. ARM reads and continuation links must stay in that subscription and redirects are refused. The subscription tenant must match AZURE_TENANT_ID before Graph is read; Graph's organization must also match before any other directory data is read. Missing or refused tenant reads fail closed and remain recorded as failures. The unsupported Government service principal sign-in report remains a recorded API failure with null dormancy fields; strict scope does not convert it into a successful or complete read.
 
     Commands Executed:
     - subscriptions.list() — picks a subscription when none is set

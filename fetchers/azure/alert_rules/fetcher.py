@@ -36,6 +36,7 @@ from alert_routing import (  # noqa: E402
     tri_state,
 )
 from arm_rest import arm_rest_client, list_all  # noqa: E402
+from azure_rest import target_subscription_scope
 from resource_exclusions import ResourceExclusions  # noqa: E402
 
 logger = logging.getLogger("azure_alert_rules")
@@ -181,6 +182,8 @@ def main() -> int:
     # The azure-* SDKs log every request header at INFO; warnings still get through.
     logging.getLogger("azure").setLevel(logging.WARNING)
     load_dotenv()
+    strict = target_subscription_scope() is not None
+    outside_scope = []
 
     output_dir = Path(os.environ.get("EVIDENCE_DIR", "./evidence"))
     collector = Collector(logger)
@@ -197,6 +200,7 @@ def main() -> int:
     exclusions = ResourceExclusions.from_env()
     excluded: list[dict] = []
     excluded_processing: list[dict] = []
+    unread = True
     registration = {ns: REGISTRATION_UNKNOWN for ns in ("Microsoft.Insights", "Microsoft.AlertsManagement")}
     if subscription_id and cred is not None:
         for ns in registration:
@@ -206,6 +210,7 @@ def main() -> int:
         alerts_mgmt = registration["Microsoft.AlertsManagement"] != NOT_REGISTERED
         raw_rules: list[tuple[str, dict]] = []
         if rest is not None:
+            unread = False
             for rule_type, ns, path, api in SOURCES:
                 if registration[ns] == NOT_REGISTERED:
                     continue
@@ -213,18 +218,21 @@ def main() -> int:
                     f"{path} list",
                     lambda path=path, api=api: list_all(rest, f"/subscriptions/{subscription_id}/providers/{path}", api),
                 )
+                unread = unread or listed is None
                 if listed:
                     pages[rule_type] = listed["pages"]
                     raw_rules.extend((rule_type, r) for r in listed["items"])
             if insights:
                 groups = collector.guard("Microsoft.Insights/actionGroups list", lambda: collect_action_groups(rest, subscription_id))
                 group_records = groups["groups"] if groups else []
+                unread = unread or groups is None
             if alerts_mgmt:
                 apr = collector.guard(
                     "Microsoft.AlertsManagement/actionRules list",
                     lambda: collect_processing_rules(rest, subscription_id, now),
                 )
                 processing_rules = apr["rules"] if apr else []
+                unread = unread or apr is None
             raw_rules, excluded = exclusions.split(
                 raw_rules, "alert_rule", resource_id=lambda t: t[1].get("id"), location=lambda t: t[1].get("location"),
                 resource_group=lambda t: None, name=lambda t: t[1].get("name"))
@@ -236,6 +244,10 @@ def main() -> int:
                            for gid in m["rule"]["added_action_group_ids"]]
             referenced += [gid for p in in_scope_processing for gid in p["added_action_group_ids"]]
             by_id = {(g["id"] or "").lower(): g for g in group_records}
+            if strict:
+                prefix = f"/subscriptions/{subscription_id}/".lower()
+                outside_scope = sorted({g for g in referenced if not g.lower().startswith(prefix)})
+                referenced = [g for g in referenced if g.lower().startswith(prefix)]
             add_referenced_groups(rest, referenced, by_id, collector)
             rules = [rule_record(t, r, by_id, processing_rules) for t, r in raw_rules]
             processing_rules = in_scope_processing
@@ -252,6 +264,8 @@ def main() -> int:
     exclusions.record_invalid(collector)
     group_records, excluded_groups = exclusions.split(group_records, "action_group")
     excluded += excluded_groups + excluded_processing
+    if unread:
+        exclusions.mark_unread()
     exclusions.warn_unmatched(logger)
 
     rules.sort(key=lambda r: (r["id"] or "").lower())
@@ -260,6 +274,7 @@ def main() -> int:
         subscription_source=sub["subscription_source"],
         collector=collector,
         results={
+            **({"read_scope":"target_subscription", "outside_read_scope_action_group_ids":outside_scope} if strict else {}),
             "alert_rules": rules,
             "action_groups": sorted(group_records, key=lambda g: (g["id"] or "").lower()),
             "processing_rules": sorted(processing_rules, key=lambda p: (p["id"] or "").lower()),
