@@ -2,6 +2,7 @@ key: azure_velero_backup_locations_read
 name: 'Azure Velero: Every Backup Storage Location Read'
 type: AUTOMATED
 role: integrity
+source: community
 statement: >
   At least one Velero backup storage location was found and every one of them had its backups listed
   (backup_locations_read equals backup_locations). Without this, the backup counts below are

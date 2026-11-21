@@ -2,6 +2,7 @@ key: azure_velero_no_missed_scheduled_runs
 name: 'Azure Velero: No Missed Scheduled Runs'
 type: AUTOMATED
 role: configuration
+source: community
 statement: >
   No expected schedule missed a run (missed_scheduled_runs is 0), counted from the gaps between
   Completed backups with 10% grace, over the part of missed_run_lookback_days the backups are kept

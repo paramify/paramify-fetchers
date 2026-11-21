@@ -2,6 +2,7 @@ key: azure_flexible_server_backups_servers_read
 name: 'Azure PostgreSQL and MySQL Backups: Every Server''s Backups Read'
 type: AUTOMATED
 role: integrity
+source: community
 statement: >
   At least one PostgreSQL or MySQL flexible server that takes its own backups (not a read replica) is
   in scope, and every one had its backup list read (backup_servers_read equals backup_servers). Does

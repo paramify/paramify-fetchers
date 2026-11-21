@@ -2,6 +2,7 @@ key: azure_velero_no_schedule_exceeds_rpo
 name: 'Azure Velero: No Schedule Exceeds the Recovery Point Objective'
 type: AUTOMATED
 role: configuration
+source: community
 statement: >
   No schedule has gone longer than rpo_hours without a Completed backup (schedules_exceeding_rpo is
   0). Also fails while rpo_hours is not set (see 'Recovery Point Objective Is Configured' for the

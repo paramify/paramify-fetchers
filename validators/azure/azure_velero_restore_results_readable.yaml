@@ -2,6 +2,7 @@ key: azure_velero_restore_results_readable
 name: 'Azure Velero: Every Restore Result Readable'
 type: AUTOMATED
 role: integrity
+source: community
 statement: >
   Every restore Velero recorded has a readable results file (restores_results_missing is 0), so no
   restore is counted without knowing whether it had errors. Does not check whether the collection run

@@ -2,6 +2,7 @@ key: azure_endpoint_availability_tests_meet_target
 name: 'Azure Endpoint Availability: Every Tested Endpoint Met the Target'
 type: AUTOMATED
 role: configuration
+source: community
 statement: >
   No enabled availability test with every hour measured averaged below availability_target_percentage
   over the lookback (availability_tests_below_target is 0). Also fails while no target is configured

@@ -2,6 +2,7 @@ key: azure_flexible_server_backups_restore_dates_known
 name: 'Azure PostgreSQL and MySQL Backups: Every Restored Server Has a Known Date'
 type: AUTOMATED
 role: integrity
+source: community
 statement: >
   Every server created by a point-in-time restore has a creation date (restored_servers_date_unknown
   is 0). A restored server without a date never counts as recent. Does not check whether the

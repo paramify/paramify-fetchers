@@ -2,6 +2,7 @@ key: azure_velero_backup_records_readable
 name: 'Azure Velero: Every Backup Record Readable'
 type: AUTOMATED
 role: integrity
+source: community
 statement: >
   Every backup's velero-backup.json in storage could be read and parsed (backups_metadata_unreadable
   is 0), so no backup is left out of the phase and schedule counts. Does not check whether the

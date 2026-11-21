@@ -2,6 +2,7 @@ key: azure_flexible_server_backups_retention_known
 name: 'Azure PostgreSQL and MySQL Backups: Every Server''s Retention Is Known'
 type: AUTOMATED
 role: integrity
+source: community
 statement: >
   Azure returned a backup retention for every backup server (servers_retention_unknown is 0), so no
   server is left out of the retention check. Does not check whether the collection run succeeded.

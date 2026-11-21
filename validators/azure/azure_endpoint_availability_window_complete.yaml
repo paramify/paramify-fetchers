@@ -2,6 +2,7 @@ key: azure_endpoint_availability_window_complete
 name: 'Azure Endpoint Availability: Measurement Window Is Complete'
 type: AUTOMATED
 role: completeness
+source: community
 statement: >
   Every expected endpoint, or every enabled test when none are listed, has a result in every hour of
   the lookback (measurement_window_complete is true), so the availability figures cover the whole

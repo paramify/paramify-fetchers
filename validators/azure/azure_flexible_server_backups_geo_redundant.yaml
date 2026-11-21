@@ -2,6 +2,7 @@ key: azure_flexible_server_backups_geo_redundant
 name: 'Azure PostgreSQL and MySQL Backups: Every Server Has Geo-Redundant Backup'
 type: AUTOMATED
 role: configuration
+source: community
 statement: >
   Every backup server has geo-redundant backup enabled, so Azure keeps a copy of its backups in the
   paired region. Does not show a restore from the paired region was tested. Does not check whether the

@@ -2,6 +2,7 @@ key: azure_velero_backup_storage_geo_replicated
 name: 'Azure Velero: Backup Storage Accounts Are Geo-Replicated'
 type: AUTOMATED
 role: configuration
+source: community
 statement: >
   Every Velero backup storage location (at least one) is in a geo-replicated storage account (GRS,
   RA-GRS, GZRS or RA-GZRS), so what Velero writes there (Kubernetes resource backups and backup

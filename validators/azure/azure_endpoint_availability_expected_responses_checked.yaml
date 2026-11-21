@@ -2,6 +2,7 @@ key: azure_endpoint_availability_expected_responses_checked
 name: 'Azure Endpoint Availability: Tests Expect the Listed Responses'
 type: AUTOMATED
 role: configuration
+source: community
 statement: >
   For every expected endpoint listed with an HTTP status code, an enabled, in-scope test requesting that
   URL expects that code (expected_responses_unchecked is 0), such as 401 from an endpoint that requires

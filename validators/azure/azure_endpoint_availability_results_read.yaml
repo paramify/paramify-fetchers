@@ -2,6 +2,7 @@ key: azure_endpoint_availability_results_read
 name: 'Azure Endpoint Availability: Every Test''s Results Read'
 type: AUTOMATED
 role: integrity
+source: community
 statement: >
   Every enabled availability test's results were read (availability_tests_results_unread is 0), so the
   availability checks are judged on complete data. Does not check whether the collection run

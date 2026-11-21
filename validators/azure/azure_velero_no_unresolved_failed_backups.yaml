@@ -2,6 +2,7 @@ key: azure_velero_no_unresolved_failed_backups
 name: 'Azure Velero: No Current Failed Backups'
 type: AUTOMATED
 role: configuration
+source: community
 statement: >
   No Failed or PartiallyFailed backup is current: every one has a later Completed backup of the same
   schedule (backups_failed_unresolved is 0). Resolved failures and deliberate failure tests (names

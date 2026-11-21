@@ -2,6 +2,7 @@ key: azure_endpoint_availability_lbs_fully_measured
 name: 'Azure Endpoint Availability: No Load Balancer Missing an Hour of Metrics'
 type: AUTOMATED
 role: configuration
+source: community
 statement: >
   No Standard load balancer is missing an hour of data-path or health-probe data over the lookback
   (load_balancers_with_missing_measurements is 0). These are inputs to availability reporting; they do

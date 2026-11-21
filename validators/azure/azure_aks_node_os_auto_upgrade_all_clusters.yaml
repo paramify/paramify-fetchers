@@ -2,6 +2,7 @@ key: azure_aks_node_os_auto_upgrade_all_clusters
 name: 'Azure AKS: Every Cluster Patches Node OS Automatically'
 type: AUTOMATED
 role: configuration
+source: community
 statement: >
   Every AKS cluster (at least one) has a node OS upgrade channel that replaces or patches node images
   automatically (SecurityPatch or NodeImage). Unmanaged does not count: it leaves node images alone,

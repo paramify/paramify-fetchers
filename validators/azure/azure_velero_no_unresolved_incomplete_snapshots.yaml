@@ -2,6 +2,7 @@ key: azure_velero_no_unresolved_incomplete_snapshots
 name: 'Azure Velero: No Current Incomplete Volume Snapshots'
 type: AUTOMATED
 role: configuration
+source: community
 statement: >
   No backup with incomplete volume snapshots is current: every one has a later Completed backup of the
   same schedule that completed every snapshot it attempted

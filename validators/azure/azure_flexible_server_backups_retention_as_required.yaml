@@ -2,6 +2,7 @@ key: azure_flexible_server_backups_retention_as_required
 name: 'Azure PostgreSQL and MySQL Backups: Every Server Keeps Backups for the Required Period'
 type: AUTOMATED
 role: configuration
+source: community
 statement: >
   No backup server keeps backups for fewer days than required_retention_days, the minimum authorized
   retention; keeping them longer meets it (servers_retention_below_required is 0). Also fails while

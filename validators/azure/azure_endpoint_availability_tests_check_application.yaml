@@ -2,6 +2,7 @@ key: azure_endpoint_availability_tests_check_application
 name: 'Azure Endpoint Availability: Every Test Checks the Application Works'
 type: AUTOMATED
 role: configuration
+source: community
 statement: >
   Every enabled availability test (at least one) checks both an expected HTTP status code and the
   response content, so a pass shows the application answered correctly and not only that the endpoint

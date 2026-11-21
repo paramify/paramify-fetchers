@@ -2,6 +2,7 @@ key: azure_velero_expired_backups_removed
 name: 'Azure Velero: Expired Backups Are Removed'
 type: AUTOMATED
 role: configuration
+source: community
 statement: >
   No backup stays in storage more than expiry_grace_hours past its expiration
   (expired_backups_not_deleted is 0), so Velero's retention is enforced. Does not show that the

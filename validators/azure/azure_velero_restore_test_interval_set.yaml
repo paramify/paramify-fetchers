@@ -2,6 +2,7 @@ key: azure_velero_restore_test_interval_set
 name: 'Azure Velero: Restore-Test Interval Is Configured'
 type: AUTOMATED
 role: configuration
+source: community
 statement: >
   A restore-test interval is configured (restore_test_interval_days is a whole number above 0). Fails
   while it is not set, which marks the interval as undecided rather than a restore as failed. Does not

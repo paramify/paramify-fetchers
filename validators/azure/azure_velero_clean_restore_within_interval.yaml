@@ -2,6 +2,7 @@ key: azure_velero_clean_restore_within_interval
 name: 'Azure Velero: Clean Restore Within the Restore-Test Interval'
 type: AUTOMATED
 role: configuration
+source: community
 statement: >
   The newest Velero restore that completed without errors is no older than restore_test_interval_days.
   Also fails while no interval is configured or restores are unread (see 'Restore-Test Interval Is

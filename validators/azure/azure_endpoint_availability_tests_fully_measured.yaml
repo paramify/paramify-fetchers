@@ -2,6 +2,7 @@ key: azure_endpoint_availability_tests_fully_measured
 name: 'Azure Endpoint Availability: No Test Missing an Hour of Results'
 type: AUTOMATED
 role: configuration
+source: community
 statement: >
   No enabled availability test has an hour of the lookback without a result
   (availability_tests_with_missing_measurements is 0), so the measured availability covers the whole

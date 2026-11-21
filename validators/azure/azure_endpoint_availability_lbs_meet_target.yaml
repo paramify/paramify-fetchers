@@ -2,6 +2,7 @@ key: azure_endpoint_availability_lbs_meet_target
 name: 'Azure Endpoint Availability: Every Load Balancer Met the Target'
 type: AUTOMATED
 role: configuration
+source: community
 statement: >
   No Standard load balancer with every hour measured had an average data-path availability or
   health-probe status below availability_target_percentage (load_balancers_below_target is 0). Only

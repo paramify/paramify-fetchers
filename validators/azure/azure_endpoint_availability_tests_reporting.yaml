@@ -2,6 +2,7 @@ key: azure_endpoint_availability_tests_reporting
 name: 'Azure Endpoint Availability: Every Test Reported Results'
 type: AUTOMATED
 role: configuration
+source: community
 statement: >
   No enabled availability test went the whole lookback without a result
   (availability_tests_without_data is 0). These are inputs to availability reporting; they do not

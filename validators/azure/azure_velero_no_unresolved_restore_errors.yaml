@@ -2,6 +2,7 @@ key: azure_velero_no_unresolved_restore_errors
 name: 'Azure Velero: No Current Restore Errors'
 type: AUTOMATED
 role: configuration
+source: community
 statement: >
   No restore with errors is current: every one has a later restore that completed without errors
   (restores_with_errors_unresolved is 0). A restore with errors and no readable date is never treated

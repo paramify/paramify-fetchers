@@ -2,6 +2,7 @@ key: azure_endpoint_availability_lb_metrics_read
 name: 'Azure Endpoint Availability: Every Load Balancer''s Metrics Read'
 type: AUTOMATED
 role: integrity
+source: community
 statement: >
   Every Standard load balancer's data-path and health-probe metrics were read
   (load_balancers_metrics_unread is 0). Does not check whether the collection run succeeded.

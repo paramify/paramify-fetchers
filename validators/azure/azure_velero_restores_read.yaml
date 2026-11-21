@@ -2,6 +2,7 @@ key: azure_velero_restores_read
 name: 'Azure Velero: Restore Records Read'
 type: AUTOMATED
 role: integrity
+source: community
 statement: >
   Every backup storage location's restore records were read (restores_total is a number, not null), so
   the restore checks are judged on complete data. Zero restores is allowed here; whether a clean

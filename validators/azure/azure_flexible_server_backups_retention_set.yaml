@@ -2,6 +2,7 @@ key: azure_flexible_server_backups_retention_set
 name: 'Azure PostgreSQL and MySQL Backups: Required Retention Is Configured'
 type: AUTOMATED
 role: configuration
+source: community
 statement: >
   The authorized backup retention is configured (required_retention_days is a whole number above 0).
   Fails while it is not set, which marks the retention as undecided rather than a server as wrong.

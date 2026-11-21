@@ -2,6 +2,7 @@ key: azure_velero_restore_dates_known
 name: 'Azure Velero: Every Restore Has a Known Date'
 type: AUTOMATED
 role: integrity
+source: community
 statement: >
   Every restore result has a readable date (restores_date_unknown is 0). A restore without a date
   never counts as recent. Does not check whether the collection run succeeded.

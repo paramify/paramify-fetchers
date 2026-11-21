@@ -2,6 +2,7 @@ key: azure_flexible_server_backups_restore_lookback_set
 name: 'Azure PostgreSQL and MySQL Backups: Restore Lookback Is Configured'
 type: AUTOMATED
 role: configuration
+source: community
 statement: >
   A restore lookback is configured (restore_lookback_days is a whole number above 0). Fails while it
   is not set, which marks the interval as undecided rather than a restore as missing. Does not check

@@ -2,6 +2,7 @@ key: azure_endpoint_availability_tests_all_judged
 name: 'Azure Endpoint Availability: Every Test Was Judged Against the Target'
 type: AUTOMATED
 role: configuration
+source: community
 statement: >
   Every enabled availability test was judged against the target: none is missing an hour of the
   lookback or unread (availability_tests_not_judged is 0). Also fails while no target is configured

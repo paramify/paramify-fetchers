@@ -2,6 +2,7 @@ key: azure_velero_expected_schedules_have_backups
 name: 'Azure Velero: Every Expected Schedule Has a Backup'
 type: AUTOMATED
 role: configuration
+source: community
 statement: >
   No expected schedule is missing from backup storage (expected_schedules_without_backups is 0). Also
   fails while expected_schedules is not set or a location is unread (see 'Expected Backup Schedules

@@ -2,6 +2,7 @@ key: azure_velero_schedules_succeed_within_window
 name: 'Azure Velero: Every Schedule Succeeded Within the Daily Window'
 type: AUTOMATED
 role: configuration
+source: community
 statement: >
   Every Velero schedule seen in backup storage (at least one) has a Completed backup within its
   window: a schedule listed in expected_schedules gets its own interval plus 10% (at least 2 hours, so
