@@ -12,6 +12,14 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **Plainer TUI wording.**
+  - Results read as sentences instead of key=value: "Uploaded 3 files, 1 already there.", not
+    `uploaded=3 duplicates=1 errors=0`.
+  - The upload confirm lists what is delivered where and anything refused, and leaves out no-op and tag steps.
+  - Counts use real plurals, messages name hosts instead of full API URLs, and `esc leave field` shows only while
+    you are typing.
+  - The Pipelines tab is one line when a manifest has nothing to send.
+  - Fixes: the Evidence tab sent you to tab 3 to run (it's 2), and the welcome screen said "1 fetchers".
 - **TUI tab keys: Validators is tab 4.** Paramify moves from `4` to `5` and Pipelines from `5` to `6`.
 - **`paramify validators sync -m` and the Paramify tab cover only the validators a manifest tracks.** Without a
   `validators:` list an entry tracks every Paramify-made validator for its evidence set, which is every validator
@@ -38,6 +46,34 @@ schemas and the `paramify` CLI — not the internal code.
   started, per receiver when Alertmanager runs with receiver-name-in-metrics, otherwise per integration type. Reports
   receivers and routes that deliver nowhere. A delivered notification means the integration accepted it, not that a
   person received it. Unread endpoints leave their fields null rather than 0.
+- **The TUI shows which environment variables a manifest is missing, and stops a run that would fail on them.**
+  - The manifest settings row has an `env` button (`✓ all set` or `✗ 2 missing`), each fetcher's status names what it
+    needs (`✗ needs OKTA_API_TOKEN`), and the line under the table splits what a run needs from what only an upload needs.
+  - The button (or `E`) opens a short list of just the missing variables and where to get each one, with a button that
+    adds them to `.env` as blank lines, as `paramify env --write` does.
+  - ctrl+r on the Run tab doesn't start while a variable a fetcher reads is empty, and says which.
+  - Only whether a variable has a value is ever checked. The TUI never shows, logs or takes a value.
+
+- **Evidence set frequency follows how often a manifest runs, and reaches sets that already exist.**
+  - The manifest settings row has a `frequency` button (daily, every 3 days, weekly, …), saved as `run.schedule.every`.
+    An entry can override it in its form (`e`). On the CLI: `paramify manifest set-frequency MANIFEST FREQUENCY
+    [--fetcher NAME]`.
+  - Order, highest first: the entry, a per-fetcher `frequency` in `upload.yaml`, `defaults.frequency` in `upload.yaml`
+    (now read), the manifest's frequency, the fetcher's own default (every 3 days).
+  - An upload now changes the frequency on an existing evidence set (`PATCH /evidence/{id}`) when one was chosen, and
+    the upload confirm shows it: `~ EVD-IAM-MFA: frequency every 3 days → daily`. A fetcher's default never changes an
+    existing set, and a key that can't edit sets skips the change, says so, and still uploads.
+
+- **Validator results and a local test in the TUI (Validators tab).**
+  - Each validator shows PASS or FAIL from its latest result in Paramify, and the Paramify tab's validators cell
+    counts failures (`2/2 · 1 failing`).
+  - The validator window tests it against your last run with Node, as Paramify does, and shows each rule's mark and
+    the value it read, with a plain reason when it fails.
+  - On a failure, `a` asks Claude why (read-only `claude -p`, asked once per session before anything is sent). Any
+    regex it proposes is tested on the same files before it is shown, and `w` writes a passing one to the
+    validator's YAML after a confirm. Without Claude Code the key says so; `c` copies the same report to paste
+    anywhere. `PARAMIFY_ASK_CLAUDE=0` turns Ask Claude off.
+
 - **Choose the validators each fetcher tracks (TUI Validators tab, beta).** The tab lists the manifest's fetchers
   and, for each, every registry validator for its evidence set in a Paramify section and a community section.
   `space` tracks or untracks one and saves the manifest; `enter` shows the claim, regex, rules in plain words,

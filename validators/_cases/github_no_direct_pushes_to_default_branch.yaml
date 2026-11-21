@@ -1,0 +1,14 @@
+validator: github_no_direct_pushes_to_default_branch
+cases:
+- name: compliant
+  expect: PASS
+  artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"direct_pushes":0}}}'
+- name: nonzero
+  expect: FAIL
+  artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"direct_pushes":2}}}'
+- name: unread
+  expect: FAIL
+  artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"direct_pushes":null}}}'
+- name: renamed
+  expect: FAIL
+  artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"direct_pushes_renamed":0}}}'
