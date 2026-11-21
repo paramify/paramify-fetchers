@@ -41,8 +41,8 @@ def _problems(pane) -> list:
     return problems
 
 
-@pytest.mark.parametrize("keys", [("1",), ("2",), ("3",), ("4",), ("5",)],
-                         ids=["fetchers", "run", "evidence", "paramify", "pipelines"])
+@pytest.mark.parametrize("keys", [("1",), ("2",), ("3",), ("4",), ("5",), ("6",)],
+                         ids=["fetchers", "run", "evidence", "validators", "paramify", "pipelines"])
 def test_page_fits_160x50(keys, demo_workspace, no_network):
     async def drive() -> list:
         app = FetcherApp(manifest_path="manifests/demo.yaml", root_override=str(demo_workspace.root))
@@ -89,7 +89,7 @@ def test_paramify_page_holds_fifty_fetchers(size, demo_workspace, no_network, mo
     async def drive():
         app = FetcherApp(manifest_path="manifests/demo.yaml", root_override=str(demo_workspace.root))
         async with app.run_test(size=size) as pilot:
-            await pilot.press("4")
+            await pilot.press("5")
             await asyncio.wait_for(app.workers.wait_for_complete(), 30)
             await pilot.pause()
             await pilot.pause()
@@ -119,7 +119,7 @@ def _paramify_at(size, monkeypatch, demo_workspace, keys=()):
     async def drive():
         app = FetcherApp(manifest_path="manifests/demo.yaml", root_override=str(demo_workspace.root))
         async with app.run_test(size=size) as pilot:
-            await pilot.press("4")
+            await pilot.press("5")
             await asyncio.wait_for(app.workers.wait_for_complete(), 30)
             await pilot.pause()
             for key in keys:
@@ -159,7 +159,7 @@ def test_paramify_fit_measures_a_list_the_detail_has_squeezed(demo_workspace, no
     async def drive():
         app = FetcherApp(manifest_path="manifests/demo.yaml", root_override=str(demo_workspace.root))
         async with app.run_test(size=SHORT) as pilot:
-            await pilot.press("4")
+            await pilot.press("5")
             await asyncio.wait_for(app.workers.wait_for_complete(), 30)
             for _ in range(4):
                 await pilot.pause()
@@ -211,7 +211,7 @@ def test_capability_view_holds_fifty_fetchers(size, demo_workspace, no_network, 
     async def drive():
         app = FetcherApp(manifest_path="manifests/demo.yaml", root_override=str(demo_workspace.root))
         async with app.run_test(size=size) as pilot:
-            await pilot.press("4")
+            await pilot.press("5")
             await asyncio.wait_for(app.workers.wait_for_complete(), 30)
             await pilot.pause()
             await pilot.press("right_square_bracket")
@@ -244,7 +244,7 @@ def test_capability_view_keeps_its_rows_on_a_short_terminal(size, demo_workspace
     async def drive():
         app = FetcherApp(manifest_path="manifests/demo.yaml", root_override=str(demo_workspace.root))
         async with app.run_test(size=size) as pilot:
-            await pilot.press("4")
+            await pilot.press("5")
             await asyncio.wait_for(app.workers.wait_for_complete(), 30)
             await pilot.pause()
             await pilot.press("right_square_bracket")

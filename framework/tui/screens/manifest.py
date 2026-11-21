@@ -240,8 +240,12 @@ class ManifestPanel(ButtonRowNav, Vertical):
             ntargets = len(e.get("targets") or [])
             errs = by_key.get(ekey, [])
             status = palette.pill("✓", "ok") if not errs else palette.pill(f"⚠ {len(errs)}", "warn")
+            name = Text(use)
+            if d and d.get("source") == "community":
+                name.append("  ")
+                name.append_text(palette.community_tag("community"))
             dt.add_row(
-                use,
+                name,
                 render.kind_pill(kinds.kind_of(d)) if d else "—",
                 f"{sset}/{stot}",
                 f"{cset}/{ctot}",
