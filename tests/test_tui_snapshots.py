@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
+import functools
+import json
+from datetime import date, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
+import yaml
 
 pytest.importorskip("textual", reason="TUI tests need the 'tui' extra")
 pytest.importorskip("pytest_textual_snapshot", reason="snapshot tests need the 'snapshots' extra")
@@ -33,7 +36,8 @@ class _Frozen(datetime):
 def shot(snap_compare, demo_workspace, no_network, monkeypatch, tui_size):
     """Open the app on MANIFEST (or the welcome screen for None), press keys, compare.
 
-    Each step is a key, or a tuple of keys typed in one go and settled once."""
+    Each step is a key, a tuple of keys typed in one go and settled once, or an
+    async callable given the pilot (to click a button that has no key)."""
     monkeypatch.setattr(chrome, "datetime", _Frozen)
     monkeypatch.setattr(welcome, "datetime", _Frozen)
     clock = SimpleNamespace(now=0.0)
@@ -60,7 +64,10 @@ def shot(snap_compare, demo_workspace, no_network, monkeypatch, tui_size):
         async def run_before(pilot) -> None:
             await settle(pilot)
             for step in steps:
-                await pilot.press(*((step,) if isinstance(step, str) else step))
+                if callable(step):
+                    await step(pilot)
+                else:
+                    await pilot.press(*((step,) if isinstance(step, str) else step))
                 await settle(pilot)
 
         return snap_compare(app, terminal_size=tui_size, run_before=run_before)
@@ -84,26 +91,33 @@ def test_workspace_switch_manifest_picker(shot):
     assert shot("m")
 
 
-def test_catalog_fetcher_contract(shot):
+def test_fetchers_catalog_detail(shot):
     assert shot("slash", tuple("demo_hello"), "down", "down", "down", "escape")
 
 
-def test_manifest(shot):
-    assert shot("2")
+def test_fetchers_manifest_entry(shot):
+    assert shot("1", "tab")
 
 
-def test_manifest_add_fetchers_picker(shot, demo_workspace):
+def test_fetchers_empty_manifest(shot, demo_workspace):
     root = demo_workspace.root
     api.dump_manifest(api.init_manifest(), root / "manifests" / "empty.yaml", root)
-    assert shot("2", "a", tuple("demo_hello"), "enter", manifest="manifests/empty.yaml")
+    assert shot("1", manifest="manifests/empty.yaml")
+
+
+def test_fetchers_add_from_catalog(shot, demo_workspace):
+    root = demo_workspace.root
+    api.dump_manifest(api.init_manifest(), root / "manifests" / "empty.yaml", root)
+    assert shot("slash", tuple("demo_hello"), "down", "down", "down", "escape", "a",
+                manifest="manifests/empty.yaml")
 
 
 def test_manifest_remove_confirm(shot):
-    assert shot("2", "x")
+    assert shot("1", "tab", "x")
 
 
 def test_manifest_preview(shot):
-    assert shot("2", "p")
+    assert shot("1", "tab", "p")
 
 
 def test_run_complete(shot, demo_workspace, monkeypatch):
@@ -112,20 +126,146 @@ def test_run_complete(shot, demo_workspace, monkeypatch):
             on_event(event)
 
     monkeypatch.setattr(api, "run", replay)
-    assert shot("3", "ctrl+r")
+    assert shot("2", "ctrl+r")
 
 
 def test_evidence(shot):
-    assert shot("4")
+    assert shot("3")
 
 
 def test_evidence_file_preview(shot):
-    assert shot("4", "enter", "enter")
+    assert shot("3", "enter", "enter")
 
 
-def test_paramify(shot):
+def test_paramify_no_token(shot):
+    """The demo workspace has no token: the page reads nothing and says why."""
     assert shot("5")
 
 
-def test_paramify_scripts_preview(shot):
-    assert shot("5", "p")
+def _setup_status() -> dict:
+    """Seven fetchers at different steps of setup, two capabilities linked."""
+    def row(name, ref, set_id, arts, script, paired, pairs=(), ready=False):
+        validators = [{"key": f"{name}-{i}", "role": "completeness" if i == 0 else "configuration",
+                       "name": label, "paired": ok}
+                      for i, (label, ok) in enumerate(paired)]
+        return {"name": name, "kind": "evidence",
+                "evidence_set": {"reference_id": ref, "name": name, "id": set_id, "exists": set_id is not None,
+                                 "artifact_count": arts},
+                "script": script, "validators": validators,
+                "pairs": [{"pair_id": f"{name}-p{i}", "validator_key": f"{name}-{v}", "capability_id": c,
+                           "function": fn} for i, (c, fn, v) in enumerate(pairs)],
+                "ready": ready}
+
+    complete = ("completeness: every certificate", True)
+    return {
+        "workspace": {"base_url": "https://app.paramify.com/api/v0", "base_url_source": "default", "token": True},
+        "fetchers": [
+            row("aws_acm_certificate_status", "EVD-ACM-CERT", "ev-1", 4, "in_sync",
+                [complete, ("TLS 1.2+ only", True), ("no cert expires < 30d", True)],
+                [("c1", "PROVIDER", 0), ("c1", "PROVIDER", 1), ("c2", "INTEGRATOR", 0), ("c2", "INTEGRATOR", 2)],
+                ready=True),
+            row("aws_access_analyzer_findings", "EVD-ACCESS-ANALYZER", "ev-2", 4, "in_sync",
+                [("completeness: every region", True), ("no public findings", True)],
+                [("c3", "PROVIDER", 0), ("c3", "PROVIDER", 1)], ready=True),
+            row("aws_cloudtrail_status", "EVD-CLOUDTRAIL", "ev-3", 2, "in_sync", [], ready=True),
+            row("github_branch_protection", "EVD-GITHUB-BRANCH-PROTECTION", "ev-4", 1, "in_sync",
+                [("completeness: every repo", True), ("reviews required", True), ("force push blocked", False)]),
+            row("github_dependabot_alerts", "EVD-GITHUB-DEPENDABOT-ALERTS", "ev-5", 0, "update",
+                [("completeness: every repo", True), ("alerts on every repo", False)]),
+            row("okta_authenticators", "EVD-OKTA-AUTHENTICATORS", "ev-6", 0, "create",
+                [("completeness: every user", False), ("MFA enforced", False)]),
+            row("knowbe4_training_enrollments", "EVD-SECURITY-AWARENESS-TRAINING", None, 0, "create",
+                [("completeness: every employee", False)]),
+        ],
+        "capabilities": [
+            {"id": "c1", "reference_id": "SC-SC-08", "name": "Encryption in transit", "functions": []},
+            {"id": "c2", "reference_id": "SC-SC-12", "name": "Key management", "functions": []},
+            {"id": "c3", "reference_id": "SC-AC-06", "name": "Least privilege", "functions": []},
+        ],
+        "pipelines_count": 2, "skipped": [], "errors": {},
+    }
+
+
+def test_paramify_by_fetcher(shot, monkeypatch):
+    monkeypatch.setattr(api, "paramify_status", lambda *a, **k: _setup_status())
+    monkeypatch.setattr(api, "list_artifacts", lambda set_id: [])
+    assert shot("5")
+
+
+def test_paramify_by_capability(shot, monkeypatch):
+    monkeypatch.setattr(api, "paramify_status", lambda *a, **k: _setup_status())
+    monkeypatch.setattr(api, "list_artifacts", lambda set_id: [])
+    assert shot("5", "right_square_bracket")
+
+
+def test_pipelines(shot):
+    assert shot("6")
+
+
+@pytest.fixture
+def workspace(demo_workspace, fake_paramify):
+    """A fake Paramify for the demo: EVD-DEMO-HELLO has one channel on Prod with a current
+    request; another set has one channel per owner. After demo_workspace, which clears the token."""
+    fake = fake_paramify
+    prod, staging = fake.add_stack("Prod"), fake.add_stack("Staging")
+    hello = fake.add_evidence("EVD-DEMO-HELLO", channels=[prod.id], owners=["alice"],
+                              name="Demo — Synthetic MFA Policy")
+    fake.add_request(hello.id, hello.channels[0].id, date.today() - timedelta(days=5), date.today() + timedelta(days=5))
+    fake.add_evidence("EVD-OTHER", channels=[prod.id, staging.id], owners=["alice", "bob"])
+    return fake
+
+
+async def _click(selector: str, pilot) -> None:
+    await pilot.click(selector)
+
+
+def test_manifest_stack_picker(shot, workspace):
+    assert shot("1", "tab", functools.partial(_click, "#manifest-stack"))
+
+
+def test_manifest_owner_picker(shot, workspace):
+    assert shot("1", "tab", functools.partial(_click, "#manifest-owner"))
+
+
+def test_paramify_upload_plan(shot, workspace, demo_workspace, stub_paramify_status, monkeypatch):
+    # The demo manifest and its run with stack Prod set, so the plan names the whole route.
+    root = demo_workspace.root
+    manifest = root / MANIFEST
+    m = yaml.safe_load(manifest.read_text())
+    api.set_stack(m, "st-1", "Prod")
+    api.dump_manifest(m, manifest, root)
+    [meta] = (root / "evidence").glob("run-*/_run_metadata.json")
+    run = json.loads(meta.read_text())
+    run["paramify"]["demo_hello"].update(stack="st-1", stack_name="Prod")
+    meta.write_text(json.dumps(run))
+    # The page's status read does not go through the fake: it shows the set the fake holds.
+    status = stub_paramify_status(fetchers=[{
+        "name": "demo_hello", "kind": "evidence",
+        "evidence_set": {"reference_id": "EVD-DEMO-HELLO", "name": "Demo — Synthetic MFA Policy", "id": "ev-1",
+                         "exists": True, "artifact_count": 0},
+        "script": None, "validators": [], "pairs": [], "ready": False,
+    }])
+    status["workspace"]["base_url"] = "https://api.example.test"  # conftest.FAKE_PARAMIFY_URL
+    monkeypatch.setattr(api, "list_artifacts", lambda set_id: [])
+    assert shot("5", "u")
+    assert not [c for c in workspace.calls if c[0] != "GET"]
+
+
+def _write_validator(root, key: str, name: str, source: str) -> None:
+    path = root / "validators" / "demo" / f"{key}.yaml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        f"key: {key}\nname: {name}\ntype: AUTOMATED\nrole: configuration\nsource: {source}\n"
+        f"statement: Every policy in the demo payload is enabled.\n"
+        "regex: '\"enabled\":\\s*(?<enabled>true|false)'\n"
+        "validation_rules:\n"
+        "  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }\n"
+        "    criteria: EQUALS\n"
+        "    value: { type: CUSTOM_TEXT, customText: \"true\" }\n"
+        "evidence_sets: [EVD-DEMO-HELLO]\n")
+
+
+def test_validators(shot, demo_workspace):
+    _write_validator(demo_workspace.root, "demo_policies_enabled", "Demo Policies Are Enabled", "paramify")
+    _write_validator(demo_workspace.root, "demo_mfa_everyone", "Demo MFA Covers Everyone", "community")
+    assert shot("4", "right")

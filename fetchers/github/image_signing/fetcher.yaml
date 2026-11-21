@@ -1,0 +1,138 @@
+name: github_image_signing
+version: 0.2.0
+description: >-
+  Container image signing in GitHub Actions: which workflows sign images with
+  cosign, with what kind of key, whether any workflow verifies signatures, and
+  how signing workflows ran.
+
+category: github
+
+supports_targets: true
+
+target_schema:
+  org:
+    type: string
+    required: true
+    env: GITHUB_ORG
+    description: Organization login, as in github.com/<org>.
+  api_url:
+    type: string
+    required: false
+    default: https://api.github.com
+    env: GITHUB_API_URL
+    description: >-
+      REST API base URL. https://api.github.com for github.com,
+      https://api.<subdomain>.ghe.com for GHE.com, https://<host>/api/v3 for
+      GitHub Enterprise Server.
+  repositories:
+    type: string
+    required: false
+    env: GITHUB_REPOSITORIES
+    description: >-
+      Comma-separated repository names to collect. Unset collects every
+      repository the token can see; a name the token cannot see fails the run.
+  exclude_repositories:
+    type: string
+    required: false
+    env: GITHUB_EXCLUDE_REPOSITORIES
+    description: >-
+      Comma-separated repository names to leave out, matched without regard
+      to case. Cannot be combined with repositories. The evidence lists the
+      names it left out and any that matched no repository.
+  include_archived:
+    type: boolean
+    required: false
+    default: false
+    env: GITHUB_INCLUDE_ARCHIVED
+    description: Include archived repositories, which cannot change.
+
+runtime:
+  type: python
+  entry: fetcher.py
+  timeout: 1800
+
+output:
+  type: json
+  path: github_image_signing.json
+  aggregation: per_target
+
+config_schema:
+  include_runs:
+    type: boolean
+    required: false
+    default: true
+    env: GITHUB_IMAGE_SIGNING_INCLUDE_RUNS
+    description: >-
+      Read how each signing workflow ran in the window, which needs the Actions
+      permission. Set false to read the workflow files only; every run field
+      is then null, never zero.
+  days_back:
+    type: integer
+    required: false
+    default: 30
+    env: GITHUB_IMAGE_SIGNING_DAYS_BACK
+    description: Days of signing workflow run history to collect (1-366).
+  max_runs:
+    type: integer
+    required: false
+    default: 1000
+    env: GITHUB_IMAGE_SIGNING_MAX_RUNS
+    description: >-
+      Most runs read per signing workflow; more in the window fails the run
+      rather than cutting the history short.
+
+secrets: []
+
+ksis:
+  - KSI-SVC-VRI
+
+evidence_set:
+  reference_id: EVD-GITHUB-IMAGE-SIGNING
+  name: GitHub Image Signing
+  instructions: |-
+    Script: github/image_signing/fetcher.py
+
+    Access: a GitHub App or fine-grained token with Metadata and Contents read on the repositories. Optional: Actions read, for how the signing workflows ran; without it, set include_runs false and every run field reads null.
+
+    Commands Executed:
+    - GET orgs/<org> — the organization and its repository counts
+    - GET orgs/<org>/repos (or GET repos/<org>/<name> per listed repository) — the repositories in scope
+    - GraphQL HEAD:.github/workflows per repository — the workflow files on the default branch
+    - GET repos/<org>/<repo>/actions/workflows/<file>/runs (per signing workflow, when include_runs is true) — its runs in the window
+
+    Output: github_image_signing.json, one per organization — per repository, each workflow file's cosign sign steps (kind of key, whether the image is named by digest, whether the step can be skipped), verify steps, and for each signing workflow its runs in the window by outcome and the latest successful run.
+
+    Summary fields:
+
+    What was read?
+    - repositories_total — Number of repositories in scope
+    - workflow_files — Number of workflow files read on the default branches
+    - workflow_files_unparsed — List of workflow files that could not be read or parsed as a workflow; their steps are unknown
+    - not_collected — List of repositories that could not be read; their steps are unknown, not absent
+
+    Which workflows sign images, and how?
+    - repositories_signing — List of repositories with at least one cosign sign step
+    - signing_workflows — List of workflow files with a cosign sign step
+    - signing_steps — Number of cosign sign steps
+    - signing_steps_by_key — Number of sign steps per kind of key: azure_key_vault, aws_kms, gcp_kms, hashicorp_vault, kubernetes_secret, environment_variable, keyless or other
+    - signing_steps_naming_a_digest — Number of sign steps that name the image by digest rather than by tag
+    - signing_steps_skipping_transparency_log — Number of sign steps that do not record the signature in the transparency log
+    - signing_steps_conditional — List of sign steps (repository/file:job:step) that run only when a condition holds
+    - signing_steps_continue_on_error — List of sign steps whose failure does not fail the job
+    - signing_steps_discarding_failure — List of sign steps whose script carries on whatever cosign returned
+    - workflows_calling_reusable_workflows — List of workflow files that call a reusable workflow (jobs.<id>.uses); what the called workflow signs is not read, so a repository that signs only there reads as not signing
+    - workflows_mentioning_cosign_without_a_cosign_command — List of workflow files that mention cosign but run it some way this fetcher does not read, such as a script
+
+    Are signatures verified?
+    - verification_workflows — List of workflow files with a cosign verify step
+    - verification_steps — Number of cosign verify steps
+    - verification_steps_not_enforced — List of verify steps whose failure cannot fail the run
+    - repositories_signing_without_verification — List of repositories that sign images but never verify a signature
+
+    How did the signing workflows run?
+    - runs_read — True when every signing workflow's runs were read; false when any could not be; null when include_runs is false
+    - signing_workflow_runs — Number of signing workflow runs in the window, pull request runs left out; null unless runs_read is true
+    - signing_workflow_runs_successful — Number of those runs that succeeded; null unless runs_read is true
+    - signing_workflow_pull_request_runs — Number of pull_request and pull_request_target runs of signing workflows, left out of the other run figures because a sign step is usually skipped on them while the run still succeeds; null unless runs_read is true
+    - signing_workflows_without_successful_run — List of signing workflows with no successful run in the window, pull request runs left out; null unless runs_read is true
+    - latest_successful_signing_run — Time of the newest successful signing workflow run, pull request runs left out; null when none or unread

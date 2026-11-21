@@ -1154,9 +1154,9 @@ def collect_remediation_deployments(
                   arm_id_key(task.get("policy_definition_reference_id")))
         read = read_by_policy.setdefault(policy, set())
         current = current_by_policy.setdefault(policy, {})
-        unread = sorted({arm_id_key(d.get("remediated_resource_id")) for d in rows} - read - {""})
-        for at in range(0, len(unread), RESOURCE_FILTER_BATCH):
-            batch = unread[at:at + RESOURCE_FILTER_BATCH]
+        to_read = sorted({arm_id_key(d.get("remediated_resource_id")) for d in rows} - read - {""})
+        for at in range(0, len(to_read), RESOURCE_FILTER_BATCH):
+            batch = to_read[at:at + RESOURCE_FILTER_BATCH]
             read.update(batch)
             current.update(collector.guard(
                 f"policyinsights.policy_states.list_query_results_for_subscription (remediated {name})",
@@ -1318,6 +1318,7 @@ def main() -> int:
     exclusions.record_invalid(collector)
 
     collected = empty_collection()
+    read = False
     registration = REGISTRATION_UNKNOWN
     if subscription_id and cred is not None:
         # Asked first: with Microsoft.PolicyInsights unregistered there is no compliance
@@ -1333,6 +1334,7 @@ def main() -> int:
             )
         else:
             collected = collect_compliance(subscription_id, cred, collector, limits, exclusions)
+            read = True
     elif not subscription_id:
         collector.record(
             "resolve_subscription",
@@ -1343,6 +1345,11 @@ def main() -> int:
             ),
         )
 
+    # A list that wasn't read in full can't show a pattern matched nothing.
+    if not (read and collected["deployments_complete"] and limits["non_compliant"] > 0) \
+            or collected["latest_pairs_status"] not in (None, LATEST_READ) or any(
+            f["operation"].startswith("policyinsights.") for f in collector.failures):
+        exclusions.mark_unread()
     exclusions.warn_unmatched(logger)
 
     service_results = collected["subscription_results"]

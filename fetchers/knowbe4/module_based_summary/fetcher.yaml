@@ -16,8 +16,14 @@ output:
 secrets:
 - name: api_key
   env: KNOWBE4_API_KEY
+  description: >-
+    KnowBe4 Reporting API key (Account Settings → Account Integrations → API → Secure
+    API key).
 - name: region
   env: KNOWBE4_REGION
+  description: >-
+    KnowBe4 region subdomain that sets the API host https://{region}.api.knowbe4.com:
+    us, eu, ca, uk or de.
 
 ksis:
   - KSI-CED-RAT

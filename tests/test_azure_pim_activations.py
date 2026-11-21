@@ -167,6 +167,13 @@ def test_collect_summary_counts():
     assert all(c[2] == {} and c[1] == pa.PIM_API for c in client.calls), "no $filter: the subscription and below"
 
 
+def test_summary_fields_are_documented(assert_summary_documented):
+    statuses = ["Provisioned", "Revoked", "Denied", "PendingApproval", "SomethingNew"]
+    _, summary, _ = run(FakeClient(requests=[req(i, status=st) for i, st in enumerate(statuses, 1)]))
+    assert set(summary["requests_by_outcome"]) == {"granted", "revoked", "denied_or_failed", "pending", "unknown"}
+    assert_summary_documented("azure/pim_activations", summary)
+
+
 def test_no_pim_is_a_state_not_a_failure():
     err = ArmError(400, "AadPremiumLicenseRequired", "Entra ID P2 licence required")
     client = FakeClient(fail={"roleAssignmentScheduleRequests": err, "roleAssignmentScheduleInstances": err})

@@ -202,10 +202,11 @@ EXCLUSION_FIGURES = ("users_excluded_from_an_mfa_policy", "users_excluded_from_m
                      "emergency_accounts_excluded_from_every_all_users_mfa_policy")
 
 
-def test_named_accounts_excluded_and_monitored(monkeypatch):
+def test_named_accounts_excluded_and_monitored(monkeypatch, assert_summary_documented):
     results, s, collector = _collect(monkeypatch, FakeClient(*_tenant()), f"breakglass1@contoso.test, {BG2}")
 
     assert collector.failures == []
+    assert_summary_documented("azure/entra_emergency_accounts", s)
     assert s["emergency_accounts_source"] == "configured" and s["emergency_accounts_named"] == 2
     assert s["conditional_access_readable"] and s["exclusions_readable"] and s["coverage_readable"]
     assert s["alert_rules_readable"]

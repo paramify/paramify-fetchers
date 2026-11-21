@@ -331,14 +331,19 @@ def collect_workspaces(subscription_id, cred, collector: Collector, exclusions: 
 
     client = collector.guard("loganalytics.LogAnalyticsManagementClient (init)", _client)
     if client is None:
+        if exclusions is not None:
+            exclusions.mark_unread()
         return []
 
     # ItemPaged: the SDK follows nextLink itself, here and below.
     workspaces = collector.guard(
         "loganalytics.workspaces.list",
         lambda: [project_workspace(w) for w in client.workspaces.list()],
-        default=[],
     )
+    if workspaces is None:
+        if exclusions is not None:
+            exclusions.mark_unread()
+        workspaces = []
     if exclusions and excluded is not None:
         workspaces, out = exclusions.split(workspaces, "workspace")
         excluded += sorted(out, key=lambda e: e["id"] or "")
@@ -412,6 +417,8 @@ def main() -> int:
             ),
         )
 
+    if not (subscription_id and cred is not None):
+        exclusions.mark_unread()
     exclusions.record_invalid(collector)
     exclusions.warn_unmatched(logger)
 

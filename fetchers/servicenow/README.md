@@ -7,7 +7,7 @@ Each fetcher takes the **full endpoint URL**, path included. The path is not
 assembled from a base URL, because these are scoped-application APIs and the
 scope prefix differs per instance — there is no path that is correct everywhere.
 
-Both fetchers use one shared engine, `_shared/scripted_rest.py`. A fetcher only
+The cases and changes fetchers use one shared engine, `_shared/scripted_rest.py`. A fetcher only
 declares its endpoint. The engine does the request and the checks. See
 [Add an endpoint](#add-an-endpoint).
 

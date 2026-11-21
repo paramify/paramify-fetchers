@@ -96,10 +96,11 @@ def run_configuration(monkeypatch, tmp_path, patterns):
     return code, json.loads((tmp_path / "azure_app_service_configuration_s1.json").read_text()), set(reads)
 
 
-def test_configuration_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_path):
+def test_configuration_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_path, assert_summary_documented):
     code, evidence, reads = run_configuration(monkeypatch, tmp_path, None)
     summary, results = evidence["summary"], evidence["results"]
     assert code == 0 and results["excluded"] == [] and reads == {"web-in", "web-out", "web-east"}
+    assert_summary_documented("azure/app_service_configuration", evidence["summary"])
     assert set(summary) - set(config_fetcher.summarize(results["web_apps"])) == NEW_FIELDS | {
         "provider_registration_status", "excluded_web_apps", "in_scope_web_apps"}
     assert summary["resource_exclusion_patterns"] == summary["resource_exclusion_patterns_unmatched"] == []
@@ -168,10 +169,11 @@ def _listed(results) -> dict:
     return {p["name"]: (p["number_of_sites"], [s["name"] for s in p["sites"]]) for p in results["app_service_plans"]}
 
 
-def test_plans_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_path):
+def test_plans_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_path, assert_summary_documented):
     code, evidence = run_plans(monkeypatch, tmp_path, None)
     summary, results = evidence["summary"], evidence["results"]
     assert code == 0 and results["excluded"] == []
+    assert_summary_documented("azure/app_service_plans", evidence["summary"])
     assert set(summary) - set(plans_fetcher.summarize(results["app_service_plans"])) == NEW_FIELDS | {
         "provider_registration_status", "excluded_app_service_plans", "excluded_sites",
         "in_scope_app_service_plans", "in_scope_sites"}
@@ -357,6 +359,7 @@ def test_backups_resource_graph_failure_still_applies_the_patterns_to_the_site_l
     assert [summary[k] for k in BOUNDARY] == [2, 1, None]
     assert (summary["excluded_function_apps"], summary["excluded_deployment_slots"]) == (1, None)
     assert summary["in_scope_web_apps"] == 1 and summary["resource_graph_web_apps"] is None
+    assert summary["resource_exclusion_patterns_unmatched"] is None
 
 
 def test_backups_bare_pattern_fails_the_run(monkeypatch, tmp_path):
@@ -449,10 +452,11 @@ def run_deployments(monkeypatch, tmp_path, patterns, events=None):
     return code, evidence, set(reads), failures
 
 
-def test_deployments_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_path):
+def test_deployments_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_path, assert_summary_documented):
     code, evidence, reads, _ = run_deployments(monkeypatch, tmp_path, None)
     summary, results = evidence["summary"], evidence["results"]
     assert code == 0 and results["excluded"] == []
+    assert_summary_documented("azure/app_service_deployments", evidence["summary"])
     assert reads == {"web-in", "web-in/stage", "web-in/qa", "web-out", "web-out/stage", "web-east", "web-east/stage",
                      "web-id", "web-id/stage"}
     expected = deployments_fetcher.summarize(results["web_apps"], 2, results["activity_log"])
@@ -539,3 +543,25 @@ def test_deployments_count_a_swap_with_an_excluded_slot_once_on_the_requesters_s
     assert summary["deployment_activity_by_caller_type"] == ({"user": 1} if on_production else {})
     assert summary["deployment_activity_on_unlisted_sites"] == 0
     assert results["activity_log"]["requests_on_excluded_sites"]["slot_swaps"] == excluded_swaps
+
+
+def _refuse():
+    raise PermissionError("(AuthorizationFailed) 403")
+
+
+@pytest.mark.parametrize("module, filename", [
+    (config_fetcher, "azure_app_service_configuration_s1.json"), (plans_fetcher, "azure_app_service_plans_s1.json"),
+    (deployments_fetcher, "azure_app_service_deployments_s1.json")])
+def test_unmatched_is_null_and_not_warned_when_the_app_list_was_refused(monkeypatch, tmp_path, caplog, module,
+                                                                         filename):
+    client = ns(web_apps=ns(list=_refuse), app_service_plans=ns(list=lambda detailed: _refuse()))
+    _common(module, monkeypatch, tmp_path, "rg:typo")
+    monkeypatch.setattr(module, "credential", lambda: object())
+    monkeypatch.setattr(module, "report_failure", lambda reason, code: None)
+    monkeypatch.setattr(module, "web_client", lambda *a: client, raising=False)
+    monkeypatch.setitem(sys.modules, "azure.mgmt.web", ns(WebSiteManagementClient=lambda **kw: client))
+    assert module.main() == 1
+    summary = json.loads((tmp_path / filename).read_text())["summary"]
+    assert summary["resource_exclusion_patterns"] == ["rg:typo"]
+    assert summary["resource_exclusion_patterns_unmatched"] is None
+    assert "matched nothing" not in caplog.text
