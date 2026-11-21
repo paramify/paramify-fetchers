@@ -1,0 +1,21 @@
+validator: sqlmi_entra_only_authentication_all_instances
+cases:
+  - name: all_instances_entra_only
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"managed_instances":[{"name":"mi-a","azure_ad_only_authentication":true,"entra_administrator_configured":true},{"name":"mi-b","azure_ad_only_authentication":true,"entra_administrator_configured":true}]}}}'
+
+  - name: entra_admin_but_sql_logins_allowed
+    expect: FAIL
+    note: a common non-compliant shape.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"managed_instances":[{"name":"mi-a","azure_ad_only_authentication":false,"entra_administrator_configured":true}]}}}'
+
+  - name: setting_unread
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":1},"payload":{"results":{"managed_instances":[{"name":"mi-a","azure_ad_only_authentication":null}]}}}'
+
+  - name: key_renamed_ALONE_THIS_PASSES
+    expect: PASS
+    note: >
+      Deliberate. sqlmi_configuration_fields_present fails here; see
+      set_EVD-AZURE-SQLMI-CONFIG.yaml.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"managed_instances":[{"name":"mi-a","entra_only_authentication":false}]}}}'

@@ -1,0 +1,23 @@
+key: azure_activity_log_alerts_log_storage_protection_covered
+name: 'Azure Activity Log Alerts: Attempts to Alter Protected Log Storage Reach a Person'
+type: AUTOMATED
+role: configuration
+source: community
+statement: >
+  For every change that would let immutable log storage be altered or removed (deleting or changing
+  a container's immutability policy, clearing a legal hold, deleting a blob container or a storage
+  account), an enabled activity log alert that reaches a person fires on it
+  (all_log_storage_protection_operations_covered is true). The alert fires on the attempt, so one
+  Azure denies is seen too. An alert that only might reach a person fails. Covers control-plane
+  changes only, not reads or writes of the log data itself, and does not show an alert was tested.
+  Does not check whether the collection run succeeded.
+
+regex: '"all_log_storage_protection_operations_covered":\s*true\b'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-ACTIVITY-ALERTS

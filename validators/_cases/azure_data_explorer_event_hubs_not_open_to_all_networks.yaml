@@ -1,0 +1,21 @@
+validator: azure_data_explorer_event_hubs_not_open_to_all_networks
+cases:
+  - name: compliant
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"data_explorer_clusters_open_to_all_networks":0,"event_hub_namespaces_network_exposure_unknown":0,"event_hub_namespaces_open_to_all_networks":0}}}'
+
+  - name: data_explorer_clusters_open_to_all_networks_nonzero
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"data_explorer_clusters_open_to_all_networks":1,"event_hub_namespaces_network_exposure_unknown":0,"event_hub_namespaces_open_to_all_networks":0}}}'
+
+  - name: event_hub_namespaces_network_exposure_unknown_nonzero
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"data_explorer_clusters_open_to_all_networks":0,"event_hub_namespaces_network_exposure_unknown":1,"event_hub_namespaces_open_to_all_networks":0}}}'
+
+  - name: event_hub_namespaces_open_to_all_networks_nonzero
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"data_explorer_clusters_open_to_all_networks":0,"event_hub_namespaces_network_exposure_unknown":0,"event_hub_namespaces_open_to_all_networks":1}}}'
+
+  - name: data_explorer_clusters_open_to_all_networks_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"data_explorer_clusters_open_to_all_networks_renamed":0,"event_hub_namespaces_network_exposure_unknown":0,"event_hub_namespaces_open_to_all_networks":0}}}'
