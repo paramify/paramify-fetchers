@@ -1,0 +1,75 @@
+name: kubernetes_workload_resilience
+version: 0.1.0
+description: >-
+  Shows whether Deployments and StatefulSets can survive losing a pod, a node or a zone: replicas, disruption budgets, zone spread (configured and actual) and health probes.
+category: kubernetes
+source: community
+
+supports_targets: false
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: kubernetes_workload_resilience.json
+
+config_schema:
+  zone_label:
+    type: string
+    required: false
+    default: topology.kubernetes.io/zone
+    env: KUBERNETES_ZONE_LABEL
+    description: >-
+      The node label that names each node's zone. The default is the standard label AKS, EKS and GKE set.
+
+secrets: []          # credentials come from the kubeconfig or the in-cluster service account (fetchers/_categories/kubernetes.yaml)
+
+ksis:
+  - KSI-CNA-OFA   # workloads that survive the loss of a pod, node or zone
+
+evidence_set:
+  reference_id: EVD-KUBERNETES-WORKLOAD-RESILIENCE
+  name: Kubernetes Workload Resilience
+  description: >-
+    For each Deployment and StatefulSet: replicas and autoscaling minimums, disruption budgets, zone spread as configured
+    and where ready pods actually run, and readiness and liveness probes.
+  instructions: |
+    Script: kubernetes/workload_resilience/fetcher.py
+
+    Access: A Kubernetes identity, through a kubeconfig or the in-cluster service account, with a ClusterRole allowing list on deployments and statefulsets (apps), poddisruptionbudgets (policy), horizontalpodautoscalers (autoscaling), and pods and nodes. Nothing else: it reads no secrets, can't exec into pods and writes nothing. On AKS with Microsoft Entra ID, the kubeconfig can sign in through kubelogin.
+
+    Commands Executed:
+    - GET /apis/apps/v1/deployments — every Deployment's replicas, selector, pod template, spread settings and probes, page by page
+    - GET /apis/apps/v1/statefulsets — the same for every StatefulSet
+    - GET /apis/policy/v1/poddisruptionbudgets — each budget's selector and its minAvailable or maxUnavailable
+    - GET /apis/autoscaling/v2/horizontalpodautoscalers — the autoscaler minimum for each workload one targets
+    - GET /api/v1/pods — each pod's labels, node and readiness, to see where a workload's ready pods run
+    - GET /api/v1/nodes — each node's zone label
+
+    Output: kubernetes_workload_resilience.json — one record per Deployment and StatefulSet outside the excluded namespaces. Configuration and current placement only: it doesn't show a workload surviving an actual failure.
+
+    Summary fields:
+
+    How many replicas?
+    - workloads — Number of Deployments and StatefulSets outside the excluded namespaces; null if either list could not be read, as are the fields below unless noted
+    - workloads_scaled_to_zero — Number set to zero replicas; they are not judged by the fields below
+    - workloads_autoscaled — Number targeted by a HorizontalPodAutoscaler; null if the autoscalers could not be read
+    - workloads_single_replica — Number that run fewer than two replicas: the autoscaler's minimum when one targets the workload, otherwise its replica count; null if the autoscalers could not be read
+    - workloads_single_replica_names — List of those workloads, each as namespace/kind/name
+
+    Can a node be drained without an outage?
+    - workloads_without_pdb — List of multi-replica workloads with no PodDisruptionBudget whose selector matches their pods; null if budgets could not be read
+    - workloads_with_pdb_blocking_drains — List of workloads whose budget never allows an eviction (maxUnavailable 0, or minAvailable at least the replica count or 100%), which blocks node drains and so node patching; null if budgets could not be read
+
+    Are workloads spread across zones?
+    - workloads_without_zone_spread_config — List of multi-replica workloads with neither a zone topology spread constraint nor pod anti-affinity across zones; the scheduler still spreads by default, so read it with the next field
+    - workloads_ready_pods_in_one_zone — List of multi-replica workloads whose ready pods all run on nodes in a single zone, from the pods' nodes and those nodes' zone labels; null if pods or nodes could not be read
+    - workloads_without_ready_pods — List of workloads with replicas set but no ready pod; null if pods could not be read
+    - zones — Number of zones across the cluster's nodes; null if nodes could not be read, as is the field below
+    - nodes_without_zone — List of nodes without the zone label, whose pods can't be placed in a zone
+
+    Are pods health-checked?
+    - workloads_without_readiness_probe — List of workloads with a container that has no readiness probe, so traffic can reach it before it is ready
+    - workloads_without_liveness_probe — List of workloads with a container that has no liveness probe, so a hung container isn't restarted
