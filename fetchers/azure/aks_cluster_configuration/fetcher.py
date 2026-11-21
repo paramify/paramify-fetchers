@@ -10,6 +10,7 @@ cluster mid-provision or in a failed state is exactly the one a reviewer needs t
 
 import logging
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -65,6 +66,7 @@ def project_agent_pool_profile(profile) -> dict:
         "os_disk_type": model_attr(profile, "os_disk_type"),
         "enable_encryption_at_host": model_attr(profile, "enable_encryption_at_host"),
         "enable_auto_scaling": model_attr(profile, "enable_auto_scaling"),
+        "min_count": model_attr(profile, "min_count"),
         "orchestrator_version": model_attr(profile, "orchestrator_version"),
         "vnet_subnet_id": model_attr(profile, "vnet_subnet_id"),
         # Node security: FIPS image, the node image build, and the pool's security profile
@@ -167,6 +169,7 @@ def agent_pool_record(profile: dict) -> dict:
         "os_disk_type": profile.get("os_disk_type"),
         "enable_encryption_at_host": bool(profile.get("enable_encryption_at_host") or False),
         "enable_auto_scaling": bool(profile.get("enable_auto_scaling") or False),
+        "min_count": profile.get("min_count"),
         "orchestrator_version": profile.get("orchestrator_version"),
         "vnet_subnet_id": profile.get("vnet_subnet_id"),
         # Tri-state on purpose (see project_agent_pool_profile): True, False, or None for not returned.
@@ -268,13 +271,71 @@ def cluster_record(cluster: dict) -> dict:
     }
 
 
-def summarize(clusters: list[dict] | None) -> dict:
+EXPECTED_POOLS_ENV = "AZURE_AKS_EXPECTED_AUTOSCALING_POOLS"
+_POOL = re.compile(r"^[a-z][a-z0-9]{0,11}$")
+_CLUSTER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,62}$")
+
+
+def parse_expected_pools(value: str | None) -> tuple[list[dict] | None, list[str]]:
+    """`pool` or `cluster/pool` entries; None when unset. A bound entry is checked only in that cluster, an unbound one
+    in every in-scope cluster, because pool names are unique only within a cluster."""
+    if not (value or "").strip():
+        return None, []
+    expected, invalid = [], []
+    for entry in (e.strip() for e in (value or "").split(",")):
+        if not entry:
+            continue
+        cluster, _, pool = entry.rpartition("/")
+        pool = pool.lower()
+        if _POOL.match(pool) and (not cluster or _CLUSTER.match(cluster)):
+            expected.append({"cluster": cluster or None, "pool": pool})
+        else:
+            invalid.append(entry)
+    return expected, invalid
+
+
+def expected_pool_checks(clusters: list[dict], expected: list[dict]) -> list[dict]:
+    """Each expected pool in each cluster it applies to: present, autoscaling, and its node count. A pool at zero
+    nodes stays expected and is judged like any other; a bound cluster that wasn't found leaves its pools missing."""
+    out = []
+    for c in clusters:
+        name = (c.get("name") or "").lower()
+        pools = {(p.get("name") or "").lower(): p for p in c["agent_pool_profiles"]}
+        for e in expected:
+            if e["cluster"] is not None and e["cluster"].lower() != name:
+                continue
+            p = pools.get(e["pool"])
+            out.append({"cluster": c.get("name"), "pool": e["pool"], "cluster_found": True, "present": p is not None,
+                        "autoscaling": p["enable_auto_scaling"] if p else None, "node_count": p.get("count") if p else None,
+                        "min_count": p.get("min_count") if p else None})
+    names = {(c.get("name") or "").lower() for c in clusters}
+    out += [{"cluster": e["cluster"], "pool": e["pool"], "cluster_found": False, "present": False, "autoscaling": None,
+             "node_count": None, "min_count": None}
+            for e in expected if e["cluster"] is not None and e["cluster"].lower() not in names]
+    return out
+
+
+def summarize_expected_pools(clusters: list[dict] | None, expected: list[dict] | None) -> dict:
+    keys = ("expected_autoscaling_pools", "expected_autoscaling_pools_missing", "expected_autoscaling_pools_missing_names",
+            "expected_autoscaling_pools_not_autoscaling", "expected_autoscaling_pools_not_autoscaling_names",
+            "expected_autoscaling_pools_at_zero_nodes", "all_expected_pools_autoscaling")
+    if clusters is None or expected is None:
+        return dict.fromkeys(keys)
+    checks = expected_pool_checks(clusters, expected)
+    missing = sorted(f"{k['cluster']}/{k['pool']}" for k in checks if not k["present"])
+    off = sorted(f"{k['cluster']}/{k['pool']}" for k in checks if k["present"] and not k["autoscaling"])
+    return dict(zip(keys, (len(checks), len(missing), missing, len(off), off,
+                           sum(1 for k in checks if k["present"] and k["node_count"] == 0),
+                           bool(checks) and not missing and not off)))
+
+
+def summarize(clusters: list[dict] | None, expected_pools: list[dict] | None = None) -> dict:
     """Coverage counts across the cluster estate, one per Prowler AKS check.
 
     `clusters` None means the list could not be read: every count is null, never 0.
     """
     if clusters is None:
-        return dict.fromkeys(summarize([]))
+        return dict.fromkeys(summarize([], []))
     total = len(clusters)
     private = sum(1 for c in clusters if c["private_cluster"])
     restricted = sum(1 for c in clusters if c["api_server_access_restricted"])
@@ -318,6 +379,7 @@ def summarize(clusters: list[dict] | None) -> dict:
         "kubernetes_versions": sorted(
             {c["kubernetes_version"] for c in clusters if c["kubernetes_version"]}
         ),
+        **summarize_expected_pools(clusters, expected_pools),
     }
 
 
@@ -395,6 +457,10 @@ def main() -> int:
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
     clusters: list[dict] | None = None
+    expected_pools, invalid_pools = parse_expected_pools(os.environ.get(EXPECTED_POOLS_ENV))
+    if invalid_pools:
+        collector.record(f"config {EXPECTED_POOLS_ENV}", ValueError(
+            f"invalid setting {EXPECTED_POOLS_ENV}: {', '.join(invalid_pools)} not pool or cluster/pool"))
     exclusions = ResourceExclusions.from_env()
     excluded: list[dict] = []
     registration = REGISTRATION_UNKNOWN
@@ -437,9 +503,10 @@ def main() -> int:
             "clusters": clusters,
             "provider_registration_status": registration,
             "excluded": excluded,
+            "expected_autoscaling_pools": expected_pool_checks(clusters, expected_pools) if listed and expected_pools is not None else None,
         },
         summary={
-            **summarize(clusters if listed else None),
+            **summarize(clusters if listed else None, expected_pools),
             "provider_registration_status": registration,
             **exclusions.summary(excluded, KINDS, {"clusters": len(clusters) if listed else None}),
         },

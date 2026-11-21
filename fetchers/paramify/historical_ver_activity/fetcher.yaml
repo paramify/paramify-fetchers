@@ -37,6 +37,10 @@ output:
 secrets:
   - name: api_token
     env: PARAMIFY_API_TOKEN
+    description: >-
+      Paramify API key (Settings → API Keys) with read access to what the fetcher reads:
+      issues and deviations for the VER reports, elements for
+      workspace_vendor_certification_status.
 
 # Report-period knobs. Declared here (not under secrets) because every entry in
 # secrets[] is mandatory -- the runner raises when a manifest omits one -- while

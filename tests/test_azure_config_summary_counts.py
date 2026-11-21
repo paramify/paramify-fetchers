@@ -80,3 +80,67 @@ def test_aks_new_counts_are_null_when_the_cluster_list_was_unread():
     s = aks.summarize(None)
     assert (s["autoscaling_agent_pools"], s["node_os_auto_upgrade_clusters"], s["node_os_upgrade_channel_unknown_clusters"]) == (None, None, None)
     assert s["node_os_unmanaged_clusters"] is None
+
+
+# --- autoscaling for expected pools ---
+
+def _pool(name, autoscaling, count, min_count=None):
+    return {"name": name, "enable_auto_scaling": autoscaling, "count": count, "min_count": min_count, "mode": "User"}
+
+
+def _aks(name, *pools):
+    return aks.cluster_record({"id": f"/subscriptions/s1/resourceGroups/rg/providers/Microsoft.ContainerService/managedClusters/{name}",
+                               "name": name, "agent_pool_profiles": list(pools)})
+
+
+def _staging():
+    # A fixed-size system pool (deliberately not listed), and three autoscaling user pools, one scaled to zero.
+    return _aks("stage-aks", _pool("system", False, 3), _pool("web", True, 4, 2), _pool("workers", True, 2, 1), _pool("batch", True, 0, 0))
+
+
+def test_expected_pools_parse_pool_or_cluster_and_pool():
+    expected, invalid = aks.parse_expected_pools("web, stage-aks/WORKERS, batch, x/Too-Long-Pool-Name, a/b/c, ")
+    assert expected == [{"cluster": None, "pool": "web"}, {"cluster": "stage-aks", "pool": "workers"}, {"cluster": None, "pool": "batch"}]
+    assert invalid == ["x/Too-Long-Pool-Name", "a/b/c"]
+
+
+def test_every_expected_pool_autoscaling_passes_and_a_zero_node_pool_stays_expected():
+    s = aks.summarize([_staging()], aks.parse_expected_pools("web, workers, batch")[0])
+    assert (s["expected_autoscaling_pools"], s["expected_autoscaling_pools_missing"], s["expected_autoscaling_pools_not_autoscaling"]) == (3, 0, 0)
+    assert (s["expected_autoscaling_pools_at_zero_nodes"], s["all_expected_pools_autoscaling"]) == (1, True)
+    [batch] = [c for c in aks.expected_pool_checks([_staging()], [{"cluster": None, "pool": "batch"}])]
+    assert (batch["present"], batch["node_count"], batch["min_count"]) == (True, 0, 0)
+
+
+def test_missing_and_non_autoscaling_expected_pools_are_named():
+    cluster = _aks("stage-aks", _pool("system", False, 3), _pool("web", False, 4), _pool("workers", True, 2, 1))
+    s = aks.summarize([cluster], aks.parse_expected_pools("web, workers, batch")[0])
+    assert (s["expected_autoscaling_pools_missing_names"], s["expected_autoscaling_pools_not_autoscaling_names"]) == (
+        ["stage-aks/batch"], ["stage-aks/web"])
+    assert s["all_expected_pools_autoscaling"] is False
+
+
+def test_a_bound_pool_in_a_cluster_that_is_not_there_is_missing():
+    s = aks.summarize([_staging()], aks.parse_expected_pools("prod-aks/web")[0])
+    assert (s["expected_autoscaling_pools"], s["expected_autoscaling_pools_missing_names"], s["all_expected_pools_autoscaling"]) == (
+        1, ["prod-aks/web"], False)
+
+
+def test_an_unbound_pool_is_checked_in_every_cluster():
+    other = _aks("tools-aks", _pool("system", False, 1))
+    s = aks.summarize([_staging(), other], aks.parse_expected_pools("web")[0])
+    assert (s["expected_autoscaling_pools"], s["expected_autoscaling_pools_missing_names"]) == (2, ["tools-aks/web"])
+    bound = aks.summarize([_staging(), other], aks.parse_expected_pools("stage-aks/web")[0])
+    assert (bound["expected_autoscaling_pools"], bound["all_expected_pools_autoscaling"]) == (1, True)
+
+
+def test_expected_pool_fields_are_null_while_unset_or_when_clusters_were_unread():
+    unset = aks.summarize([_staging()])
+    assert {k: unset[k] for k in aks.summarize_expected_pools(None, None)} == dict.fromkeys(aks.summarize_expected_pools(None, None))
+    unread = aks.summarize(None, aks.parse_expected_pools("web")[0])
+    assert all(unread[k] is None for k in aks.summarize_expected_pools(None, None))
+
+
+def test_min_count_comes_through_the_projection():
+    profile = NS(name="batch", enable_auto_scaling=True, count=0, min_count=0, max_count=5)
+    assert aks.project_agent_pool_profile(profile)["min_count"] == 0

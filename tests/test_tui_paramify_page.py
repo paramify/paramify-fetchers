@@ -100,7 +100,7 @@ async def _settle(app, pilot):
 
 
 async def _open(app, pilot) -> ParamifyPage:
-    await pilot.press("4")
+    await pilot.press("5")
     await _settle(app, pilot)
     return app.screen.query_one(ParamifyPage)
 
@@ -268,7 +268,7 @@ def test_only_scan_reports_points_at_pipelines(tmp_path, monkeypatch, run_tui):
         page = await _open(app, pilot)
         return _text(page.query_one("#pf-grid-empty", Static).content)
 
-    assert "They are on the Pipelines tab (5)." in run_tui(body, _manifest(tmp_path))
+    assert "They are on the Pipelines tab (6)." in run_tui(body, _manifest(tmp_path))
 
 
 def test_a_refresh_does_not_pull_the_view_off_pipelines(tmp_path, monkeypatch, run_tui):
@@ -276,7 +276,7 @@ def test_a_refresh_does_not_pull_the_view_off_pipelines(tmp_path, monkeypatch, r
 
     async def body(app, pilot):
         page = await _open(app, pilot)
-        await pilot.press("5")
+        await pilot.press("6")
         await pilot.pause()
         page.request_status()
         await _settle(app, pilot)
@@ -295,7 +295,7 @@ def test_a_status_for_another_manifest_is_dropped(tmp_path, monkeypatch, run_tui
     _stub(monkeypatch, slow)
 
     async def body(app, pilot):
-        await pilot.press("4")
+        await pilot.press("5")
         await pilot.pause()
         app.manifest_path = tmp_path / "other.yaml"
         gate.set()
@@ -909,7 +909,7 @@ def test_coming_back_on_the_capability_view_focuses_it(tmp_path, monkeypatch, ru
         page = await _capability_lens(app, pilot)
         await pilot.press("3")
         await pilot.pause()
-        await pilot.press("4")
+        await pilot.press("5")
         await _settle(app, pilot)
         on_return = app.focused.id
         await pilot.press("escape")
@@ -1036,7 +1036,7 @@ def test_the_capability_view_says_it_is_reading(tmp_path, monkeypatch, run_tui):
     _stub(monkeypatch, slow)
 
     async def body(app, pilot):
-        await pilot.press("4")
+        await pilot.press("5")
         await pilot.pause()
         page = app.screen.query_one(ParamifyPage)
         await pilot.press("right_square_bracket")
