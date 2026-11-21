@@ -2,6 +2,7 @@ key: azure_postgresql_secure_transport_every_server
 name: 'Azure PostgreSQL: Encrypted Connections Required on Every Server'
 type: AUTOMATED
 role: configuration
+source: community
 statement: >
   Every in-scope PostgreSQL server has require_secure_transport ON, so unencrypted connections are
   refused (require_secure_transport_servers equals total_postgresql_servers, and there is at least

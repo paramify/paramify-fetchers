@@ -2,6 +2,7 @@ key: azure_acr_no_public_network_access
 name: 'Azure Container Registry: No Public Network Access'
 type: AUTOMATED
 role: configuration
+source: community
 statement: >
   Every in-scope container registry has public network access Disabled
   (public_network_access_registries is 0); a registry that does not return the setting counts as

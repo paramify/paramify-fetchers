@@ -2,6 +2,7 @@ key: azure_postgresql_public_access_disabled_every_server
 name: 'Azure PostgreSQL: Public Network Access Disabled on Every Server'
 type: AUTOMATED
 role: configuration
+source: community
 statement: >
   Every in-scope PostgreSQL server has public network access Disabled, so it is reached only through
   a virtual network or private endpoint (public_network_access_disabled_servers equals

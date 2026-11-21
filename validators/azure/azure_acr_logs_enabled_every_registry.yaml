@@ -2,6 +2,7 @@ key: azure_acr_logs_enabled_every_registry
 name: 'Azure Container Registry: Logs Enabled on Every Registry'
 type: AUTOMATED
 role: configuration
+source: community
 statement: >
   Every in-scope container registry has a diagnostic setting with at least one log category on
   (registries_with_enabled_logs equals total_registries, and there is at least one registry). Shows

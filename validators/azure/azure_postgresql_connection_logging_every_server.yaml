@@ -2,6 +2,7 @@ key: azure_postgresql_connection_logging_every_server
 name: 'Azure PostgreSQL: Connection Logging On for Every Server'
 type: AUTOMATED
 role: configuration
+source: community
 statement: >
   Every in-scope PostgreSQL server has log_connections ON, so each connection attempt is logged
   (log_connections_servers equals total_postgresql_servers, and there is at least one server). Shows

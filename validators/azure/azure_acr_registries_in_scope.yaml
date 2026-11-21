@@ -2,6 +2,7 @@ key: azure_acr_registries_in_scope
 name: 'Azure Container Registry: At Least One Registry in Scope'
 type: AUTOMATED
 role: completeness
+source: community
 statement: >
   At least one container registry was read and is in scope (in_scope_registries is above 0). Fails
   when there are none, resource_exclusions took out every registry, the registry list was not read,

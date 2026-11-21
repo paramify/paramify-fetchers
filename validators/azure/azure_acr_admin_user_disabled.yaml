@@ -2,6 +2,7 @@ key: azure_acr_admin_user_disabled
 name: 'Azure Container Registry: Admin Account Disabled on Every Registry'
 type: AUTOMATED
 role: configuration
+source: community
 statement: >
   No in-scope container registry has the shared admin account enabled (admin_user_enabled_registries
   is 0), so pulls and pushes go through Entra ID identities that can be traced. Fails when no

@@ -2,6 +2,7 @@ key: azure_acr_no_anonymous_pull
 name: 'Azure Container Registry: No Anonymous Pull'
 type: AUTOMATED
 role: configuration
+source: community
 statement: >
   No in-scope container registry lets anyone pull images without signing in
   (anonymous_pull_enabled_registries is 0). Fails when no registry is in scope, the registry list
