@@ -94,7 +94,7 @@ async def _until(pilot, done, what: str, timeout: float = 30.0) -> None:
 
 async def _confirm(app, pilot) -> list:
     """Open the Paramify page, ask to upload, and return the confirm's lines."""
-    await pilot.press("4")
+    await pilot.press("5")
     await pilot.pause()
     page = app.screen.query_one(ParamifyPage)
     await _until(pilot, lambda: page.check_action("upload_run", ()), "the upload key")
@@ -484,7 +484,7 @@ def test_a_second_upload_while_the_plan_is_made_is_refused(tmp_path, paramify, r
     monkeypatch.setattr(api, "plan_upload", slow_plan)
 
     async def body(app, pilot):
-        await pilot.press("4")
+        await pilot.press("5")
         await pilot.pause()
         page = app.screen.query_one(ParamifyPage)
         page.action_upload_run()
