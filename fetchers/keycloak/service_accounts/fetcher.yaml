@@ -3,6 +3,7 @@ version: 0.1.0
 description: >-
   Lists every Keycloak client that signs in as a service account, with how it authenticates, its secret's age and expiry, its owner and the roles it holds.
 category: keycloak
+source: community
 
 supports_targets: false
 
