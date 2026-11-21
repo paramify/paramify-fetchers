@@ -5,6 +5,7 @@ renderables for display in a Textual `Static`. Kept separate from the screens so
 later phases (the manifest editor) can reuse the same field rendering.
 """
 
+import re
 from typing import Any, List, Optional
 
 from rich.console import Group, RenderableType
@@ -25,6 +26,7 @@ from framework.secret_resolver import (
     view_runtime_value,
 )
 from framework.tui import kinds, palette
+from framework.tui.words import agree
 
 
 def _fmt_default(value: Any) -> str:
@@ -383,4 +385,109 @@ def entry_detail(
         for e in errors:
             parts.append(Text(f"  ✗ {e}", style=palette.WARN))
 
+    return Group(*parts)
+
+
+# --------------------------------------------------------------------------- #
+# Environment: the variables a run reads (api.generate_env's `variables`), by
+# tool. Presence only: a value is never passed in, so none can be shown.
+# --------------------------------------------------------------------------- #
+
+_NOTE_TAIL = re.compile(r" - (?:required|optional.*)$")
+# The tool's heading already names the fetchers a passthrough variable reaches.
+_PASSTHROUGH = re.compile(r"^Passed through to the \S+ fetchers when set$")
+
+
+def _env_note(note: str) -> str:
+    note = _NOTE_TAIL.sub("", note)
+    return "Used when set" if _PASSTHROUGH.match(note) else note
+
+
+def _read_by(fetchers: List[str]) -> str:
+    if not fetchers:
+        return "upload"
+    if len(fetchers) == 1:
+        return fetchers[0]
+    return f"{len(fetchers)} fetchers"
+
+
+def env_missing(variables: List[dict], use: Optional[str] = None, run: bool = False) -> List[str]:
+    """Required variables with no value: every one, those fetcher `use` reads,
+    or (run) those any fetcher reads. The last two leave Paramify's own out: a
+    run collects without the upload token, as `paramify run` does."""
+    return [v["name"] for v in variables
+            if v["required"] and not v["set"]
+            and (use is None or use in v["fetchers"]) and (not run or v["fetchers"])]
+
+
+def env_list(variables: List[dict], show_optional: bool = False) -> RenderableType:
+    """One block per tool: ✓ set, ✗ required and empty, · optional and empty.
+    Optional variables nobody set fold into one line unless show_optional."""
+    table = Table.grid(padding=(0, 2), expand=True)
+    table.add_column(width=1)
+    table.add_column(no_wrap=True)
+    table.add_column(ratio=1, overflow="fold")  # wraps: a cut-off note hides where to get the value
+    table.add_column(no_wrap=True, justify="right")
+    tools: List[str] = []
+    for v in variables:
+        if v["tool"] not in tools:
+            tools.append(v["tool"])
+    for i, tool in enumerate(tools):
+        rows = [v for v in variables if v["tool"] == tool]
+        shown = [v for v in rows if show_optional or v["required"] or v["set"]]
+        folded = len(rows) - len(shown)
+        if i:
+            table.add_row()
+        table.add_row("", Text(tool, style=f"bold {palette.ACCENT}"), "", "")
+        for v in shown:
+            if v["set"]:
+                mark = Text("✓", style=palette.OK)
+            elif v["required"]:
+                mark = Text("✗", style=palette.FAIL)
+            else:
+                mark = Text("·", style=palette.MUTED)
+            name = Text(v["name"], style=palette.FG if v["set"] or v["required"] else palette.MUTED)
+            note = Text(_env_note(v["note"]), style="dim")
+            if not v["required"]:
+                note.append("  optional", style=palette.MUTED)
+            table.add_row(mark, name, note, Text(_read_by(v["fetchers"]), style=palette.MUTED))
+        if folded:
+            table.add_row(Text("·", style=palette.MUTED), Text(f"{folded} more", style=palette.MUTED),
+                          Text(f"optional, not set  (o shows {agree(folded, 'it', 'them')})", style=palette.MUTED), "")
+    return table
+
+
+def _used_by(fetchers: List[str]) -> str:
+    if not fetchers:
+        return ""
+    if len(fetchers) == 1:
+        return f"Used by {fetchers[0]}."
+    return f"Used by {len(fetchers)} fetchers."
+
+
+def env_needed(variables: List[dict]) -> RenderableType:
+    """Only the required variables with no value, split by what they block: a run
+    (a fetcher reads it) or an upload (Paramify's own). Each is its name, then
+    where to get it, so the note is the content rather than a squeezed column."""
+    sections = (
+        ("To run", [v for v in variables if v["required"] and not v["set"] and v["fetchers"]]),
+        ("To upload", [v for v in variables if v["required"] and not v["set"] and not v["fetchers"]]),
+    )
+    parts: List[RenderableType] = []
+    for heading, rows in sections:
+        if not rows:
+            continue
+        if parts:
+            parts.append(Text(""))
+        parts.append(Text(heading, style=f"bold {palette.ACCENT}"))
+        table = Table.grid(padding=(0, 1), expand=True)
+        table.add_column(width=1)
+        table.add_column(ratio=1)
+        for v in rows:
+            body = Text(v["name"], style=f"bold {palette.FG}")
+            note = _env_note(v["note"]).rstrip(".")
+            used = _used_by(v["fetchers"])
+            body.append("\n" + (f"{note}. {used}" if note else used).strip(), style="dim")
+            table.add_row(Text("✗", style=palette.FAIL), body)
+        parts.append(table)
     return Group(*parts)

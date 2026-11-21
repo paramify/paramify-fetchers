@@ -26,12 +26,17 @@ from textual.message import Message
 from textual.widgets import Button, RichLog, Static
 
 from framework import api
-from framework.tui import palette
+from framework.tui import palette, render
 from framework.tui.components.table import DataTable
 from framework.tui.modals import ConfirmModal
-from framework.tui.words import plural
+from framework.tui.words import agree, plural
 
 _BAR_WIDTH = 20
+
+
+def _names(names: list) -> str:
+    """"A", "A and B", "A, B and C"."""
+    return names[0] if len(names) == 1 else f"{', '.join(names[:-1])} and {names[-1]}"
 
 
 def _exit_label(code: int) -> str:
@@ -108,6 +113,25 @@ class RunPage(Vertical):
             self.notify("A run is already in progress.")
             return
         if self.app.manifest is None or self.app.root_path is None:
+            return
+        # A fetcher whose variable is empty fails partway through a run, after
+        # the others have spent their time: stop before it, name the variables,
+        # and open the view that shows them. The upload token is not one: a
+        # run collects without it.
+        try:
+            variables = api.generate_env(self.app.root_path, self.app.manifest)["variables"]
+        except Exception:  # an unreadable .env: the run reports it its own way
+            variables = []
+        missing = render.env_missing(variables, run=True)
+        if missing:
+            n = len(missing)
+            banner = Text(f"✗ Didn't start: {plural(n, 'variable')} {agree(n, 'needs', 'need')} a value. ",
+                          style=palette.FAIL)
+            banner.append(f"E shows {agree(n, 'it', 'them')}; ctrl+r again once {agree(n, 'it is', 'they are')} set.",
+                          style="dim")
+            self._set_banner(banner)
+            self.app.open_environment(
+                notice=f"The run didn't start. {_names(missing)} {agree(n, 'needs', 'need')} a value first.")
             return
         errors = api.validate(self.app.manifest, self.app.root_path)
         if errors:

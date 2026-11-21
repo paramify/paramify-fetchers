@@ -49,6 +49,8 @@ class WorkspaceScreen(Screen):
         Binding("slash", "focus_search", "Search"),
         Binding("escape", "unfocus", "Unfocus", show=False),
         Binding("m", "switch_manifest", "Manifest…"),
+        # Not in the hints: the manifest's issues line and the Run tab name it where it matters.
+        Binding("E", "environment", "Environment"),
         Binding("r", "refresh", "Refresh", show=False),
         Binding("q", "app.quit", "Quit"),  # app.* — a bare "quit" resolves in the screen namespace (no-op)
     ]
@@ -191,3 +193,6 @@ class WorkspaceScreen(Screen):
 
     def action_switch_manifest(self) -> None:
         self.app.open_manifest_picker()
+
+    def action_environment(self) -> None:
+        self.app.open_environment()

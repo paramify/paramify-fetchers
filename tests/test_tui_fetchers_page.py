@@ -208,14 +208,14 @@ def test_arrows_walk_the_stack_owner_save_row(tmp_path, run_tui):
         app.screen.query_one("#manifest-stack").focus()
         await pilot.pause()
         seen = [_focus_id(app)]
-        for key in ("right", "right", "right"):
+        for key in ("right", "right", "right", "right"):
             await pilot.press(key)
             await pilot.pause()
             seen.append(_focus_id(app))
         return seen
 
     assert run_tui(body, _manifest_with(tmp_path, "demo_hello")) == [
-        "manifest-stack", "manifest-owner", "btn-save", "manifest-stack",
+        "manifest-stack", "manifest-owner", "manifest-env", "btn-save", "manifest-stack",
     ]
 
 

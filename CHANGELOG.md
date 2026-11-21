@@ -40,6 +40,14 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **The TUI shows which environment variables a manifest is missing, and stops a run that would fail on them.**
+  - The manifest settings row has an `env` button (`✓ all set` or `✗ 2 missing`), each fetcher's status names what it
+    needs (`✗ needs OKTA_API_TOKEN`), and the line under the table splits what a run needs from what only an upload needs.
+  - The button (or `E`) opens a short list of just the missing variables and where to get each one, with a button that
+    adds them to `.env` as blank lines, as `paramify env --write` does.
+  - ctrl+r on the Run tab doesn't start while a variable a fetcher reads is empty, and says which.
+  - Only whether a variable has a value is ever checked. The TUI never shows, logs or takes a value.
+
 - **Choose the validators each fetcher tracks (TUI Validators tab, beta).** The tab lists the manifest's fetchers
   and, for each, every registry validator for its evidence set in a Paramify section and a community section.
   `space` tracks or untracks one and saves the manifest; `enter` shows the claim, regex, rules in plain words,

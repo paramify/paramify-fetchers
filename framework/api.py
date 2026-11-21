@@ -4166,7 +4166,8 @@ def refresh_env(root: Path) -> List[str]:
 _FILLED_FROM_DOTENV: set = set()
 
 
-def generate_env(root: Path, manifest: Mapping[str, Any], write: bool = False, path: Optional[Path] = None) -> dict:
+def generate_env(root: Path, manifest: Mapping[str, Any], write: bool = False, path: Optional[Path] = None,
+                 found: Optional[Mapping[str, Any]] = None) -> dict:
     """The .env a manifest needs, merged with the one at `path` (default
     env_file(root)) without changing anything already in it.
 
@@ -4183,6 +4184,7 @@ def generate_env(root: Path, manifest: Mapping[str, Any], write: bool = False, p
     target}): the run
     stops on those whatever .env holds. Writes only when `write` is set:
     atomically, through a symlinked .env to its file, keeping CRLF line endings.
+    `found` is a discover(root) the caller already has (the TUI's rebuild).
     """
 
     path = Path(path) if path else env_file(root)
@@ -4191,7 +4193,7 @@ def generate_env(root: Path, manifest: Mapping[str, Any], write: bool = False, p
     if target.is_file():
         with target.open(newline="") as fh:
             existing = fh.read()
-    found = discover(root)
+    found = found or discover(root)
     groups, unmapped = envgen.env_groups(found["fetchers"], found["platforms"], manifest)
     text, result = envgen.merged(existing, groups)
     if write and result.text:
