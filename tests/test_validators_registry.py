@@ -15,10 +15,14 @@ from framework import api
 from framework.config_loader import _parse_fetcher, discover_fetchers
 from framework.contract import Validator
 from framework.validators import (
+    available_for,
+    default_keys,
     discover_validators,
     manifest_reference_ids,
+    manifest_tracked,
     pipeline_conflicts,
     select_validators,
+    tracked_for,
 )
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -212,3 +216,98 @@ def test_ordinary_entry_under_a_run_level_direct_has_no_error_and_no_note():
                           {"delivery": "direct", "no_request": "direct"})
     assert not any("direct" in e for e in api.validate(m, REPO_ROOT))
     assert not any("ignores run.paramify" in n for n in api.validate_notes(m, REPO_ROOT))
+
+
+# --- per-fetcher selection: `validators:` on a manifest entry ---------------
+
+
+def _v(key: str, ref: str = "EVD-A", source: str = "paramify") -> Validator:
+    return Validator(key=key, name=key.upper(), type="AUTOMATED", statement="s",
+                     evidence_sets=[ref], source=source)
+
+
+def test_source_defaults_to_paramify_and_reads_community(tmp_path):
+    cat = tmp_path / "validators" / "demo"
+    cat.mkdir(parents=True)
+    (tmp_path / "framework" / "schemas").mkdir(parents=True)
+    (tmp_path / "framework" / "schemas" / "validator_schema.json").write_text(json.dumps(SCHEMA))
+    base = {"name": "N", "type": "AUTOMATED", "statement": "s", "evidence_sets": ["EVD-A"],
+            "regex": "x", "validation_rules": [{"regexOperation": {"type": "MATCH_COUNT"},
+                                                "criteria": "NOT_EQUALS",
+                                                "value": {"type": "CUSTOM_TEXT", "customText": "0"}}]}
+    (cat / "plain.yaml").write_text(yaml.safe_dump({"key": "plain", **base}))
+    (cat / "theirs.yaml").write_text(yaml.safe_dump({"key": "theirs", "source": "community", **base}))
+    registry = discover_validators(tmp_path)
+    assert registry["plain"].source == "paramify"
+    assert registry["theirs"].source == "community"
+
+
+def test_schema_refuses_an_unknown_source():
+    data = {"key": "k", "name": "N", "type": "AUTOMATED", "statement": "s",
+            "evidence_sets": ["EVD-A"], "source": "vendor"}
+    assert list(Draft202012Validator(SCHEMA).iter_errors(data))
+
+
+def test_an_entry_without_a_list_tracks_only_paramify_made():
+    registry = [_v("p1"), _v("p2"), _v("c1", source="community"), _v("other", ref="EVD-B")]
+    assert [v.key for v in tracked_for({"use": "f"}, "EVD-A", registry)] == ["p1", "p2"]
+
+
+def test_an_entry_with_a_list_tracks_exactly_that_list():
+    registry = [_v("p1"), _v("p2"), _v("c1", source="community")]
+    entry = {"use": "f", "validators": ["p2", "c1"]}
+    assert [v.key for v in tracked_for(entry, "EVD-A", registry)] == ["p2", "c1"]
+    # An empty list tracks nothing, and a key for another set is ignored.
+    assert tracked_for({"use": "f", "validators": []}, "EVD-A", registry) == []
+    assert tracked_for({"use": "f", "validators": ["other"]}, "EVD-A", [*registry, _v("other", "EVD-B")]) == []
+
+
+def test_available_for_and_default_keys():
+    registry = [_v("p1"), _v("c1", source="community"), _v("b", ref="EVD-B")]
+    avail = available_for("EVD-A", registry)
+    assert [v.key for v in avail] == ["p1", "c1"]
+    assert default_keys(avail) == ["p1"]
+
+
+def _fake_fetcher(name: str, ref: str):
+    return _parse_fetcher({
+        "name": name, "version": "0.1.0", "description": "d",
+        "runtime": {"type": "python", "entry": "fetcher.py"},
+        "output": {"type": "json", "path": "x.json"},
+        "secrets": [],
+        "evidence_set": {"reference_id": ref, "name": "X"},
+    }, REPO_ROOT / "fetchers" / "x" / name)
+
+
+def test_manifest_tracked_is_the_union_of_each_entrys_selection():
+    fetchers = {"fa": _fake_fetcher("fa", "EVD-A"), "fb": _fake_fetcher("fb", "EVD-B"),
+                "x_inventory": fake_inventory_fetcher("EVD-X-INVENTORY")}
+    registry = [_v("a1"), _v("a2"), _v("ac", source="community"),
+                _v("b1", ref="EVD-B"), _v("inv", ref="EVD-X-INVENTORY")]
+    manifest = {"run": {"fetchers": [
+        {"use": "fa", "validators": ["a2", "ac"]},
+        {"use": "fb"},
+        {"use": "x_inventory"},  # a pipeline set never gets validators
+    ]}}
+    assert sorted(v.key for v in manifest_tracked(manifest, fetchers, registry)) == ["a2", "ac", "b1"]
+    assert sorted(v.key for v in manifest_tracked(manifest, fetchers, registry, {"EVD-B"})) == ["b1"]
+
+
+def test_collect_validators_follows_the_manifest_selection(tmp_path, monkeypatch):
+    syncer = api._load_paramify_validator_syncer(REPO_ROOT)
+    registry = {v.key: v for v in [_v("a1"), _v("a2"), _v("ac", source="community")]}
+    monkeypatch.setattr("framework.validators.discover_validators", lambda root: registry)
+    monkeypatch.setattr("framework.config_loader.discover_fetchers",
+                        lambda root: {"fa": _fake_fetcher("fa", "EVD-A")})
+    path = tmp_path / "m.yaml"
+    path.write_text(yaml.safe_dump({"run": {"fetchers": [{"use": "fa", "validators": ["a1", "ac"]}]}}))
+    monkeypatch.setattr(api, "read_manifest", lambda p: yaml.safe_load(Path(p).read_text()))
+
+    def keys(**kw):
+        return sorted(d["key"] for d in syncer.collect_validators(REPO_ROOT, **kw))
+
+    assert keys(manifest_path=path) == ["a1", "ac"]
+    # The TUI's per-fetcher sync passes both; the selection still applies.
+    assert keys(manifest_path=path, reference_ids=["EVD-A"]) == ["a1", "ac"]
+    # Without a manifest an explicit set list still means every validator for it.
+    assert keys(reference_ids=["EVD-A"]) == ["a1", "a2", "ac"]

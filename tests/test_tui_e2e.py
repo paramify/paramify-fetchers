@@ -132,7 +132,7 @@ def test_demo_manifest_end_to_end(demo_workspace, no_network, monkeypatch, tui_s
             await pilot.press("escape")
 
             # Paramify: with no token the page says why, and the syncs and upload stay off.
-            page = await _tab(pilot, "4", ParamifyPage)
+            page = await _tab(pilot, "5", ParamifyPage)
             summary = page.query_one("#pf-summary")
             await _until(pilot, lambda: "No Paramify API token found" in _text(summary), "the status read")
             [row] = _rows(page.query_one("#pf-grid", DataTable))
@@ -240,7 +240,7 @@ def test_demo_stack_owner_run_and_batch_plan_end_to_end(demo_workspace, no_netwo
 
             for read in ("list_evidence_sets", "list_capabilities", "scripts_sync"):
                 monkeypatch.setattr(api, read, offline)
-            page = await _tab(pilot, "4", ParamifyPage)
+            page = await _tab(pilot, "5", ParamifyPage)
             await _until(pilot, lambda: page.check_action("upload_run", ()), "the token to show")
             real_upload = api.upload_run
             # The TUI has no dry-run switch: force it, so the confirm's yes sends nothing.

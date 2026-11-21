@@ -20,7 +20,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widgets import Input, Static, Tree
 
-from framework.tui import kinds, render
+from framework.tui import kinds, palette, render
 from framework.tui.components.detail import AddRequested, ShowDetail
 from framework.tui.components.keys import FILTER_NAV_BINDINGS, FilterListNav
 
@@ -210,6 +210,9 @@ class CatalogPanel(FilterListNav, Horizontal):
         label = Text()
         label.append("[x] " if checked else "[ ] ", style="green" if checked else "dim")
         label.append(name)
+        if fetcher.get("source") == "community":
+            label.append("  ")
+            label.append_text(palette.community_tag("community"))
         return label
 
     def set_marked(self, names) -> None:
