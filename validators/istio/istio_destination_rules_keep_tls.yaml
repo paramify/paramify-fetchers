@@ -2,6 +2,7 @@ key: istio_destination_rules_keep_tls
 name: 'Istio: No Destination Rule Turns TLS Off'
 type: AUTOMATED
 role: configuration
+source: community
 statement: >
   No DestinationRule sets tls.mode DISABLE for a host or a port (destination_rules_tls_disabled is empty),
   so no rule sends traffic in plaintext where mTLS would apply. Does not check whether the collection run

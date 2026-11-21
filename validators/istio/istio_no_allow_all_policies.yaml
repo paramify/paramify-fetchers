@@ -2,6 +2,7 @@ key: istio_no_allow_all_policies
 name: 'Istio: No Allow-All Authorization Rules'
 type: AUTOMATED
 role: configuration
+source: community
 statement: >
   No ALLOW AuthorizationPolicy has an empty rule, which would match every request to the workloads it
   selects (authorization_policies_allowing_all is empty). Does not check whether the collection run

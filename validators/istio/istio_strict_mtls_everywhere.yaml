@@ -2,6 +2,7 @@ key: istio_strict_mtls_everywhere
 name: 'Istio: Strict mTLS Everywhere'
 type: AUTOMATED
 role: configuration
+source: community
 statement: >
   The mesh-wide PeerAuthentication is STRICT and no namespace-, workload- or port-level setting weakens it
   to PERMISSIVE or DISABLE (strict_mtls_everywhere is true), so sidecars accept only mTLS. Covers

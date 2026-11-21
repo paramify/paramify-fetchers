@@ -2,6 +2,7 @@ key: istio_ingress_no_plaintext
 name: 'Istio: No Plaintext Ingress'
 type: AUTOMATED
 role: configuration
+source: community
 statement: >
   No Istio Gateway server takes HTTP or TCP without TLS and without an HTTPS redirect
   (gateway_servers_plaintext is empty). Covers Istio Gateways only, not other ingress paths. Does not

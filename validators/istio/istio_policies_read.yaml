@@ -2,6 +2,7 @@ key: istio_policies_read
 name: 'Istio: mTLS Policies Read'
 type: AUTOMATED
 role: integrity
+source: community
 statement: >
   Istio's PeerAuthentication policies were read, so mesh_mtls_mode has a value (STRICT, PERMISSIVE,
   DISABLE, UNSET or NONE). NONE means there is no mesh-wide policy and Istio applies PERMISSIVE. The mTLS

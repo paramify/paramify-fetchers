@@ -2,6 +2,7 @@ key: istio_mesh_namespaces_default_deny
 name: 'Istio: In-Mesh Namespaces Deny by Default'
 type: AUTOMATED
 role: configuration
+source: community
 statement: >
   Every in-mesh namespace is covered by an allow-nothing AuthorizationPolicy, its own or the mesh-wide one
   (namespaces_in_mesh_without_default_deny is empty), so requests are denied unless a policy allows them.

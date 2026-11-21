@@ -2,6 +2,7 @@ key: istio_ingress_min_tls_1_2
 name: 'Istio: Ingress TLS 1.2 or Later'
 type: AUTOMATED
 role: configuration
+source: community
 statement: >
   No Istio Gateway server allows a minimum TLS version below 1.2 (gateway_servers_weak_tls is empty); a
   server with no minimum set uses Istio's default of 1.2. Does not check whether the collection run
