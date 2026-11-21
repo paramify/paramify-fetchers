@@ -40,6 +40,12 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`keycloak` category and `keycloak_realm_security` fetcher.** Reads a Keycloak realm through the Admin REST API with a
+  read-only service-account client: session and token lifetimes, brute-force lockout, password policy, the browser
+  and reset-credentials flows with each step's effective requirement (so a phishing-resistant authenticator counts
+  only when every sign-in must pass it), required actions such as terms and conditions, identity providers, user
+  federation, and login and admin event logging. Client secrets and bind credentials are never written to the
+  evidence, and an unreadable section leaves its fields null rather than empty.
 - **The TUI shows which environment variables a manifest is missing, and stops a run that would fail on them.**
   - The manifest settings row has an `env` button (`✓ all set` or `✗ 2 missing`), each fetcher's status names what it
     needs (`✗ needs OKTA_API_TOKEN`), and the line under the table splits what a run needs from what only an upload needs.
