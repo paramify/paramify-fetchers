@@ -1,7 +1,8 @@
 display_name: Keycloak
 description: >-
   Keycloak identity provider, read through the Keycloak Admin REST API. Realm sign-in, session, lockout,
-  password and event settings, authentication flows, required actions, and federation. One service-account
+  password and event settings, authentication flows, required actions, federation, and users with their roles and
+  authenticators. One service-account
   client per Keycloak instance.
 
 requires:
@@ -37,8 +38,9 @@ secrets:
     env: KEYCLOAK_CLIENT_ID
     description: >-
       Client ID of a confidential client with service accounts enabled. Its service account needs the realm-management
-      roles view-realm, view-identity-providers and view-events, and nothing else: from realm-management in the
-      realm being read, or from the <realm>-realm client when the client is in master. On Keycloak 26.8.2 and
+      roles view-realm, view-identity-providers, view-events, view-users and view-clients, and nothing else (each
+      fetcher's instructions name the roles it uses): from realm-management in the realm being read, or from the
+      <realm>-realm client when the client is in master. On Keycloak 26.8.2 and
       later, also assign the built-in kc-admin-api client scope to the client as a default scope.
   - name: client_secret
     env: KEYCLOAK_CLIENT_SECRET
