@@ -36,7 +36,7 @@ from framework.tui.modals import (
     PreviewModal,
     TargetsModal,
 )
-from framework.tui.words import plural
+from framework.tui.words import agree, plural
 
 APPROVALS = ("MANUAL", "SUBMISSION_WITH_PASSING_VALIDATORS", "SUBMISSION")
 NO_REQUESTS = ("direct", "evidence", "refuse")
@@ -130,6 +130,8 @@ class ManifestPanel(ButtonRowNav, Vertical):
         yield Button("—", id="manifest-stack")
         yield Static("owner:", classes="inline-label after-button")
         yield Button("—", id="manifest-owner")
+        yield Static("env:", classes="inline-label after-button")
+        yield Button("—", id="manifest-env")
         yield Button("Save", id="btn-save")
 
     def on_mount(self) -> None:
@@ -139,6 +141,8 @@ class ManifestPanel(ButtonRowNav, Vertical):
         self._errors: List[str] = []
         # {entry key: merged config view}, rebuilt with the table (api.effective_config)
         self._config_view: Dict[str, List[dict]] = {}
+        # api.generate_env()'s variables: names, notes and whether each is set, never a value
+        self._env_vars: List[dict] = []
         self.query_one("#manifest-entries-panel", Vertical).border_title = "fetchers"
         if self._has_detail:
             self.query_one("#manifest-detail-scroll", VerticalScroll).border_title = "detail"
@@ -232,6 +236,11 @@ class ManifestPanel(ButtonRowNav, Vertical):
             self._config_view = api.effective_config(self._manifest, keys, self.app.root_path, **discovered)
         except Exception:  # never let a config-merge failure kill the UI
             self._config_view = {}
+        try:
+            self._env_vars = api.generate_env(self.app.root_path, self._manifest, found=discovered)["variables"]
+        except Exception:  # an unreadable .env must not kill the UI either
+            self._env_vars = []
+        self._paint_env_button()
 
         dt.clear()
         row_keys: List[str] = []
@@ -245,7 +254,7 @@ class ManifestPanel(ButtonRowNav, Vertical):
             cset, ctot = self._config_counts(self._config_view.get(ekey))
             ntargets = len(e.get("targets") or [])
             errs = by_key.get(ekey, [])
-            status = palette.pill("✓", "ok") if not errs else palette.pill(f"⚠ {len(errs)}", "warn")
+            status = self._status_cell(errs, render.env_missing(self._env_vars, use))
             name = Text(use)
             if d and d.get("source") == "community":
                 name.append("  ")
@@ -285,7 +294,9 @@ class ManifestPanel(ButtonRowNav, Vertical):
             self._selected = self._selected_key = None
 
         self._refresh_detail()
-        self._set_issues(self._errors)
+        run_missing = render.env_missing(self._env_vars, run=True)
+        upload_missing = [n for n in render.env_missing(self._env_vars) if n not in run_missing]
+        self._set_issues(self._errors, run_missing, upload_missing)
         if not self._has_detail:
             # Under the catalog, whose list is titled "fetchers", this one is the manifest.
             self.query_one("#manifest-entries-panel", Vertical).border_title = f"manifest ({len(entries)})"
@@ -323,10 +334,52 @@ class ManifestPanel(ButtonRowNav, Vertical):
         errs = self._bucket_errors(self._errors, self._entries()).get(key, [])
         return render.entry_detail(d, entry, errs, self._config_view.get(key))
 
-    def _set_issues(self, errors: List[str]) -> None:
+    @staticmethod
+    def _status_cell(errors: List[str], missing: List[str]) -> Text:
+        """✓, or what stops the entry: manifest problems, and the variables it reads that have no value."""
+        if not errors and not missing:
+            return palette.pill("✓ ready", "ok")
+        cell = Text()
+        if errors:
+            cell.append_text(palette.pill(f"⚠ {len(errors)}", "warn"))
+        if missing:
+            if errors:
+                cell.append(" ")
+            more = f" +{len(missing) - 1}" if len(missing) > 1 else ""
+            cell.append_text(palette.pill(f"✗ needs {missing[0]}{more}", "fail"))
+        return cell
+
+    def _paint_env_button(self) -> None:
+        button = self.query_one("#manifest-env", Button)
+        missing = render.env_missing(self._env_vars)
+        if not self._env_vars:
+            button.label = "—"
+        elif missing:
+            button.label = f"✗ {len(missing)} missing"
+        else:
+            button.label = "✓ all set"
+        button.set_class(bool(missing), "env-missing")
+
+    def _set_issues(self, errors: List[str], missing: Sequence[str] = (), upload_missing: Sequence[str] = ()) -> None:
+        """The line under the table: manifest problems first; otherwise the variables
+        a run needs, then those only an upload needs (the env button counts both)."""
         issues = self.query_one("#manifest-issues", Static)
         if not errors:
-            issues.update(Text("✓ ready to run", style=palette.OK))
+            if missing:
+                n = len(missing)
+                head = Text(f"{plural(n, 'variable')} {agree(n, 'needs', 'need')} a value before a run:  ",
+                            style=palette.WARN)
+                head.append(", ".join(missing), style="dim")
+            else:
+                head = Text("✓ ready to run", style=palette.OK)
+            if upload_missing:
+                head.append("   ·   ", style="dim")
+                head.append(f"{', '.join(upload_missing)} before an upload", style=palette.WARN)
+            if missing or upload_missing:
+                head.append("   ·   E shows the environment", style="dim")
+            # One line, cut at the edge: a wrapped line takes a row from the catalog.
+            head.no_wrap, head.overflow = True, "ellipsis"
+            issues.update(head)
             return
         head = Text(f"{plural(len(errors), 'problem')}:  ", style=palette.WARN)
         head.append("   ·   ".join(errors[:3]), style="dim")
@@ -600,6 +653,13 @@ class ManifestPanel(ButtonRowNav, Vertical):
                       subtitle="Set a token to pick from the workspace's channel owners."),
             done,
         )
+
+    @on(Button.Pressed, "#manifest-env")
+    def _on_env(self) -> None:
+        self.action_environment()
+
+    def action_environment(self) -> None:
+        self.app.open_environment()
 
     @on(Button.Pressed, "#btn-save")
     def _on_btn_save(self) -> None:

@@ -102,7 +102,8 @@ def test_demo_manifest_end_to_end(demo_workspace, no_network, monkeypatch, tui_s
             await pilot.pause()
             assert str(tree.cursor_node.label) == "[x] demo_hello"
             assert [row[0] for row in _rows(page.query_one("#manifest-entries", DataTable))] == ["demo_hello"]
-            assert _text(page.query_one("#manifest-issues")) == "✓ ready to run"
+            # Ready to run; the line may go on to name an upload-only variable (the upload token).
+            assert _text(page.query_one("#manifest-issues")).startswith("✓ ready to run")
             shipped = yaml.safe_load((REPO_ROOT / "examples" / "demo.yaml").read_text())
             assert yaml.safe_load(manifest.read_text())["run"] == shipped["run"]
 
