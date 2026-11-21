@@ -210,7 +210,7 @@ def entry(evidence, namespace, token, who):
                 and (e["identity"] or {}).get("descriptor") == who)
 
 
-def test_collects_the_organization_and_exits_zero(tmp_path):
+def test_collects_the_organization_and_exits_zero(tmp_path, assert_summary_documented):
     code, evidence, status, _ = run(tmp_path)
     assert code == 0 and status is None
     s = evidence["summary"]
@@ -233,6 +233,7 @@ def test_collects_the_organization_and_exits_zero(tmp_path):
     assert s["branch_policy_bypass_holders"] == ["Alice"]
     assert s["checkin_validation_override_grants"] == 0 and s["checkin_validation_override_holders"] == []
     assert s["checkin_validation_override_grants_outside_admin_groups"] == 0
+    assert_summary_documented("azure/devops_permissions", s)
 
 
 def test_scopes_by_namespace(tmp_path):

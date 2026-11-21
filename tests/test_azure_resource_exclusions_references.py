@@ -178,6 +178,7 @@ def test_change_provenance_exclusion_counts_are_null_when_a_change_table_was_ref
     code, evidence = _run(cp, monkeypatch, tmp_path, "rg:rg-out", "azure_change_provenance")
     assert code == 1
     assert (evidence["summary"]["excluded_changes"], evidence["summary"]["in_scope_changes"]) == (None, None)
+    assert evidence["summary"]["resource_exclusion_patterns_unmatched"] is None
 
 
 # --- rbac_role_assignments ---
@@ -378,6 +379,7 @@ def test_rbac_exclusion_counts_are_null_when_a_list_was_refused(monkeypatch, tmp
     assert {k: v for k, v in evidence["summary"].items() if k.startswith(("excluded_", "in_scope_"))} == {
         "excluded_role_assignments": None, "in_scope_role_assignments": None,
         "excluded_eligible_role_assignments": None, "in_scope_eligible_role_assignments": None}
+    assert evidence["summary"]["resource_exclusion_patterns_unmatched"] is None
 
 
 def test_rbac_reads_no_identity_without_patterns_or_identity_grants(monkeypatch, tmp_path):
@@ -414,8 +416,9 @@ def run_cr(monkeypatch, tmp_path, patterns):
     return _run(cr, monkeypatch, tmp_path, patterns, "azure_rbac_custom_roles")
 
 
-def test_custom_roles_without_patterns_add_only_empty_exclusion_fields(monkeypatch, tmp_path):
+def test_custom_roles_without_patterns_add_only_empty_exclusion_fields(monkeypatch, tmp_path, assert_summary_documented):
     code, evidence = run_cr(monkeypatch, tmp_path, None)
+    assert_summary_documented("azure/rbac_custom_roles", evidence["summary"])
     assert code == 0 and evidence["results"]["excluded"] == []
     assert evidence["summary"] == {
         **cr.summarize(_cr_records(), 9), "provider_registration_status": "registered",
@@ -460,6 +463,7 @@ def test_custom_role_exclusion_counts_are_null_when_the_list_was_refused(monkeyp
     code, evidence = _run(cr, monkeypatch, tmp_path, "rg:rg-out", "azure_rbac_custom_roles")
     assert code == 1
     assert (evidence["summary"]["excluded_custom_roles"], evidence["summary"]["in_scope_custom_roles"]) == (None, None)
+    assert evidence["summary"]["resource_exclusion_patterns_unmatched"] is None
 
 
 # --- monitor_fired_alerts ---
@@ -596,6 +600,7 @@ def test_fired_alert_exclusion_counts_are_null_when_their_list_was_refused(monke
     summary = evidence["summary"]
     assert code == 1
     assert (summary[f"excluded_{unknown}"], summary[f"in_scope_{unknown}"]) == (None, None)
+    assert summary["resource_exclusion_patterns_unmatched"] is None
     assert {k: summary[k] for k in known} == known
     if unknown == "alert_rules":
         assert summary["alert_rules_listed"] is None

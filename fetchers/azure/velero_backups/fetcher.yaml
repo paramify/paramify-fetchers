@@ -1,0 +1,210 @@
+name: azure_velero_backups
+version: 0.1.0
+description: >-
+  Shows whether Velero backups stored in Azure Blob Storage succeed on schedule, expire on time and restore cleanly, and whether their storage is geo-replicated and encrypted with a customer key.
+category: azure
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_velero_backups.json
+  aggregation: per_target
+
+config_schema:
+  container_names:
+    type: string
+    required: false
+    default: velero
+    env: AZURE_VELERO_CONTAINER_NAMES
+    description: >
+      Comma-separated blob container names to treat as Velero backup storage locations when backup_locations is not
+      set. Every in-scope storage account in the subscription is searched for containers with these names.
+  backup_locations:
+    type: string
+    required: false
+    env: AZURE_VELERO_BACKUP_LOCATIONS
+    description: >
+      Comma-separated Velero backup storage locations as account/container or account/container/prefix (the prefix
+      configured on the BackupStorageLocation). When set, only these are read and container_names is ignored. An
+      entry not in that form, or an account that is not an in-scope account in the subscription, fails the run.
+  success_window_hours:
+    type: integer
+    required: false
+    default: 26
+    env: AZURE_VELERO_SUCCESS_WINDOW_HOURS
+    description: >
+      How recent a schedule's newest Completed backup must be to count as a success within the window, for a schedule
+      not listed in expected_schedules. A listed schedule is judged against its own interval plus 10% (at least 2
+      hours), so a weekly schedule is not judged against a daily window. The default suits a daily schedule.
+  expiry_grace_hours:
+    type: integer
+    required: false
+    default: 24
+    env: AZURE_VELERO_EXPIRY_GRACE_HOURS
+    description: >
+      How long past its expiration a backup may stay in storage before it counts as expired but not deleted. Velero
+      removes expired backups on its own garbage-collection cycle.
+  expected_schedules:
+    type: string
+    required: false
+    env: AZURE_VELERO_EXPECTED_SCHEDULES
+    description: >
+      Comma-separated schedules that must be producing backups, as schedule:hours (the Velero schedule name and how
+      often it should produce one, such as daily:24). Velero does not write schedules to backup storage, so a schedule
+      that has never produced a backup is only visible when it is listed here. There is no default: while it is unset,
+      the expected-schedule and missed-run counts are null. An entry not in that form fails the run as bad_config.
+  rpo_hours:
+    type: integer
+    required: false
+    env: AZURE_VELERO_RPO_HOURS
+    description: >
+      The recovery point objective in hours: the longest a schedule may go without a Completed backup. There is no
+      default: while it is unset, schedules_exceeding_rpo is null. A value that is not a whole number above 0 fails the
+      run as bad_config and leaves it unset.
+  missed_run_lookback_days:
+    type: integer
+    required: false
+    default: 7
+    env: AZURE_VELERO_MISSED_RUN_LOOKBACK_DAYS
+    description: >
+      How many days of each expected schedule's periods to check for missed runs, up to 90. A value that is not a
+      whole number above 0 fails the run as bad_config.
+  retry_suffix:
+    type: string
+    required: false
+    env: AZURE_VELERO_RETRY_SUFFIX
+    description: >
+      The suffix a retry adds to the name of the backup or restore it retries (such as -retry). When set, a failed
+      backup or a restore with errors is also resolved by its own retry: <name><suffix> finishing later without
+      failing. A failed retry, or none, leaves the failure current. No failure is ever excluded by its name or labels.
+  validation_label:
+    type: string
+    required: false
+    env: AZURE_VELERO_VALIDATION_LABEL
+    description: >
+      A label, as key=value, that marks validation backups (such as validation-test=true). Matching backups are
+      counted in validation_backups and validation_backups_failed and are still judged like every other backup. A
+      value not in that form fails the run as bad_config and leaves it unset.
+  restore_test_interval_days:
+    type: integer
+    required: false
+    env: AZURE_VELERO_RESTORE_TEST_INTERVAL_DAYS
+    description: >
+      The adopted interval, in days, within which a clean restore must have been recorded. There is no default:
+      while it is unset, clean_restore_within_interval is null rather than judged against an interval nobody adopted.
+      A value that is not a whole number above 0 fails the run as bad_config and leaves it unset.
+  resource_exclusions:
+    type: patterns
+    prefixes: [rg, location, id]
+    bare: false
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Patterns that take storage accounts out of scope, as for the other Azure fetchers.
+
+target_schema:
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id to collect from. Optional — omit to use the first
+      enabled subscription the ambient credential can see; set one target per
+      subscription to fan out.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: Deployment environment label (e.g. prod) written into the evidence metadata.
+
+secrets: []          # DefaultAzureCredential only — see _categories/azure.yaml
+
+ksis:
+  - KSI-RPL-ABO   # each schedule's newest successful backup against the window, and failed or partial backups
+  - KSI-RPL-TRC   # restore results, and how long since the last clean restore
+  - KSI-RPL-ARP   # whether backup storage is geo-replicated
+  - KSI-SVC-SIN   # whether backup storage is encrypted with a customer-managed key
+  - KSI-SVC-RUD   # backups kept past their expiration
+
+evidence_set:
+  reference_id: EVD-AZURE-VELERO-BACKUPS
+  name: Azure Velero Backups and Restores
+  instructions: |
+    Script: azure/velero_backups/fetcher.py
+
+    Access: Reader on the subscription, and Storage Blob Data Reader on each Velero backup container, from a network the storage account's firewall allows. Without the data role or network access, the blob reads fail and the backup and restore counts read as null.
+
+    Commands Executed:
+    - subscriptions.list() — picks a subscription when none is set
+    - GET Microsoft.Storage/storageAccounts — each account's blob endpoint, replication and encryption key source
+    - GET storageAccounts/{account}/blobServices/default/containers (per account) — finds the Velero containers by name
+    - Blob List Blobs on backups/ and restores/ (per location) — every backup and restore Velero wrote
+    - Blob Get velero-backup.json (per backup) — the backup's phase, schedule, completion time, expiration and volume snapshot counts
+    - Blob Get restore-<name>-results.gz (per restore) — the restore's errors and warnings
+
+    Output: azure_velero_backups_<subscription>.json — each Velero backup storage location with its storage settings, every backup's outcome and expiry, and every restore's result. Schedules and restore status are not stored in backup storage, so schedules come from each backup's schedule label and a restore is judged by its results file.
+
+    Summary fields:
+
+    What was checked?
+    - backup_locations — Number of Velero backup storage locations found (a container with a configured name in an in-scope account, or an entry in backup_locations); null if the account or container lists could not be read
+    - backup_locations_read — Number of backup storage locations whose backups could be listed
+    - resource_exclusion_patterns — List of the resource_exclusions patterns as given
+    - resource_exclusion_patterns_unmatched — List of the patterns that matched nothing, such as a mistyped name; null when the storage account list could not be read
+    - excluded_storage_accounts — Number of storage accounts a pattern took out of scope
+    - in_scope_storage_accounts — Number of storage accounts searched for backup storage locations
+
+    Do backups run on schedule?
+    - backups_total — Number of backups in the backup storage locations; null unless every location was read
+    - backups_completed — Number of backups whose phase is Completed
+    - backups_partially_failed — Number of backups whose phase is PartiallyFailed
+    - backups_failed — Number of backups whose phase is Failed
+    - backups_other_phase — Number of backups in any other phase, such as InProgress
+    - backups_metadata_unreadable — Number of backups whose velero-backup.json could not be read or parsed
+    - backups_volume_snapshots_incomplete — Number of backups that completed fewer volume snapshots (native and CSI) than they attempted
+    - backups_failed_unresolved — Number of Failed or PartiallyFailed backups that have no later Completed backup of the same schedule (a current failure); a backup with no schedule label stays unresolved, since a later manual backup may cover other namespaces; resolved failures stay in backups_failed and backups_partially_failed
+    - backups_volume_snapshots_incomplete_unresolved — Number of backups with incomplete volume snapshots that have no later Completed backup of the same schedule that completed every snapshot it attempted; a backup with no schedule label stays unresolved
+    - schedules_observed — Number of schedules named by a backup's velero.io/schedule-name label
+    - schedules_with_success_within_window — Number of schedules whose newest Completed backup finished within the schedule's window (a success within the window): its interval plus 10% (at least 2 hours) when listed in expected_schedules, otherwise success_window_hours
+    - schedules_without_success_within_window — List of schedule names without a success within the window
+    - max_hours_since_scheduled_success — Hours since the newest Completed backup of the schedule that has gone longest without one; null if any schedule has no Completed backup
+    - success_window_hours — Hours a schedule not listed in expected_schedules may go since its newest Completed backup and still count as a success within the window
+
+    Is every expected backup happening?
+    - expected_schedules — Number of schedules listed in expected_schedules; null when none are listed
+    - expected_schedules_without_backups — Number of expected schedules with no backup at all in storage; null when expected_schedules is not set or any location could not be read
+    - expected_schedules_without_backups_names — List of the expected schedules with no backup at all
+    - missed_scheduled_runs — Number of missed runs across expected schedules, from the gaps between Completed backups and from the newest one to now: each gap longer than the interval plus 10% adds one missed run per whole interval. Only the part of missed_run_lookback_days that the schedule's backups are kept for is checked, so a backup Velero deleted when its retention ended is not a missed run. Null when expected_schedules is not set or any location could not be read
+    - schedules_with_missed_runs — Number of expected schedules with at least one missed run
+    - missed_run_lookback_days — Days of each expected schedule's periods checked for missed runs
+    - schedules_exceeding_rpo — Number of schedules (the expected schedules when listed, otherwise every schedule a backup names) whose newest Completed backup is older than rpo_hours, or that have none; null while rpo_hours is not set
+    - rpo_hours — The recovery point objective in hours, as configured; null when not set
+
+    Are expired backups removed?
+    - expired_backups_not_deleted — Number of backups still in storage more than expiry_grace_hours past their expiration
+    - expiry_grace_hours — Hours past its expiration a backup may stay before it counts as expired but not deleted
+
+    Do restores work?
+    - restores_total — Number of restores Velero recorded in the backup storage locations; null unless every location's restores were read
+    - restores_without_errors — Number of clean restores (a results file that lists no errors)
+    - restores_with_errors — Number of restores whose results file lists at least one error
+    - restores_with_errors_unresolved — Number of restores with errors not resolved by their own retry (a later <name><retry_suffix> restore without errors); a clean restore of anything else never resolves one, since storage doesn't record which backup a restore used, and a restore with errors and no readable date is never resolved
+    - restores_results_missing — Number of restores whose results file is missing or could not be read
+    - failures_resolved_by_retry — Number of failed backups and restores with errors resolved by their own retry (a later <name><retry_suffix> that did not fail); null while retry_suffix is not set or any location could not be read
+    - retry_suffix — The retry name suffix, as configured; null when not set
+    - validation_backups — Number of backups carrying validation_label; they are judged like every other backup; null while validation_label is not set
+    - validation_backups_failed — Number of validation backups that are Failed or PartiallyFailed; they also stay in every failure count
+    - validation_label — The validation label as key=value, as configured; null when not set
+    - restores_date_unknown — Number of restores whose results file was read but has no readable date; they never count as recent
+    - days_since_last_clean_restore — Days since the newest clean restore's results file was written; null if there is no clean restore
+    - restore_test_interval_days — The adopted restore-test interval in days, as configured; null when not set
+    - clean_restore_within_interval — Whether the newest clean restore is no older than restore_test_interval_days (false when there is none); null while no interval is set or any location's restores could not be read
+
+    Is backup storage protected?
+    - backup_locations_geo_replicated — Number of backup storage locations whose storage account is geo-replicated (GRS, RA-GRS, GZRS or RA-GZRS)
+    - backup_locations_customer_managed_key — Number of backup storage locations whose storage account encrypts with a customer-managed key from Key Vault

@@ -531,9 +531,10 @@ def test_bare_group_listing_is_completed_with_a_get_per_group() -> None:
     assert any("/ruleCollectionGroups/g?" in u for u in arm.urls)
 
 
-def test_failed_firewall_list_fails_the_run_with_nothing_assessed() -> None:
-    results, summary, collector = _collect(_Arm(list_fail=True))
+def test_failed_firewall_list_fails_the_run_with_nothing_assessed(caplog) -> None:
+    results, summary, collector = _collect(_Arm(list_fail=True), ResourceExclusions(["rg:nope"]))
     assert not collector.ok and summary["firewalls_read"] is False
+    assert summary["resource_exclusion_patterns_unmatched"] is None and "matched nothing" not in caplog.text
     assert summary["in_scope_firewalls"] is None and summary["excluded_firewalls"] is None
     assert summary["firewall_policies_read"] is True
     # An unread firewall list is not an empty one: no firewall or rule count reads as a known 0.

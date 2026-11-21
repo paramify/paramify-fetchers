@@ -16,9 +16,11 @@ typer
 textual>=8,<9
 
 # Checkov category (fetchers/checkov/*) — the bash fetchers shell out to the
-# `checkov` CLI. Also requires system `git` (clone) + `jq`, which are not pip deps.
-# checkov_bicep's Entra sign-in to TFVC also uses azure-identity (pinned below).
-checkov
+# `checkov` CLI, which is deliberately NOT listed here: it pins exact versions of
+# libraries other fetchers use (boto3), so install it in its own environment with
+# `pipx install checkov` (the Docker image does the same). Also requires system
+# `git` (clone) + `jq`, which are not pip deps. checkov_bicep's Entra sign-in to
+# TFVC also uses azure-identity (pinned below).
 
 # Azure category (fetchers/azure/*) — official azure-mgmt-* SDKs. Auth is the
 # ambient credential chain via DefaultAzureCredential (service principal env,
@@ -70,6 +72,7 @@ azure-mgmt-security>=7.0.0,<8
 # through Graph rather than ARM.
 azure-mgmt-authorization>=4.0.0,<5
 msgraph-sdk>=1.61.0,<2
+microsoft-kiota-http>=1.16.0,<2
 # Reads the subject and expiry of the CAs trusted for certificate sign-in.
 cryptography>=42.0.0,<51
 
@@ -87,7 +90,7 @@ azure-mgmt-msi>=7.1.0,<8
 azure-mgmt-apimanagement>=5.0.0,<6
 # Container workloads and the data tier.
 azure-mgmt-appcontainers>=5.1.0,<6
-azure-mgmt-containerinstance>=10.1.0,<11
+azure-mgmt-containerinstance>=10.1.0,<12
 azure-mgmt-mongocluster>=1.2.0,<2
 azure-mgmt-kusto>=4.0.0,<5
 azure-mgmt-eventhub>=12.0.0,<13
@@ -149,3 +152,10 @@ oci
 # Qualys category (fetchers/qualys/*) — the VM/PC API answers in XML that names an
 # external DTD; defusedxml parses it with entities and external references refused.
 defusedxml
+
+# AWS category: aws_inspector_ecr_findings and aws_inspector_ecr_report call Inspector
+# and ECR through boto3 (botocore is imported directly too), in one process. The other AWS
+# fetchers use the aws CLI and jq and do not need it. 1.38.20 is the first botocore
+# whose Inspector model has the image usage filters.
+boto3>=1.38.20
+botocore>=1.38.20
