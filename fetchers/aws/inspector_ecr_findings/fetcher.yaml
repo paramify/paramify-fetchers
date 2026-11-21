@@ -1,5 +1,5 @@
 name: aws_inspector_ecr_findings
-version: 0.2.0
+version: 0.3.0
 description: Collects active Inspector ECR findings, package remediation details, image inventory and scan coverage for one account and region, with optional repository, tag, usage, push-age and severity filters.
 category: aws
 supports_targets: true

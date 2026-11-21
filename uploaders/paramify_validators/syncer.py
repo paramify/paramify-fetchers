@@ -20,9 +20,8 @@ The shipped validators are TEMPLATES (~80% right); customers tune them in
 Paramify. That is why the default is create-or-skip and why the per-instance
 validator id lives in a customer-side lock file, never in the shared registry.
 
-Auth: PARAMIFY_UPLOAD_API_TOKEN, falling back to PARAMIFY_API_TOKEN, resolved by
-framework.paramify_auth exactly as the other uploaders do (source-agnostic env —
-.env, secret manager, CI).
+Auth: PARAMIFY_UPLOAD_API_TOKEN, falling back to PARAMIFY_API_TOKEN (source-agnostic
+env — .env, secret manager, CI).
 """
 
 import argparse
@@ -33,149 +32,29 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Dict, List, Optional
-from urllib.parse import urlparse
 
-import requests
 from dotenv import load_dotenv
 
 # Also runnable directly from any cwd, where only its own directory lands on
-# sys.path. Position in the repo is fixed, so derive the root rather than
-# duplicating the token-resolution and duplicate-refusal rules locally — the
-# syncer carrying its own copies is how it came to disagree with the other
-# uploaders about both (GitHub #83).
+# sys.path. Its position in the repo is fixed, so derive the root.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from framework import yaml_io  # noqa: E402
 from framework.custom_tags import (  # noqa: E402
     ENTITY_VALIDATOR,
     build_tagger,
     category_display_names,
 )
-from framework.paramify_auth import (  # noqa: E402
-    DEFAULT_BASE_URL,
-    READ_TOKEN_ENV,
-    UPLOAD_TOKEN_ENV,
-    resolve_base_url,
-    resolve_upload_token,
-)
-from framework.paramify_responses import already_present  # noqa: E402
+from framework.paramify.client import ApiError, Client  # noqa: E402
+from framework.paramify.connection import open_workspace  # noqa: E402
 
 logger = logging.getLogger("paramify_validators_syncer")
 
 DEFAULT_LOCK_PATH = "./.paramify/validators-sync.lock.json"
-_REQUEST_TIMEOUT = 30
 
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
-# --------------------------------------------------------------------------- #
-# Paramify API client
-# --------------------------------------------------------------------------- #
-class ParamifyError(RuntimeError):
-    pass
-
-
-class ValidatorClient:
-    """Thin client over the Paramify REST API v0 validator + associate endpoints."""
-
-    def __init__(self, token: str, base_url: str, timeout: int = _REQUEST_TIMEOUT):
-        self.base_url = base_url.rstrip("/")
-        self.timeout = timeout
-        self.session = requests.Session()
-        self.session.headers.update({"Authorization": f"Bearer {token}"})
-
-    def list_validators(self) -> List[Dict]:
-        """All validators on the instance. GET /validators exposes no name filter,
-        so name-matching (for reconcile) is done client-side over this list."""
-        r = self.session.get(f"{self.base_url}/validators", timeout=self.timeout)
-        r.raise_for_status()
-        data = r.json()
-        return data.get("validators", []) if isinstance(data, dict) else (data or [])
-
-    def create_validator(self, payload: Dict) -> str:
-        r = self.session.post(
-            f"{self.base_url}/validators", json=payload, timeout=self.timeout
-        )
-        if r.status_code not in (200, 201):
-            raise ParamifyError(
-                f"create validator {payload.get('name')!r} failed "
-                f"(HTTP {r.status_code}): {r.text[:300]}"
-            )
-        vid = r.json().get("id")
-        if not vid:
-            raise ParamifyError(
-                f"create validator {payload.get('name')!r} returned no id: {r.text[:300]}"
-            )
-        return vid
-
-    def update_validator(self, validator_id: str, payload: Dict) -> None:
-        r = self.session.patch(
-            f"{self.base_url}/validators/{validator_id}",
-            json=payload,
-            timeout=self.timeout,
-        )
-        if r.status_code not in (200, 201, 204):
-            raise ParamifyError(
-                f"update validator {validator_id} failed "
-                f"(HTTP {r.status_code}): {r.text[:300]}"
-            )
-
-    def find_evidence_set(self, reference_id: str) -> Optional[str]:
-        """Return the evidence-set id for a reference_id, or None. Server-side filter."""
-        r = self.session.get(
-            f"{self.base_url}/evidence",
-            params={"referenceId": reference_id},
-            timeout=self.timeout,
-        )
-        if r.status_code != 200:
-            # ParamifyError, not requests.HTTPError: the sync loop's per-set
-            # isolation and its callers reason about this module's own errors.
-            raise ParamifyError(
-                f"find evidence set {reference_id} failed "
-                f"(HTTP {r.status_code}): {r.text[:300]}"
-            )
-        for ev in r.json().get("evidences", []):
-            if ev.get("referenceId") == reference_id:
-                return ev.get("id")
-        return None
-
-    def associate_validator(self, evidence_id: str, validator_id: str) -> None:
-        """CONNECT a validator to an evidence set. Tolerant of an already-connected
-        state, read with the rule shared by every uploader: the API has no
-        association read-back, so a repeat CONNECT is the only way to assert the
-        link, and a refusal that says it already holds is success, not failure."""
-        body = {
-            "associationType": "CONNECT",
-            "subjectType": "VALIDATOR",
-            "subjectId": validator_id,
-        }
-        r = self.session.post(
-            f"{self.base_url}/evidence/{evidence_id}/associate",
-            json=body,
-            timeout=self.timeout,
-        )
-        if r.status_code in (200, 201, 204):
-            return
-        if already_present(r.status_code, r.text):
-            return  # already associated — the state we wanted holds
-        raise ParamifyError(
-            f"associate validator {validator_id} to set {evidence_id} failed "
-            f"(HTTP {r.status_code}): {r.text[:300]}"
-        )
-
-
-# --------------------------------------------------------------------------- #
-# Helpers
-# --------------------------------------------------------------------------- #
-def _base_url_error(base_url: str) -> Optional[str]:
-    parsed = urlparse(base_url)
-    if parsed.scheme != "https" and (parsed.hostname or "") not in ("localhost", "127.0.0.1", "::1"):
-        return (
-            "base_url must be https to protect the API token "
-            f"(got {base_url!r}); only localhost may use http"
-        )
-    return None
 
 
 def build_payload(v: Dict) -> Dict:
@@ -189,7 +68,7 @@ def build_payload(v: Dict) -> Dict:
     if vtype == "AUTOMATED":
         payload["regex"] = v.get("regex")
         payload["validationRules"] = v.get("validation_rules") or []
-    else:  # ATTESTATION
+    else:
         payload["attestationRules"] = v.get("attestation_rules") or []
     return payload
 
@@ -228,7 +107,7 @@ def _emit(on_event: Optional[Callable[[dict], None]], event: dict) -> None:
 def sync_validators(
     validators: List[Dict],
     *,
-    client: Optional[ValidatorClient] = None,
+    client: Optional[Client] = None,
     token: Optional[str] = None,
     base_url: Optional[str] = None,
     dry_run: bool = False,
@@ -246,39 +125,21 @@ def sync_validators(
     is available). Returns a summary dict; never raises for per-validator errors
     (those are isolated and counted), only for setup errors.
     """
-    load_dotenv()
     config = config or {}
-    paramify_cfg = config.get("paramify") or {}
-    base_url, _ = resolve_base_url(paramify_cfg.get("base_url") or base_url)
-    url_error = _base_url_error(base_url)
-    if url_error:
-        logger.error(url_error)
-        raise ValueError(url_error)
+    base_url, resources = open_workspace(config, base_url=base_url, token=token, client=client,
+                                         dry_run=dry_run, log=logger)
 
     lock_file = Path(
         lock_path or (config.get("validators") or {}).get("lock_path") or DEFAULT_LOCK_PATH
     )
     lock = load_lock(lock_file)
 
-    if token is None:
-        token, _ = resolve_upload_token()
-    if client is None:
-        # Build a client whenever we have a token — even in dry-run, so reads can
-        # report create-vs-skip precisely. Writes stay gated on `not dry_run`.
-        if token:
-            client = ValidatorClient(token, base_url)
-        elif not dry_run:
-            msg = f"{UPLOAD_TOKEN_ENV} is not set (nor its fallback {READ_TOKEN_ENV})"
-            logger.error(msg)
-            raise ValueError(msg)
-
     # Default custom tags on every validator this run sees, created or existing.
     # `display_names` maps registry category -> service tag; the facade reads it
     # from the category files, since this function has no repo root of its own.
     try:
         tagger = build_tagger(
-            None if (dry_run or client is None) else client.session,
-            base_url, config=config, display_names=display_names,
+            None if dry_run else resources, config=config, display_names=display_names,
             override_off=None if custom_tags else "--no-tags",
         )
     except ValueError as e:
@@ -301,23 +162,22 @@ def sync_validators(
         "lock_path": str(lock_file),
     })
 
-    # Lazily fetched name -> id index over existing validators (for reconcile).
     _name_index: Optional[Dict[str, str]] = None
 
     def name_index() -> Dict[str, str]:
         nonlocal _name_index
         if _name_index is None:
-            if client is None:
+            if resources is None:
                 _name_index = {}
             else:
-                # Build fully, THEN cache. If list_validators() raises, we do NOT
-                # cache a half/empty index — the exception re-raises per validator
-                # (each isolated as an error), so a transient GET failure can never
-                # leave reconcile blind and create duplicates. Fail closed.
+                # Build fully, THEN cache. If the read raises, a half or empty
+                # index is never cached: the error repeats per validator (each
+                # isolated), so a transient failure cannot leave reconcile blind
+                # and create duplicates. Fail closed.
                 index: Dict[str, str] = {}
-                for ex in client.list_validators():
-                    if ex.get("name") and ex.get("id"):
-                        index.setdefault(ex["name"], ex["id"])
+                for ex in resources.validators():
+                    if ex.name and ex.id:
+                        index.setdefault(ex.name, ex.id)
                 _name_index = index
         return _name_index
 
@@ -328,13 +188,22 @@ def sync_validators(
         results.append(r)
         _emit(on_event, {"event": "sync_validator", **r})
 
+    stopped: Optional[str] = None
+
+    def stop(e: Exception) -> None:
+        nonlocal stopped
+        stopped = str(e)[:300]
+        logger.error("stopping the sweep: %s", stopped)
+
     for v in validators:
-        key = v.get("key", "<unknown>")  # fallback label if the dict is malformed
+        if stopped:
+            break
+        key = v.get("key", "<unknown>")
         try:
             key = v["key"]  # inside try: a missing key is an isolated error, not a crash
             existing_id = lock.get(key)
             adopted = False
-            if existing_id is None and client is not None:
+            if existing_id is None and resources is not None:
                 existing_id = name_index().get(v["name"])
                 if existing_id:
                     lock[key] = existing_id
@@ -344,7 +213,6 @@ def sync_validators(
             refs = v.get("evidence_sets", [])
             category = v.get("category")
 
-            # ---- create (absent) -> create, then associate on create only ----
             if existing_id is None:
                 if dry_run:
                     created += 1
@@ -353,8 +221,8 @@ def sync_validators(
                         "tags": tagger.plan(category),
                     })
                     continue
-                assert client is not None  # not dry_run => token present or we raised
-                vid = client.create_validator(payload)
+                assert resources is not None  # not dry_run => a client, or connect() raised
+                vid = resources.create_validator(payload)
                 lock[key] = vid  # persist before associating so a re-run won't recreate
                 created += 1
                 tags = _tag(vid, category)
@@ -363,9 +231,9 @@ def sync_validators(
                 assoc, missing, failed = [], [], []
                 for ref in refs:
                     try:
-                        eid = client.find_evidence_set(ref)
-                        if eid:
-                            client.associate_validator(eid, vid)
+                        found = resources.evidence_by_reference([ref]).get(ref)
+                        if found:
+                            resources.associate(found.id, "VALIDATOR", vid)
                             assoc.append(ref)
                             associated += 1
                         else:
@@ -375,6 +243,9 @@ def sync_validators(
                         failed.append(ref)
                         assoc_errors += 1
                         logger.error("%s: associate to %s failed: %s", key, ref, ae)
+                        if isinstance(ae, ApiError) and ae.fatal:
+                            stop(ae)  # the validator exists and is locked; record it, then stop
+                            break
                 result = {
                     "key": key, "outcome": "created", "validator_id": vid,
                     "associated": assoc, "set_not_found": missing, "tags": tags,
@@ -384,13 +255,12 @@ def sync_validators(
                 add_result(result)
                 continue
 
-            # ---- exists -> skip, or (opt-in) update; never re-associate ----
             if update:
                 if dry_run:
                     add_result({"key": key, "outcome": "would_update", "validator_id": existing_id})
                 else:
-                    assert client is not None  # not dry_run => token present or we raised
-                    client.update_validator(existing_id, payload)
+                    assert resources is not None  # not dry_run => a client, or connect() raised
+                    resources.update_validator(existing_id, payload)
                     add_result({"key": key, "outcome": "updated", "validator_id": existing_id,
                                 "tags": _tag(existing_id, category)})
                 updated += 1
@@ -404,11 +274,12 @@ def sync_validators(
                 "adopted": adopted,
                 "tags": _tag(existing_id, category),
             })
-        except Exception as e:  # per-validator isolation
+        except Exception as e:  # noqa: BLE001
             logger.error("%s: sync failed: %s", key, e)
             errors += 1
             add_result({"key": key, "outcome": "error", "error": str(e)[:300]})
-            continue
+            if isinstance(e, ApiError) and e.fatal:
+                stop(e)  # a rejected token fails every later call the same way
 
     lock_written = None
     if not dry_run:
@@ -429,6 +300,7 @@ def sync_validators(
         "tags": tagger.summary(),
         "results": results,
         "lock_path": str(lock_written) if lock_written else str(lock_file),
+        "stopped": stopped,
         "ok": errors == 0 and assoc_errors == 0,
     }
     logger.info(
@@ -477,15 +349,23 @@ def collect_validators(
         select_validators,
     )
 
+    from framework.validators import manifest_tracked
+
     registry = discover_validators(root)
-    if reference_ids is not None:
+    if reference_ids is not None and manifest_path is not None:
+        # A manifest's selection applies to an explicit set list too.
+        fetchers = discover_fetchers(root)
+        pipeline = pipeline_reference_ids(fetchers)
+        selected = manifest_tracked(api.read_manifest(manifest_path), fetchers, registry.values(),
+                                    set(reference_ids) - pipeline)
+    elif reference_ids is not None:
         pipeline = pipeline_reference_ids(discover_fetchers(root))
         selected = select_validators(registry.values(), set(reference_ids) - pipeline)
     elif manifest_path is not None:
         fetchers = discover_fetchers(root)
         manifest = api.read_manifest(manifest_path)
-        refs = manifest_reference_ids(manifest, fetchers)
-        selected = select_validators(registry.values(), refs)
+        # Only what the manifest tracks, not every validator for its sets.
+        selected = manifest_tracked(manifest, fetchers, registry.values())
     else:
         selected = list(registry.values())
     return [_validator_to_dict(v) for v in selected]
@@ -520,11 +400,7 @@ def main(argv=None) -> int:
         logger.info("No validators in scope — nothing to sync.")
         return 0
 
-    config: Dict = {}
-    if args.config:
-        import yaml
-
-        config = yaml.safe_load(Path(args.config).read_text()) or {}
+    config: Dict = (yaml_io.load_path(Path(args.config)) or {}) if args.config else {}
 
     try:
         summary = sync_validators(

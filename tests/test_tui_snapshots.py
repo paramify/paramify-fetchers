@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
+import functools
+import json
+from datetime import date, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
+import yaml
 
 pytest.importorskip("textual", reason="TUI tests need the 'tui' extra")
 pytest.importorskip("pytest_textual_snapshot", reason="snapshot tests need the 'snapshots' extra")
@@ -33,7 +36,8 @@ class _Frozen(datetime):
 def shot(snap_compare, demo_workspace, no_network, monkeypatch, tui_size):
     """Open the app on MANIFEST (or the welcome screen for None), press keys, compare.
 
-    Each step is a key, or a tuple of keys typed in one go and settled once."""
+    Each step is a key, a tuple of keys typed in one go and settled once, or an
+    async callable given the pilot (to click a button that has no key)."""
     monkeypatch.setattr(chrome, "datetime", _Frozen)
     monkeypatch.setattr(welcome, "datetime", _Frozen)
     clock = SimpleNamespace(now=0.0)
@@ -60,7 +64,10 @@ def shot(snap_compare, demo_workspace, no_network, monkeypatch, tui_size):
         async def run_before(pilot) -> None:
             await settle(pilot)
             for step in steps:
-                await pilot.press(*((step,) if isinstance(step, str) else step))
+                if callable(step):
+                    await step(pilot)
+                else:
+                    await pilot.press(*((step,) if isinstance(step, str) else step))
                 await settle(pilot)
 
         return snap_compare(app, terminal_size=tui_size, run_before=run_before)
@@ -132,7 +139,7 @@ def test_evidence_file_preview(shot):
 
 def test_paramify_no_token(shot):
     """The demo workspace has no token: the page reads nothing and says why."""
-    assert shot("4")
+    assert shot("5")
 
 
 def _setup_status() -> dict:
@@ -182,14 +189,83 @@ def _setup_status() -> dict:
 def test_paramify_by_fetcher(shot, monkeypatch):
     monkeypatch.setattr(api, "paramify_status", lambda *a, **k: _setup_status())
     monkeypatch.setattr(api, "list_artifacts", lambda set_id: [])
-    assert shot("4")
+    assert shot("5")
 
 
 def test_paramify_by_capability(shot, monkeypatch):
     monkeypatch.setattr(api, "paramify_status", lambda *a, **k: _setup_status())
     monkeypatch.setattr(api, "list_artifacts", lambda set_id: [])
-    assert shot("4", "right_square_bracket")
+    assert shot("5", "right_square_bracket")
 
 
 def test_pipelines(shot):
-    assert shot("5")
+    assert shot("6")
+
+
+@pytest.fixture
+def workspace(demo_workspace, fake_paramify):
+    """A fake Paramify for the demo: EVD-DEMO-HELLO has one channel on Prod with a current
+    request; another set has one channel per owner. After demo_workspace, which clears the token."""
+    fake = fake_paramify
+    prod, staging = fake.add_stack("Prod"), fake.add_stack("Staging")
+    hello = fake.add_evidence("EVD-DEMO-HELLO", channels=[prod.id], owners=["alice"],
+                              name="Demo — Synthetic MFA Policy")
+    fake.add_request(hello.id, hello.channels[0].id, date.today() - timedelta(days=5), date.today() + timedelta(days=5))
+    fake.add_evidence("EVD-OTHER", channels=[prod.id, staging.id], owners=["alice", "bob"])
+    return fake
+
+
+async def _click(selector: str, pilot) -> None:
+    await pilot.click(selector)
+
+
+def test_manifest_stack_picker(shot, workspace):
+    assert shot("1", "tab", functools.partial(_click, "#manifest-stack"))
+
+
+def test_manifest_owner_picker(shot, workspace):
+    assert shot("1", "tab", functools.partial(_click, "#manifest-owner"))
+
+
+def test_paramify_upload_plan(shot, workspace, demo_workspace, stub_paramify_status, monkeypatch):
+    # The demo manifest and its run with stack Prod set, so the plan names the whole route.
+    root = demo_workspace.root
+    manifest = root / MANIFEST
+    m = yaml.safe_load(manifest.read_text())
+    api.set_stack(m, "st-1", "Prod")
+    api.dump_manifest(m, manifest, root)
+    [meta] = (root / "evidence").glob("run-*/_run_metadata.json")
+    run = json.loads(meta.read_text())
+    run["paramify"]["demo_hello"].update(stack="st-1", stack_name="Prod")
+    meta.write_text(json.dumps(run))
+    # The page's status read does not go through the fake: it shows the set the fake holds.
+    status = stub_paramify_status(fetchers=[{
+        "name": "demo_hello", "kind": "evidence",
+        "evidence_set": {"reference_id": "EVD-DEMO-HELLO", "name": "Demo — Synthetic MFA Policy", "id": "ev-1",
+                         "exists": True, "artifact_count": 0},
+        "script": None, "validators": [], "pairs": [], "ready": False,
+    }])
+    status["workspace"]["base_url"] = "https://api.example.test"  # conftest.FAKE_PARAMIFY_URL
+    monkeypatch.setattr(api, "list_artifacts", lambda set_id: [])
+    assert shot("5", "u")
+    assert not [c for c in workspace.calls if c[0] != "GET"]
+
+
+def _write_validator(root, key: str, name: str, source: str) -> None:
+    path = root / "validators" / "demo" / f"{key}.yaml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        f"key: {key}\nname: {name}\ntype: AUTOMATED\nrole: configuration\nsource: {source}\n"
+        f"statement: Every policy in the demo payload is enabled.\n"
+        "regex: '\"enabled\":\\s*(?<enabled>true|false)'\n"
+        "validation_rules:\n"
+        "  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }\n"
+        "    criteria: EQUALS\n"
+        "    value: { type: CUSTOM_TEXT, customText: \"true\" }\n"
+        "evidence_sets: [EVD-DEMO-HELLO]\n")
+
+
+def test_validators(shot, demo_workspace):
+    _write_validator(demo_workspace.root, "demo_policies_enabled", "Demo Policies Are Enabled", "paramify")
+    _write_validator(demo_workspace.root, "demo_mfa_everyone", "Demo MFA Covers Everyone", "community")
+    assert shot("4", "right")

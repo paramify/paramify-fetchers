@@ -45,6 +45,10 @@ variable the fetcher reads: the runner drops any it doesn't know about
 ([upload guide](uploader_guide.md)). To run once per region or project, set
 `supports_targets: true` and add a `target_schema`, as the
 [GitLab pipeline fetcher](../fetchers/gitlab/ci_cd_pipeline_config/fetcher.yaml) does.
+If you're writing it for your own workspace rather than for Paramify to ship,
+add `source: community`. The TUI then labels it COMMUNITY wherever it's listed,
+and its validators are opt-in
+([choosing validators](run_manifest_guide.md#choose-the-validators-each-fetcher-tracks)).
 
 ```yaml
 name: okta_password_policy                # <category>_<short_name>, globally unique

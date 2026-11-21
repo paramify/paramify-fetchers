@@ -15,6 +15,12 @@
       "default": "evidence",
       "description": "What class of output this fetcher produces. `evidence` (the default) writes a JSON payload the runner wraps in the evidence envelope and the paramify_evidence uploader attaches to an evidence set. `inventory` is evidence with a record contract: the payload's `data` is one record per asset, each with a `unique_asset_identifier`, for a Paramify inventory pipeline attached to the evidence set to turn into Inventory items. The uploader sends an inventory only when the run collected all of it (see docs/inventory_fetchers_guide.md). `issue_report` writes the source tool's own file (a scan report) UNMODIFIED into <run>/issue-reports/, where the paramify_issues uploader posts it to an assessment intake. Issue reports are never enveloped: Paramify's intake parser reads the vendor's own structure, so anything added to the file breaks it."
     },
+    "source": {
+      "type": "string",
+      "enum": ["paramify", "community"],
+      "default": "paramify",
+      "description": "Who made the fetcher. `community` fetchers are labelled COMMUNITY in the TUI. Absent = paramify."
+    },
 
     "runtime": {
       "type": "object",
