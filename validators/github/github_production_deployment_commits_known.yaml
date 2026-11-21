@@ -1,0 +1,19 @@
+key: github_production_deployment_commits_known
+name: GitHub Production Deployment Commits Known
+type: AUTOMATED
+role: integrity
+source: community
+statement: >-
+  The commit of every production deployment in the window was resolved against the default branch. A deployment
+  whose commit could not be placed fails rather than reading as on the default branch.
+regex: '"production_deployments_commit_unknown":\s*\[\s*\]'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+- regexOperation:
+    type: MATCH_COUNT
+  criteria: NOT_EQUALS
+  value:
+    type: CUSTOM_TEXT
+    customText: '0'
+evidence_sets:
+- EVD-GITHUB-DEPLOYMENT-CONTROLS
