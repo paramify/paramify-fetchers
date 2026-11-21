@@ -203,19 +203,19 @@ def test_tab_reaches_every_part_of_the_page(tmp_path, run_tui):
     ]
 
 
-def test_arrows_walk_the_stack_owner_save_row(tmp_path, run_tui):
+def test_arrows_walk_the_settings_row(tmp_path, run_tui):
     async def body(app, pilot):
         app.screen.query_one("#manifest-stack").focus()
         await pilot.pause()
         seen = [_focus_id(app)]
-        for key in ("right", "right", "right"):
+        for key in ("right",) * 5:
             await pilot.press(key)
             await pilot.pause()
             seen.append(_focus_id(app))
         return seen
 
     assert run_tui(body, _manifest_with(tmp_path, "demo_hello")) == [
-        "manifest-stack", "manifest-owner", "btn-save", "manifest-stack",
+        "manifest-stack", "manifest-owner", "manifest-schedule", "manifest-env", "btn-save", "manifest-stack",
     ]
 
 
@@ -223,7 +223,7 @@ def test_empty_manifest_hint(tmp_path, run_tui):
     async def body(app, pilot):
         return _text(app.screen.query_one("#manifest-empty-hint", Static).content)
 
-    assert "press a on a fetcher to add it" in run_tui(body, _manifest_with(tmp_path))
+    assert "Press a on a fetcher to add it." in run_tui(body, _manifest_with(tmp_path))
 
 
 def test_switching_manifest_moves_the_marks(tmp_path, run_tui):
@@ -465,7 +465,7 @@ def test_the_add_notice_says_how_to_reach_the_entry(tmp_path, run_tui):
         return notices
 
     notices = run_tui(body, _manifest_with(tmp_path))
-    wired = [n for n in notices if "secrets wired" in n]
+    wired = [n for n in notices if "default env vars" in n]
     assert wired, notices
     assert "tab, then e" in wired[-1], "the notice names a key that does nothing in the catalog"
 

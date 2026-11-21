@@ -129,15 +129,19 @@ class FakeParamify:
         return row
 
     def add_evidence(self, ref: str, *, channels: Any = (), approval: str = "SUBMISSION",
-                     owners: Any = (), name: Optional[str] = None, validators: Any = ()) -> EvidenceSet:
+                     owners: Any = (), name: Optional[str] = None, validators: Any = (),
+                     frequency: Optional[str] = None) -> EvidenceSet:
         """`owners` gives each channel's owner username, in the order of `channels`; a channel past its end has none.
         `name` defaults to `ref`. `validators` names the validators paired with the set."""
         row = self._make_evidence(ref, channels, approval, name, owners=owners, validators=validators)
+        if frequency:
+            row["frequency"] = frequency
         return EvidenceSet(
             id=row["id"], reference_id=ref, name=row["name"], approval=approval,
             channels=tuple(Channel(c["id"], c["referenceId"], c["stackId"], (c["owner"] or {}).get("username"))
                            for c in row["channels"]),
             validators=tuple(validators),
+            frequency=frequency or "",
         )
 
     def add_request(self, evidence_id: str, channel_id: str, requested: date, due: date) -> ArtifactRequest:
@@ -266,6 +270,16 @@ class FakeParamify:
                 return self._submit(batch)
             if m.group(2):
                 return self._upload(batch, files)
+        m = re.fullmatch(r"/evidence/([^/]+)", path)
+        if method == "PATCH" and m:
+            row = next((e for e in self._evidence if e["id"] == m.group(1)), None)
+            if row is None:
+                return FakeResponse(404, text="Not Found")
+            extra = sorted(set(body) - _EVIDENCE_POST_KEYS)
+            if extra:
+                return FakeResponse(400, text=f"Unrecognized keys: {', '.join(extra)}")
+            row.update(body)
+            return FakeResponse(200, row)
         m = re.fullmatch(r"/evidence/([^/]+)/artifacts/upload", path)
         if method == "POST" and m:
             if not any(e["id"] == m.group(1) for e in self._evidence):

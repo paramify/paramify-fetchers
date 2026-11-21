@@ -79,7 +79,7 @@ class AppHeader(Horizontal):
 
     def compose(self) -> ComposeResult:
         yield Static(
-            f"[b]paramify fetcher[/]  [{palette.ORANGE}]•[/]  [{palette.SUBTLE}]evidence tui[/]",
+            "[b]paramify fetchers[/]",
             id="app-header-left",
         )
         yield UpdateNotice(id="app-header-update")
