@@ -30,7 +30,17 @@ from datetime import datetime, timezone
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as pkg_version
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Mapping,
+    Optional,
+    Sequence,
+    Tuple,
+)
 
 import yaml
 from dotenv import load_dotenv
@@ -3742,7 +3752,8 @@ def list_artifacts(evidence_set_id: str) -> List[dict]:
         validators = []
         for v in a.get("validators") or []:
             if isinstance(v, dict):
-                validators.append({"name": v.get("name") or "", "result": v.get("result") or ""})
+                validators.append({"id": v.get("id") or "", "name": v.get("name") or "",
+                                   "result": v.get("result") or ""})
         artifacts.append({
             "id": a["id"],
             "title": a.get("title") or "",
@@ -3759,6 +3770,69 @@ def list_artifacts(evidence_set_id: str) -> List[dict]:
         })
     artifacts.sort(key=lambda a: a.get("created_at") or "", reverse=True)
     return artifacts
+
+
+def latest_validator_results(artifacts: List[dict]) -> Dict[str, dict]:
+    """Each validator's latest result in Paramify, from one set's artifacts.
+
+    `artifacts` as list_artifacts returns them, newest first. Validation runs on
+    upload, so a validator's latest result is the one on the newest artifact that
+    has one (the reading `pfy validators failing` uses): an empty or NOT_SET
+    result is not one, so an older real verdict shows through it. Keyed by
+    Paramify validator id, and by name too for a validator with no id match:
+    {id or name: {"id", "name", "result", "at", "artifact"}}, where `result` is
+    PASS, FAIL or ERROR and `at` is the upload time ("2026-11-19 14:02"). A
+    validator no artifact has a real result for is absent (not run).
+    """
+    out: Dict[str, dict] = {}
+    for art in artifacts:
+        for v in art.get("validators") or []:
+            result = v.get("result") or ""
+            if result in ("", "NOT_SET"):
+                continue
+            found = {"id": v.get("id") or "", "name": v.get("name") or "",
+                     "result": result,
+                     "at": (art.get("created_at") or "")[:16].replace("T", " "),
+                     "artifact": art.get("title") or art.get("file_name") or ""}
+            for key in (found["id"], f"name:{found['name']}"):
+                if key and key != "name:" and key not in out:
+                    out[key] = found
+    return out
+
+
+def result_for(results: Dict[str, dict], paramify_id: Optional[str], name: str) -> Optional[dict]:
+    """One registry validator's entry in latest_validator_results: by its
+    Paramify id when known, else by name. None when it has no result."""
+    return (results.get(paramify_id) if paramify_id else None) or results.get(f"name:{name}")
+
+
+def validator_results(root: Path, reference_id: str, validators: Iterable,
+                      config_path: Optional[Path] = None) -> dict:
+    """The latest Paramify result of each registry validator on one evidence set.
+
+    Read-only: two GETs (the evidence sets, then this set's artifacts). Returns
+    {"state": "no_token" | "no_set" | "ok", "results": {registry key: entry}},
+    each entry as latest_validator_results gives it. A validator with no result
+    yet is absent. Matches by the `validators sync` lock's id, then by name, as
+    paramify_status pairs them. Raises RuntimeError when a read fails.
+    """
+    root = Path(root)
+    config_path = _upload_config(root, config_path)
+    readiness = upload_readiness(root, config_path=config_path)
+    if not readiness.get("token_present"):
+        return {"state": "no_token", "results": {}}
+    sets = {s["reference_id"]: s for s in list_evidence_sets(base_url=readiness.get("base_url"))}
+    found = sets.get(reference_id)
+    if found is None:
+        return {"state": "no_set", "results": {}}
+    latest = latest_validator_results(list_artifacts(found["id"]))
+    lock = _validator_lock(root, config_path)
+    results = {}
+    for v in validators:
+        entry = result_for(latest, lock.get(v.key), v.name)
+        if entry is not None:
+            results[v.key] = entry
+    return {"state": "ok", "results": results}
 
 
 def _artifact_filename(evidence_set: dict, artifact: dict) -> str:
@@ -3899,7 +3973,8 @@ def paramify_status(root: Path, manifest_path: Path, config_path: Optional[Path]
                        "evidence_set": {"reference_id", "name", "id" | None,
                                         "exists": bool | None, "artifact_count": int | None},
                        "script": "in_sync" | "update" | "create" | "drift" | "error" | None,
-                       "validators": [{"key", "role", "name", "paired": bool | None}],
+                       "validators": [{"key", "role", "name", "paired": bool | None,
+                                       "id": the Paramify id once read (None: not paired)}],
                        "pairs": [{"pair_id", "validator_key", "capability_id", "function"}],
                        "ready": bool}],
          "capabilities": [{"id", "reference_id", "name",
@@ -4047,6 +4122,7 @@ def paramify_status(root: Path, manifest_path: Path, config_path: Optional[Path]
         for v in row["validators"]:
             vid = lock.get(v["key"]) if lock.get(v["key"]) in ids else names.get(v["name"])
             v["paired"] = vid is not None
+            v["id"] = vid  # its Paramify id, which its results are read by
             if vid is not None:
                 key_by_id[vid] = v["key"]
         for cap in status["capabilities"]:

@@ -392,6 +392,10 @@ API_TO_CLI = {
     "set_owner": "manifest set-owner",
     "generate_env": "env",
     "set_schedule": "manifest set-frequency",
+    "validator_results": "artifacts list",
+    "latest_validator_results": "<implicit: the newest result per validator, from artifacts list>",
+    "result_for": "<implicit: one validator's row of artifacts list>",
+    "newest_pipeline_files": "<implicit: the files a local validator test reads; paramify runs lists the runs>",
     "entry_frequency": "<implicit: the entry detail's frequency row; upload --plan shows the result>",
     "default_upload_values": "<implicit: the default upload.yaml the frequency row reads; upload reads it too>",
     "list_channel_owners": "manifest set-owner",  # and `validate --online`, and the TUI's owner picker
@@ -1827,7 +1831,8 @@ def test_artifacts_list_sorts_newest_first(workspace_reads):
     assert result.exit_code == 0, result.output
     artifacts = json.loads(result.output)["artifacts"]
     assert [a["title"] for a in artifacts] == ["Newer", "Older"]
-    assert artifacts[0]["validators"] == [{"name": "All encrypted", "result": "PASS"}]
+    # The validator id is kept (blank when the API leaves it out) so results match by id, then name.
+    assert artifacts[0]["validators"] == [{"id": "", "name": "All encrypted", "result": "PASS"}]
 
 
 def test_pull_artifact_does_not_send_the_api_token_to_s3(workspace_reads, tmp_path, monkeypatch):

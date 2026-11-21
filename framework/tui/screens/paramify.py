@@ -118,11 +118,18 @@ _SCRIPT_MARKS = {
 
 
 class ArtifactsReady(Message):
-    """The newest artifact date of one evidence set, from the worker thread."""
+    """The newest artifact date of one evidence set, and each validator's latest
+    result there (api.latest_validator_results), from the worker thread.
+    `results` None: the artifacts couldn't be read, so what is known stays.
+    `generation` is the status read the worker started under; a message from
+    an older read is dropped."""
 
-    def __init__(self, set_id: str, newest: str | None) -> None:
+    def __init__(self, set_id: str, newest: str | None, results: dict | None = None,
+                 generation: int = 0) -> None:
         self.set_id = set_id
         self.newest = newest
+        self.results = results
+        self.generation = generation
         super().__init__()
 
 
@@ -153,9 +160,19 @@ def _capability_ids(row: dict) -> set:
     return {p["capability_id"] for p in row["pairs"]}
 
 
-def grid_cells(row: dict, online: bool, errors: dict | None = None) -> list:
+def failing_count(row: dict, results: dict | None) -> int:
+    """How many of the row's paired validators failed on their latest result
+    (FAIL or ERROR), from api.latest_validator_results; 0 when not read."""
+    return sum(
+        (api.result_for(results or {}, v.get("id"), v["name"]) or {}).get("result") in ("FAIL", "ERROR")
+        for v in row["validators"] if v["paired"]
+    )
+
+
+def grid_cells(row: dict, online: bool, errors: dict | None = None, results: dict | None = None) -> list:
     """One status row as grid cells (spec §6.3). A cell whose read failed is
-    "?", as in `paramify status`."""
+    "?", as in `paramify status`. `results` (the set's latest validator results,
+    read after the status) adds "· 1 failing" to the validators cell."""
     errors = errors or {}
     validators = row["validators"]
     if not online:
@@ -184,6 +201,10 @@ def grid_cells(row: dict, online: bool, errors: dict | None = None) -> list:
         validators_cell = Text(f"?/{len(validators)}", style=palette.WARN)
     else:
         validators_cell = _fraction(have, len(validators))
+        failing = failing_count(row, results)
+        if failing:
+            validators_cell.append(" · ", style=palette.MUTED)
+            validators_cell.append(f"{failing} failing", style=palette.FAIL)
     if "capabilities" in errors or sets_unknown:
         caps_cell = _unknown()
     else:
@@ -287,6 +308,9 @@ class ParamifyPage(ParamifyWriter, Vertical):
         self._reread = False
         self._stale = True
         self._newest: dict = {}
+        self._results: dict = {}  # {set id: api.latest_validator_results(...)}, read with _newest
+        # Bumped by each status read that lands: artifacts read under an older one are dropped.
+        self._generation = 0
         self._rows: dict = {}
         self._filter = ""
         self._hide_ready = False
@@ -440,6 +464,8 @@ class ParamifyPage(ParamifyWriter, Vertical):
             self._rows = {}
             self._error = None
             self._newest = {}
+            self._results = {}
+            self._generation += 1
             self._cap_pairs = {}
             self._cap_others = {}
             for table in ("#pf-grid", "#pf-caps", "#pf-cap-grid", "#pf-pairs"):
@@ -518,11 +544,20 @@ class ParamifyPage(ParamifyWriter, Vertical):
             self._status_at = time.monotonic()
             self._status_clock = datetime.now().strftime("%H:%M")
             self._newest = {}
+            self._results = {}
+            self._generation += 1
         # Never focus from here: a read can land while the user is on another tab.
         # When the redraw hides the grid (an empty manifest), Textual moves focus
         # to the next focusable widget: the hint, which takes focus for that.
         self._draw()
         self._refresh_hints()
+        if message.error is None and self._online():
+            # Each set's latest validator results, for the grid's "· 1 failing".
+            ids = [r["evidence_set"]["id"] for r in self._status["fetchers"]
+                   if r["evidence_set"]["id"] and r["evidence_set"]["artifact_count"]
+                   and any(v["paired"] for v in r["validators"])]
+            if ids:
+                self._all_artifacts_worker(ids, self._generation)
         if reread:
             self.request_status()
 
@@ -604,7 +639,8 @@ class ParamifyPage(ParamifyWriter, Vertical):
         with self.prevent(DataTable.RowHighlighted):
             grid.clear()
             for row in shown:
-                grid.add_row(*grid_cells(row, online, status["errors"]), key=row["name"])
+                grid.add_row(*grid_cells(row, online, status["errors"],
+                                         self._results.get(row["evidence_set"]["id"])), key=row["name"])
             if target is not None:
                 grid.move_cursor(row=grid.get_row_index(target))
         empty = not rows
@@ -873,7 +909,7 @@ class ParamifyPage(ParamifyWriter, Vertical):
         self._show_caps(row, online)
         set_id = row["evidence_set"]["id"]
         if online and set_id and (row["evidence_set"]["artifact_count"] or 0) and set_id not in self._newest:
-            self._artifacts_worker(set_id)
+            self._artifacts_worker(set_id, self._generation)
 
     def _show_no_match(self) -> None:
         """The filter or w hides every fetcher: say so where the detail was."""
@@ -912,6 +948,7 @@ class ParamifyPage(ParamifyWriter, Vertical):
         validators = row["validators"]
         if validators:
             table = Table.grid(padding=(0, 1))
+            results = self._results.get(es["id"]) or {}
             for i, v in enumerate(validators):
                 if not online:
                     mark = _dim("·")
@@ -919,8 +956,14 @@ class ParamifyPage(ParamifyWriter, Vertical):
                     mark = _unknown()
                 else:
                     mark = Text("✓", style=palette.OK) if v["paired"] else Text("+", style=palette.INFO)
-                table.add_row(Text(f"V{i + 1}", style=palette.ACCENT), mark, Text(v["name"]))
-            body += [_dim("validators"), table]
+                # Its latest result in Paramify, once the artifacts are read.
+                result = api.result_for(results, v.get("id"), v["name"]) if v["paired"] else None
+                table.add_row(Text(f"V{i + 1}", style=palette.ACCENT), mark, Text(v["name"]),
+                              palette.verdict_pill(result["result"]) if result else Text(""))
+            head = _dim("validators")
+            if results:
+                head.append("   latest result in Paramify →", style=palette.MUTED)
+            body += [head, table]
         else:
             body.append(_dim("validators  none yet"))
         return Group(*body)
@@ -969,16 +1012,43 @@ class ParamifyPage(ParamifyWriter, Vertical):
                 table.add_row(label, fn, *marks)
 
     @work(thread=True, exclusive=True, group="paramify-artifacts")
-    def _artifacts_worker(self, set_id: str) -> None:
+    def _artifacts_worker(self, set_id: str, generation: int) -> None:
         try:
             artifacts = api.list_artifacts(set_id)
         except Exception:  # noqa: BLE001 — the count still shows; only the date is lost
-            artifacts = []
+            # No results: a failing count already read stays as it is.
+            self.post_message(ArtifactsReady(set_id, None, None, generation))
+            return
         created = (artifacts[0].get("created_at") or "") if artifacts else ""
-        self.post_message(ArtifactsReady(set_id, created[:16].replace("T", " ") or None))
+        self.post_message(ArtifactsReady(set_id, created[:16].replace("T", " ") or None,
+                                         api.latest_validator_results(artifacts), generation))
+
+    @work(thread=True, exclusive=True, group="paramify-results")
+    def _all_artifacts_worker(self, set_ids: list, generation: int) -> None:
+        for set_id in set_ids:
+            try:
+                artifacts = api.list_artifacts(set_id)
+            except Exception:  # noqa: BLE001 — that row just shows no failing count
+                continue
+            created = (artifacts[0].get("created_at") or "") if artifacts else ""
+            self.post_message(ArtifactsReady(set_id, created[:16].replace("T", " ") or None,
+                                             api.latest_validator_results(artifacts), generation))
 
     def on_artifacts_ready(self, message: ArtifactsReady) -> None:
+        if message.generation != self._generation:
+            return  # read for an older status: newer results may already be here
+        if message.results is None:
+            # The read failed: keep what is known, and don't read it again on every move.
+            self._newest.setdefault(message.set_id, None)
+            return
         self._newest[message.set_id] = message.newest
+        self._results[message.set_id] = message.results
+        status = self._status or {}
+        grid = self.query_one("#pf-grid", DataTable)
+        for row in status.get("fetchers") or []:
+            if row["evidence_set"]["id"] == message.set_id and row["name"] in grid.rows:
+                cells = grid_cells(row, self._online(), status.get("errors"), message.results)
+                grid.update_cell(row["name"], grid.ordered_columns[3].key, cells[3], update_width=True)
         row = self._rows.get(self._cursor_key() or "")
         if row is not None and row["evidence_set"]["id"] == message.set_id:
             self.query_one("#pf-set", Static).update(self._set_info(row, self._online()))

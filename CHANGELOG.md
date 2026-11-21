@@ -58,6 +58,16 @@ schemas and the `paramify` CLI — not the internal code.
     the upload confirm shows it: `~ EVD-IAM-MFA: frequency every 3 days → daily`. A fetcher's default never changes an
     existing set, and a key that can't edit sets skips the change, says so, and still uploads.
 
+- **Validator results and a local test in the TUI (Validators tab).**
+  - Each validator shows PASS or FAIL from its latest result in Paramify, and the Paramify tab's validators cell
+    counts failures (`2/2 · 1 failing`).
+  - The validator window tests it against your last run with Node, as Paramify does, and shows each rule's mark and
+    the value it read, with a plain reason when it fails.
+  - On a failure, `a` asks Claude why (read-only `claude -p`, asked once per session before anything is sent). Any
+    regex it proposes is tested on the same files before it is shown, and `w` writes a passing one to the
+    validator's YAML after a confirm. Without Claude Code the key says so; `c` copies the same report to paste
+    anywhere. `PARAMIFY_ASK_CLAUDE=0` turns Ask Claude off.
+
 - **Choose the validators each fetcher tracks (TUI Validators tab, beta).** The tab lists the manifest's fetchers
   and, for each, every registry validator for its evidence set in a Paramify section and a community section.
   `space` tracks or untracks one and saves the manifest; `enter` shows the claim, regex, rules in plain words,

@@ -162,6 +162,28 @@ def test_detail_follows_the_cursor(tmp_path, monkeypatch, run_tui):
     assert "bravo" in second and "update" in second
 
 
+def test_detail_shows_each_validators_latest_result(tmp_path, monkeypatch, run_tui):
+    """The artifact read the detail already makes carries each validator's results."""
+    status = _status()
+    status["fetchers"][0]["validators"][0]["id"] = "v-0"
+    _stub(monkeypatch, status)
+    monkeypatch.setattr(api, "list_artifacts", lambda set_id: [
+        {"created_at": "2026-11-20T09:00:00Z", "title": "new", "validators": [
+            {"id": "v-0", "name": "renamed in Paramify", "result": "PASS"},
+            {"id": "v-9", "name": "check 1", "result": "FAIL"}]},
+    ])
+
+    async def body(app, pilot):
+        page = await _open(app, pilot)
+        return _text(page.query_one("#pf-set", Static).content), _cells(page, "alpha")[3]
+
+    detail, cell = run_tui(body, _manifest(tmp_path))
+    assert cell == "2/2 · 1 failing"
+    assert "latest result in Paramify" in detail
+    assert "V1 ✓ check 0  PASS" in detail  # by its Paramify id
+    assert "V2 ✓ check 1  FAIL" in detail  # by name
+
+
 def test_no_token_shows_the_problem_bar(tmp_path, monkeypatch, run_tui):
     _stub(monkeypatch, _status([_row("alpha", set_id=None, script=None, validators=_validators(False))],
                                token=False, capabilities=[]))
@@ -1065,3 +1087,51 @@ def test_a_capability_filter_that_matches_nothing_says_so(tmp_path, monkeypatch,
     rows, shown, text = run_tui(body, _manifest(tmp_path))
     assert rows == {} and shown
     assert "No capability matches “zzz”." in text
+
+
+def _failing_artifacts(set_id):
+    return [{"created_at": "2026-11-20T09:00:00Z", "title": "new", "validators": [
+        {"name": "check 0", "result": "PASS"}, {"name": "check 1", "result": "FAIL"}]}]
+
+
+def test_an_artifacts_read_error_keeps_the_failing_count(tmp_path, monkeypatch, run_tui):
+    _stub(monkeypatch, _status())
+    monkeypatch.setattr(api, "list_artifacts", _failing_artifacts)
+
+    async def body(app, pilot):
+        page = await _open(app, pilot)
+        before = _cells(page, "alpha")[3]
+
+        def boom(set_id):
+            raise RuntimeError("502 from Paramify")
+
+        monkeypatch.setattr(api, "list_artifacts", boom)
+        page._newest.pop("ev", None)  # so the detail's own read runs again
+        page._artifacts_worker("ev", page._generation)
+        await _settle(app, pilot)
+        return before, _cells(page, "alpha")[3], page._results.get("ev")
+
+    before, after, results = run_tui(body, _manifest(tmp_path))
+    assert before == after == "2/2 · 1 failing"
+    assert results and results["name:check 1"]["result"] == "FAIL"
+
+
+def test_artifacts_read_for_an_older_status_are_dropped(tmp_path, monkeypatch, run_tui):
+    _stub(monkeypatch, _status())
+    monkeypatch.setattr(api, "list_artifacts", _failing_artifacts)
+
+    async def body(app, pilot):
+        page = await _open(app, pilot)
+        old = page._generation
+        page.request_status()  # a newer status lands, and its artifacts read
+        await _settle(app, pilot)
+        newer = page._generation
+        # The older read's worker posts late, with what it saw then: nothing failing.
+        monkeypatch.setattr(api, "list_artifacts", lambda set_id: [])
+        page._all_artifacts_worker(["ev"], old)
+        await _settle(app, pilot)
+        return old, newer, _cells(page, "alpha")[3]
+
+    old, newer, cell = run_tui(body, _manifest(tmp_path))
+    assert newer == old + 1
+    assert cell == "2/2 · 1 failing"

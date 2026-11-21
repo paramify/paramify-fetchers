@@ -455,6 +455,13 @@ ModalScreen {
     width: 1fr;
 }
 
+/* ReportModal: the question under what will be sent. */
+#report-question {
+    width: 100%;
+    padding-top: 1;
+    text-style: bold;
+}
+
 #modal-buttons {
     height: auto;
     align-horizontal: right;

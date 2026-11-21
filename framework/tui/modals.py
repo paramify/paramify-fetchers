@@ -340,6 +340,44 @@ class ConfirmModal(ButtonRowNav, ModalScreen[bool]):
         self.dismiss(False)
 
 
+class ReportModal(ButtonRowNav, ModalScreen[bool]):
+    """Exactly what will be sent, and one question (from the error card, branch
+    feat/tui-error-card). Lands on Back: sending to an AI service is opt-in."""
+
+    AUTO_FOCUS = "#report-no"
+
+    BINDINGS = [
+        Binding("escape", "no", "Back"),
+        Binding("n", "no", "Back"),
+        Binding("y", "yes", "Yes"),
+        *BUTTON_ROW_BINDINGS,
+    ]
+
+    def __init__(self, report: str, title: str, subtitle: str, question: str, yes_label: str) -> None:
+        super().__init__()
+        self._report, self._title, self._subtitle = report, title, subtitle
+        self._question, self._yes_label = question, yes_label
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="modal-card", classes="wide"):
+            yield Label(self._title, id="modal-title")
+            yield Label(self._subtitle, id="modal-subtitle")
+            with VerticalScroll(id="modal-body"):
+                yield Static(self._report, id="preview-text", markup=False)
+            yield Label(Text(self._question), id="report-question")
+            with Horizontal(id="modal-buttons"):
+                yield Button(f"{self._yes_label} (y)", variant="primary", id="report-yes")
+                yield Button("Back (n)", id="report-no")
+
+    @on(Button.Pressed, "#report-yes")
+    def action_yes(self) -> None:
+        self.dismiss(True)
+
+    @on(Button.Pressed, "#report-no")
+    def action_no(self) -> None:
+        self.dismiss(False)
+
+
 class PreviewModal(ModalScreen[None]):
     """Read-only scrollable view of the manifest YAML."""
 
