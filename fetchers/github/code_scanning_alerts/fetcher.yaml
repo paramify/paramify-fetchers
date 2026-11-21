@@ -1,5 +1,5 @@
 name: github_code_scanning_alerts
-version: 0.1.0
+version: 0.2.0
 description: >-
   Code scanning for every repository: whether the default branch is analysed,
   by which tools and how recently, and every alert with its severity, age and
@@ -30,6 +30,14 @@ target_schema:
     description: >-
       Comma-separated repository names to collect. Unset collects every
       repository the token can see; a name the token cannot see fails the run.
+  exclude_repositories:
+    type: string
+    required: false
+    env: GITHUB_EXCLUDE_REPOSITORIES
+    description: >-
+      Comma-separated repository names to leave out, matched without regard
+      to case. Cannot be combined with repositories. The evidence lists the
+      names it left out and any that matched no repository.
   include_archived:
     type: boolean
     required: false

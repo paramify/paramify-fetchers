@@ -52,6 +52,10 @@ requires:
   tools:
     - aws
     - jq
+  # The Inspector ECR fetchers call AWS through boto3 (botocore comes with it).
+  python_packages:
+    - boto3
+    - botocore
 
 auth:
   passthrough_env:

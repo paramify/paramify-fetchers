@@ -1,0 +1,21 @@
+key: loki_expected_sources_ingesting
+name: 'Loki Log Ingestion: Every Expected Source Arriving'
+type: AUTOMATED
+role: configuration
+source: community
+statement: >
+  Every expected log source sent at least one line to Loki in the recent window
+  (all_expected_sources_ingesting is true). Fails when any source is quiet, any source's queries
+  failed, no source is set, or the field appears other than exactly once. Shows the logs are
+  collected and stored, not that anyone reviews or alerts on them. Does not check whether the
+  collection run succeeded.
+
+regex: '"all_expected_sources_ingesting":\s*true\b'
+rules_summary: MATCH_COUNT EQUALS 1
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "1" }
+
+evidence_sets:
+  - EVD-LOKI-LOG-INGESTION

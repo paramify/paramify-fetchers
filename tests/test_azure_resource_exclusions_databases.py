@@ -242,6 +242,47 @@ def test_cosmos_verdicts_cover_only_in_scope_accounts(monkeypatch, tmp_path):
     assert scoped["summary"]["local_auth_disabled_accounts"] == 1
 
 
+def test_cosmos_summary_matches_the_instructions(monkeypatch, tmp_path, assert_summary_documented):
+    accounts = _three("Microsoft.DocumentDB/databaseAccounts")
+    for account, api in zip(accounts, ("GlobalDocumentDB", "MongoDB", "Parse")):
+        account.kind = api
+    accounts.append(_res("Microsoft.DocumentDB/databaseAccounts", "none", "rg-in", "regionwest"))
+    client = _Client({("database_accounts", "list"): accounts})
+    modules = {"azure.mgmt.cosmosdb": {"CosmosDBManagementClient": lambda **k: client}}
+    _, evidence = _run(cosmos, monkeypatch, tmp_path, "rg:rg-typo", "azure_cosmosdb_configuration", modules)
+    assert_summary_documented("azure/cosmosdb_configuration", evidence["summary"])
+
+
+def test_databricks_summary_matches_the_instructions(monkeypatch, tmp_path, assert_summary_documented):
+    _, modules = _databricks_modules()
+    _, evidence = _run(databricks, monkeypatch, tmp_path, PATTERNS, "azure_databricks_workspace_configuration", modules)
+    assert_summary_documented("azure/databricks_workspace_configuration", evidence["summary"])
+
+
+def test_mysql_summary_matches_the_instructions(monkeypatch, tmp_path, assert_summary_documented):
+    _, modules = _mysql_modules()
+    _, evidence = _run(mysql, monkeypatch, tmp_path, PATTERNS, "azure_mysql_configuration", modules)
+    assert_summary_documented("azure/mysql_configuration", evidence["summary"])
+
+
+def test_postgresql_summary_matches_the_instructions(monkeypatch, tmp_path, assert_summary_documented):
+    _, modules = _postgres_modules()
+    _, evidence = _run(postgres, monkeypatch, tmp_path, PATTERNS, "azure_postgresql_configuration", modules)
+    assert_summary_documented("azure/postgresql_configuration", evidence["summary"])
+
+
+def test_sql_server_summary_matches_the_instructions(monkeypatch, tmp_path, assert_summary_documented):
+    _, modules = _sql_modules()
+    _, evidence = _run(sql_cfg, monkeypatch, tmp_path, PATTERNS, "azure_sql_server_configuration", modules)
+    assert_summary_documented("azure/sql_server_configuration", evidence["summary"])
+
+
+def test_sql_encryption_summary_matches_the_instructions(monkeypatch, tmp_path, assert_summary_documented):
+    _, modules = _sql_modules()
+    _, evidence = _run(sql_enc, monkeypatch, tmp_path, PATTERNS, "azure_sql_encryption_status", modules)
+    assert_summary_documented("azure/sql_encryption_status", evidence["summary"])
+
+
 def test_sql_encryption_keeps_the_verdict_when_its_key_vault_is_excluded(monkeypatch, tmp_path):
     vault = f"{SUB}/resourceGroups/rg-out/providers/Microsoft.KeyVault/vaults/kv-out"
     protector = ns(server_key_type="AzureKeyVault", uri="https://kv-out.example/keys/k1", auto_rotation_enabled=True)
@@ -290,6 +331,18 @@ def test_redis_cache_no_patterns_and_patterns(monkeypatch, tmp_path):
     assert evidence["summary"]["resource_exclusion_patterns_unmatched"] == UNMATCHED
 
 
+def test_redis_cache_summary_matches_the_instructions(monkeypatch, tmp_path, assert_summary_documented):
+    _, modules = _redis_cache_modules()
+    _, evidence = _run(redis_cache, monkeypatch, tmp_path, PATTERNS, "azure_redis_cache_configuration", modules)
+    assert_summary_documented("azure/redis_cache_configuration", evidence["summary"])
+
+
+def test_managed_redis_summary_matches_the_instructions(monkeypatch, tmp_path, assert_summary_documented):
+    _, modules = _managed_redis_modules()
+    _, evidence = _run(managed_redis, monkeypatch, tmp_path, PATTERNS, "azure_managed_redis_configuration", modules)
+    assert_summary_documented("azure/managed_redis_configuration", evidence["summary"])
+
+
 def _mongo(name, rg, location):
     return ns(id=f"{SUB}/resourceGroups/{rg}/providers/Microsoft.DocumentDB/mongoClusters/{name}", name=name,
               location=location)
@@ -310,8 +363,9 @@ def _data_services(patterns, monkeypatch, tmp_path):
     return code, evidence, (mongo, kusto, hubs)
 
 
-def test_data_services_no_patterns(monkeypatch, tmp_path):
+def test_data_services_no_patterns(monkeypatch, tmp_path, assert_summary_documented):
     code, evidence, _ = _data_services(None, monkeypatch, tmp_path)
+    assert_summary_documented("azure/data_services_configuration", evidence["summary"])
     assert code == 0 and evidence["results"]["excluded"] == []
     r = evidence["results"]
     registration = {k: v for k, v in r.items() if k.startswith("provider_registration_status_")}
@@ -365,13 +419,15 @@ LISTS = {cosmos: "cosmosdb.database_accounts.list", databricks: "databricks.work
 
 
 @pytest.mark.parametrize("case", SIMPLE, ids=IDS)
-def test_a_refused_list_leaves_its_exclusion_counts_null(case, monkeypatch, tmp_path):
+def test_a_refused_list_leaves_its_exclusion_counts_null(case, monkeypatch, tmp_path, caplog):
     m, filename, _, kind, plural, _, modules, _ = case
     _refuse(monkeypatch, m, LISTS[m])
     _, modules_ = modules()
     code, evidence = _run(m, monkeypatch, tmp_path, PATTERNS, filename, modules_)
     assert code == 1
     assert (evidence["summary"][f"in_scope_{plural}"], evidence["summary"][f"excluded_{kind}s"]) == (None, None)
+    assert evidence["summary"]["resource_exclusion_patterns_unmatched"] is None
+    assert "matched nothing" not in caplog.text
 
 
 def test_a_refused_list_leaves_the_redis_cache_and_data_services_counts_null(monkeypatch, tmp_path):
@@ -380,12 +436,14 @@ def test_a_refused_list_leaves_the_redis_cache_and_data_services_counts_null(mon
     code, evidence = _run(redis_cache, monkeypatch, tmp_path, PATTERNS, "azure_redis_cache_configuration", modules)
     assert code == 1
     assert (evidence["summary"]["in_scope_redis_caches"], evidence["summary"]["excluded_redis_caches"]) == (None, None)
+    assert evidence["summary"]["resource_exclusion_patterns_unmatched"] is None
     _refuse(monkeypatch, data_services, "eventhub.namespaces.list")
     code, evidence, _ = _data_services(PATTERNS, monkeypatch, tmp_path)
     s = evidence["summary"]
     assert code == 1
     assert (s["in_scope_event_hub_namespaces"], s["excluded_event_hub_namespaces"]) == (None, None)
     assert (s["in_scope_mongo_clusters"], s["excluded_mongo_clusters"]) == (1, 1)
+    assert s["resource_exclusion_patterns_unmatched"] is None
 
 
 @pytest.mark.parametrize("refused, unknown", [
@@ -398,6 +456,7 @@ def test_a_refused_data_services_list_leaves_only_its_counts_null(refused, unkno
     counts = {k: v for k, v in evidence["summary"].items() if k.startswith(("in_scope_", "excluded_"))}
     assert code == 1
     assert {k for k, v in counts.items() if v is None} == {f"in_scope_{unknown}", f"excluded_{unknown}"}
+    assert evidence["summary"]["resource_exclusion_patterns_unmatched"] is None
 
 
 INITS = {cosmos: "cosmosdb.CosmosDBManagementClient (init)",
@@ -415,6 +474,7 @@ def test_a_client_that_couldnt_be_built_leaves_the_exclusion_counts_null(case, m
     code, evidence = _run(m, monkeypatch, tmp_path, PATTERNS, filename, modules_)
     assert code == 1
     assert (evidence["summary"][f"in_scope_{plural}"], evidence["summary"][f"excluded_{kind}s"]) == (None, None)
+    assert evidence["summary"]["resource_exclusion_patterns_unmatched"] is None
 
 
 def test_a_client_that_couldnt_be_built_leaves_the_redis_cache_and_data_services_counts_null(monkeypatch, tmp_path):
@@ -423,7 +483,9 @@ def test_a_client_that_couldnt_be_built_leaves_the_redis_cache_and_data_services
     code, evidence = _run(redis_cache, monkeypatch, tmp_path, PATTERNS, "azure_redis_cache_configuration", modules)
     assert code == 1
     assert (evidence["summary"]["in_scope_redis_caches"], evidence["summary"]["excluded_redis_caches"]) == (None, None)
+    assert evidence["summary"]["resource_exclusion_patterns_unmatched"] is None
     _refuse(monkeypatch, data_services, "data services clients (init)")
     code, evidence, _ = _data_services(PATTERNS, monkeypatch, tmp_path)
     counts = {k: v for k, v in evidence["summary"].items() if k.startswith(("in_scope_", "excluded_"))}
     assert code == 1 and len(counts) == 6 and set(counts.values()) == {None}
+    assert evidence["summary"]["resource_exclusion_patterns_unmatched"] is None
