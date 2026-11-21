@@ -1,0 +1,24 @@
+key: checkov_kubernetes_no_failed_checks
+name: 'Checkov Kubernetes: No Check Failed'
+type: AUTOMATED
+role: configuration
+source: community
+statement: >
+  No Checkov check failed against the repository's Kubernetes manifests (failed_checks is 0). Checks
+  in the skip list, and failures moved to skipped for listed resources, are not counted; the
+  evidence records both. A scan that did not run reads 0 here, so pair with 'Checks Ran Against the
+  Manifests'. Fails if the count appears other than exactly once. Does not check whether the
+  collection run succeeded.
+
+regex: '"failed_checks":\s*(?<failed_checks>\d+)'
+rules_summary: MATCH_COUNT EQUALS 1; MATCH_GROUP[1] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "1" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # failed_checks
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-CHECKOV-KUBERNETES

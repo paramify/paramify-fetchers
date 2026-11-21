@@ -1,0 +1,14 @@
+validator: github_default_branches_require_signed_commits
+cases:
+- name: compliant
+  expect: PASS
+  artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"repositories_total":4,"requiring_signed_commits":4}}}'
+- name: some_missing
+  expect: FAIL
+  artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"repositories_total":4,"requiring_signed_commits":3}}}'
+- name: unread
+  expect: FAIL
+  artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"repositories_total":4,"requiring_signed_commits":null}}}'
+- name: renamed
+  expect: FAIL
+  artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"repositories_total":4,"requiring_signed_commits_renamed":4}}}'
