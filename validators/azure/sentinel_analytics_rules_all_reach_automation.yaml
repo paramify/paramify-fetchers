@@ -2,6 +2,7 @@ key: sentinel_analytics_rules_all_reach_automation
 name: 'Microsoft Sentinel: Every Enabled Analytics Rule Reaches Automation'
 type: AUTOMATED
 role: configuration
+source: community
 statement: >
   Every enabled analytics rule on every Sentinel workspace read has an active automation rule that
   runs when it matches (all_enabled_rules_reach_automation is true): one triggered on a new incident
