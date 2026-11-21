@@ -42,6 +42,7 @@ from framework import envgen, patterns, yaml_io
 from framework import samples as _samples
 from framework.config_loader import discover_fetchers, discover_platforms
 from framework.contract import (
+    SCHEDULE_FREQUENCIES,
     ConfigField,
     Fetcher,
     ManifestEntry,
@@ -1772,6 +1773,8 @@ def run(
         "started_at": started_at,
         "completed_at": completed_at,
         "invocations": [_invocation_record(r) for r in all_results],
+        # The upload reads `every` as the frequency of each set no entry or upload.yaml sets.
+        "schedule": dict(parsed.schedule),
         "paramify": {
             keys[id(e)]: {"use": e.use, **manifest_loader.resolved_paramify(
                 parsed, e, pipeline=e.use in fetchers and fetchers[e.use].is_pipeline)}
@@ -2181,6 +2184,73 @@ def set_owner(m: dict, owner: Optional[str], use: Optional[str] = None) -> dict:
     else:
         block.pop("owner", None)
     return m
+
+
+def set_schedule(m: dict, every: Optional[str], at: Optional[str] = None) -> dict:
+    """Record how often the manifest runs: `run.schedule: {every, at}`.
+
+    Each evidence set's frequency follows `every` unless the entry or upload.yaml
+    sets one. No `every` removes the schedule; no `at` runs at any time of day.
+    """
+    run = _run(m)
+    if not every:
+        run.pop("schedule", None)
+        return m
+    schedule: Dict[str, Any] = {"every": every}
+    if at:
+        schedule["at"] = at
+    run["schedule"] = schedule
+    return m
+
+
+def set_frequency(m: dict, frequency: Optional[str], use: Optional[str] = None) -> dict:
+    """Record how often evidence sets expect a new artifact: manifest-wide
+    (`run.schedule.every`, keeping any `at`), or with `use` for one fetcher entry
+    (its `paramify.frequency`, see _paramify_block). A blank `frequency` removes
+    it. Raises ValueError for a value that isn't one of SCHEDULE_FREQUENCIES:
+    NOT_SET is Paramify's, but a schedule always has a cadence.
+    """
+    value = (frequency or "").strip().upper()
+    if value and value not in SCHEDULE_FREQUENCIES:
+        raise ValueError(f"{frequency!r} isn't a frequency; use one of {', '.join(SCHEDULE_FREQUENCIES)}")
+    if use is None:
+        return set_schedule(m, value or None, (_run(m).get("schedule") or {}).get("at") if value else None)
+    block = _paramify_block(m, use)
+    if value:
+        block["frequency"] = value
+    else:
+        block.pop("frequency", None)
+    return m
+
+
+def default_upload_values(root: Path) -> dict:
+    """The default upload.yaml under `root`, parsed; {} when there is none or it can't
+    be read (a display value: the upload itself reports a bad config)."""
+    try:
+        path = default_upload_config(root)
+        cfg = (yaml_io.load_path(path) or {}) if path else {}
+    except Exception:  # noqa: BLE001
+        cfg = {}
+    return cfg if isinstance(cfg, dict) else {}
+
+
+def entry_frequency(m: dict, entry: Mapping[str, Any], declared: Optional[str], root: Path,
+                    upload_cfg: Optional[dict] = None) -> Tuple[str, str]:
+    """(frequency, source) for one manifest entry's evidence set, as an upload of a
+    run made now would resolve it (see desired.resolve_frequency). `upload_cfg` is
+    the parsed upload.yaml (a caller showing many entries reads it once); without
+    it, the default one under `root` is read. An upload with --config may differ."""
+    from framework.sync.providers.desired import resolve_frequency
+
+    cfg = upload_cfg if upload_cfg is not None else default_upload_values(root)
+    use = str(entry.get("use") or "")
+    return resolve_frequency(
+        declared,
+        entry=(entry.get("paramify") or {}).get("frequency"),
+        fetcher_override=((cfg.get("overrides") or {}).get(use) or {}).get("frequency"),
+        upload_default=(cfg.get("defaults") or {}).get("frequency"),
+        schedule_every=(_run(m).get("schedule") or {}).get("every"),
+    )
 
 
 # --------------------------------------------------------------------------- #

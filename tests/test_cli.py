@@ -391,6 +391,9 @@ API_TO_CLI = {
     "set_stack": "manifest set-stack",
     "set_owner": "manifest set-owner",
     "generate_env": "env",
+    "set_schedule": "manifest set-frequency",
+    "entry_frequency": "<implicit: the entry detail's frequency row; upload --plan shows the result>",
+    "default_upload_values": "<implicit: the default upload.yaml the frequency row reads; upload reads it too>",
     "list_channel_owners": "manifest set-owner",  # and `validate --online`, and the TUI's owner picker
     "owner_notes": "validate",  # --online
     "manifest_owners": "validate",  # --online: only a manifest that sets an owner lists the owners

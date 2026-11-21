@@ -189,8 +189,9 @@ ManifestPanel {
     padding: 0 1 0 0;
 }
 
+/* One column: the row holds stack, owner, frequency and env and still fits 120. */
 #manifest-top .after-button {
-    margin-left: 2;
+    margin-left: 1;
 }
 
 /* The env button while a required variable has no value. */
