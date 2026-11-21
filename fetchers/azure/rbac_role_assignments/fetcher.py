@@ -950,6 +950,8 @@ def main() -> int:
             pim["eligible"], "eligible_role_assignment", exclusions, keep)
         excluded += excluded_eligible
     everything = assignments + below_subscription
+    if not (listed and pim["eligible"] is not None):
+        exclusions.mark_unread()
     counts = exclusions.summary(excluded, ("role_assignment", "eligible_role_assignment"), {
         "role_assignments": len(everything), "eligible_role_assignments": len(pim["eligible"] or [])})
     # Unknown, not none, when a list wasn't read.
@@ -957,10 +959,7 @@ def main() -> int:
         counts.update(excluded_role_assignments=None, in_scope_role_assignments=None)
     if pim["eligible"] is None:
         counts.update(excluded_eligible_role_assignments=None, in_scope_eligible_role_assignments=None)
-    if listed and pim["eligible"] is not None:
-        exclusions.warn_unmatched(logger)
-    elif exclusions:
-        counts["resource_exclusion_patterns_unmatched"] = None
+    exclusions.warn_unmatched(logger)
     assignments = assignments if at_scope_read else None
     below_subscription = below_subscription if below_read else None
     evidence = build_payload(

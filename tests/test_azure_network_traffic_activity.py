@@ -557,13 +557,14 @@ def _lists():
     }
 
 
-def test_collect_wires_flows_front_door_and_origins(monkeypatch):
+def test_collect_wires_flows_front_door_and_origins(monkeypatch, assert_summary_documented):
     monkeypatch.setenv(nta.LOOKBACK_ENV, "5")
     client = FakeClient(tables={nta.NSG_TABLE: "Analytics", nta.FD_TABLE: "Analytics", nta.HTTP_TABLE: "Analytics"},
                         arm=_arm(), lists=_lists())
     collector = Collector(logger())
     results, summary = nta.collect(client, SUB_ID, collector)
     assert collector.ok, collector.failures
+    assert_summary_documented("azure/network_traffic_activity", summary)
     assert summary["flow_logs"] == 3 and summary["flow_logs_with_traffic_analytics"] == 2
     assert [(t["table"], t["status"]) for t in results["traffic_tables"]] == [
         (nta.NSG_TABLE, nta.WS_QUERIED), (nta.VNET_TABLE, "not_present")]

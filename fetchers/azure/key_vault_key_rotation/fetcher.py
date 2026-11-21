@@ -29,6 +29,7 @@ from azure_common import (  # noqa: E402
     REGISTRATION_UNKNOWN,
     Collector,
     arm_client_kwargs,
+    arm_endpoint,
     arm_id_key,
     build_payload,
     classify_failure_code,
@@ -37,12 +38,12 @@ from azure_common import (  # noqa: E402
     failure_reason,
     model_attr,
     provider_registration_status,
+    report_failure,
     resolve_subscription,
     resource_group_from_id,
     sanitize_for_filename,
     sorted_counts,
     write_evidence,
-    report_failure,
 )
 from resource_exclusions import ResourceExclusions  # noqa: E402
 
@@ -63,10 +64,16 @@ ROTATE_ACTION = "rotate"
 SOURCE_DATA_PLANE = "data_plane"
 SOURCE_MANAGEMENT_PLANE = "management_plane"
 
-# Fallback host suffix, used only when ARM returned no `vault_uri`. Prowler
-# hardcodes this form; preferring `vault_uri` is what keeps this correct in the
-# sovereign clouds (vault.usgovcloudapi.net / vault.azure.cn).
+# Cloud-specific fallback, used only when ARM returned no `vault_uri`.
+# ARM-provided URI remains preferred; derive the fallback from the same authority
+# as the management client rather than sending sovereign reads to the public cloud.
 DEFAULT_VAULT_URI_SUFFIX = "vault.azure.net"
+_ARM_TO_VAULT_SUFFIX = {
+    "https://management.azure.com": DEFAULT_VAULT_URI_SUFFIX,
+    "https://management.usgovcloudapi.net": "vault.usgovcloudapi.net",
+    "https://management.chinacloudapi.cn": "vault.azure.cn",
+    "https://management.microsoftazure.de": "vault.microsoftazure.de",
+}
 
 # Certificates carry their own data-plane grant (an access policy can allow keys and not certificates).
 CERTIFICATES_ACCESSIBLE = "accessible"
@@ -717,17 +724,13 @@ def is_data_plane_inaccessible(exc: BaseException) -> bool:
 
 
 def vault_data_plane_uri(vault: dict) -> str | None:
-    """The vault's data-plane URL: `vault_uri` from ARM, else Prowler's form.
-
-    Prowler hardcodes f"https://{name}.vault.azure.net/"; preferring ARM's own
-    `vault_uri` is what keeps this correct in Azure Government / China
-    (vault.usgovcloudapi.net / vault.azure.cn).
-    """
+    """Prefer ARM's vault URI; otherwise derive its host in the selected cloud."""
     uri = vault.get("vault_uri")
     if uri:
         return uri
     name = vault.get("name")
-    return f"https://{name}.{DEFAULT_VAULT_URI_SUFFIX}/" if name else None
+    suffix = _ARM_TO_VAULT_SUFFIX[arm_endpoint()]
+    return f"https://{name}.{suffix}/" if name else None
 
 
 def collect_management_plane_keys(client, collector: Collector, group: str, name: str) -> list[dict]:
@@ -948,6 +951,14 @@ def collect_certificates(vault: dict, cred, collector: Collector, now: datetime)
     vault["certificates"] = sorted(records, key=lambda r: r.get("name") or "")
 
 
+# Failures of these calls mean a vault or certificate list was not read, so unmatched patterns are unknown.
+UNREAD_LIST_OPERATIONS = {
+    "keyvault.KeyVaultManagementClient (init)", "keyvault.vaults.list_by_subscription",
+    "web.WebSiteManagementClient (init)", "web.certificates.list",
+    "keyvault.keys.list", "keyvault.secrets.list",
+}
+
+
 def collect_key_vaults(subscription_id, cred, collector: Collector, now: datetime | None = None) -> list[dict]:
     """Both planes: the management-plane inventory, then per-vault rotation policies and certificates."""
     now = now or datetime.now(timezone.utc)
@@ -1081,6 +1092,11 @@ def main() -> int:
     app_service_certificates, excluded_certificates = exclusions.split(
         app_service_certificates, "app_service_certificate")
     excluded += excluded_certificates
+    lists_read = bool(subscription_id and cred is not None) and not any(
+        f["operation"] in UNREAD_LIST_OPERATIONS or f["operation"].split(" (")[0] in UNREAD_LIST_OPERATIONS
+        for f in collector.failures)
+    if not lists_read:
+        exclusions.mark_unread()
     exclusions.warn_unmatched(logger)
 
     results, summary = evidence_sections(vaults, registration, app_service_certificates, web_registration)

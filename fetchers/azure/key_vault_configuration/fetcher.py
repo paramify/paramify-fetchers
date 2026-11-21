@@ -37,11 +37,11 @@ from azure_common import (  # noqa: E402
     failure_reason,
     model_attr,
     provider_registration_status,
+    report_failure,
     resolve_subscription,
     resource_group_from_id,
     sanitize_for_filename,
     write_evidence,
-    report_failure,
 )
 from resource_exclusions import ResourceExclusions  # noqa: E402
 
@@ -374,8 +374,27 @@ def with_audit_logging(vault: dict, settings) -> dict:
     }
 
 
-def summarize(vaults: list[dict]) -> dict:
-    """RBAC adoption and recoverability are the headlines."""
+AUDIT_COUNTS = (
+    "vaults_with_diagnostic_settings", "vaults_with_audit_logging", "vaults_without_audit_logging",
+    "audit_logging_percentage",
+)
+
+
+def summarize(vaults: list[dict] | None) -> dict:
+    """RBAC adoption and recoverability are the headlines.
+
+    `None` means the vault list was not read: every count is null, not 0. The counts built from
+    diagnostic settings are null too while any vault's settings could not be read.
+    """
+    if vaults is None:
+        return {k: None for k in summarize([])}
+    counts = _summarize(vaults)
+    if any(v.get("audit_logging_enabled") is None for v in vaults):
+        counts.update({k: None for k in AUDIT_COUNTS})
+    return counts
+
+
+def _summarize(vaults: list[dict]) -> dict:
     total = len(vaults)
     rbac = sum(1 for v in vaults if v["rbac_authorization_enabled"])
     recoverable = sum(1 for v in vaults if v["recoverable"])
@@ -417,8 +436,8 @@ def summarize(vaults: list[dict]) -> dict:
 # --- collection (lazy azure imports) ---
 
 def collect_key_vaults(subscription_id, cred, collector: Collector, exclusions: ResourceExclusions | None = None,
-                       excluded: list | None = None) -> list[dict]:
-    """One vaults.list_by_subscription() call; vaults the exclusions take out go to `excluded` unread."""
+                       excluded: list | None = None) -> list[dict] | None:
+    """One vaults.list_by_subscription() call; vaults the exclusions take out go to `excluded` unread. None when the list couldn't be read."""
     from azure.mgmt.keyvault import KeyVaultManagementClient
 
     def _client():
@@ -426,13 +445,15 @@ def collect_key_vaults(subscription_id, cred, collector: Collector, exclusions: 
 
     client = collector.guard("keyvault.KeyVaultManagementClient (init)", _client)
     if client is None:
-        return []
+        return None
 
     def _list():
         # ItemPaged: the SDK follows nextLink itself.
         return [vault_record(project_vault(v)) for v in client.vaults.list_by_subscription()]
 
-    vaults = collector.guard("keyvault.vaults.list_by_subscription", _list, default=[])
+    vaults = collector.guard("keyvault.vaults.list_by_subscription", _list)
+    if vaults is None:
+        return None
     if exclusions:
         vaults, out = exclusions.split(vaults, "key_vault")
         if excluded is not None:
@@ -508,7 +529,7 @@ def main() -> int:
     subscription_id = sub["subscription_id"]
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
-    vaults: list[dict] = []
+    vaults: list[dict] | None = None
     excluded: list[dict] = []
     exclusions = ResourceExclusions.from_env()
     registration = REGISTRATION_UNKNOWN
@@ -534,6 +555,11 @@ def main() -> int:
         )
 
     exclusions.record_invalid(collector)
+    listed = vaults is not None
+    summary = summarize(vaults)
+    vaults = vaults or []
+    if not listed:
+        exclusions.mark_unread()
     exclusions.warn_unmatched(logger)
 
     evidence = build_payload(
@@ -546,9 +572,9 @@ def main() -> int:
             "excluded": excluded,
         },
         summary={
-            **summarize(vaults),
+            **summary,
             "provider_registration_status": registration,
-            **exclusions.summary(excluded, ("key_vault",), {"key_vaults": len(vaults)}),
+            **exclusions.summary(excluded, ("key_vault",), {"key_vaults": len(vaults) if listed else None}),
         },
     )
 

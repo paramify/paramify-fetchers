@@ -1,0 +1,54 @@
+# What `paramify update` shows for v0.6.0-beta. The full list is the
+# CHANGELOG's [0.6.0-beta] section; this is the part a user acts on.
+# Format and rules: releases/README.md.
+version: 0.6.0-beta
+date: 2026-10-23
+highlights:
+  - tag: fetcher
+    title: Wiz, Splunk, Jira, ServiceNow and Zendesk categories
+    detail: Over forty new fetchers, plus dozens more for Azure, DevOps and Front Door
+    try: paramify catalog
+  - tag: new
+    title: Scan reports go straight into Paramify pipelines
+    detail: paramify issues upload sends each report and waits for the job's counts
+    try: paramify issues jobs
+  - tag: new
+    title: Validators live in one registry and sync to your workspace
+    detail: Write a validator once in validators/ and attach it to every evidence set it fits
+    try: paramify validators check
+  - tag: cli
+    title: Read your workspace's capabilities and artifacts from the CLI
+    detail: See the narrative a validator must prove, and pull real evidence to test against
+    try: paramify capabilities list
+  - tag: tui
+    title: The TUI saves manifest edits as you make them
+    detail: A fanout target editor too, on t in the Manifest tab
+    try: paramify tui
+  - tag: breaking
+    title: Python 3.11 is now the minimum
+    fix: Make a new virtual environment on Python 3.11 or later, then install again
+  - tag: breaking
+    title: Every issue-report entry must set close_cycle
+    fix: Run paramify assessments select, or set close_cycle to after_run or never
+    fetchers: [wiz_issues_report, wiz_stig_compliance_report, wiz_vulnerability_findings]
+  - tag: breaking
+    title: paramify issues upload needs new API key permissions
+    fix: Give the key PIPELINE_INTAKE and PIPELINE_PROCESS, plus PIPELINE_CLOSE to close
+    fetchers: [wiz_issues_report, wiz_stig_compliance_report, wiz_vulnerability_findings]
+  - tag: breaking
+    title: A manifest name that matches no file is now an error
+    fix: Check the names your scripts pass to -f and paramify validate
+  - tag: breaking
+    title: Malformed ${env:...} references are refused
+    fix: Name an upper-case variable, such as ${env:OKTA_API_TOKEN}
+  - tag: breaking
+    title: A target's AWS profile now outranks AWS keys in the environment
+    fix: Drop credential_source = Environment profiles, or unset profile to use keys
+    fetchers: [aws_*]
+  - tag: breaking
+    title: Okta allowlists moved from code to config
+    fix: Set OKTA_KNOWN_SERVICE_ACCOUNTS and OKTA_KNOWN_SUPER_ADMINS if you relied on them
+    fetchers: [okta_non_user_accounts_authentication, okta_least_privilege]
+  - tag: breaking
+    title: write_status is gone from azure_common and gcp_common
+    fix: Custom fetchers import report_failure instead

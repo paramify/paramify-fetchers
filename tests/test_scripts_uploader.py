@@ -1,10 +1,11 @@
 """Tests for the Paramify scripts uploader (uploaders/paramify_scripts/uploader.py).
 
-Like the evidence uploader, this pushes to a real tenant, so we mock only the
-HTTP boundary (a fake client) and let the reconcile logic run: the marker
-round-trip, the create / update / drift / noop decision, the drift gate
-(warn-skip vs --force), association on change, --reassociate, the https guard,
-and per-fetcher error isolation.
+Like the evidence uploader, this pushes to a real tenant, so only the HTTP
+boundary is faked (the shared fake workspace behind the real Client) and the
+reconcile logic runs: the create / update / drift / noop decision, the drift
+gate (warn-skip vs --force), association on change, --reassociate, the https
+guard, per-fetcher error isolation, and the default custom tags. Assertions are
+on what ends up in the workspace.
 
 The module isn't an importable package (loaded by path), so we do the same here.
 """
@@ -17,73 +18,16 @@ from pathlib import Path
 
 import pytest
 
+from framework.paramify.client import Client
+from tests.paramify_fake import FakeParamify
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 _PATH = REPO_ROOT / "uploaders" / "paramify_scripts" / "uploader.py"
 _spec = importlib.util.spec_from_file_location("scripts_uploader_under_test", _PATH)
 uploader = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(uploader)
 
-
-# --------------------------------------------------------------------------- #
-# Marker helpers
-# --------------------------------------------------------------------------- #
-
-def test_marker_roundtrip():
-    desc = uploader.build_description("aws_vpc_flow_logs", "1.2.0", "deadbeef")
-    m = uploader.parse_marker(desc)
-    assert m["paramify-fetcher"] == "aws_vpc_flow_logs"
-    assert m["version"] == "1.2.0"
-    assert m["sha256"] == "deadbeef"
-
-
-def test_code_hash_stable_and_sensitive():
-    assert uploader.code_hash("abc") == uploader.code_hash("abc")
-    assert uploader.code_hash("abc") != uploader.code_hash("abd")
-
-
-# --------------------------------------------------------------------------- #
-# Fake client at the sync_scripts boundary
-# --------------------------------------------------------------------------- #
-
-class TagSession:
-    """What the Tagger posts default custom tags through; records every POST."""
-
-    def __init__(self, status=200):
-        self.status = status
-        self.posts = []
-
-    def post(self, url, json=None, timeout=None, **_):
-        self.posts.append((url, json))
-        return type("R", (), {"status_code": self.status, "text": ""})()
-
-
-class FakeClient:
-    def __init__(self, existing, tag_status=200):
-        # existing: list of {id, name, description}
-        self._existing = existing
-        self.created = []
-        self.updated = []
-        self.associated = []
-        self.session = TagSession(tag_status)
-
-    def list_scripts(self):
-        return self._existing
-
-    def create_script(self, name, description, code):
-        sid = "sid-" + name
-        self.created.append((sid, name))
-        return {"id": sid, "name": name, "description": description, "code": code}
-
-    def update_script(self, script_id, name, description, code):
-        self.updated.append(script_id)
-        return {"id": script_id}
-
-    def get_or_create_evidence_set(self, reference_id, name, frequency=None):
-        return "ev-" + reference_id
-
-    def associate_script(self, evidence_id, script_id):
-        self.associated.append((evidence_id, script_id))
-
+PROVENANCE = "Automated by Paramify Fetchers"
 
 SPECS = [
     {"fetcher_name": "f_new", "version": "1.0.0", "entry": "fetcher.py", "code": "NEW",
@@ -97,34 +41,63 @@ SPECS = [
 ]
 
 
-def _existing_for_specs():
-    """Tenant scripts: f_bump at an old version, f_drift at same version but old
-    code, f_noop matching exactly. f_new is absent."""
-    return [
-        {"id": "sid-f_bump", "name": "Bump",
-         "description": uploader.build_description("f_bump", "1.0.0", uploader.code_hash("BUMP"))},
-        {"id": "sid-f_drift", "name": "Drift",
-         "description": uploader.build_description("f_drift", "1.0.0", uploader.code_hash("OLDCODE"))},
-        {"id": "sid-f_noop", "name": "Noop",
-         "description": uploader.build_description("f_noop", "1.0.0", uploader.code_hash("SAME"))},
-    ]
-
-
-@pytest.fixture
-def wired(monkeypatch):
-    monkeypatch.setenv("PARAMIFY_UPLOAD_API_TOKEN", "test-token")
-    monkeypatch.setattr(uploader, "_discover_specs", lambda root, include=None: list(SPECS))
-    fake = FakeClient(_existing_for_specs())
-    monkeypatch.setattr(uploader, "ParamifyScriptsClient", lambda token, base_url: fake)
+def _workspace() -> FakeParamify:
+    """f_bump at an old version, f_drift at the same version but old code, f_noop
+    matching exactly; f_new absent. Scripts are named after their fetcher."""
+    fake = FakeParamify()
+    for name, version, code in (("f_bump", "1.0.0", "BUMP"), ("f_drift", "1.0.0", "OLDCODE"),
+                                ("f_noop", "1.0.0", "SAME")):
+        fake.add_script(name, uploader.build_description(name, version, uploader.code_hash(code)))
     return fake
+
+
+def _client(fake: FakeParamify) -> Client:
+    return Client("tok", "https://api.example.test", session=fake.session, sleep=lambda _s: None)
+
+
+def _sync(fake: FakeParamify, root=".", **kw):
+    return uploader.sync_scripts(root, client=_client(fake), **kw)
+
+
+def _script_names(fake):
+    return {s["id"]: s["name"] for s in fake.scripts}
+
+
+def _linked(fake):
+    """{(evidence set reference, script name)} for every script CONNECTed."""
+    refs = {e["id"]: e["referenceId"] for e in fake._evidence}
+    names = _script_names(fake)
+    return {(refs[ev], names.get(sid, sid)) for ev, kind, sid in fake.associations if kind == "SCRIPT"}
+
+
+def _tags(fake):
+    """{"<entity>/<reference or script name>": tag names} for every tagged entity."""
+    refs = {e["id"]: e["referenceId"] for e in fake._evidence}
+    names = _script_names(fake)
+    return {f"{kind}/{refs.get(eid) or names.get(eid, eid)}": tags for (kind, eid), tags in fake.tags.items()}
 
 
 def _by_fetcher(summary):
     return {r["fetcher"]: r for r in summary["results"]}
 
 
-def test_plan_actions_without_force(wired):
-    summary = uploader.sync_scripts(".")
+@pytest.fixture(autouse=True)
+def _env(monkeypatch):
+    """No developer token or .env: a sync without an injected client must never
+    reach a real workspace."""
+    for name in ("PARAMIFY_CUSTOM_TAGS", "PARAMIFY_UPLOAD_API_TOKEN", "PARAMIFY_API_TOKEN"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("PYTHON_DOTENV_DISABLED", "1")
+
+
+@pytest.fixture
+def specs(monkeypatch):
+    monkeypatch.setattr(uploader, "_discover_specs", lambda root, include=None: [dict(s) for s in SPECS])
+    return SPECS
+
+
+def test_plan_actions_without_force(specs):
+    summary = _sync(_workspace())
     r = _by_fetcher(summary)
     assert r["f_new"]["outcome"] == "create"
     assert r["f_bump"]["outcome"] == "update"
@@ -135,36 +108,66 @@ def test_plan_actions_without_force(wired):
     assert summary["ok"] is True
 
 
-def test_association_only_on_change(wired):
-    uploader.sync_scripts(".")
-    associated_ids = {sid for _, sid in wired.associated}
-    # create + update associate; drift (skipped) and noop do not. The created
-    # script's id comes from create_script (called with the display name "New").
-    assert associated_ids == {"sid-New", "sid-f_bump"}
+def test_association_only_on_change(specs):
+    fake = _workspace()
+    _sync(fake)
+    # create + update associate; drift (skipped) and noop do not. A created script
+    # is named after its evidence set.
+    assert _linked(fake) == {("EVD-NEW", "New"), ("EVD-BUMP", "Bump")}
 
 
-def test_drift_pushed_with_force(wired):
-    summary = uploader.sync_scripts(".", force=True)
-    r = _by_fetcher(summary)
+def test_drift_pushed_with_force(specs):
+    fake = _workspace()
+    r = _by_fetcher(_sync(fake, force=True))
     assert r["f_drift"]["outcome"] == "drift"       # pushed, not skipped
-    assert "sid-f_drift" in wired.updated
-    assert ("ev-EVD-DRIFT", "sid-f_drift") in wired.associated
+    drift = next(s for s in fake.scripts if "f_drift" in s["description"])
+    assert drift["code"] == "NEWCODE"
+    assert ("EVD-DRIFT", "Drift") in _linked(fake)
 
 
-def test_reassociate_covers_noop(wired):
-    uploader.sync_scripts(".", reassociate=True)
-    associated_ids = {sid for _, sid in wired.associated}
-    assert "sid-f_noop" in associated_ids   # noop normally skips association
+def test_reassociate_covers_noop(specs):
+    fake = _workspace()
+    _sync(fake, reassociate=True)
+    assert ("EVD-NOOP", "f_noop") in _linked(fake)   # noop normally skips association
 
 
-def test_reference_carries_frequency_with_override():
-    """A set this stage creates first must get the same frequency the evidence
-    uploader would have given it — the evidence uploader never patches it later."""
-    es = {"reference_id": "EVD-1", "name": "n", "frequency": "WEEKLY"}
-    assert uploader._resolve_reference("f", es, {})["frequency"] == "WEEKLY"
-    assert uploader._resolve_reference("f", es, {"f": {"frequency": "DAILY"}})["frequency"] == "DAILY"
-    bare = {"reference_id": "EVD-1", "name": "n"}
-    assert uploader._resolve_reference("f", bare, {})["frequency"] == "THREE_DAY"
+def test_a_second_run_reconnects_without_failing(specs):
+    """The API has no association read-back, so --reassociate CONNECTs again;
+    the 'already connected' refusal is the state we wanted."""
+    fake = _workspace()
+    _sync(fake, reassociate=True)
+    summary = _sync(fake, reassociate=True)
+    assert summary["ok"] and summary["errors"] == 0
+
+
+def test_a_set_this_stage_creates_gets_the_evidence_uploaders_schedule(monkeypatch):
+    """The evidence uploader never patches a set's frequency later, so a set the
+    scripts stage creates first must get the frequency it would have: the
+    fetcher's own, an override, or the default."""
+    spec = {**SPECS[0], "evidence_set": {"reference_id": "EVD-NEW", "name": "New", "frequency": "WEEKLY"}}
+    monkeypatch.setattr(uploader, "_discover_specs", lambda root, include=None: [spec])
+    fake = FakeParamify()
+    _sync(fake)
+    made = next(e for e in fake._evidence if e["referenceId"] == "EVD-NEW")
+    assert made["frequency"] == "WEEKLY"
+    assert made["startDate"] == date.today().isoformat()   # the schedule counts from creation
+
+    fake = FakeParamify()
+    _sync(fake, config={"overrides": {"f_new": {"frequency": "DAILY"}}})
+    assert fake._evidence[0]["frequency"] == "DAILY"
+
+    monkeypatch.setattr(uploader, "_discover_specs", lambda root, include=None: [dict(SPECS[0])])
+    fake = FakeParamify()
+    _sync(fake)
+    assert fake._evidence[0]["frequency"] == "THREE_DAY"
+
+
+def test_an_existing_set_is_reused_not_recreated(specs):
+    fake = _workspace()
+    fake.add_evidence("EVD-NEW")
+    _sync(fake)
+    assert [e["referenceId"] for e in fake._evidence].count("EVD-NEW") == 1
+    assert ("EVD-NEW", "New") in _linked(fake)
 
 
 def test_https_guard_rejects_http():
@@ -172,214 +175,117 @@ def test_https_guard_rejects_http():
         uploader.sync_scripts(".", base_url="http://not-secure.example.com", dry_run=True)
 
 
-def test_error_isolation(monkeypatch):
-    monkeypatch.setenv("PARAMIFY_UPLOAD_API_TOKEN", "test-token")
-    monkeypatch.setattr(uploader, "_discover_specs", lambda root, include=None: list(SPECS))
-    fake = FakeClient(_existing_for_specs())
-
-    def boom(name, description, code):
-        raise uploader.ParamifyError("kaboom")
-
-    fake.create_script = boom  # f_new (the only create) blows up
-    monkeypatch.setattr(uploader, "ParamifyScriptsClient", lambda token, base_url: fake)
-
-    summary = uploader.sync_scripts(".")
+def test_one_refused_fetcher_does_not_stop_the_sweep(specs):
+    fake = _workspace()
+    fake.fail_route("POST", "/scripts", 400, "kaboom")   # f_new is the only create
+    summary = _sync(fake)
     r = _by_fetcher(summary)
-    assert r["f_new"]["outcome"] == "error"
-    assert summary["errors"] == 1
-    assert summary["ok"] is False
-    # the other fetchers still processed
+    assert r["f_new"]["outcome"] == "error" and "kaboom" in r["f_new"]["error"]
+    assert summary["errors"] == 1 and summary["ok"] is False
     assert r["f_bump"]["outcome"] == "update"
     assert r["f_noop"]["outcome"] == "noop"
 
 
-# --------------------------------------------------------------------------- #
-# Manifest scoping: discovery restricts to the `include` set (the manifest's
-# fetchers), so a sync never provisions scripts for fetchers you don't collect.
-# --------------------------------------------------------------------------- #
+def test_a_rejected_token_stops_the_sweep_and_says_which_fetcher(specs):
+    """No later call can succeed, so the stage stops instead of failing every
+    fetcher the same way, and the summary keeps what happened before it."""
+    fake = _workspace()
+    fake.fail_route("PATCH", r"/scripts/.*", 401, "Unauthorized")
+    summary = _sync(fake)
+    r = _by_fetcher(summary)
+    assert r["f_new"]["outcome"] == "create"          # done before the 401
+    assert r["f_bump"]["outcome"] == "error"          # the 401
+    assert "f_drift" not in r and "f_noop" not in r   # never attempted
+    assert summary["stopped"] and "401" in summary["stopped"] and summary["ok"] is False
 
-def test_include_scopes_discovery_to_named_fetchers():
+
+def test_a_dry_run_with_a_token_reads_the_workspace_and_writes_nothing(specs, monkeypatch):
+    fake = _workspace()
+    monkeypatch.setenv("PARAMIFY_UPLOAD_API_TOKEN", "env-tok")
+    monkeypatch.setenv("PARAMIFY_API_BASE_URL", "https://api.example.test")
+    monkeypatch.setattr("framework.paramify.client.requests.Session", lambda: fake.session)
+    summary = uploader.sync_scripts(".", dry_run=True)
+    assert _by_fetcher(summary)["f_noop"]["outcome"] == "would_noop"   # it read the markers
+    assert ("GET", "/scripts", {}) in fake.calls
+    assert [c for c in fake.calls if c[0] != "GET"] == []
+
+
+def test_include_scopes_the_sweep_to_named_fetchers():
     # demo_hello is credential-free and declares an evidence_set, so it always
     # discovers; scoping to it must yield exactly it.
-    only = uploader._discover_specs(REPO_ROOT, include={"demo_hello"})
-    assert {s["fetcher_name"] for s in only} == {"demo_hello"}
-
-    # None = the whole catalog (many more than one).
-    everything = uploader._discover_specs(REPO_ROOT, include=None)
-    names = {s["fetcher_name"] for s in everything}
-    assert "demo_hello" in names and len(names) > 1
-
-    # A name that isn't a real fetcher scopes to nothing.
-    assert uploader._discover_specs(REPO_ROOT, include={"not_a_fetcher"}) == []
+    summary = uploader.sync_scripts(REPO_ROOT, include={"demo_hello"}, dry_run=True)
+    assert [r["fetcher"] for r in summary["results"]] == ["demo_hello"]
+    assert uploader.sync_scripts(REPO_ROOT, include={"not_a_fetcher"}, dry_run=True)["fetchers"] == 0
+    everything = uploader.sync_scripts(REPO_ROOT, include=None, dry_run=True)
+    assert everything["fetchers"] > 1
 
 
-def test_sync_forwards_include_to_discovery(monkeypatch):
-    monkeypatch.setenv("PARAMIFY_UPLOAD_API_TOKEN", "test-token")
-    seen = {}
-
-    def fake_discover(root, include=None):
-        seen["include"] = include
-        return list(SPECS)
-
-    monkeypatch.setattr(uploader, "_discover_specs", fake_discover)
-    monkeypatch.setattr(uploader, "ParamifyScriptsClient", lambda token, base_url: FakeClient(_existing_for_specs()))
-    uploader.sync_scripts(".", include={"f_bump"})
-    assert seen["include"] == {"f_bump"}
+@pytest.mark.parametrize("named", [True, False])
+def test_a_missing_manifest_is_refused_not_read_as_empty(tmp_path, monkeypatch, named):
+    """Read as empty, it scoped the sweep to nothing and exited 0."""
+    monkeypatch.chdir(tmp_path)
+    argv = ["--root", str(tmp_path), "--dry-run"]
+    if named:
+        argv += ["--manifest", str(tmp_path / "nope.yaml")]
+    assert uploader.main(argv) == 1
 
 
 # --------------------------------------------------------------------------- #
 # Default custom tags — every script the sweep sees, and the set it links to
 # --------------------------------------------------------------------------- #
 
-def _tag_posts(fake):
-    return [(url.rsplit("/custom-tags/", 1)[1], body["names"]) for url, body in fake.session.posts]
-
-
-@pytest.fixture(autouse=True)
-def _no_ambient_tag_switch(monkeypatch):
-    monkeypatch.delenv("PARAMIFY_CUSTOM_TAGS", raising=False)
-
-
-def test_every_script_is_tagged_including_noop_and_drift(wired):
-    summary = uploader.sync_scripts("/repo", base_url="https://app.example.com/api/v0")
-    posted = dict(_tag_posts(wired))
+def test_every_script_is_tagged_including_noop_and_drift(specs):
+    fake = _workspace()
+    summary = _sync(fake)
     # SPECS carry no category, so only the provenance tag applies.
-    # The fake names a created script after its display name ("New").
-    assert posted == {
-        "scripts/sid-New": ["Automated by Paramify Fetchers"],
-        "evidence/ev-EVD-NEW": ["Automated by Paramify Fetchers"],
-        "scripts/sid-f_bump": ["Automated by Paramify Fetchers"],
-        "evidence/ev-EVD-BUMP": ["Automated by Paramify Fetchers"],
-        "scripts/sid-f_drift": ["Automated by Paramify Fetchers"],
-        "scripts/sid-f_noop": ["Automated by Paramify Fetchers"],
+    assert _tags(fake) == {
+        "scripts/New": [PROVENANCE],
+        "evidence/EVD-NEW": [PROVENANCE],
+        "scripts/Bump": [PROVENANCE],   # an update renames the script after its set
+        "evidence/EVD-BUMP": [PROVENANCE],
+        "scripts/f_drift": [PROVENANCE],
+        "scripts/f_noop": [PROVENANCE],
     }
     by = _by_fetcher(summary)
-    assert by["f_noop"]["tags"] == ["Automated by Paramify Fetchers"]
+    assert by["f_noop"]["tags"] == [PROVENANCE]
     assert by["f_drift"]["outcome"] == "drift_skipped" and by["f_drift"]["tags"]
     assert summary["tags"]["applied"] == 6 and summary["tags"]["disabled"] is None
 
 
 def test_service_tag_uses_the_category_display_name(monkeypatch):
-    monkeypatch.setenv("PARAMIFY_UPLOAD_API_TOKEN", "test-token")
     spec = {**SPECS[0], "category": "aws"}
     monkeypatch.setattr(uploader, "_discover_specs", lambda root, include=None: [spec])
-    fake = FakeClient([])
-    monkeypatch.setattr(uploader, "ParamifyScriptsClient", lambda token, base_url: fake)
-    real_build_tagger = uploader.build_tagger
-    monkeypatch.setattr(uploader, "build_tagger",
-                        lambda session, base_url, **kw: real_build_tagger(
-                            session, base_url, config=kw.get("config"), display_names={"aws": "AWS"}))
-
-    uploader.sync_scripts("/repo", base_url="https://app.example.com/api/v0")
-    posted = dict(_tag_posts(fake))
-    assert posted["scripts/sid-New"] == ["Automated by Paramify Fetchers", "AWS"]
-    assert posted["evidence/ev-EVD-NEW"] == ["Automated by Paramify Fetchers", "AWS"]
+    fake = FakeParamify()
+    _sync(fake, root=REPO_ROOT)   # display names come from the repo's category files
+    assert _tags(fake)["scripts/New"] == [PROVENANCE, "AWS"]
+    assert _tags(fake)["evidence/EVD-NEW"] == [PROVENANCE, "AWS"]
 
 
-def test_dry_run_plans_tags_without_posting(wired):
-    summary = uploader.sync_scripts("/repo", base_url="https://app.example.com/api/v0", dry_run=True)
-    assert wired.session.posts == []
-    assert all(r["tags"] == ["Automated by Paramify Fetchers"] for r in summary["results"])
+def test_dry_run_plans_tags_and_writes_nothing(specs):
+    fake = _workspace()
+    summary = _sync(fake, dry_run=True)
+    assert [c for c in fake.calls if c[0] != "GET"] == []
+    assert all(r["tags"] == [PROVENANCE] for r in summary["results"])
 
 
-def test_tags_off_posts_nothing(wired):
-    summary = uploader.sync_scripts(
-        "/repo", base_url="https://app.example.com/api/v0", config={"tags": False}
-    )
-    assert wired.session.posts == [] and summary["tags"]["enabled"] is False
+@pytest.mark.parametrize("off, reason", [
+    ({"config": {"tags": False}}, "tags: false"),
+    ({"custom_tags": False}, "--no-tags"),
+    ({"env": "off"}, "PARAMIFY_CUSTOM_TAGS=off"),
+])
+def test_tags_switched_off_tag_nothing(specs, monkeypatch, off, reason):
+    if "env" in off:
+        monkeypatch.setenv("PARAMIFY_CUSTOM_TAGS", off.pop("env"))
+    fake = _workspace()
+    summary = _sync(fake, **off)
+    assert fake.tags == {}
+    assert summary["tags"]["enabled"] is False and reason in summary["tags"]["reason"]
 
 
-def test_no_tags_switch_posts_nothing(wired):
-    summary = uploader.sync_scripts("/repo", base_url="https://app.example.com/api/v0", custom_tags=False)
-    assert wired.session.posts == [] and summary["tags"]["reason"] == "--no-tags"
-    assert all(r["tags"] == [] for r in summary["results"])
-
-
-def test_env_switch_posts_nothing(wired, monkeypatch):
-    monkeypatch.setenv("PARAMIFY_CUSTOM_TAGS", "off")
-    summary = uploader.sync_scripts("/repo", base_url="https://app.example.com/api/v0")
-    assert wired.session.posts == [] and summary["tags"]["reason"] == "PARAMIFY_CUSTOM_TAGS=off"
-
-
-def test_missing_tag_permission_does_not_fail_the_sync(monkeypatch):
-    monkeypatch.setenv("PARAMIFY_UPLOAD_API_TOKEN", "test-token")
-    monkeypatch.setattr(uploader, "_discover_specs", lambda root, include=None: list(SPECS))
-    fake = FakeClient(_existing_for_specs(), tag_status=403)
-    monkeypatch.setattr(uploader, "ParamifyScriptsClient", lambda token, base_url: fake)
-
-    summary = uploader.sync_scripts("/repo", base_url="https://app.example.com/api/v0")
+def test_missing_tag_permission_does_not_fail_the_sync(specs):
+    fake = _workspace()
+    fake.fail_route("POST", r"/custom-tags/.*", 403, "forbidden")
+    summary = _sync(fake)
     assert summary["ok"] and summary["errors"] == 0
-    assert len(fake.session.posts) == 1
+    assert len([c for c in fake.calls if c[1].startswith("/custom-tags/")]) == 1
     assert summary["tags"]["disabled"]
-
-
-# --------------------------------------------------------------------------- #
-# ParamifyScriptsClient — the HTTP boundary for create-set and CONNECT (GitHub #83)
-# --------------------------------------------------------------------------- #
-
-class _Resp:
-    def __init__(self, status_code, json_data=None, text=""):
-        self.status_code = status_code
-        self._json = {} if json_data is None else json_data
-        self.text = text
-
-    def json(self):
-        return self._json
-
-    def raise_for_status(self):
-        if self.status_code >= 400:
-            raise RuntimeError(f"HTTP {self.status_code}")
-
-
-class _Session:
-    def __init__(self, get=None, post=None):
-        self.headers = {}
-        self._get, self._post = get, post
-        self.posts = []
-
-    def get(self, url, params=None, timeout=None):
-        return self._get(url, params)
-
-    def post(self, url, json=None, timeout=None):
-        self.posts.append((url, json))
-        return self._post(url, json)
-
-
-def _client(get=None, post=None):
-    c = uploader.ParamifyScriptsClient("tok", "https://app.example.com/api/v0")
-    c.session = _Session(get, post)
-    return c
-
-
-@pytest.mark.parametrize("status, text", [
-    (400, "Script already connected to evidence"),   # as observed live
-    (409, "Script already connected to evidence"),   # same refusal on the code 0.9.2 permits
-])
-def test_associate_tolerates_already_connected(status, text):
-    c = _client(post=lambda url, body: _Resp(status, text=text))
-    c.associate_script("ev-1", "s-1")  # no raise: the state we wanted holds
-    assert c.session.posts[0][1] == {"associationType": "CONNECT", "subjectType": "SCRIPT", "subjectId": "s-1"}
-
-
-@pytest.mark.parametrize("status, text", [
-    (400, "subjectId must be a uuid"),
-    (409, '{"statusMessage":"Conflict","error":{"message":"Conflict"}}'),
-    (403, "forbidden"),
-])
-def test_associate_other_refusals_raise(status, text):
-    c = _client(post=lambda url, body: _Resp(status, text=text))
-    with pytest.raises(uploader.ParamifyError):
-        c.associate_script("ev-1", "s-1")
-
-
-def test_create_evidence_set_falls_back_to_find_on_409():
-    gets = [_Resp(200, {"evidences": [{"id": "ev-7", "referenceId": "EVD-X"}]})]
-    c = _client(get=lambda url, params: gets.pop(0),
-                post=lambda url, body: _Resp(409, text="Evidence already exists"))
-    assert c.create_evidence_set("EVD-X", "X") == "ev-7"
-
-
-def test_create_evidence_set_starts_the_schedule_on_the_creation_day():
-    c = _client(post=lambda url, body: _Resp(201, {"id": "ev-1"}))
-    c.create_evidence_set("EVD-X", "X")
-    assert c.session.posts[0][1]["startDate"] == date.today().isoformat()
