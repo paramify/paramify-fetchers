@@ -32,6 +32,7 @@ from textual.widgets import Static
 from framework import api
 from framework.paramify_auth import READ_TOKEN_ENV, UPLOAD_TOKEN_ENV
 from framework.tui import palette
+from framework.tui.components.chrome import UpdateNotice
 from framework.tui.components.table import DataTable
 from framework.tui.modals import ConfirmModal, FormModal, PickerModal
 
@@ -145,6 +146,7 @@ class WelcomeScreen(Screen):
             with Center():
                 yield Static(LOGO, id="welcome-logo", markup=False)
             yield Static(self._tagline(), id="welcome-tagline")
+            yield UpdateNotice(id="welcome-update")
             yield Static("", id="welcome-checks")
             with Container(id="welcome-panel"):
                 yield DataTable(id="welcome-manifests")

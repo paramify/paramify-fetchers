@@ -189,14 +189,14 @@ def test_stack_and_validators_reach_upload_run(no_env, tmp_path, monkeypatch):  
     monkeypatch.setattr(api, "upload_run", fake_upload)
     monkeypatch.setattr(api, "sync_validators", lambda *a, **k: pytest.fail("synced after the upload"))
     res = cli("upload", str(two_files(tmp_path)), "--dry-run", "--stack", "Prod", "--owner", "alice",
-              "--with-validators", "--no-tags", "--no-waf-check")
+              "--with-validators", "--no-tags")
     assert res.exit_code == 0, res.output
     assert seen["stack"] == "Prod" and seen["with_validators"] is True and seen["custom_tags"] is False
-    assert seen["waf_check"] is False
     assert seen["owner"] == "alice"
 
 
-def test_no_waf_check_reaches_the_plan(no_env, tmp_path, monkeypatch):  # noqa: F811
+def test_no_waf_check_is_accepted_and_does_nothing(no_env, tmp_path, monkeypatch):  # noqa: F811
+    # Kept so scripts that pass it still run; the upload no longer checks for WAF strings.
     seen: Dict[str, Any] = {}
 
     def fake_plan(run_dir, _root, config_path, **kw):
@@ -207,7 +207,8 @@ def test_no_waf_check_reaches_the_plan(no_env, tmp_path, monkeypatch):  # noqa: 
     monkeypatch.setattr(api, "plan_upload", fake_plan)
     res = cli("upload", str(two_files(tmp_path)), "--plan", "--no-waf-check")
     assert res.exit_code == 0, res.output
-    assert seen["waf_check"] is False
+    assert "waf_check" not in seen
+    assert "--no-waf-check does nothing now" in res.output
 
 
 def test_stack_override_is_applied(fake, tmp_path):  # noqa: F811

@@ -1008,6 +1008,91 @@ def test_two_factor_is_unknown_to_a_non_owner(fake, monkeypatch, tmp_path):
     assert not any(q.get("filter") == "2fa_disabled" for _, q in f.calls)
 
 
+def managed_routes(members=("ana_acme", "bo_acme")):
+    """An Enterprise Managed Users organization as measured: requirement off, every member listed as 2fa_disabled."""
+    routes = org_settings_routes()
+    routes[f"orgs/{ORG}/members"] = lambda q: (200, [{"login": m} for m in members])
+    return routes
+
+
+def test_managed_user_accounts_make_the_two_factor_fields_not_applicable(fake, monkeypatch, tmp_path):
+    f = fake(managed_routes())
+    code, ev, _ = run_fetcher("org_security_settings", monkeypatch, tmp_path)
+    s = ev["summary"]
+    assert code == 0 and s["managed_user_accounts"] is True and "identity provider" in s["two_factor_note"]
+    assert s["two_factor_required"] is None and s["members_without_two_factor"] is None
+    assert ev["members_without_two_factor"] is None and ev["organization"]["two_factor_requirement_enabled"] is None
+    assert ev["metadata"]["managed_user_accounts"] == "auto" and ev["metadata"]["managed_user_accounts_source"] == "detected"
+    assert not any(q.get("filter") == "2fa_disabled" for _, q in f.calls)
+    # The rest of the file is unchanged.
+    assert s["actions_default_token_permissions"] == "write" and s["repositories_without_security_configuration"] == ["b", "c"]
+
+
+def test_one_personal_login_means_not_managed(fake, monkeypatch, tmp_path):
+    routes = org_settings_routes()
+    routes[f"orgs/{ORG}/members"] = lambda q: (200, [{"login": "nofa"}]) if q.get("filter") == "2fa_disabled" \
+        else (200, [{"login": "ana_acme"}, {"login": "nofa"}])
+    fake(routes)
+    code, ev, _ = run_fetcher("org_security_settings", monkeypatch, tmp_path)
+    s = ev["summary"]
+    assert code == 0 and s["managed_user_accounts"] is False and "two_factor_note" not in s
+    assert s["two_factor_required"] is False and s["members_without_two_factor"] == 1
+
+
+@pytest.mark.parametrize("members_route", [[], (403, {"message": "Resource not accessible by integration"})])
+def test_an_empty_or_unreadable_member_list_proves_nothing(fake, monkeypatch, tmp_path, members_route):
+    routes = org_settings_routes()
+    routes[f"orgs/{ORG}/members"] = lambda q: (200, [{"login": "nofa"}]) if q.get("filter") == "2fa_disabled" \
+        else (members_route if isinstance(members_route, tuple) else (200, members_route))
+    fake(routes)
+    code, ev, status = run_fetcher("org_security_settings", monkeypatch, tmp_path)
+    s = ev["summary"]
+    assert s["managed_user_accounts"] is None and "two_factor_note" not in s
+    assert s["two_factor_required"] is False and s["members_without_two_factor"] == 1  # collected as before
+    assert code == 0  # a refused list leaves detection unknown and does not fail the run
+    assert ev["metadata"]["api_failures"] == []
+
+
+def test_a_server_error_on_the_member_list_still_fails(fake, monkeypatch, tmp_path):
+    routes = org_settings_routes()
+    routes[f"orgs/{ORG}/members"] = lambda q: (200, [{"login": "nofa"}]) if q.get("filter") == "2fa_disabled" \
+        else FAILING
+    fake(routes)
+    code, ev, _ = run_fetcher("org_security_settings", monkeypatch, tmp_path)
+    assert code == 1 and ev["summary"]["managed_user_accounts"] is None
+
+
+def test_managed_user_accounts_can_be_stated(fake, monkeypatch, tmp_path):
+    routes = org_settings_routes()
+    routes[f"orgs/{ORG}/members"] = lambda q: (200, [{"login": "nofa"}])  # would detect as not managed
+    f = fake(routes)
+    code, ev, _ = run_fetcher("org_security_settings", monkeypatch, tmp_path, GITHUB_MANAGED_USER_ACCOUNTS="true")
+    assert code == 0 and ev["summary"]["managed_user_accounts"] is True and ev["summary"]["two_factor_required"] is None
+    assert ev["metadata"]["managed_user_accounts_source"] == "configured"
+    assert not any(q.get("role") == "all" for p, q in f.calls if p.endswith("/members"))  # no detection call
+    fake(managed_routes())
+    code, ev, _ = run_fetcher("org_security_settings", monkeypatch, tmp_path, GITHUB_MANAGED_USER_ACCOUNTS="false")
+    assert code == 0 and ev["summary"]["managed_user_accounts"] is False
+    assert ev["summary"]["members_without_two_factor"] == 2  # stated false: GitHub's answer is reported as is
+
+
+def test_a_bad_managed_user_accounts_value_fails_as_bad_config(fake, monkeypatch, tmp_path):
+    fake(org_settings_routes())
+    code, ev, status = run_fetcher("org_security_settings", monkeypatch, tmp_path, GITHUB_MANAGED_USER_ACCOUNTS="maybe")
+    assert code == 1
+    assert "managed_user_accounts must be auto, true or false" in json.dumps(ev["metadata"]["api_failures"])
+
+
+def test_managed_detection_for_a_non_owner_leaves_two_factor_unknown(fake, monkeypatch, tmp_path):
+    routes = managed_routes()
+    org = routes[f"orgs/{ORG}"]
+    org.pop("two_factor_requirement_enabled")
+    fake(routes)
+    code, ev, _ = run_fetcher("org_security_settings", monkeypatch, tmp_path)
+    assert code == 0 and ev["summary"]["managed_user_accounts"] is True
+    assert ev["summary"]["two_factor_required"] is None and ev["summary"]["members_without_two_factor"] is None
+
+
 # --- access_review --------------------------------------------------------------
 
 def access_routes():
@@ -1110,6 +1195,122 @@ def test_access_review_needs_owner_reads(fake, monkeypatch, tmp_path):
     fake(routes)
     code, ev, status = run_fetcher("access_review", monkeypatch, tmp_path)
     assert code == 1 and "members=read" in status["error"] and "repositories" not in ev
+
+
+def scoped_access_routes():
+    """access_routes plus a team with no grant, a team nested under platform, and a role held only outside scope."""
+    routes = access_routes()
+    o = f"orgs/{ORG}"
+    routes[f"{o}/teams"] = [{"slug": "platform", "privacy": "closed"},
+                            {"slug": "platform-oncall", "privacy": "closed", "parent": {"slug": "platform"}},
+                            {"slug": "marketing", "privacy": "closed"}]
+    routes[f"{o}/teams/platform-oncall/members"] = [{"login": "dev"}]
+    routes[f"{o}/teams/marketing/members"] = [{"login": "ads"}]
+    roles = routes[f"{o}/organization-roles"]["roles"]
+    roles.append({"id": 4, "name": "billing_viewer", "source": "Organization", "base_role": None, "permissions": []})
+    routes[f"{o}/organization-roles/4/users"] = [{"login": "ads", "assignment": "direct", "inherited_from": []}]
+    routes[f"{o}/organization-roles/4/teams"] = [{"slug": "marketing", "assignment": "direct"}]
+    routes[f"{o}/organization-roles/1/users"] = [{"login": "boss", "assignment": "direct", "inherited_from": []}]
+    return routes
+
+
+def test_access_review_is_organization_wide_by_default(fake, monkeypatch, tmp_path):
+    fake(scoped_access_routes())
+    code, ev, _ = run_fetcher("access_review", monkeypatch, tmp_path)
+    assert code == 0 and {t["team"] for t in ev["teams"]} == {"platform", "platform-oncall", "marketing"}
+    assert "billing_viewer" in ev["summary"]["organization_role_holders"] and ev["members"] == ["boss", "dev"]
+    assert ev["metadata"]["scoped_to_repositories"] is False and ev["metadata"]["teams_left_out"] == 0
+
+
+def test_scope_to_repositories_keeps_only_teams_and_roles_that_reach_them(fake, monkeypatch, tmp_path):
+    f = fake(scoped_access_routes())
+    code, ev, _ = run_fetcher("access_review", monkeypatch, tmp_path, GITHUB_SCOPE_TO_REPOSITORIES="true")
+    assert code == 0
+    assert {t["team"] for t in ev["teams"]} == {"platform", "platform-oncall"}  # nested team inherits the grant
+    assert f"orgs/{ORG}/teams/marketing/members" not in {p for p, _ in f.calls}
+    holders = ev["summary"]["organization_role_holders"]
+    # security_manager is held by boss, who has access; all_repo_admin has a base role; billing_viewer reaches nothing.
+    assert set(holders) == {"security_manager", "all_repo_admin"}
+    assert "ads" not in json.dumps({k: v for k, v in ev.items() if k != "metadata"})
+    m = ev["metadata"]
+    assert m["scoped_to_repositories"] is True and m["teams_left_out"] == 1 and m["organization_roles_left_out"] == 2
+    assert ev["summary"]["owners"] == ["boss"] and ev["members"] == ["boss", "dev"]  # owners and members stay
+    assert "_logins" not in json.dumps(ev)
+
+
+def test_scope_follows_the_repositories_filter(fake, monkeypatch, tmp_path):
+    routes = scoped_access_routes()
+    routes[f"repos/{ORG}/infra/teams"] = [{"slug": "marketing", "permission": "pull"}]
+    routes[f"repos/{ORG}/app/teams"] = []
+    routes[f"repos/{ORG}/app"], routes[f"repos/{ORG}/infra"] = repo("app"), repo("infra")
+    fake(routes)
+    code, ev, _ = run_fetcher("access_review", monkeypatch, tmp_path, GITHUB_REPOSITORIES="app",
+                              GITHUB_SCOPE_TO_REPOSITORIES="true")
+    # marketing is granted on infra only; platform reaches app through its organization-wide admin role.
+    assert code == 0 and {t["team"] for t in ev["teams"]} == {"platform", "platform-oncall"}
+    assert ev["metadata"]["teams_left_out"] == 1
+    fake(routes)
+    code, ev, _ = run_fetcher("access_review", monkeypatch, tmp_path, GITHUB_REPOSITORIES="infra",
+                              GITHUB_SCOPE_TO_REPOSITORIES="true")
+    assert code == 0 and {t["team"] for t in ev["teams"]} == {"marketing", "platform", "platform-oncall"}
+
+
+def test_scope_is_not_applied_when_a_repository_is_unread(fake, monkeypatch, tmp_path):
+    routes = scoped_access_routes()
+    routes[f"repos/{ORG}/infra/teams"] = FAILING
+    fake(routes)
+    code, ev, _ = run_fetcher("access_review", monkeypatch, tmp_path, GITHUB_SCOPE_TO_REPOSITORIES="true")
+    assert code == 1 and ev["metadata"]["scoped_to_repositories"] is None
+    assert {t["team"] for t in ev["teams"]} == {"platform", "platform-oncall", "marketing"}  # nothing left out
+    assert ev["metadata"]["teams_left_out"] == 0 and ev["metadata"]["organization_roles_left_out"] == 0
+
+
+def test_a_team_holding_an_organization_wide_role_stays_in_scope(fake, monkeypatch, tmp_path):
+    routes = scoped_access_routes()
+    routes[f"repos/{ORG}/app/teams"] = routes[f"repos/{ORG}/infra/teams"] = []  # no direct grant to any team
+    fake(routes)
+    code, ev, _ = run_fetcher("access_review", monkeypatch, tmp_path, GITHUB_SCOPE_TO_REPOSITORIES="true")
+    # platform holds all_repo_admin (base role admin): it reaches every repository, so it and its nested team stay.
+    assert code == 0 and {t["team"] for t in ev["teams"]} == {"platform", "platform-oncall"}
+
+
+def test_scope_is_not_applied_when_requested_roles_are_unread(fake, monkeypatch, tmp_path):
+    routes = scoped_access_routes()
+    routes[f"orgs/{ORG}/organization-roles"] = FAILING
+    fake(routes)
+    code, ev, _ = run_fetcher("access_review", monkeypatch, tmp_path, GITHUB_SCOPE_TO_REPOSITORIES="true")
+    assert code == 1 and ev["metadata"]["scoped_to_repositories"] is None
+    assert {t["team"] for t in ev["teams"]} == {"platform", "platform-oncall", "marketing"}
+
+
+def test_scope_without_organization_roles_is_bad_config(fake, monkeypatch, tmp_path):
+    # platform reaches every repository only through all_repo_admin: with the roles unread, scoping would drop it and
+    # still claim to be complete. So the combination is refused before anything is read.
+    routes = scoped_access_routes()
+    routes[f"repos/{ORG}/app/teams"] = routes[f"repos/{ORG}/infra/teams"] = []
+    f = fake(routes)
+    code, ev, status = run_fetcher("access_review", monkeypatch, tmp_path, GITHUB_SCOPE_TO_REPOSITORIES="true",
+                                   GITHUB_INCLUDE_ORGANIZATION_ROLES="false")
+    assert code == 1 and status["code"] == "bad_config" and "include_organization_roles" in status["error"]
+    assert "teams" not in ev and ev["metadata"].get("scoped_to_repositories") is None
+    # run() reads the organization and its repository list before collect; collect itself reads nothing.
+    assert not any(k in p for p, _ in f.calls for k in ("/members", "/teams", "/collaborators", "organization-roles",
+                                                         "outside_collaborators", "invitations"))
+
+
+def test_roles_switched_off_without_scope_still_runs(fake, monkeypatch, tmp_path):
+    f = fake(scoped_access_routes())
+    code, ev, _ = run_fetcher("access_review", monkeypatch, tmp_path, GITHUB_INCLUDE_ORGANIZATION_ROLES="false")
+    assert code == 0 and ev["organization_roles"] is None and ev["metadata"]["scoped_to_repositories"] is False
+    assert {t["team"] for t in ev["teams"]} == {"platform", "platform-oncall", "marketing"}
+    assert not any("organization-roles" in p for p, _ in f.calls)
+
+
+def test_the_member_list_can_be_left_out(fake, monkeypatch, tmp_path):
+    fake(access_routes())
+    code, ev, _ = run_fetcher("access_review", monkeypatch, tmp_path, GITHUB_INCLUDE_MEMBERS="false")
+    assert code == 0 and ev["members"] is None and ev["summary"]["members_total"] == 2
+    assert ev["summary"]["owners"] == ["boss"]
 
 
 # --- non_user_credentials ------------------------------------------------------------
@@ -3668,3 +3869,108 @@ def test_audit_log_truncation_is_judged_on_the_events_read_not_the_events_kept(f
 ])
 def test_audit_event_repository_scope(event, allow, exclude, kept):
     assert MODS["audit_log"].in_repository_scope(event, allow, exclude) is kept
+
+
+# --- access_review: an organization with no invitation list -------------------------------
+
+NO_INVITATIONS = (404, {"message": "Not Found"}, {"X-Accepted-GitHub-Permissions": "members=read"})
+APP_TOKEN = {"GITHUB_TOKEN": "ghs_test"}            # an App installation token: permissions only, no user
+USER_TOKEN = {"GITHUB_TOKEN": "github_pat_test"}    # a personal token: also bound by its user's role
+
+
+def no_invitations_routes(user=None):
+    routes = access_routes()
+    routes[f"orgs/{ORG}/invitations"] = NO_INVITATIONS
+    if user:
+        routes["user"] = {"login": user}
+    return routes
+
+
+def invitation_failed(ev):
+    return f"GET orgs/{ORG}/invitations" in [f["operation"] for f in ev["metadata"]["api_failures"]]
+
+
+def test_invitations_read_normally_are_marked_available(fake, monkeypatch, tmp_path):
+    fake(access_routes())
+    code, ev, _ = run_fetcher("access_review", monkeypatch, tmp_path)
+    assert code == 0 and ev["metadata"]["pending_invitations_available"] is True
+    assert ev["summary"]["pending_invitations"] == 1
+
+
+def test_an_app_token_404_on_invitations_with_teams_and_outsiders_readable_is_unavailable(fake, monkeypatch, tmp_path):
+    f = fake(no_invitations_routes())
+    code, ev, status = run_fetcher("access_review", monkeypatch, tmp_path, **APP_TOKEN)
+    assert code == 0 and ev["metadata"]["partial_failure"] is False and ev["metadata"]["api_failures"] == []
+    assert ev["metadata"]["pending_invitations_available"] is False
+    assert ev["pending_invitations"] is None and ev["summary"]["pending_invitations"] is None  # unknown, never zero
+    assert ev["summary"]["members_total"] == 2 and ev["summary"]["teams_total"] == 1  # the rest is collected
+    assert "user" not in {p for p, _ in f.calls}  # an installation token has no user to ask about
+
+
+def test_a_404_on_invitations_when_teams_are_unreadable_stays_a_failure(fake, monkeypatch, tmp_path):
+    # A token without members: read gets the same 404, and cannot list teams either.
+    routes = no_invitations_routes()
+    routes[f"orgs/{ORG}/teams"] = (403, {"message": "Resource not accessible by integration"})
+    fake(routes)
+    code, ev, _ = run_fetcher("access_review", monkeypatch, tmp_path, **APP_TOKEN)
+    operations = [f["operation"] for f in ev["metadata"]["api_failures"]]
+    assert code == 1 and invitation_failed(ev) and f"GET orgs/{ORG}/teams" in operations
+
+
+def test_a_404_on_invitations_when_outside_collaborators_are_unreadable_stays_a_failure(fake, monkeypatch, tmp_path):
+    routes = no_invitations_routes()
+    routes[f"orgs/{ORG}/outside_collaborators"] = (403, {"message": "Resource not accessible by integration"})
+    fake(routes)
+    code, ev, _ = run_fetcher("access_review", monkeypatch, tmp_path, **APP_TOKEN)
+    assert code == 1 and invitation_failed(ev)
+
+
+@pytest.mark.parametrize("answer", [(403, {"message": "Resource not accessible by integration"}),
+                                    (500, {"message": "Server Error"})])
+def test_any_other_invitations_error_stays_a_failure(fake, monkeypatch, tmp_path, answer):
+    routes = access_routes()
+    routes[f"orgs/{ORG}/invitations"] = answer
+    fake(routes)
+    code, ev, _ = run_fetcher("access_review", monkeypatch, tmp_path, **APP_TOKEN)
+    assert code == 1 and ev["metadata"]["pending_invitations_available"] is None
+    assert invitation_failed(ev) and ev["pending_invitations"] is None
+
+
+def test_an_earlier_failure_is_kept_when_invitations_are_unavailable(fake, monkeypatch, tmp_path):
+    routes = no_invitations_routes()
+    routes[f"orgs/{ORG}/teams/platform/members"] = FAILING
+    fake(routes)
+    code, ev, _ = run_fetcher("access_review", monkeypatch, tmp_path, **APP_TOKEN)
+    operations = [f["operation"] for f in ev["metadata"]["api_failures"]]
+    assert code == 1 and not invitation_failed(ev) and len(operations) == 1
+    assert ev["metadata"]["pending_invitations_available"] is False
+
+
+def test_an_owners_personal_token_404_on_invitations_is_unavailable(fake, monkeypatch, tmp_path):
+    fake(no_invitations_routes(user="boss"))  # boss is in the role=admin list
+    code, ev, _ = run_fetcher("access_review", monkeypatch, tmp_path, **USER_TOKEN)
+    assert code == 0 and ev["metadata"]["pending_invitations_available"] is False and not invitation_failed(ev)
+
+
+@pytest.mark.parametrize("token", [USER_TOKEN, {"GITHUB_TOKEN": "some-other-kind-of-token"}])
+def test_a_non_owners_token_404_on_invitations_stays_a_failure(fake, monkeypatch, tmp_path, token):
+    # Not measured whether a non-owner gets this 404 on an ordinary organization, so it is not read as "none".
+    fake(no_invitations_routes(user="dev"))  # dev is a member, not an owner
+    code, ev, _ = run_fetcher("access_review", monkeypatch, tmp_path, **token)
+    assert code == 1 and invitation_failed(ev) and ev["metadata"]["pending_invitations_available"] is None
+
+
+def test_a_token_whose_user_cannot_be_read_stays_a_failure(fake, monkeypatch, tmp_path):
+    routes = no_invitations_routes()
+    routes["user"] = (403, {"message": "Resource not accessible by personal access token"})
+    fake(routes)
+    code, ev, _ = run_fetcher("access_review", monkeypatch, tmp_path, **USER_TOKEN)
+    assert code == 1 and invitation_failed(ev) and ev["metadata"]["pending_invitations_available"] is None
+
+
+def test_a_token_with_no_readable_user_route_stays_a_failure(fake, monkeypatch, tmp_path):
+    routes = no_invitations_routes()
+    routes["user"] = (404, {"message": "Not Found"})
+    fake(routes)
+    code, ev, _ = run_fetcher("access_review", monkeypatch, tmp_path, **USER_TOKEN)
+    assert code == 1 and invitation_failed(ev)

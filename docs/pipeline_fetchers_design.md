@@ -206,8 +206,8 @@ failure, and the upload says so.**
 | Files of this run an earlier upload sent direct (the workspace has batches now) | Count as delivered | **Sent again in a batch**, with a warning: the direct upload built nothing |
 | This run's batch is submitted or approved, and the set has since gained a validator | No-op | No-op (not the validators refusal) |
 
-Channel and stack routing, idempotency, resume, WAF checks, and the incomplete-
-inventory skip are unchanged.
+Channel and stack routing, idempotency, resume, and the incomplete-inventory
+skip are unchanged.
 
 ### Approval
 

@@ -35,20 +35,16 @@ def delivery_capability(client: Client) -> Capability:
         if exc.status == 403 and FLAG_OFF in exc.message:
             return Capability(False, FLAG_OFF)
         if exc.status == 403:
-            return Capability(False, _server_message(exc.message))
+            return Capability(False, _server_message(exc))
         raise
     return Capability(True, None)
 
 
-def _server_message(message: str) -> str:
-    """The `error.message` of the JSON body in an ApiError message, else the whole message."""
-    start, end = message.find("{"), message.rfind("}")
-    if start != -1 and end > start:
-        try:
-            text = json.loads(message[start:end + 1])["error"]["message"]
-        except (ValueError, KeyError, TypeError):
-            text = None
-        if isinstance(text, str) and text:
-            return text
-    return message
+def _server_message(exc: ApiError) -> str:
+    """The `error.message` of the response body, else the whole error message."""
+    try:
+        text = json.loads(exc.body)["error"]["message"]
+    except (ValueError, KeyError, TypeError):
+        text = None
+    return text if isinstance(text, str) and text else exc.message
 

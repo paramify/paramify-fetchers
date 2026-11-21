@@ -81,7 +81,7 @@ class EvidenceSetsProvider:
         today: Callable[[], date] = date.today,
     ) -> None:
         policy = resolve_tag_policy(tag_config, override_off=None if tags_enabled else "tags disabled")
-        self._tagger = Tagger(None, "", policy=policy, display_names=display_names)
+        self._tagger = Tagger(None, policy=policy, display_names=display_names)
         self._today = today
         self._tags_unavailable = False
 
