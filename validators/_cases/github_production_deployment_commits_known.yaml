@@ -1,0 +1,14 @@
+validator: github_production_deployment_commits_known
+cases:
+- name: compliant
+  expect: PASS
+  artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"production_deployments_commit_unknown":[]}}}'
+- name: listed
+  expect: FAIL
+  artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"production_deployments_commit_unknown":["example-repo"]}}}'
+- name: unread
+  expect: FAIL
+  artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"production_deployments_commit_unknown":null}}}'
+- name: renamed
+  expect: FAIL
+  artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"production_deployments_commit_unknown_renamed":[]}}}'
