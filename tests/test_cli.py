@@ -390,6 +390,7 @@ API_TO_CLI = {
     "list_stacks": "stacks",
     "set_stack": "manifest set-stack",
     "set_owner": "manifest set-owner",
+    "generate_env": "env",
     "list_channel_owners": "manifest set-owner",  # and `validate --online`, and the TUI's owner picker
     "owner_notes": "validate",  # --online
     "manifest_owners": "validate",  # --online: only a manifest that sets an owner lists the owners
