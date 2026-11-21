@@ -7,6 +7,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -182,6 +183,7 @@ def test_collects_every_repository_in_order():
     assert repos["enhanced"]["scan_on_push"] is True
     assert repos["enhanced"]["immutability"] == "IMMUTABLE"
     assert repos["enhanced"]["scan_frequency"] == "CONTINUOUS_SCAN"
+    assert repos["enhanced"]["applied_scan_filters"] == [{"filter": "*", "filterType": "WILDCARD"}]
     assert repos["enhanced"]["scan_collection_status"] == "collected"
 
     assert repos["basic"]["latest_image_scan"]["severity_counts"] == {
@@ -200,11 +202,14 @@ def test_collects_every_repository_in_order():
     assert repos["empty"]["latest_image_scan"] is None
     assert repos["empty"]["scan_collection_status"] == "empty_repository"
     assert repos["empty"]["scan_frequency"] is None
+    # Not read, so unknown: [] would claim no registry filter applies.
+    assert repos["empty"]["applied_scan_filters"] is None
 
+    # In describe-repositories order, whichever worker finishes first.
     labels = [label for label, _ in collector.failures]
-    assert sorted(labels) == [
-        "No effective scanning configuration returned for empty",
+    assert labels == [
         "aws ecr describe-image-scan-findings (denied) failed",
+        "No effective scanning configuration returned for empty",
     ]
     assert fetcher.classify([e for _, e in collector.failures if e]) == "not_authorized"
 
@@ -254,7 +259,62 @@ def test_failed_repository_list_keeps_registry_evidence():
 
     collector = fetcher.Collector(Failing([]))
     results = collector.collect()
-    assert results["repositories"] == []
+    # Not listed, so unknown: [] would claim the registry has no repositories.
+    assert results["repositories"] is None
     assert results["registry_scanning"]["scan_type"] == "ENHANCED"
     assert [label for label, _ in collector.failures] == ["aws ecr describe-repositories (list) failed"]
     assert fetcher.classify([e for _, e in collector.failures]) == "rate_limited"
+
+
+def test_failed_registry_read_leaves_rules_unknown():
+    class Failing(FakeEcr):
+        def get_registry_scanning_configuration(self):
+            raise client_error("AccessDeniedException", "GetRegistryScanningConfiguration")
+
+    collector = fetcher.Collector(Failing([]))
+    results = collector.collect()
+    assert results["registry_scanning"] == {"scan_type": None, "rules": None}
+    assert results["repositories"] == []
+
+
+def test_failures_follow_repository_order_not_finish_order():
+    # The first repository's read waits until every other read has failed.
+    others = threading.Barrier(fetcher.REPO_WORKERS)
+
+    class Ordered(FakeEcr):
+        def describe_images(self, **params):
+            if params["repositoryName"] == "r0":
+                others.wait(5)
+                time.sleep(0.05)
+                raise client_error("AccessDeniedException", "DescribeImages")
+            try:
+                raise client_error("AccessDeniedException", "DescribeImages")
+            finally:
+                others.wait(5)
+
+    names = [f"r{i}" for i in range(fetcher.REPO_WORKERS)]
+    collector = fetcher.Collector(Ordered([repo(n) for n in names]))
+    collector.collect()
+    assert [label for label, _ in collector.failures] == [
+        f"aws ecr describe-images ({n}) failed" for n in names]
+
+
+def test_missing_boto3_is_bad_config(tmp_path, monkeypatch):
+    import builtins
+
+    real_import = builtins.__import__
+
+    def no_boto3(name, *args, **kwargs):
+        if name.split(".")[0] in ("boto3", "botocore"):
+            raise ModuleNotFoundError(f"No module named '{name}'")
+        return real_import(name, *args, **kwargs)
+
+    status = tmp_path / "status.json"
+    monkeypatch.setenv("EVIDENCE_DIR", str(tmp_path / "out"))
+    monkeypatch.setenv("FETCHER_STATUS_FILE", str(status))
+    monkeypatch.setattr(builtins, "__import__", no_boto3)
+
+    assert fetcher.main() == 1
+    reported = json.loads(status.read_text())
+    assert reported["code"] == "bad_config"
+    assert "pip install -r requirements.txt" in reported["error"]

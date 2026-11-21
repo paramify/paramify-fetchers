@@ -34,6 +34,7 @@ import json
 import os
 import shutil
 import socket
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Dict
@@ -48,6 +49,14 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 @pytest.fixture(scope="session")
 def repo_root() -> Path:
     return REPO_ROOT
+
+
+@pytest.fixture(autouse=True)
+def _no_update_check(monkeypatch):
+    """The TUI asks for the update notice on start, and the real check runs `git fetch`
+    in the background and writes .paramify/state.json. Tests never do either; the
+    tests of the check itself clear this (tests/test_update.py)."""
+    monkeypatch.setenv("PARAMIFY_NO_UPDATE_CHECK", "1")
 
 
 @pytest.fixture(autouse=True)
@@ -70,6 +79,27 @@ def _no_upload_yaml_from_the_working_tree(monkeypatch):
         return real(root)
 
     monkeypatch.setattr(api, "default_upload_config", default_upload_config)
+
+
+@pytest.fixture(autouse=True)
+def _no_dotenv_from_the_working_tree(monkeypatch):
+    """Tests never copy the user's own `<repo>/.env` into os.environ.
+
+    `api.run` and `api.doctor` fill unset variables from `<root>/.env`. A
+    developer's file often holds real tokens (CI never has one), and with the
+    real repo root they would land in os.environ for every later test in the
+    process. For that root only, act as if there is none.
+    """
+    from framework import api
+
+    real = api.refresh_env
+
+    def refresh_env(root):
+        if Path(root).resolve() == REPO_ROOT:
+            return []
+        return real(root)
+
+    monkeypatch.setattr(api, "refresh_env", refresh_env)
 
 
 # --------------------------------------------------------------------------- #
@@ -490,6 +520,37 @@ def no_network(monkeypatch, tmp_path):
     if log.exists():
         attempts += log.read_text().splitlines()
     assert not attempts, f"network attempts (the app may have swallowed the error): {attempts}"
+
+
+FAKE_PARAMIFY_URL = "https://api.example.test"
+
+
+@functools.cache
+def _paramify_fake():
+    spec = importlib.util.spec_from_file_location("paramify_fake", Path(__file__).with_name("paramify_fake.py"))
+    module = importlib.util.module_from_spec(spec)
+    sys.modules.setdefault("paramify_fake", module)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.fixture
+def fake_paramify(monkeypatch):
+    """tests/paramify_fake.py as the workspace every Paramify call reaches (stacks, owners,
+    plan, upload), with a fake upload token. Request it after demo_workspace, which clears the token."""
+    from datetime import date
+
+    from framework.paramify.client import Client
+    from framework.paramify_auth import BASE_URL_ENV, UPLOAD_TOKEN_ENV
+    from framework.paramify import connection as connection_mod
+
+    fake = _paramify_fake().FakeParamify()
+    fake.set_today(date.today())
+    monkeypatch.setenv(UPLOAD_TOKEN_ENV, "fake-token")
+    monkeypatch.setenv(BASE_URL_ENV, FAKE_PARAMIFY_URL)
+    monkeypatch.setattr(connection_mod, "Client", functools.partial(
+        Client, session=fake.session, sleep=lambda _s: None, retry_budget_s=3))
+    return fake
 
 
 @pytest.fixture

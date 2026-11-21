@@ -93,12 +93,12 @@ def error_name(exc):
 class Collector:
     def __init__(self, client):
         self.client = client
-        # (label, error text); appended from worker threads, which list.append
-        # does atomically.
+        # (label, error text), in collection order: repository failures follow
+        # describe-repositories order, not the order the workers finish.
         self.failures = []
 
-    def fail(self, label, exc=None):
-        self.failures.append((label, describe(exc) if exc is not None else ""))
+    def fail(self, label, exc=None, into=None):
+        (self.failures if into is None else into).append((label, describe(exc) if exc is not None else ""))
 
     def pages(self, operation, **params):
         """Every response page, at the API's largest page size."""
@@ -120,11 +120,14 @@ class Collector:
             config = self.client.get_registry_scanning_configuration().get("scanningConfiguration") or {}
         except Exception as exc:
             self.fail("aws ecr get-registry-scanning-configuration failed", exc)
-            config = {}
+            config = None
         else:
             if config.get("scanType") not in ("BASIC", "ENHANCED"):
                 self.fail("aws ecr get-registry-scanning-configuration returned no scanning configuration")
-                config = {}
+                config = None
+        if config is None:
+            # Not read, so unknown: [] would claim the registry has no rules.
+            return {"scan_type": None, "rules": None}
         return {
             "scan_type": config.get("scanType"),
             "rules": [
@@ -218,10 +221,10 @@ class Collector:
             "vulnerability_source_updated_at": plain(findings.get("vulnerabilitySourceUpdatedAt")),
         }
 
-    def repository(self, repo, effective):
+    def repository(self, repo, effective, failures=None):
         name = repo.get("repositoryName")
         if effective is None:
-            self.fail(f"No effective scanning configuration returned for {name}")
+            self.fail(f"No effective scanning configuration returned for {name}", into=failures)
         record = {
             "name": name,
             "arn": repo.get("repositoryArn"),
@@ -230,19 +233,19 @@ class Collector:
             "immutability": repo.get("imageTagMutability") or "MUTABLE",
             "latest_image_scan": None,
             "scan_frequency": (effective or {}).get("scanFrequency"),
-            "applied_scan_filters": (effective or {}).get("appliedScanFilters") or [],
+            "applied_scan_filters": None if effective is None else effective.get("appliedScanFilters") or [],
             "scan_collection_status": "empty_repository",
         }
         try:
             digest = self.latest_digest(name)
         except Exception as exc:
-            self.fail(f"aws ecr describe-images ({name}) failed", exc)
+            self.fail(f"aws ecr describe-images ({name}) failed", exc, into=failures)
             record["scan_collection_status"] = "error"
             return record
         if digest is None:
             return record
         if not isinstance(digest, str) or not digest:
-            self.fail(f"aws ecr describe-images ({name}) returned an invalid digest")
+            self.fail(f"aws ecr describe-images ({name}) returned an invalid digest", into=failures)
             record["scan_collection_status"] = "error"
             return record
 
@@ -261,11 +264,11 @@ class Collector:
                 record["scan_collection_status"] = (
                     "not_scanned" if code == "ScanNotFoundException" else "image_deleted")
             else:
-                self.fail(f"aws ecr describe-image-scan-findings ({name}) failed", exc)
+                self.fail(f"aws ecr describe-image-scan-findings ({name}) failed", exc, into=failures)
                 record["scan_collection_status"] = "error"
             return record
         if scan is None:
-            self.fail(f"aws ecr describe-image-scan-findings ({name}) returned invalid scan data")
+            self.fail(f"aws ecr describe-image-scan-findings ({name}) returned invalid scan data", into=failures)
             record["scan_collection_status"] = "error"
             return record
         record["latest_image_scan"] = scan
@@ -273,15 +276,24 @@ class Collector:
         return record
 
     def collect(self):
-        results = {"registry_scanning": self.registry_scanning(), "repositories": []}
+        results = {"registry_scanning": self.registry_scanning()}
         repos = self.repositories()
+        # Null when the list failed: [] would claim the registry has no repositories.
+        results["repositories"] = repos
         if not repos:
             return results
         effective = self.effective_scanning([r.get("repositoryName") for r in repos])
+
+        def read(repo):
+            failures = []
+            return self.repository(repo, effective.get(repo.get("repositoryName")), failures), failures
+
         with ThreadPoolExecutor(max_workers=min(REPO_WORKERS, len(repos))) as pool:
             # map keeps describe-repositories order.
-            results["repositories"] = list(
-                pool.map(lambda r: self.repository(r, effective.get(r.get("repositoryName"))), repos))
+            read_repos = list(pool.map(read, repos))
+        results["repositories"] = [record for record, _ in read_repos]
+        for _, failures in read_repos:
+            self.failures.extend(failures)
         return results
 
 
@@ -293,9 +305,21 @@ def target_id(profile, region):
     return re.sub(r"[^A-Za-z0-9._-]", "_", target)
 
 
+class CollectionError(Exception):
+    def __init__(self, message, code="partial_failure"):
+        super().__init__(message)
+        self.code = code
+
+
 def session_and_client():
-    import boto3
-    from botocore.config import Config
+    try:
+        import boto3
+        from botocore.config import Config
+    except ImportError as exc:
+        raise CollectionError(
+            "boto3 is required for aws_ecr_image_scanning (pip install -r requirements.txt)",
+            "bad_config",
+        ) from exc
 
     session = boto3.Session(profile_name=os.environ.get("AWS_PROFILE") or None)
     # The runner maps target.region to AWS_DEFAULT_REGION; pin it so an ambient
@@ -325,6 +349,9 @@ def main():
 
     try:
         sts, ecr = session_and_client()
+    except CollectionError as exc:
+        report_failure(str(exc), exc.code)
+        return 1
     except Exception as exc:
         report_failure(f"AWS session: {describe(exc)}", classify([describe(exc)]))
         return 1

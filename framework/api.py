@@ -31,7 +31,6 @@ from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as pkg_version
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
-from urllib.parse import urlparse
 
 import yaml
 from dotenv import load_dotenv
@@ -39,7 +38,7 @@ from packaging.requirements import Requirement
 from packaging.specifiers import SpecifierSet
 from packaging.utils import canonicalize_name
 
-from framework import patterns, yaml_io
+from framework import envgen, patterns, yaml_io
 from framework import samples as _samples
 from framework.config_loader import discover_fetchers, discover_platforms
 from framework.contract import (
@@ -67,15 +66,18 @@ from framework.issue_reports import (
 )
 from framework.issue_reports import read_index as read_issue_report_index
 from framework.issue_reports import record_outputs as record_issue_reports
-from framework.paramify.client import base_url_error
+from framework.paramify.client import ApiError
+from framework.paramify.connection import client_for, open_workspace
+from framework.paramify.connection import settings as paramify_settings
+from framework.paramify.pipelines import (
+    DEFAULT_WAIT_TIMEOUT,
+    Pipelines,
+    job_summary,
+    wait_for_job,
+)
+from framework.paramify.resources import Resources
 from framework.paramify_auth import (
-    BASE_URL_ENV,
-    READ_TOKEN_ENV,
-    UPLOAD_TOKEN_ENV,
     describe_base_url,
-    missing_token_error,
-    resolve_base_url,
-    resolve_upload_token,
 )
 from framework.probe import probe_categories
 from framework.run_files import is_evidence_file
@@ -88,8 +90,6 @@ from framework.secret_resolver import (
 from framework.sync import upload as _sync_upload
 from framework.sync.model import Plan
 from framework.sync.providers.delivery_routing import PIPELINE_DIRECT
-
-_missing_token_error = missing_token_error
 
 _STDERR_TAIL_CHARS = 4000
 
@@ -107,6 +107,80 @@ def find_repo_root(start: Optional[Path] = None) -> Path:
     raise RuntimeError(
         "Could not locate repo root (looking for sibling fetchers/ and framework/ dirs)"
     )
+
+
+def update_notice(root: Path) -> Optional[str]:
+    """The one line a front-end shows when an update is waiting, else None.
+
+    The `waiting` text of update.check_for_update ("12 new commits on main"),
+    so a front-end that only wants the notice need not read the dict.
+    """
+    from framework import update
+
+    info = update.check_for_update(root)
+    return info["waiting"] if info and info.get("update_available") else None
+
+
+def _run_update(root: Path, *flags: str) -> dict:
+    """Run `paramify update <flags>` in `root` as a subprocess and parse its JSON.
+
+    A subprocess, not an import: an update replaces the code on disk, and the
+    running TUI must not load half of it. Output that is not JSON becomes
+    {"ok": False, "errors": [<last line it printed>]}.
+    """
+    import json
+    import subprocess
+    import sys
+
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-m", "framework.cli", "update", *flags],
+            cwd=root, capture_output=True, text=True,  # no timeout: killing it mid-pip would leave a half install
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return {"ok": False, "errors": [str(exc)]}
+    try:
+        doc = json.loads(proc.stdout)
+        if isinstance(doc, dict):
+            return doc
+    except ValueError:
+        pass
+    lines = [ln.strip() for ln in (proc.stderr or "").splitlines() if ln.strip()]
+    lines = lines or [ln.strip() for ln in (proc.stdout or "").splitlines() if ln.strip()]
+    return {"ok": False, "errors": [lines[-1] if lines else f"paramify update exited {proc.returncode} without output"]}
+
+
+def update_plan(root: Path) -> dict:
+    """What `paramify update` would do, without doing it (it asks nothing and changes nothing).
+
+    The plan the CLI draws (framework.update.plan, as `--json` shows it), read
+    in this process: reading is safe here, only the move must be a subprocess.
+    {ok, errors, current, target, ...}, or {ok: False, errors} when update
+    refuses outright. Adds `can_roll_back`: whether `--rollback` would go back
+    from here (update.rollback_refusal).
+    """
+    from framework import update
+
+    try:
+        doc = {"ok": True, "errors": [], **update.public(update.plan(root))}
+    except update.UpdateError as e:
+        doc = {"ok": False, "errors": [str(e)]}
+    doc["can_roll_back"] = update.rollback_refusal(root) is None
+    return doc
+
+
+def apply_update(root: Path, expect: str, allow_breaking: bool = False) -> dict:
+    """Move to the commit a plan showed (`paramify update --yes --json --expect <sha>`),
+    in a subprocess, so the running process never loads half-replaced code. It
+    refuses if the target has moved since. Breaking changes that touch this
+    clone stop it unless allow_breaking. Returns the CLI's JSON document."""
+    flags = ["--yes", "--json", "--expect", expect] + (["--allow-breaking"] if allow_breaking else [])
+    return _run_update(root, *flags)
+
+
+def rollback_update(root: Path) -> dict:
+    """Return to where the clone was before the last update (`--rollback --yes --json`)."""
+    return _run_update(root, "--rollback", "--yes", "--json")
 
 
 # --------------------------------------------------------------------------- #
@@ -160,6 +234,7 @@ def _fetcher_descriptor(f, platform_spec=None) -> dict:
         "description": f.description,
         "category": f.category,
         "kind": f.kind,
+        "source": f.source,
         "supports_targets": f.supports_targets,
         "config": [_config_descriptor(c) for c in f.config_schema.values()],
         # Category-declared secrets are part of what this fetcher takes, so the
@@ -469,6 +544,7 @@ def doctor(
     that touches the network, and its results never gate `ok` — see
     framework/probe.py.
     """
+    refresh_env(root)  # judge secrets as `run` will see them, .env included
     py = sys.version_info
     python = {
         "version": f"{py.major}.{py.minor}.{py.micro}",
@@ -653,25 +729,15 @@ def upload_readiness(root: Path, config_path: Optional[Path] = None) -> dict:
                 "errors": [f"Could not read uploader config {config_path}: {exc}"],
             }
 
-    paramify_cfg = config.get("paramify") or {}
-    base_url, base_url_source = resolve_base_url(paramify_cfg.get("base_url"))
-    token, token_source = resolve_upload_token()
-
-    errors: List[str] = []
-    if not token:
-        errors.append(_missing_token_error())
-    if not base_url.lower().startswith("https://"):
-        errors.append(
-            f"{BASE_URL_ENV} must be https to protect the API token (got {base_url!r})"
-        )
-
+    resolved = paramify_settings(config)
+    errors = resolved.errors(need_token=True)
     return {
         "ok": not errors,
-        "token_present": bool(token),
-        "token_source": token_source,
-        "base_url": base_url,
-        "base_url_source": base_url_source,
-        "base_url_label": describe_base_url(base_url),
+        "token_present": bool(resolved.token),
+        "token_source": resolved.token_source,
+        "base_url": resolved.base_url,
+        "base_url_source": resolved.base_url_source,
+        "base_url_label": describe_base_url(resolved.base_url),
         "errors": errors,
     }
 
@@ -1553,6 +1619,7 @@ def run(
     errs = manifest_loader.schema_errors(manifest, root)
     if errs:
         raise ValueError("manifest schema invalid:\n  " + "\n  ".join(errs))
+    refresh_env(root)  # a value kept in .env reaches ${env:...}, whoever started the run
 
     fetchers = discover_fetchers(root)
     platforms = discover_platforms(root)
@@ -1832,7 +1899,8 @@ def sync_validators(
     Scope precedence: explicit `reference_ids` > `manifest_path`'s fetchers'
     sets > whole registry. Create-or-skip; associates on create only; `update`
     opt-in patches existing. Fires sync_start / sync_validator / sync_complete.
-    Raises ValueError for setup errors; returns the syncer summary otherwise.
+    Raises ValueError for setup errors. A rejected token mid-sweep stops it: the
+    summary's `stopped` says why, and the lock still records what was created.
     """
     syncer = _load_paramify_validator_syncer(root)
     validators = syncer.collect_validators(root, manifest_path, reference_ids)
@@ -1864,9 +1932,7 @@ def upload_preflight(
     """Inspect upload readiness without making Paramify API calls."""
     load_dotenv()
     config_path = _upload_config(root, config_path)
-    config = _sync_upload.load_config(config_path)
-    paramify_cfg = config.get("paramify") or {}
-    base_url, base_url_source = resolve_base_url(paramify_cfg.get("base_url"))
+    resolved = paramify_settings(_sync_upload.load_config(config_path))
 
     run_path = Path(run_dir)
     errors: List[str] = []
@@ -1878,25 +1944,18 @@ def upload_preflight(
         if file_count == 0:
             errors.append(f"No evidence files found in {run_path}")
 
-    url_error = base_url_error(base_url)
-    if url_error:
-        errors.append(url_error)
-
-    token, token_source = resolve_upload_token()
-    token_present = bool(token)
-    if not token_present and not dry_run:
-        errors.append(_missing_token_error())
+    errors.extend(resolved.errors(need_token=not dry_run))
 
     return {
         "ok": not errors,
         "run_dir": str(run_path),
-        "base_url": base_url,
-        "base_url_source": base_url_source,
-        "base_url_label": describe_base_url(base_url),
+        "base_url": resolved.base_url,
+        "base_url_source": resolved.base_url_source,
+        "base_url_label": describe_base_url(resolved.base_url),
         "config_path": str(config_path) if config_path else None,
         "file_count": file_count,
-        "token_present": token_present,
-        "token_source": token_source,
+        "token_present": bool(resolved.token),
+        "token_source": resolved.token_source,
         "dry_run": dry_run,
         "errors": errors,
     }
@@ -1976,19 +2035,12 @@ def upload_run(
     )
 
 
-def _workspace(root: Optional[Path], config_path: Optional[Path]) -> Any:
+def _workspace(root: Optional[Path], config_path: Optional[Path]) -> Resources:
     """Resources for the configured workspace. Raises ValueError with no token or a bad base URL."""
     root = Path(root) if root is not None else find_repo_root()
-    load_dotenv()
-    config = _sync_upload.load_config(_upload_config(root, config_path))
-    base_url, _ = resolve_base_url((config.get("paramify") or {}).get("base_url"))
-    url_error = base_url_error(base_url)
-    if url_error:
-        raise ValueError(url_error)
-    token, _ = resolve_upload_token()
-    if not token:
-        raise ValueError(_missing_token_error())
-    return _sync_upload.Resources(_sync_upload.Client(token, base_url))
+    _, resources = open_workspace(_sync_upload.load_config(_upload_config(root, config_path)))
+    assert resources is not None  # a token is required, or open_workspace raised
+    return resources
 
 
 def list_stacks(root: Optional[Path] = None, config_path: Optional[Path] = None) -> List[dict]:
@@ -2209,11 +2261,10 @@ def issues_upload_preflight(
     files and sends the rest.
     """
     uploader = _load_paramify_issues_uploader(root)
-    uploader.load_dotenv()
+    load_dotenv()
     config_path = _upload_config(root, config_path)
-    config = uploader.load_config(str(config_path)) if config_path else {}
-    paramify_cfg = config.get("paramify") or {}
-    base_url, base_url_source = resolve_base_url(paramify_cfg.get("base_url"))
+    config = (yaml_io.load_path(Path(config_path)) or {}) if config_path else {}
+    resolved = paramify_settings(config)
 
     run_path = Path(run_dir)
     errors: List[str] = []
@@ -2284,28 +2335,21 @@ def issues_upload_preflight(
                     f"(fix: paramify assessments select {name})"
                 )
 
-    url_error = uploader._base_url_error(base_url)
-    if url_error:
-        errors.append(url_error)
-
-    token, token_source = resolve_upload_token()
-    token_present = bool(token)
-    if not token_present and not dry_run:
-        errors.append(_missing_token_error())
+    errors.extend(resolved.errors(need_token=not dry_run))
 
     return {
         "ok": not errors,
         "run_dir": str(run_path),
-        "base_url": base_url,
-        "base_url_source": base_url_source,
-        "base_url_label": describe_base_url(base_url),
+        "base_url": resolved.base_url,
+        "base_url_source": resolved.base_url_source,
+        "base_url_label": describe_base_url(resolved.base_url),
         "config_path": str(config_path) if config_path else None,
         "file_count": file_count,
         "missing_assessment": missing_assessment,
         "assessments": plan,
         "warnings": warnings,
-        "token_present": token_present,
-        "token_source": token_source,
+        "token_present": bool(resolved.token),
+        "token_source": resolved.token_source,
         "dry_run": dry_run,
         "errors": errors,
     }
@@ -2331,7 +2375,7 @@ def issues_upload_run(
     """
     uploader = _load_paramify_issues_uploader(root)
     config_path = _upload_config(root, config_path)
-    config = uploader.load_config(str(config_path)) if config_path else {}
+    config = (yaml_io.load_path(Path(config_path)) or {}) if config_path else {}
     try:
         index = read_issue_report_index(Path(run_dir))
     except ValueError:
@@ -2348,21 +2392,14 @@ def issues_upload_run(
     )
 
 
-def _issues_client(root: Path, config_path: Optional[Path] = None):
-    """(uploader module, client) for the pipeline commands that act on Paramify
-    directly rather than on a run: jobs, retry, cancel, close."""
-    uploader = _load_paramify_issues_uploader(root)
-    uploader.load_dotenv()
+def _pipelines(root: Path, config_path: Optional[Path] = None) -> Pipelines:
+    """The pipeline endpoints, for the commands that act on Paramify directly
+    rather than on a run: jobs, retry, cancel, close."""
     config_path = _upload_config(root, config_path)
-    config = uploader.load_config(str(config_path)) if config_path else {}
-    base_url, _ = resolve_base_url((config.get("paramify") or {}).get("base_url"))
-    url_error = uploader._base_url_error(base_url)
-    if url_error:
-        raise RuntimeError(url_error)
-    token, _ = resolve_upload_token()
-    if not token:
-        raise RuntimeError(_missing_token_error())
-    return uploader, uploader.ParamifyClient(token, base_url)
+    config = (yaml_io.load_path(Path(config_path)) or {}) if config_path else {}
+    _, pipelines = open_workspace(config, wrap=Pipelines)
+    assert pipelines is not None  # a token is required, or open_workspace raised
+    return pipelines
 
 
 def issues_jobs(
@@ -2374,16 +2411,16 @@ def issues_jobs(
     limit: int = 50,
 ) -> List[dict]:
     """Recent pipeline jobs, newest first, as job_summary dicts plus timestamps."""
-    uploader, client = _issues_client(root, config_path)
-    out = []
-    for job in client.list_jobs(assessment_id=assessment_id, status=status, limit=limit):
-        out.append({
-            **uploader.job_summary(job),
+    return [
+        {
+            **job_summary(job),
             "assessment_id": job.get("assessmentId"),
             "created_at": job.get("createdAt"),
             "completed_at": job.get("completedAt"),
-        })
-    return out
+        }
+        for job in _pipelines(root, config_path).list_jobs(
+            assessment_id=assessment_id, status=status, limit=limit)
+    ]
 
 
 def issues_job_action(
@@ -2391,14 +2428,11 @@ def issues_job_action(
 ) -> dict:
     """Retry or cancel one pipeline job. Cancelling also cancels every unfinished
     job queued behind it on the same assessment — that is Paramify's rule."""
-    uploader, client = _issues_client(root, config_path)
-    if action == "retry":
-        job = client.retry_job(job_id)
-    elif action == "cancel":
-        job = client.cancel_job(job_id)
-    else:
+    if action not in ("retry", "cancel"):
         raise ValueError(f"unknown job action {action!r}")
-    return uploader.job_summary(job)
+    pipelines = _pipelines(root, config_path)
+    job = pipelines.retry_job(job_id) if action == "retry" else pipelines.cancel_job(job_id)
+    return job_summary(job)
 
 
 def issues_close(
@@ -2416,16 +2450,15 @@ def issues_close(
     closing auto-closes every open issue the cycle never saw, so it belongs after
     the last file has landed, which only a person knows.
     """
-    uploader, client = _issues_client(root, config_path)
-    job = uploader.job_summary(client.close(assessment_id))
+    pipelines = _pipelines(root, config_path)
+    job = job_summary(pipelines.close(assessment_id))
     if on_event:
         on_event({"event": "job_queued", "assessment_id": assessment_id,
                   "job_id": job["job_id"], "operation": "CLOSE"})
     if not wait:
         return job
-    timeout = wait_timeout or uploader.DEFAULT_WAIT_TIMEOUT
-    final, timed_out = uploader.wait_for_job(client, job["job_id"], timeout=timeout)
-    result = uploader.job_summary(final)
+    final, timed_out = wait_for_job(pipelines, job["job_id"], timeout=wait_timeout or DEFAULT_WAIT_TIMEOUT)
+    result = job_summary(final)
     if timed_out:
         result["timed_out"] = True
     return result
@@ -2460,12 +2493,10 @@ def scripts_sync_preflight(
     ``include`` restricts the fetcher count to those names (a manifest's
     fetchers); ``None`` counts every discovered fetcher.
     """
-    uploader = _load_paramify_scripts_uploader(root)
-    uploader.load_dotenv()
+    load_dotenv()
     config_path = _upload_config(root, config_path)
-    config = uploader.load_config(str(config_path)) if config_path else {}
-    paramify_cfg = config.get("paramify") or {}
-    base_url, base_url_source = resolve_base_url(paramify_cfg.get("base_url"))
+    config = (yaml_io.load_path(Path(config_path)) or {}) if config_path else {}
+    resolved = paramify_settings(config)
 
     errors: List[str] = []
     fetcher_count = 0
@@ -2478,25 +2509,18 @@ def scripts_sync_preflight(
         scope = "in the manifest " if include is not None else ""
         errors.append(f"No fetchers {scope}with an evidence_set and a readable entry file to sync")
 
-    url_error = uploader._base_url_error(base_url)
-    if url_error:
-        errors.append(url_error)
-
-    token, token_source = resolve_upload_token()
-    token_present = bool(token)
     # A token is required to write; dry-run still wants one to diff the tenant,
     # but tolerates its absence (it then reports every fetcher as a create).
-    if not token_present and not dry_run:
-        errors.append(_missing_token_error())
+    errors.extend(resolved.errors(need_token=not dry_run))
 
     return {
         "ok": not errors,
-        "base_url": base_url,
-        "base_url_source": base_url_source,
-        "base_url_label": describe_base_url(base_url),
+        "base_url": resolved.base_url,
+        "base_url_source": resolved.base_url_source,
+        "base_url_label": describe_base_url(resolved.base_url),
         "fetcher_count": fetcher_count,
-        "token_present": token_present,
-        "token_source": token_source,
+        "token_present": bool(resolved.token),
+        "token_source": resolved.token_source,
         "dry_run": dry_run,
         "errors": errors,
     }
@@ -2516,14 +2540,16 @@ def scripts_sync(
     """Sync fetcher entry scripts to Paramify and associate them to evidence sets.
 
     Fires sync_start / sync_item / sync_complete so front-ends can render
-    progress. Raises ValueError for setup errors; returns the uploader summary.
+    progress. Raises ValueError for setup errors, and ApiError when the workspace's
+    scripts cannot be read at all; a rejected token mid-sweep stops it, with the
+    summary's `stopped` saying why.
 
     ``include`` restricts the sweep to those fetcher names (a manifest's
     fetchers); ``None`` syncs every discovered fetcher.
     """
     uploader = _load_paramify_scripts_uploader(root)
     config_path = _upload_config(root, config_path)
-    config = uploader.load_config(str(config_path)) if config_path else {}
+    config = (yaml_io.load_path(Path(config_path)) or {}) if config_path else {}
     return uploader.sync_scripts(
         root,
         config=config,
@@ -3098,7 +3124,6 @@ def new_manifest_path(
 
 _PROGRAMS_PATH = "/projects"  # the UI's "programs" are the API's projects
 _ASSESSMENTS_PATH = "/assessment"
-_WORKSPACE_READ_TIMEOUT = 30
 
 
 def _workspace_get(
@@ -3108,62 +3133,37 @@ def _workspace_get(
 
     `base_url` is the instance to read; None resolves it from the environment.
     A caller that has already resolved it with the uploader config (as
-    `upload_readiness` does) passes it, so every call it makes goes to one host.
-
-    The one place the read path resolves a token, enforces https, and turns a
-    transport or HTTP failure into a single actionable message. Shared by every
-    `api` function that reads live workspace state (programs, assessments) —
-    duplicating it is exactly the drift framework/paramify_auth.py exists to
-    prevent.
+    `paramify_status` does) passes it, so every call it makes goes to one host.
+    Reads prefer the read-scope token (PARAMIFY_API_TOKEN). A person is usually
+    waiting, so a failing read is reported at once, not retried.
 
     Raises RuntimeError with a message a CLI can print verbatim.
     """
-    import requests  # local: keeps `paramify list`/`tui` startup free of it
-    from dotenv import load_dotenv
-
-    # Same as the uploaders: a token in `.env` is a first-class source, not
-    # something you have to `export` first. Without this, `paramify upload`
-    # works from `.env` while `paramify assessments list` / `programs list`
-    # report the token as missing. override=False so a real shell export wins.
+    # A token in `.env` is a first-class source, as it is for the uploads.
+    # override=False so a real shell export wins.
     load_dotenv()
-
-    token = os.environ.get(READ_TOKEN_ENV) or os.environ.get(UPLOAD_TOKEN_ENV)
-    if not token:
-        raise RuntimeError(
-            f"No Paramify API token: set {READ_TOKEN_ENV} (or "
-            f"{UPLOAD_TOKEN_ENV}) to a token with read scope on the workspace"
-        )
-    if not base_url:
-        base_url, _ = resolve_base_url()
-    # Same rule the uploader enforces (uploader._base_url_error): a Bearer token
-    # must not go out over plaintext. Localhost is exempt so a local stub works.
-    host = urlparse(base_url).hostname or ""
-    if urlparse(base_url).scheme != "https" and host not in ("localhost", "127.0.0.1", "::1"):
-        raise RuntimeError(
-            f"{BASE_URL_ENV} must be https to protect the API token (got {base_url!r}); "
-            "only localhost may use http"
-        )
-    url = f"{base_url.rstrip('/')}{path}"
+    resolved = paramify_settings(base_url=base_url, read=True)
+    problems = resolved.errors(need_token=True)
+    if problems:
+        raise RuntimeError(problems[0])
+    url = f"{resolved.base_url.rstrip('/')}{path}"
+    client = client_for(resolved, retry_budget_s=0)
     try:
-        resp = requests.get(
-            url,
-            headers={"Accept": "application/json", "Authorization": f"Bearer {token}"},
-            params=params or None,
-            timeout=_WORKSPACE_READ_TIMEOUT,
-        )
-    except Exception as e:  # noqa: BLE001 — transport errors become one clean message
-        raise RuntimeError(f"could not reach {url}: {e}") from e
-    if resp.status_code in (401, 403):
-        raise RuntimeError(
-            f"Paramify rejected the token (HTTP {resp.status_code}) for {url}; "
-            "check that it has read scope on this workspace"
-        )
-    if resp.status_code != 200:
-        raise RuntimeError(f"GET {url} failed (HTTP {resp.status_code}): {resp.text[:300]}")
-    try:
-        return resp.json()
-    except ValueError as e:
-        raise RuntimeError(f"GET {url} returned a non-JSON body: {resp.text[:200]}") from e
+        body = client.get(path, params or None)
+    except ApiError as e:
+        if e.status in (401, 403):
+            raise RuntimeError(
+                f"Paramify rejected the token (HTTP {e.status}) for {url}; "
+                "check that it has read scope on this workspace"
+            ) from e
+        if e.status is None:
+            raise RuntimeError(f"could not reach {url}: {e.message}") from e
+        if e.status < 400:
+            raise RuntimeError(f"GET {url} returned a non-JSON body: {e.body[:200]}") from e
+        raise RuntimeError(f"GET {url} failed (HTTP {e.status}): {e.body[:300]}") from e
+    if body is None:
+        raise RuntimeError(f"GET {url} returned a non-JSON body: (empty)")
+    return body
 
 
 def program_display_name(program: dict) -> str:
@@ -3906,7 +3906,7 @@ def paramify_status(root: Path, manifest_path: Path, config_path: Optional[Path]
             "script": None,
             "validators": [
                 {"key": v.key, "role": v.role or "", "name": v.name, "paired": None}
-                for v in registry if ref in v.evidence_sets
+                for v in _registry.tracked_for(entry, ref, registry)  # what the entry tracks
             ],
             "pairs": [],
             "ready": False,
@@ -4126,3 +4126,79 @@ def shared_config_state(
         "conflict": len(runtime) > 1,
         "missing": missing,
     }
+
+
+def env_file(root: Path) -> Path:
+    """The .env that `run` and `doctor` read, and `paramify env` writes by default."""
+    return Path(root) / ".env"
+
+
+def refresh_env(root: Path) -> List[str]:
+    """Copy into os.environ each `.env` value (env_file) whose variable is
+    unset or empty here. Returns the names it filled.
+
+    A run resolves ${env:...} from os.environ, so without this a value kept
+    only in `.env` (the file `paramify env --write` makes) reaches a run only
+    when something else happened to load it first. And `load_dotenv` never
+    overrides: a line still empty when it ran (`OKTA_API_TOKEN=`) leaves the
+    variable set to "", so a value typed in later would never be read. A
+    non-empty export always wins; an empty .env value is never copied; a value
+    this function set earlier is refreshed. Called by `run` and `doctor`
+    before they read anything.
+    """
+
+    path = env_file(root)
+    # The words python-dotenv (1.2) accepts in its private _load_dotenv_disabled; the demo's offline guard sets it.
+    disabled = os.environ.get("PYTHON_DOTENV_DISABLED", "").casefold() in {"1", "true", "t", "yes", "y"}
+    if disabled or not path.is_file():
+        return []
+    filled = []
+    for name, value in envgen.assigned(path.read_text()).items():
+        if value and (name in _FILLED_FROM_DOTENV or not (os.environ.get(name) or "").strip()):
+            os.environ[name] = value
+            _FILLED_FROM_DOTENV.add(name)
+            filled.append(name)
+    return filled
+
+
+# Names refresh_env set, as opposed to real exports: in a long-lived process (the TUI) they are
+# read again on every run, so a token rotated in .env is picked up.
+_FILLED_FROM_DOTENV: set = set()
+
+
+def generate_env(root: Path, manifest: Mapping[str, Any], write: bool = False, path: Optional[Path] = None) -> dict:
+    """The .env a manifest needs, merged with the one at `path` (default
+    env_file(root)) without changing anything already in it.
+
+    Returns {"text", "added", "already_set", "missing_values", "variables",
+    "unmapped", "path"}. `variables` is every variable the manifest needs:
+    {name, tool, required, default, note, fetchers (who reads it; empty for
+    Paramify's upload token), set (has a value in the file or environment)};
+    never a value. `text`
+    is what is added (the whole file when there was none), never existing
+    content, so printing it cannot leak a value. `missing_values` names required
+    variables that would still be empty: empty in the file and not exported
+    (non-empty) in this process's environment. `unmapped` names the required
+    secrets the manifest doesn't map yet ({fetcher, secret, env, per_target,
+    target}): the run
+    stops on those whatever .env holds. Writes only when `write` is set:
+    atomically, through a symlinked .env to its file, keeping CRLF line endings.
+    """
+
+    path = Path(path) if path else env_file(root)
+    target = path.resolve() if path.is_symlink() else path
+    existing = ""
+    if target.is_file():
+        with target.open(newline="") as fh:
+            existing = fh.read()
+    found = discover(root)
+    groups, unmapped = envgen.env_groups(found["fetchers"], found["platforms"], manifest)
+    text, result = envgen.merged(existing, groups)
+    if write and result.text:
+        _atomic_write(target, text)
+    variables = [{"name": v.name, "tool": g.title, "required": v.required, "default": v.default, "note": v.note,
+                  "fetchers": list(v.fetchers), "set": v.name in result.has_value}
+                 for g in groups for v in g.vars]
+    return {"text": result.text, "added": result.added, "already_set": result.already_set,
+            "missing_values": result.missing, "path": str(path), "variables": variables,
+            "unmapped": [vars(u) for u in unmapped]}

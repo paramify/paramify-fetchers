@@ -303,3 +303,52 @@ def test_evidence_validators_are_named():
     from framework.paramify.resources import _evidence
     ev = _evidence({"id": "e", "referenceId": "R", "validators": [{"id": "v1", "name": "VAL-1"}, {"id": "v2"}]})
     assert ev.validators == ("VAL-1", "v2")
+
+
+@pytest.mark.parametrize("subject", ["SCRIPT", "VALIDATOR"])
+def test_associate_connects_once_and_a_repeat_is_the_state_we_wanted(fake, res, subject):
+    """The API has no association read-back, so asserting a link means CONNECTing
+    again; its 'already connected' refusal is success. One rule for every subject
+    (the scripts and validator stages once disagreed about it, GitHub #83)."""
+    ev = fake.add_evidence("EVD-A")
+    res.associate(ev.id, subject, "s-1")
+    res.associate(ev.id, subject, "s-1")
+    assert fake.associations == {(ev.id, subject, "s-1")}
+
+
+@pytest.mark.parametrize("status, text", [
+    (400, "Subject is already connected"),        # as observed live
+    (409, "Subject is already connected"),        # the same refusal on the code spec 0.9.2 permits
+])
+def test_associate_tolerates_already_connected_on_either_code(fake, res, status, text):
+    ev = fake.add_evidence("EVD-A")
+    fake.fail_route("POST", r"/evidence/[^/]+/associate", status, text)
+    res.associate(ev.id, "SCRIPT", "s-1")  # no raise
+
+
+@pytest.mark.parametrize("status, text", [
+    (400, "subjectId must be a uuid"),
+    (409, '{"statusMessage":"Conflict","error":{"message":"Conflict"}}'),
+    (403, "forbidden"),
+])
+def test_associate_other_refusals_raise(fake, res, status, text):
+    ev = fake.add_evidence("EVD-A")
+    fake.fail_route("POST", r"/evidence/[^/]+/associate", status, text)
+    with pytest.raises(ApiError) as e:
+        res.associate(ev.id, "SCRIPT", "s-1")
+    assert e.value.status == status
+
+
+def test_already_present_reads_the_whole_body_not_the_truncated_message(fake, res):
+    """The 'already' can sit past the first 300 characters, which is all an
+    ApiError's message keeps."""
+    ev = fake.add_evidence("EVD-A")
+    fake.fail_route("POST", r"/evidence/[^/]+/associate", 400, "x" * 400 + " already connected")
+    res.associate(ev.id, "SCRIPT", "s-1")  # no raise
+
+
+def test_a_create_that_returns_no_id_fails_that_action(fake, res):
+    fake.fail_route("POST", "/scripts", 201, "{}")
+    with pytest.raises(ApiError, match="returned no id") as e:
+        res.create_script("n", "d", "code")
+    assert not e.value.fatal

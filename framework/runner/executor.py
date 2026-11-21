@@ -36,6 +36,7 @@ from typing import (
     FrozenSet,
     Iterable,
     List,
+    Mapping,
     NamedTuple,
     Optional,
     Set,
@@ -293,6 +294,7 @@ def merged_config(
     platform_cfg: Optional[PlatformConfig],
     entry: ManifestEntry,
     secret_vars: FrozenSet[str] = frozenset(),
+    environ: Optional[Mapping[str, str]] = None,
 ) -> MergedConfig:
     """Resolve a fetcher's effective config.
 
@@ -311,7 +313,9 @@ def merged_config(
     stale one) passes through as written. Extracted from _apply_config so callers that need a resolved value
     the fetcher never sees can read it without re-implementing the ladder —
     `api.run()` does this for the issue-report `assessment_id`, which is resolved
-    from the manifest but injected into no env var.
+    from the manifest but injected into no env var. `environ` (default
+    os.environ) is where references are looked up; `paramify env` passes an
+    empty one to learn every variable the config would read.
     """
     schema: Dict[str, ConfigField] = {}
     if platform_spec:
@@ -357,7 +361,7 @@ def merged_config(
                                     f"string config fields only")
                 else:
                     try:
-                        referenced[name], value = value, resolve(value)
+                        referenced[name], value = value, resolve(value, environ)
                     except UnsetSecretError as e:
                         unset.append((name, e.env_var))
                         continue
