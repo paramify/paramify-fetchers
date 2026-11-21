@@ -1,0 +1,21 @@
+key: kubernetes_ready_pods_span_zones
+name: 'Kubernetes: Ready Pods Span More Than One Zone'
+type: AUTOMATED
+role: configuration
+source: community
+statement: >
+  No multi-replica workload has all its ready pods on nodes in a single zone
+  (workloads_ready_pods_in_one_zone is empty), judged from where pods actually run and their nodes' zone
+  labels. This is current placement: it doesn't show the workload surviving an actual zone failure. Covers
+  Deployments and StatefulSets outside the excluded namespaces. Does not check whether the collection run
+  succeeded.
+
+regex: '"workloads_ready_pods_in_one_zone":\s*\[\]'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-KUBERNETES-WORKLOAD-RESILIENCE
