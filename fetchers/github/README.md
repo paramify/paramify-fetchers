@@ -38,6 +38,7 @@ organization, each with its own token and API host.
 | `org` | `GITHUB_ORG` | yes | Organization login, as in `github.com/<org>` |
 | `api_url` | `GITHUB_API_URL` | no | `https://api.github.com` (default), `https://api.<sub>.ghe.com` (GHE.com), `https://<host>/api/v3` (GitHub Enterprise Server) |
 | `repositories` | `GITHUB_REPOSITORIES` | no | Comma-separated names; unset collects every repository the token can see. The inventory ignores it |
+| `exclude_repositories` | `GITHUB_EXCLUDE_REPOSITORIES` | no | Comma-separated names to leave out, matched without regard to case; cannot be combined with `repositories`. The evidence lists `repositories_excluded` and `exclude_repositories_unmatched` (names that matched nothing, such as a typo). The inventory ignores it; the audit log leaves out the events that name an excluded repository (and, with `repositories`, the events of every repository not listed), counts them in `events_outside_repository_filter`, and keeps organization-wide events |
 | `include_archived` | `GITHUB_INCLUDE_ARCHIVED` | no | Default `false`. The inventory ignores it and always includes archived repositories, because they are still assets |
 | secret `token` | `GITHUB_TOKEN` | yes | Per target |
 
@@ -97,6 +98,22 @@ Two settings are visible only to an **organization owner**: the two-factor
 requirement and the list of members without two-factor. Collected by a
 non-owner they are `null`, never `false`.
 
+In an organization of **managed user accounts** (Enterprise Managed Users)
+members sign in, and use two-factor, through the identity provider. GitHub
+keeps no two-factor method for them, so it lists every member as lacking
+two-factor and reports the requirement as off. `org_security_settings`
+detects such an organization from its member list (every login carries the
+enterprise's underscore suffix; a personal login cannot hold an underscore),
+or takes `managed_user_accounts: true`, and then reports the two-factor
+fields as `null` with `two_factor_note`. It does not read the identity
+provider.
+
+`access_review` reads members, teams and organization roles across the whole
+organization; a `repositories` filter narrows only the per-repository
+section. Set `scope_to_repositories: true` to keep only the teams and roles
+that reach the collected repositories, and `include_members: false` to
+leave the member list out (the count stays).
+
 A **GitHub App installation token** holding the same read-only permissions
 produced the same evidence as a personal token for those fifteen, with two
 differences, both measured: it can list the organization's fine-grained
@@ -143,6 +160,13 @@ repositories; each returns well-formed, misleading data without an error.
   the second a collection failure.
 - **A token restricted to some repositories lists only those.** The listing is
   compared with the organization's own repository count.
+- **An organization can have no invitation list.** One whose accounts an identity provider provisions (Enterprise
+  Managed Users) answers a bare 404 for `orgs/{org}/invitations`, the same answer a caller that may not read it
+  gets. `github_access_review` accepts the 404 as "none to give" only when the outside collaborator and team
+  lists were both read (they need the same `members: read`) and the token is an App installation token, or its
+  user is an organization owner. Then `pending_invitations` is `null` with `pending_invitations_available: false`
+  and the run does not fail. Whether a non-owner's personal token gets this 404 on an ordinary organization is
+  not measured, so for one the 404 stays a failure.
 - **Unreadable is not absent.** Where a token cannot read something that
   could disprove a verdict, the verdict is `null`, never `false`.
 - **GraphQL fails with a 200.** Errors arrive in an `errors` list beside

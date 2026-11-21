@@ -26,6 +26,18 @@ _BATCH_META_KEYS = frozenset({"title", "note", "effectiveDate"})
 _BATCH_DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
 
 
+# Fixed, not http.HTTPStatus: Python 3.13 renamed 422's phrase.
+_STATUS_MESSAGE = {400: "Bad Request", 401: "Unauthorized", 403: "Forbidden", 404: "Not Found", 409: "Conflict",
+                   422: "Unprocessable Entity", 429: "Too Many Requests", 500: "Internal Server Error",
+                   503: "Service Unavailable"}
+
+
+def api_error(status: int, message: str, path: str) -> str:
+    """The body the API answers an error with. A WAF refusal has no requestId (framework.paramify.client.classify)."""
+    return json.dumps({"requestId": "r-1", "statusMessage": _STATUS_MESSAGE.get(status, "Error"),
+                       "error": {"message": message, "path": path}})
+
+
 def _public(row: Dict[str, Any]) -> Dict[str, Any]:
     """An artifact as the API shows it: the fake's private keys (leading underscore) are dropped."""
     return {k: v for k, v in row.items() if not k.startswith("_")}
@@ -70,6 +82,10 @@ class FakeParamify:
         self.batch_settings = True
         self.today = date(2026, 11, 1)
         self.tags: Dict[Tuple[str, str], List[str]] = {}
+        self.scripts: List[Dict[str, Any]] = []
+        self.validators: List[Dict[str, Any]] = []
+        #: (evidence id, subject type, subject id) for every CONNECT that took.
+        self.associations: set = set()
         self._stacks: List[Dict[str, Any]] = []
         self._evidence: List[Dict[str, Any]] = []
         self._requests: List[Dict[str, Any]] = []
@@ -113,10 +129,10 @@ class FakeParamify:
         return row
 
     def add_evidence(self, ref: str, *, channels: Any = (), approval: str = "SUBMISSION",
-                     owners: Any = (), validators: Any = ()) -> EvidenceSet:
+                     owners: Any = (), name: Optional[str] = None, validators: Any = ()) -> EvidenceSet:
         """`owners` gives each channel's owner username, in the order of `channels`; a channel past its end has none.
-        `validators` names the validators paired with the set."""
-        row = self._make_evidence(ref, channels, approval, owners=owners, validators=validators)
+        `name` defaults to `ref`. `validators` names the validators paired with the set."""
+        row = self._make_evidence(ref, channels, approval, name, owners=owners, validators=validators)
         return EvidenceSet(
             id=row["id"], reference_id=ref, name=row["name"], approval=approval,
             channels=tuple(Channel(c["id"], c["referenceId"], c["stackId"], (c["owner"] or {}).get("username"))
@@ -133,11 +149,22 @@ class FakeParamify:
         self._requests.append(row)
         return ArtifactRequest(row["id"], row["referenceId"], channel_id, evidence_id, requested, due)
 
+    def add_script(self, name: str, description: str) -> Dict[str, Any]:
+        row = {"id": f"sc-{self._next('sc')}", "name": name, "description": description, "code": ""}
+        self.scripts.append(row)
+        return row
+
+    def add_validator(self, name: str) -> Dict[str, Any]:
+        row = {"id": f"vl-{self._next('vl')}", "name": name}
+        self.validators.append(row)
+        return row
+
     def set_today(self, d: date) -> None:
         self.today = d
 
-    def fail_upload(self, filename: str, status: int, body: str = "") -> None:
-        self._fail_all[filename] = (status, body)
+    def fail_upload(self, filename: str, status: int, body: str = "", *, envelope: bool = False) -> None:
+        """Answer `status` to every upload of `filename`. `envelope`: as the API, not a WAF (see api_error)."""
+        self._fail_all[filename] = (status, body, envelope)
 
     def fail_upload_once(self, filename: str, status: int) -> None:
         self._fail_once[filename] = status
@@ -150,12 +177,24 @@ class FakeParamify:
         self._batches_flag_off = off
 
     def fail_route(self, method: str, path_regex: str, status: int, text: str = "",
-                   when: Optional[Dict[str, Any]] = None) -> None:
+                   when: Optional[Dict[str, Any]] = None, *, envelope: bool = False) -> None:
         """Answer `status` to every `method` call on a path matching `path_regex`.
 
         `when` limits it to JSON bodies that hold these key/value pairs.
+        `envelope` sends `text` in the API's JSON error body (see api_error).
         """
-        self._fail_routes.append((method, path_regex, status, text, dict(when or {})))
+        self._fail_routes.append((method, path_regex, status, text, dict(when or {}), envelope))
+
+    def clear_failures(self) -> None:
+        """Drop every injected failure: the outage is over."""
+        self._fail_all.clear()
+        self._fail_once.clear()
+        self._fail_routes.clear()
+
+    @property
+    def batches(self) -> List[Dict[str, Any]]:
+        """Every batch made, as the API shows it."""
+        return [_public(b) for b in self._batches]
 
     def add_legacy_artifact(self, evidence_id: str, filename: str, note: str) -> Dict[str, Any]:
         """An artifact the pre-batch uploader made (POST /evidence/{id}/artifacts/upload): no batch."""
@@ -171,15 +210,12 @@ class FakeParamify:
 
     # ----- routing -------------------------------------------------------
     def _route(self, method: str, path: str, params: Dict[str, Any], body: Any, files: Any) -> FakeResponse:
-        for f_method, f_path, f_status, f_text, f_when in self._fail_routes:
+        for f_method, f_path, f_status, f_text, f_when, f_envelope in self._fail_routes:
             if (f_method == method and re.fullmatch(f_path, path)
                     and all((body or {}).get(k) == v for k, v in f_when.items())):
-                return FakeResponse(f_status, text=f_text)
+                return FakeResponse(f_status, text=api_error(f_status, f_text, path) if f_envelope else f_text)
         if self._batches_flag_off and path.startswith(("/batches", "/artifact-requests")):
-            return FakeResponse(403, text=json.dumps({
-                "requestId": "r-1", "statusMessage": "Forbidden",
-                "error": {"message": "Artifact requests are not enabled for this workspace.", "path": path},
-            }))
+            return FakeResponse(403, text=api_error(403, "Artifact requests are not enabled for this workspace.", path))
         if path.startswith("/batches") and not self._batches_enabled:
             return FakeResponse(404, text="Not Found")
         if method == "GET" and path == "/stacks":
@@ -203,6 +239,7 @@ class FakeParamify:
             )
             row["whenToCreateAndUpdateProcessArtifactRequest"] = body.get(
                 "whenToCreateAndUpdateProcessArtifactRequest", "MANUAL")
+            row["frequency"], row["startDate"] = body.get("frequency"), body.get("startDate")
             return FakeResponse(201, row)
         if method == "GET" and path == "/artifact-requests":
             rows = [r for r in self._requests if r["evidenceId"] == params.get("evidenceId")]
@@ -247,6 +284,31 @@ class FakeParamify:
             have = self.tags.setdefault((m.group(1), m.group(2)), [])
             have.extend(n for n in body["names"] if n not in have)
             return FakeResponse(200, {"customTags": have})
+        for kind, rows in (("scripts", self.scripts), ("validators", self.validators)):
+            if path == f"/{kind}":
+                if method == "GET":
+                    return FakeResponse(200, {kind: rows})
+                row = {"id": f"{kind[:2]}-{self._next(kind[:2])}", **body}
+                rows.append(row)
+                return FakeResponse(201, row)
+            m = re.fullmatch(rf"/{kind}/([^/]+)", path)
+            if method == "PATCH" and m:
+                row = next((r for r in rows if r["id"] == m.group(1)), None)
+                if row is None:
+                    return FakeResponse(404, text="Not Found")
+                row.update(body)
+                return FakeResponse(200, row)
+        m = re.fullmatch(r"/evidence/([^/]+)/associate", path)
+        if method == "POST" and m:
+            if not any(e["id"] == m.group(1) for e in self._evidence):
+                return FakeResponse(404, text="Not Found")
+            link = (m.group(1), body["subjectType"], body["subjectId"])
+            if link in self.associations:
+                # A repeat CONNECT is refused with HTTP 400 saying it is already
+                # connected (seen live 2026-08-31); the exact wording is assumed.
+                return FakeResponse(400, text="Subject is already connected to this evidence")
+            self.associations.add(link)
+            return FakeResponse(201, {})
         return FakeResponse(404, text="Not Found")
 
     def _page(self, rows: List[Dict[str, Any]], key: str, params: Dict[str, Any]) -> FakeResponse:
@@ -300,8 +362,7 @@ class FakeParamify:
         if filename in self._fail_once:
             return FakeResponse(self._fail_once.pop(filename), text="injected failure")
         if filename in self._fail_all:
-            status, text = self._fail_all[filename]
-            return FakeResponse(status, text=text)
+            return self._injected(filename, f"/batches/{batch['id']}/artifacts/upload")
         meta = json.loads(files["artifact"][1])
         extra = sorted(set(meta) - _BATCH_META_KEYS)
         if extra:
@@ -329,8 +390,7 @@ class FakeParamify:
         if filename in self._fail_once:
             return FakeResponse(self._fail_once.pop(filename), text="injected failure")
         if filename in self._fail_all:
-            status, text = self._fail_all[filename]
-            return FakeResponse(status, text=text)
+            return self._injected(filename, f"/evidence/{evidence_id}/artifacts/upload")
         row = {
             "id": f"af-{self._next('af')}", "title": meta.get("title") or filename,
             "originalFileName": filename, "pathname": f"/artifacts/{filename}", "note": meta.get("note"),
@@ -341,6 +401,10 @@ class FakeParamify:
         self._artifacts.append(row)
         return FakeResponse(200, _public(row))
 
+    def _injected(self, filename: str, path: str) -> FakeResponse:
+        status, text, envelope = self._fail_all[filename]
+        return FakeResponse(status, text=api_error(status, text, path) if envelope else text)
+
     def _submit(self, batch: Dict[str, Any]) -> FakeResponse:
         if batch["status"] not in ("OPEN", "REJECTED"):
             return FakeResponse(409, text="Batch is not open")
@@ -348,3 +412,23 @@ class FakeParamify:
             return FakeResponse(409, text="Batch has no artifacts")
         batch["status"] = "SUBMITTED" if batch["whenToApprove"] == "MANUAL" else "APPROVED"
         return FakeResponse(200, batch)
+
+
+def reads_through(fake_get: Any) -> Any:
+    """A requests.Session stand-in for `Client` that answers every GET with a
+    `requests.get`-style fake: `fake_get(url, headers=, params=, timeout=)`.
+
+    Patch it in with
+    `monkeypatch.setattr("framework.paramify.client.requests.Session", lambda: reads_through(fake_get))`,
+    which replaces `requests.Session` itself for the test (monkeypatch restores it).
+    """
+    class _Session:
+        def __init__(self) -> None:
+            self.headers: Dict[str, str] = {}
+
+        def request(self, method: str, url: str, params: Any = None, json: Any = None,
+                    files: Any = None, timeout: Any = None) -> Any:
+            assert method == "GET", f"a workspace read sent {method} {url}"
+            return fake_get(url, headers=dict(self.headers), params=params, timeout=timeout)
+
+    return _Session()

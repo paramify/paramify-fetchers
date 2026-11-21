@@ -53,7 +53,7 @@ NO_TOKEN = (
     "environment, then press ctrl+r. Until then this page shows what the manifest and the registry hold."
 )
 EMPTY = "No fetchers in this manifest yet.\nAdd them on the Fetchers tab (1)."
-ONLY_SCAN = "This manifest's fetchers all send scan reports. They are on the Pipelines tab (5)."
+ONLY_SCAN = "This manifest's fetchers all send scan reports. They are on the Pipelines tab (6)."
 NO_LINKS = "No capability uses this evidence set yet.\nLink its validators to a capability in Paramify."
 CAPS_OFFLINE = "Capabilities are read from Paramify.\nThey show once a token is set."
 READING = "reading the workspace…"
@@ -350,6 +350,11 @@ class ParamifyPage(ParamifyWriter, Vertical):
         Measured, not CSS: the rows above the list (the summary wraps) and the
         list panel's own rows (filter, totals) vary, and the list must keep
         its rows while the detail gives way.
+
+        Nothing measured here depends on the row under the list, so one fit
+        is right whatever that row's height is when it runs: it may still have
+        its CSS height and squeeze the list to no rows, and no later fit is
+        sure to come once its own height change is laid out.
         """
         if not self.is_mounted or self.size.height == 0:
             return
@@ -364,9 +369,15 @@ class ParamifyPage(ParamifyWriter, Vertical):
         panel_id, list_id, slots = self._VIEW_LAYOUT[view]
         panel, table = self.query_one(panel_id), self.query_one(list_id)
         rows = self.DETAIL_ROWS_TALL if self.app.size.height >= self.TALL_TERMINAL else self.DETAIL_ROWS
-        if panel.display and table.display and table.size.height:
+        if panel.display and table.display and panel.outer_size.height:  # laid out; the list may have no rows
             above = panel.region.y - self.content_region.y
-            around = panel.outer_size.height - table.size.height  # border, filter, totals
+            # The panel's border and its fixed rows (filter, totals), all from the last
+            # layout: not the panel's height less the list's, which is wrong while
+            # the row under the list squeezes it (the fixed rows then overflow).
+            after = list(panel.children)[list(panel.children).index(table) + 1:]
+            around = (table.region.y - panel.region.y  # top border, filter and its margin
+                      + sum(child.outer_size.height for child in after if child.display)
+                      + panel.styles.border.spacing.bottom)
             margin = 0 if short else 1
             rows = min(rows, self.content_region.height - above - around - margin - self.MIN_LIST_ROWS)
         self._detail_rows = rows if rows >= self.DETAIL_MIN_ROWS else 0
@@ -557,7 +568,7 @@ class ParamifyPage(ParamifyWriter, Vertical):
                     ready = sum(r["ready"] for r in rows)
                     line.append(f"    {ready}/{len(rows)} ready", style=palette.OK if ready == len(rows) else palette.WARN)
             if status["pipelines_count"]:
-                line.append(f"    {status['pipelines_count']} scan-report fetchers → Pipelines (5)", style=palette.MUTED)
+                line.append(f"    {status['pipelines_count']} scan-report fetchers → Pipelines (6)", style=palette.MUTED)
             if status["skipped"]:
                 line.append(f"    skipped: {', '.join(status['skipped'])}", style=palette.WARN)
         if self._reading:

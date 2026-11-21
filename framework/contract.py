@@ -165,6 +165,9 @@ class Validator:
     #: The registry directory the validator sits in (`validators/<category>/`),
     #: which is the service axis the uploaders tag it by.
     category: Optional[str] = None
+    #: Who made it: "paramify" or "community" (absent in the yaml = paramify).
+    #: Only Paramify-made validators are tracked by default.
+    source: str = "paramify"
 
 
 @dataclass
@@ -209,6 +212,8 @@ class Fetcher:
     evidence_set: Optional["EvidenceSet"] = None
     ksis: List[str] = field(default_factory=list)
     kind: str = "evidence"
+    #: Who made it: "paramify" or "community" (absent in fetcher.yaml = paramify).
+    source: str = "paramify"
     issue_report: Optional["IssueReport"] = None
     #: The Paramify pipeline this fetcher's output feeds. Required of an inventory.
     pipeline: Optional["Pipeline"] = None
@@ -333,6 +338,7 @@ class ManifestEntry:
     secrets: Dict[str, str] = field(default_factory=dict)
     targets: List[TargetInstance] = field(default_factory=list)
     paramify: Dict[str, Any] = field(default_factory=dict)
+    concurrency: int = 1
 
 
 @dataclass

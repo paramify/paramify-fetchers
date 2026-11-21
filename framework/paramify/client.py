@@ -53,6 +53,7 @@ class ApiError(Exception):
         kind: ErrorKind,
         method: str,
         path: str,
+        body: str = "",
     ) -> None:
         super().__init__(message)
         self.message = message
@@ -60,6 +61,8 @@ class ApiError(Exception):
         self.kind = kind
         self.method = method
         self.path = path
+        #: The whole response body, for callers that read Paramify's own message.
+        self.body = body
 
     @property
     def fatal(self) -> bool:
@@ -96,12 +99,13 @@ def classify(method: str, path: str, status: int, body: str, is_upload: bool) ->
     return ErrorKind.FATAL
 
 
-def base_url_error(base_url: str) -> Optional[str]:
-    """A message when the base URL would send the token over plain http."""
+def base_url_error(base_url: str, setting: str = "base_url") -> Optional[str]:
+    """A message when the base URL would send the token over plain http.
+    `setting` names where the URL came from, so the message says what to fix."""
     parsed = urlparse(base_url)
     if parsed.scheme != "https" and (parsed.hostname or "") not in ("localhost", "127.0.0.1", "::1"):
         return (
-            "base_url must be https to protect the API token "
+            f"{setting} must be https to protect the API token "
             f"(got {base_url!r}); only localhost may use http"
         )
     return None
@@ -144,15 +148,22 @@ class Client:
     def get(self, path: str, params: Optional[Dict[str, Any]] = None) -> Any:
         return self._call("GET", path, params=params)
 
-    def post_json(self, path: str, body: Dict[str, Any]) -> Any:
+    def post_json(self, path: str, body: Optional[Dict[str, Any]] = None) -> Any:
+        """POST `body` as JSON; without one the request carries no body at all."""
         return self._call("POST", path, json_body=body)
 
-    def post_file(self, path: str, filename: str, content: bytes, meta: Dict[str, Any]) -> Any:
+    def patch_json(self, path: str, body: Dict[str, Any]) -> Any:
+        return self._call("PATCH", path, json_body=body)
+
+    def post_file(
+        self, path: str, filename: str, content: bytes, meta: Dict[str, Any],
+        *, content_type: str = "application/json", timeout: Optional[float] = None,
+    ) -> Any:
         files = {
-            "file": (filename, content, "application/json"),
+            "file": (filename, content, content_type),
             "artifact": ("artifact.json", json.dumps(meta), "application/json"),
         }
-        return self._call("POST", path, files=files, is_upload=True)
+        return self._call("POST", path, files=files, is_upload=True, timeout=timeout)
 
     def _call(
         self,
@@ -163,6 +174,7 @@ class Client:
         json_body: Optional[Dict[str, Any]] = None,
         files: Optional[Dict[str, Any]] = None,
         is_upload: bool = False,
+        timeout: Optional[float] = None,
     ) -> Any:
         attempt = 0
         # A POST may already be committed server-side when it times out or
@@ -172,6 +184,7 @@ class Client:
         safe_to_retry = method == "GET"
         while True:
             status: Optional[int] = None
+            body = ""
             retry_after: Optional[float] = None
             retryable = True
             try:
@@ -181,7 +194,7 @@ class Client:
                     params=params,
                     json=json_body,
                     files=files,
-                    timeout=self.timeout,
+                    timeout=timeout or self.timeout,
                 )
             except requests.ConnectionError as exc:
                 reason = f"{type(exc).__name__}: {exc}"
@@ -198,6 +211,7 @@ class Client:
                         raise ApiError(
                             f"{method} {path} returned a body that is not valid JSON",
                             status=status, kind=ErrorKind.FATAL, method=method, path=path,
+                            body=resp.text or "",
                         ) from exc
                 body = resp.text or ""
                 kind = classify(method, path, status, body, is_upload)
@@ -205,22 +219,22 @@ class Client:
                 if kind is not ErrorKind.TEMPORARY:
                     raise ApiError(
                         f"{method} {path} failed ({reason})",
-                        status=status, kind=kind, method=method, path=path,
+                        status=status, kind=kind, method=method, path=path, body=body,
                     )
                 retryable = safe_to_retry or status in (429, 503)
                 retry_after = _retry_after(resp.headers)
             if not retryable:
                 raise ApiError(
                     f"{method} {path} failed, not retried because it may have taken effect ({reason})",
-                    status=status, kind=ErrorKind.TEMPORARY, method=method, path=path,
+                    status=status, kind=ErrorKind.TEMPORARY, method=method, path=path, body=body,
                 )
             delay = retry_after if retry_after is not None else min(2.0**attempt, _BACKOFF_CAP_S)
             if not delay >= 1.0:  # also catches NaN: every retry costs at least 1 s of budget
                 delay = 1.0
             if delay > self._budget_left:
                 raise ApiError(
-                    f"{method} {path} failed after retrying ({reason})",
-                    status=status, kind=ErrorKind.TEMPORARY, method=method, path=path,
+                    f"{method} {path} failed{' after retrying' if attempt else ''} ({reason})",
+                    status=status, kind=ErrorKind.TEMPORARY, method=method, path=path, body=body,
                 )
             self._budget_left -= delay
             self._sleep(delay)
