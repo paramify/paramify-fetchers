@@ -115,7 +115,7 @@ def test_the_pipelines_tab_carries_a_beta_tag(tmp_path, run_tui):
     assert spans == [("beta", "$warning")]
 
 
-def test_tabs_are_fetchers_run_evidence_paramify(tmp_path, run_tui):
+def test_tabs_are_fetchers_run_evidence_validators_paramify_pipelines(tmp_path, run_tui):
     async def body(app, pilot):
         tabs = app.screen.query_one(TabbedContent)
         labels = [str(t.label) for t in tabs.query("ContentTab")]  # not the Paramify lens tabs
@@ -124,7 +124,7 @@ def test_tabs_are_fetchers_run_evidence_paramify(tmp_path, run_tui):
         return labels, tabs.active, _focus_id(app)
 
     labels, active, focus = run_tui(body, _manifest_with(tmp_path))
-    assert labels == ["Fetchers", "Run", "Evidence", "Paramify", "Pipelines beta"]
+    assert labels == ["Fetchers", "Run", "Evidence", "Validators beta", "Paramify", "Pipelines beta"]
     assert active == "tab-fetchers" and focus == "catalog-tree"
 
 
@@ -344,7 +344,7 @@ def test_footer_hints_follow_focus(tmp_path, run_tui):
     assert "targets" in in_manifest and "validate" in in_manifest
     # `a` in the manifest moves to the catalog filter; the hint says so.
     assert "a find to add" in in_manifest and "a add" not in in_manifest
-    assert "1-5" in in_catalog and "1-5" in in_manifest  # the workspace keys stay
+    assert "1-6" in in_catalog and "1-6" in in_manifest  # the workspace keys stay
 
 
 def _sizes(path: Path, size: tuple) -> dict:

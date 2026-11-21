@@ -12,6 +12,7 @@ CONFIG = {
     "days_back": ("GITHUB_WORKFLOW_RUNS_DAYS_BACK", 30),
     "max_runs": ("GITHUB_MAX_WORKFLOW_RUNS", 2000),
     "max_artifacts": ("GITHUB_MAX_ARTIFACTS", 2000),
+    "include_branch_names": ("GITHUB_WORKFLOW_RUNS_INCLUDE_BRANCH_NAMES", True),
 }
 MAX_DAYS_BACK = 366
 FAILED = ("failure", "timed_out", "startup_failure")
@@ -78,6 +79,12 @@ def collect(client, org, repos, config):
     since = now_epoch() - config["days_back"] * 86400
     records = [repo_record(client, org["login"], r, since, config) for r in repos]
     done = [r for r in records if r["collected"]]
+    if not config["include_branch_names"]:
+        # on_default_branch is worked out from the branch name before it is dropped, so it still says whether a run
+        # came from the default branch. The key is removed, not nulled, and metadata.include_branch_names says why.
+        for r in done:
+            for x in r["runs"]:
+                x.pop("head_branch", None)
     runs = [(r["repository"], x) for r in done for x in r["runs"]]
     on_default = [(repo, x) for repo, x in runs if x["on_default_branch"]]
     artifacts = [a for _, x in runs for a in x["artifacts"]]

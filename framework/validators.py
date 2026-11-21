@@ -39,6 +39,7 @@ def _parse_validator(data: dict, path: Path) -> Validator:
         attestation_rules=list(data.get("attestation_rules") or []),
         path=path.resolve(),
         category=path.parent.name,
+        source=data.get("source") or "paramify",
     )
 
 
@@ -116,3 +117,49 @@ def pipeline_conflicts(validators: Iterable[Validator], fetchers: Dict[str, Fetc
         f"never approve, so the pipeline never runs (remove {ref} from its evidence_sets)"
         for v in validators for ref in v.evidence_sets if ref in pipeline
     ]
+
+
+# --------------------------------------------------------------------------- #
+# Per-fetcher validator selection in the manifest.
+#
+#   - use: some_fetcher
+#     validators: [key_a, key_b]     # the exact tracked list (pinned)
+#
+# No `validators:` on an entry = the defaults: every Paramify-made validator
+# for the fetcher's evidence set. Unticking only stops tracking; nothing is
+# removed from the workspace.
+
+
+def available_for(ref: str, validators: Iterable[Validator]) -> List[Validator]:
+    """Every registry validator that applies to one evidence set."""
+    return [v for v in validators if ref in v.evidence_sets]
+
+
+def default_keys(available: Iterable[Validator]) -> List[str]:
+    return [v.key for v in available if v.source == "paramify"]
+
+
+def tracked_for(entry: dict, ref: str, validators: Iterable[Validator]) -> List[Validator]:
+    """The validators a manifest entry tracks for its evidence set."""
+    avail = available_for(ref, validators)
+    chosen = entry.get("validators") if isinstance(entry, dict) else None
+    keys = set(default_keys(avail) if chosen is None else chosen)
+    return [v for v in avail if v.key in keys]
+
+
+def manifest_tracked(manifest: dict, fetchers: Dict[str, Fetcher],
+                     validators: Iterable[Validator], refs: Set[str] | None = None) -> List[Validator]:
+    """Union of what the manifest's entries track (optionally only for `refs`)."""
+    validators = list(validators)
+    out: Dict[str, Validator] = {}
+    for entry in (manifest.get("run") or {}).get("fetchers") or []:
+        name = entry.get("use") if isinstance(entry, dict) else None
+        fetcher = fetchers.get(name) if name else None
+        if not fetcher or not fetcher.evidence_set or fetcher.is_pipeline:
+            continue
+        ref = fetcher.evidence_set.reference_id
+        if refs is not None and ref not in refs:
+            continue
+        for v in tracked_for(entry, ref, validators):
+            out[v.key] = v
+    return list(out.values())

@@ -1,0 +1,18 @@
+# Public pages, so no secrets or auth; no `requires:`, since `requests` is core and HTML parsing is stdlib.
+
+name: nist_cmvp
+display_name: NIST CMVP
+description: >-
+  NIST Cryptographic Module Validation Program certificates: whether each
+  cryptographic module you list by certificate number is currently FIPS 140-2
+  or FIPS 140-3 validated.
+
+config_schema:
+  base_url:
+    type: string
+    default: https://csrc.nist.gov
+    env: NIST_CMVP_BASE_URL
+    description: >-
+      Base URL the certificate pages are read from, as
+      <base_url>/projects/cryptographic-module-validation-program/certificate/<number>.
+      Change it only to point at a mirror.
