@@ -44,6 +44,7 @@ class ResourceExclusions:
         self.patterns = list(patterns)
         self._keys = [_split(p) for p in self.patterns]
         self._matched: set = set()
+        self._unread = False
 
     @classmethod
     def from_env(cls) -> "ResourceExclusions":
@@ -92,8 +93,13 @@ class ResourceExclusions:
                 f"resource exclusion pattern {pattern!r} needs one of the prefixes rg:, location: or id: "
                 "and something after it"))
 
-    def unmatched(self) -> list[str]:
-        return [p for p in self.patterns if p not in self._matched]
+    def mark_unread(self) -> None:
+        """A resource list was not read: no pattern was compared to it, so none can be called unmatched."""
+        self._unread = True
+
+    def unmatched(self) -> Optional[list[str]]:
+        """The patterns that matched nothing, or None once a list was marked unread (or summary() saw one)."""
+        return None if self._unread else [p for p in self.patterns if p not in self._matched]
 
     def split(self, items: list, kind: str, *, resource_id=lambda r: r.get("id"),
               location=lambda r: r.get("location"), resource_group=lambda r: r.get("resource_group"),
@@ -114,7 +120,9 @@ class ResourceExclusions:
     def summary(self, excluded: list[dict], kinds: Iterable[str], in_scope: dict) -> dict:
         """The patterns as given, the ones that matched nothing, how many items of each kind were excluded, and how
         many of each stayed in scope (in_scope maps a plural name to a count, or to None when that list wasn't read,
-        which leaves its excluded count None too)."""
+        which leaves its excluded count None too, and the unmatched patterns None)."""
+        if any(count is None for count in in_scope.values()):
+            self.mark_unread()
         return {
             "resource_exclusion_patterns": list(self.patterns),
             "resource_exclusion_patterns_unmatched": self.unmatched(),
@@ -124,5 +132,5 @@ class ResourceExclusions:
         }
 
     def warn_unmatched(self, logger: logging.Logger) -> None:
-        for pattern in self.unmatched():
+        for pattern in self.unmatched() or ():
             logger.warning("resource exclusion pattern %r matched nothing", pattern)

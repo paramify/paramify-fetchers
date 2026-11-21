@@ -1,5 +1,5 @@
 name: azure_monitor_fired_alerts
-version: 0.2.1
+version: 0.2.2
 description: >-
   Lists every Azure Monitor alert fired in the last 30 days, who acknowledged and closed it and when, and how often each alert rule fired.
 category: azure
@@ -128,7 +128,7 @@ evidence_set:
 
     Which alerts and rules are left out of scope?
     - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every alert and rule is in scope
-    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no alert's target resource and no alert rule, such as a mistyped name
+    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no alert's target resource and no alert rule, such as a mistyped name; null if the alert list or a rule list wasn't read
     - excluded_alerts — Number of fired alerts left out of scope because a pattern matched their target resource's resource group or id; each is listed under excluded with the pattern and target_id, its history isn't read, and no other count includes it; null if the alert list wasn't read
     - excluded_alert_rules — Number of alert rules left out of scope because a pattern matched their own resource group or id; their alerts on in-scope resources still count; null if a rule list wasn't read
     - in_scope_alerts — Number of fired alerts listed and in scope (the same as alerts_fired); null if the alert list wasn't read

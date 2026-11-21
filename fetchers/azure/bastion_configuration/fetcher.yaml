@@ -1,5 +1,5 @@
 name: azure_bastion_configuration
-version: 0.1.0
+version: 0.1.1
 description: >-
   Shows how each Azure Bastion host is configured and logged, and which virtual machines a Bastion can reach, so administrative access needs no exposed port.
 category: azure
@@ -109,7 +109,7 @@ evidence_set:
 
     What was left out of scope?
     - resource_exclusion_patterns — List of the resource_exclusions patterns as given
-    - resource_exclusion_patterns_unmatched — List of the patterns that matched nothing, such as a mistyped name
+    - resource_exclusion_patterns_unmatched — List of the patterns that matched nothing, such as a mistyped name, or null when a list could not be read
     - excluded_bastion_hosts — Number of Bastion hosts a pattern took out of scope; null if the host list was not read
     - excluded_virtual_machines — Number of virtual machines a pattern took out of scope; null if the machine list was not read
     - in_scope_bastion_hosts — Number of Bastion hosts assessed; null if the host list was not read

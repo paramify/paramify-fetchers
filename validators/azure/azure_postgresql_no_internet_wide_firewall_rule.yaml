@@ -1,0 +1,24 @@
+key: azure_postgresql_no_internet_wide_firewall_rule
+name: 'Azure PostgreSQL: No Firewall Rule Opens a Server to the Internet'
+type: AUTOMATED
+role: configuration
+source: community
+statement: >
+  No in-scope PostgreSQL server has a firewall rule for every IPv4 address
+  (servers_allowing_entire_internet is 0). Only the exact 0.0.0.0 to 255.255.255.255 rule is
+  detected, and a server whose firewall rules could not be read adds none, which the collection
+  check catches. Fails when no server is in scope, the server list was not read, or the counts
+  appear other than exactly once. Does not check whether the collection run succeeded.
+
+regex: '"in_scope_postgresql_servers":\s*(?<in_scope_postgresql_servers>[1-9]\d*)(?:(?!"in_scope_postgresql_servers")[\s\S])*?"servers_allowing_entire_internet":\s*(?<servers_allowing_entire_internet>\d+)'
+rules_summary: MATCH_COUNT EQUALS 1; MATCH_GROUP[2] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "1" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }   # servers_allowing_entire_internet
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-POSTGRESQL-CONFIG
