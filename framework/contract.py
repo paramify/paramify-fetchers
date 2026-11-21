@@ -86,6 +86,15 @@ EVIDENCE_FREQUENCIES = (
     "MONTHLY", "QUARTERLY", "BIANNUAL", "ANNUAL",
 )
 DEFAULT_EVIDENCE_FREQUENCY = "THREE_DAY"
+# What a manifest can choose (run.schedule.every, an entry's paramify.frequency), shortest
+# first. NOT_SET is left out: a schedule always has a cadence.
+SCHEDULE_FREQUENCIES = tuple(f for f in EVIDENCE_FREQUENCIES if f != "NOT_SET")
+# Each value as a person says it, for messages and the TUI.
+FREQUENCY_WORDS = {
+    "NOT_SET": "not set", "DAILY": "daily", "THREE_DAY": "every 3 days", "WEEKLY": "weekly",
+    "BIWEEKLY": "every 2 weeks", "MONTHLY": "monthly", "QUARTERLY": "quarterly",
+    "BIANNUAL": "twice a year", "ANNUAL": "yearly",
+}
 
 
 @dataclass
@@ -347,6 +356,8 @@ class Manifest:
     entries: List[ManifestEntry]
     platforms: Dict[str, PlatformConfig] = field(default_factory=dict)
     paramify: Dict[str, Any] = field(default_factory=dict)
+    # run.schedule: {"every": <frequency>, "at": "HH:MM"}; empty when the manifest sets none.
+    schedule: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass

@@ -44,6 +44,35 @@ def render_plan(plan: Plan) -> List[str]:
     return lines
 
 
+def confirm_lines(plan: Plan) -> List[str]:
+    """The plan as a confirm dialog shows it: what is delivered where, what gets
+    created (+) or changed (~), and anything refused with its fix. Steps that
+    change nothing (noop) are left out, and tags are counted, not listed."""
+    lines: List[str] = [f"! {n}" for n in plan.notes]
+    tags = 0
+    for a in plan.actions:
+        if a.verb == "noop":
+            continue
+        if a.verb == "tag":
+            tags += 1
+            continue
+        if a.verb == "refuse":
+            lines.append(f"✗ {a.key}: {a.summary}")
+            if a.fix:
+                lines.append(f"    fix: {a.fix}")
+        elif a.provider == DELIVERY:
+            summary = a.summary[len("deliver "):] if a.summary.startswith("deliver ") else a.summary
+            lines.append(f"{a.key}: {summary}")
+        elif a.verb == "update":
+            lines.append(f"~ {a.summary}")
+        else:
+            lines.append(f"+ {a.summary}")
+        lines.extend(f"    ! {w}" for w in a.warnings)
+    if tags:
+        lines.append(f"Also tags {tags} evidence set{'s' if tags != 1 else ''}.")
+    return lines
+
+
 def _totals(plan: Plan) -> str:
     delivery: List[str] = [a.verb for a in plan.actions if a.provider == DELIVERY]
     parts = [f"{delivery.count(v)} {v}" for v in _DELIVERY_VERBS]
@@ -61,14 +90,15 @@ def _totals(plan: Plan) -> str:
 
 
 def render_outcomes(outcomes: Sequence[Outcome]) -> List[str]:
-    """One line per delivery entry (state, batch, message), plus any other action that did not complete."""
+    """One line per delivery entry (state, batch, message), plus any other action that did not complete
+    or completed with a warning (a frequency change this key can't make)."""
     lines: List[str] = []
     for o in outcomes:
         state = outcome_state(o)
         if o.action_id.startswith(f"{DELIVERY}/"):
             batch = o.result.get("batch_reference") or o.result.get("batch_id") if o.result else None
             head = f"{state} {_key(o.action_id)}" + (f" {batch}" if batch else "")
-        elif o.status in ("failed", "refused", "skipped"):
+        elif o.status in ("failed", "refused", "skipped") or state == "warning":
             head = f"{state} {o.action_id}"
         else:
             continue

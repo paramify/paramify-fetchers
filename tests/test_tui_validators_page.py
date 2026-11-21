@@ -27,6 +27,12 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 REF = discover_fetchers(REPO_ROOT)["demo_hello"].evidence_set.reference_id
 
 
+@pytest.fixture(autouse=True)
+def _offline(monkeypatch):
+    """The tab reads Paramify's results for the highlighted fetcher: no token here."""
+    monkeypatch.setattr(api, "validator_results", lambda root, ref, vs: {"state": "no_token", "results": {}})
+
+
 def _registry(monkeypatch):
     def v(key, source="paramify", role="configuration"):
         return Validator(key=key, name=key.replace("_", " ").title(), type="AUTOMATED",
@@ -141,7 +147,7 @@ def test_enter_opens_the_full_validator_and_space_there_toggles(tmp_path, monkey
         await pilot.pause()
         modal = app.screen
         seen["modal"] = isinstance(modal, ValidatorModal)
-        seen["body"] = _text(modal._body())
+        seen["body"] = _text(modal._top())
         await pilot.press("space")
         await pilot.pause()
         seen["closed"] = not isinstance(app.screen, ValidatorModal)

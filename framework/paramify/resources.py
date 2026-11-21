@@ -64,6 +64,7 @@ class EvidenceSet:
     channels: Tuple[Channel, ...]
     # Names (else ids) of the validators paired with the set; empty when the API sends none.
     validators: Tuple[str, ...] = ()
+    frequency: str = ""  # empty when the API sends none
 
 
 @dataclass(frozen=True)
@@ -126,6 +127,7 @@ def _evidence(d: Dict[str, Any]) -> EvidenceSet:
         approval=d.get("whenToApproveArtifactRequest") or "",
         channels=tuple(_channel(c) for c in d.get("channels") or ()),
         validators=tuple(v.get("name") or v.get("id") or "" for v in d.get("validators") or ()),
+        frequency=d.get("frequency") or "",
     )
 
 
@@ -267,6 +269,10 @@ class Resources:
                 status=None, kind=ErrorKind.CONFLICT, method="POST", path="/evidence",
             )
         return existing
+
+    def update_evidence(self, evidence_id: str, body: Dict[str, Any]) -> None:
+        """PATCH /evidence/{id}: only the fields in `body` change."""
+        self._client.patch_json(f"/evidence/{evidence_id}", body)
 
     def create_batch(
         self, *, artifact_request_id: Optional[str] = None, evidence_id: Optional[str] = None,

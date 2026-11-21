@@ -20,10 +20,11 @@ from textual.screen import ModalScreen
 
 from framework import api
 from framework.tui.components.chrome import UPDATE_KEY, UpdateNotice
-from framework.tui.modals import PickerModal
+from framework.tui.modals import EnvironmentModal, PickerModal
 from framework.tui.screens.update import UpdateScreen
 from framework.tui.screens.welcome import ManifestSelected, WelcomeScreen
 from framework.tui.screens.workspace import WorkspaceScreen
+from framework.tui.words import plural
 
 
 class FetcherApp(App):
@@ -125,7 +126,7 @@ class FetcherApp(App):
 
     def _update_failed(self, why: str) -> None:
         self._opening_update = False
-        self.notify(f"Could not open the update screen: {why}", severity="error")
+        self.notify(f"Couldn't open the update screen: {why}", severity="error")
 
     def _show_update_screen(self, plan: dict) -> None:
         self._opening_update = False
@@ -139,14 +140,14 @@ class FetcherApp(App):
             self.catalog_data = api.catalog(self.root_path)
         except Exception as exc:  # repo-root discovery / fetcher load failures
             self.catalog_data = None
-            self.notify(f"Could not load catalog: {exc}", severity="error", timeout=10)
+            self.notify(f"Couldn't load the catalog: {exc}", severity="error", timeout=10)
 
     def refresh_catalog(self) -> None:
         try:
             self.catalog_data = api.catalog(self.root_path)
             self.notify("Catalog reloaded.")
         except Exception as exc:
-            self.notify(f"Catalog reload failed: {exc}", severity="error")
+            self.notify(f"Couldn't reload the catalog: {exc}", severity="error")
 
     def load_manifest(self, path) -> None:
         self.manifest_path = Path(path)
@@ -154,7 +155,7 @@ class FetcherApp(App):
             self.manifest = api.read_manifest(self.manifest_path)
         except Exception as exc:  # malformed YAML, etc.
             self.manifest = api.init_manifest()
-            self.notify(f"Manifest unreadable ({exc}); starting a fresh one.", severity="warning")
+            self.notify(f"Couldn't read the manifest ({exc}), so this is a fresh one.", severity="warning")
 
     # -- screen routing --------------------------------------------------- #
 
@@ -176,7 +177,7 @@ class FetcherApp(App):
         options = []
         for m in api.list_manifests(self.root_path):
             flag = f"  ⚠ {m['issues']}" if m["issues"] else ""
-            options.append((m["path"], f"{m['name']}   {m['fetcher_count']} fetchers{flag}"))
+            options.append((m["path"], f"{m['name']}   {plural(m['fetcher_count'], 'fetcher')}{flag}"))
         if not options:
             self.notify("No manifests found under manifests/.")
             return
@@ -187,8 +188,32 @@ class FetcherApp(App):
                 screen = self.screen
                 if hasattr(screen, "reload"):
                     screen.reload()
-                self.notify(f"Switched to {Path(path).name}")
+                self.notify(f"Switched to {Path(path).name}.")
 
         self.push_screen(
-            PickerModal("Switch manifest", options, subtitle="Pick a manifest to work on"), done
+            PickerModal("Switch manifest", options), done
+        )
+
+    def open_environment(self, notice: str = "") -> None:
+        """The environment view for the open manifest: which variables a run
+        reads have a value (never the values). Opened from the manifest's env
+        button and by a run that stopped on a missing one (`notice` says so)."""
+        if self.root_path is None or self.manifest is None:
+            return
+        root = self.root_path
+
+        def done(_: None) -> None:
+            # .env may have changed under the view: the manifest's env button and rows follow it.
+            for panel in self.screen.query("ManifestPanel"):
+                panel.rebuild()
+
+        name = self.manifest_path.name if self.manifest_path else "manifest"
+        self.push_screen(
+            EnvironmentModal(
+                name,  # the manifest file name: "Everything <name> reads"
+                read=lambda: api.generate_env(root, self.manifest),
+                write=lambda: api.generate_env(root, self.manifest, write=True),
+                notice=notice,
+            ),
+            done,
         )
