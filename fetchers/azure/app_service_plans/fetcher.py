@@ -205,7 +205,8 @@ def summarize(plans: list[dict]) -> dict:
 
 # --- collection (lazy azure imports) ---
 
-def collect_plans(subscription_id, cred, collector: Collector) -> tuple[list[dict], list[dict]]:
+def collect_plans(subscription_id, cred, collector: Collector,
+                  exclusions: ResourceExclusions | None = None) -> tuple[list[dict], list[dict]]:
     """app_service_plans.list(detailed=True), then web_apps.list() for the join: (plans, sites), projected.
 
     Both are ItemPaged, so the SDK follows nextLink itself. `web_apps.list()` returns
@@ -221,19 +222,23 @@ def collect_plans(subscription_id, cred, collector: Collector) -> tuple[list[dic
 
     client = collector.guard("web.WebSiteManagementClient (init)", _client)
     if client is None:
+        if exclusions is not None:
+            exclusions.mark_unread()
         return [], []
 
     raw_plans = collector.guard(
         "web.app_service_plans.list",
         lambda: [project_plan(p) for p in client.app_service_plans.list(detailed=True)],
-        default=[],
+        default=None,
     )
     raw_sites = collector.guard(
         "web.web_apps.list",
         lambda: [project_site(s) for s in client.web_apps.list()],
-        default=[],
+        default=None,
     )
-    return raw_plans, raw_sites
+    if (raw_plans is None or raw_sites is None) and exclusions is not None:
+        exclusions.mark_unread()
+    return raw_plans or [], raw_sites or []
 
 
 def main() -> int:
@@ -255,6 +260,7 @@ def main() -> int:
 
     raw_plans: list[dict] = []
     raw_sites: list[dict] = []
+    exclusions = ResourceExclusions.from_env()
     registration = REGISTRATION_UNKNOWN
     if subscription_id and cred is not None:
         # Asked BEFORE the list call, so a zero-plan result is legible: Azure returns
@@ -268,7 +274,7 @@ def main() -> int:
                 "in use; reporting status not_registered",
                 subscription_id,
             )
-        raw_plans, raw_sites = collect_plans(subscription_id, cred, collector)
+        raw_plans, raw_sites = collect_plans(subscription_id, cred, collector, exclusions)
     elif not subscription_id:
         collector.record(
             "resolve_subscription",
@@ -278,9 +284,10 @@ def main() -> int:
             ),
         )
 
-    exclusions = ResourceExclusions.from_env()
     exclusions.record_invalid(collector)
     plans, excluded = plan_records(raw_plans, raw_sites, exclusions)
+    if not (subscription_id and cred is not None):
+        exclusions.mark_unread()
     exclusions.warn_unmatched(logger)
     summary = summarize(plans)
 

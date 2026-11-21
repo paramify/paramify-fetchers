@@ -8,6 +8,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "_shared"))
 from github_client import run  # noqa: E402
 
 NAME = "github_org_security_settings"
+# "auto" decides from the member list; "true" or "false" states it for an organization where that list is unreadable.
+CONFIG = {"managed_user_accounts": ("GITHUB_MANAGED_USER_ACCOUNTS", "auto")}
+MANAGED_NOTE = ("The organization's members are managed user accounts (Enterprise Managed Users). They sign in through "
+                "the identity provider, which handles two-factor authentication; GitHub keeps no two-factor method "
+                "for them and has no two-factor requirement setting for the organization, so the two-factor fields "
+                "do not apply and are null. This evidence does not read the identity provider.")
 ORG_FIELDS = ("two_factor_requirement_enabled", "default_repository_permission", "members_can_create_repositories",
               "members_can_create_public_repositories", "members_can_create_private_repositories",
               "members_can_fork_private_repositories", "members_can_delete_repositories",
@@ -26,6 +32,29 @@ def two_factor(client, login, org):
         return None
     state, members = client.paginate(f"orgs/{login}/members", {"filter": "2fa_disabled"})
     return None if state is not None else sorted(m.get("login") for m in members)
+
+
+def managed_user_accounts(client, login, setting):
+    """(managed, source). True when every member is a managed user account; None when it cannot be told.
+
+    A managed user account's login is the identity provider's handle, an underscore and the enterprise's short code
+    (measured: every member of an Enterprise Managed Users organization). A personal account's login may hold only
+    letters, digits and hyphens, so one login without an underscore proves the organization is not managed. An
+    unreadable or empty member list proves nothing, and the two-factor fields are then collected as before.
+    """
+    if setting in ("true", "false"):
+        return setting == "true", "configured"
+    before = len(client.failures)
+    state, members = client.paginate(f"orgs/{login}/members", {"role": "all"})
+    if state is not None or not members:
+        # Detection is a hint, not evidence: a refused list (403 or 404) leaves it unknown and does not fail the run,
+        # which collected nothing from this list before. Any other failure (network, server, pagination) stands.
+        new = client.failures[before:]
+        if new and all(f["type"] in ("HTTP 403", "HTTP 404") for f in new):
+            del client.failures[before:]
+            del client.codes[before:]
+        return None, "detected"
+    return all("_" in (m.get("login") or "") for m in members), "detected"
 
 
 def configurations(client, login):
@@ -54,10 +83,20 @@ def configurations(client, login):
 
 def collect(client, org, repos, config):
     login = org["login"]
+    setting = str(config["managed_user_accounts"]).strip().lower()
+    if setting not in ("auto", "true", "false"):
+        client.fail("config managed_user_accounts", "BadConfig",
+                    f"managed_user_accounts must be auto, true or false, got {config['managed_user_accounts']!r}",
+                    "bad_config")
+        return None
     settings = {k: org.get(k) for k in ORG_FIELDS}
+    managed, managed_source = managed_user_accounts(client, login, setting)
+    if managed:
+        # GitHub answers false for the requirement and lists every member under 2fa_disabled: neither is a finding.
+        settings["two_factor_requirement_enabled"] = None
     actions = client.get(f"orgs/{login}/actions/permissions") or {}
     workflow = client.get(f"orgs/{login}/actions/permissions/workflow") or {}
-    without_2fa = two_factor(client, login, org)
+    without_2fa = None if managed else two_factor(client, login, org)
     configs = configurations(client, login)
     coverage = {r["name"]: None if r.get("security_and_analysis") is None else {
         k: (r["security_and_analysis"].get(k) or {}).get("status") for k in REPO_SETTINGS} for r in repos}
@@ -67,7 +106,12 @@ def collect(client, org, repos, config):
     lists_known = configs is not None and all(c["repositories"] is not None for c in configs)
     readable = {n: c for n, c in coverage.items() if c is not None}
     return {
+        # The setting itself ("auto", "true" or "false") is in metadata as managed_user_accounts; the result is in the
+        # summary, and this says whether it was detected from the member list or stated in the configuration.
+        "metadata": {"managed_user_accounts_source": managed_source},
         "summary": {
+            "managed_user_accounts": managed,
+            **({"two_factor_note": MANAGED_NOTE} if managed else {}),
             "two_factor_required": settings["two_factor_requirement_enabled"],
             "members_without_two_factor": None if without_2fa is None else len(without_2fa),
             "default_repository_permission": settings["default_repository_permission"],
@@ -98,4 +142,4 @@ def collect(client, org, repos, config):
 
 
 if __name__ == "__main__":
-    sys.exit(run(NAME, collect))
+    sys.exit(run(NAME, collect, CONFIG))

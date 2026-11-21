@@ -1,0 +1,143 @@
+name: azure_aks_workload_security
+version: 0.1.0
+description: >-
+  Shows from each AKS cluster's Kubernetes API whether workload containers run non-root with privilege escalation off, a read-only root filesystem and capabilities dropped, and which namespaces network policies cover.
+category: azure
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_aks_workload_security.json
+  aggregation: per_target
+
+target_schema:
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id holding the AKS clusters. Optional - omit to use the first
+      enabled subscription the ambient credential can see.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: Deployment environment label (e.g. prod) written into the evidence metadata.
+
+config_schema:
+  system_namespaces:
+    type: string
+    required: false
+    env: AKS_SYSTEM_NAMESPACES
+    description: >
+      Namespaces that hold the platform's own pods, separated by commas or spaces. Their
+      workloads are listed and counted apart, and never judged, because node agents need
+      host access. Default: kube-system, kube-public, kube-node-lease, gatekeeper-system,
+      calico-system, tigera-operator, app-routing-system and aks-command. A value that
+      names no namespace fails the run.
+  max_rows:
+    type: integer
+    required: false
+    default: 500
+    env: AKS_WORKLOAD_MAX_ROWS
+    description: >
+      Most workload rows kept per cluster, those not hardened first. Every count still
+      covers all workloads.
+  resource_exclusions:
+    type: patterns
+    prefixes: [rg, location, id]
+    bare: false
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Resources outside the authorization boundary, to leave out of scope,
+      as case-insensitive glob patterns listed in the manifest, each with
+      a prefix: rg:<resource group> (read from the resource id),
+      location:<region> (the region's name without spaces, such as
+      usgovvirginia; a resource with no location never matches one) or
+      id:<resource id> (also matches that resource's child resources). *
+      matches any run of characters and ? one character. A matching cluster is listed under excluded with the pattern, its Kubernetes API is not called, and it is left out of every count and judgement. A pattern that matches nothing is reported; a bare pattern fails the run.
+
+secrets: []          # DefaultAzureCredential only - see _categories/azure.yaml
+
+ksis:
+  - KSI-CNA-DFP   # containers restricted to what they need: non-root, no privilege escalation, read-only root filesystem, capabilities dropped
+  - KSI-CNA-MAT   # privileged containers, host namespaces and host paths that widen what a compromised pod can reach
+  - KSI-CNA-ULN   # network policies and default-deny namespaces that limit traffic between workloads
+
+evidence_set:
+  reference_id: EVD-AZURE-AKS-WORKLOAD-SECURITY
+  name: Azure AKS Workload Security
+  instructions: |
+    Script: azure/aks_workload_security/fetcher.py
+
+    Access: Reader on the subscription, plus on each cluster Azure Kubernetes Service Cluster User Role (to read the API server address and its CA certificate) and Azure Kubernetes Service RBAC Reader (to read pods, namespaces and network policies; it cannot read secrets). The cluster must use AKS-managed Microsoft Entra integration, and where it authorizes with Kubernetes RBAC instead of Azure RBAC, the identity needs a ClusterRole allowing get and list on those three resources in place of RBAC Reader. The run must reach its API server, which for a private cluster means running inside its virtual network or a peered one. Without these the cluster reads unread and the run fails.
+
+    Commands Executed:
+    - subscriptions.list() — picks a subscription when none is set
+    - GET Microsoft.ContainerService/managedClusters — every AKS cluster with its power state, Entra integration, network policy engine and Azure Policy add-on
+    - POST managedClusters/{cluster}/listClusterUserCredential (per cluster) — the API server address and CA certificate from the user kubeconfig; the user entry is not read
+    - GET {API server}/api/v1/pods (per cluster) — every pod's security context, containers, host namespaces, host path volumes, labels and owner
+    - GET {API server}/apis/networking.k8s.io/v1/networkpolicies (per cluster) — every network policy with its pod selector, policy types and rule counts
+    - GET {API server}/api/v1/namespaces (per cluster) — every namespace with its Pod Security Admission labels
+
+    Output: azure_aks_workload_security_<subscription>.json — per cluster, its identity and network policy engine, each namespace with its Pod Security Admission levels and policy coverage, each network policy, and each workload (pods grouped by the Deployment, StatefulSet, DaemonSet or Job that runs them) with every container's security context; no environment variables, images, secrets or logs are read.
+
+    Summary fields:
+
+    Which clusters were read?
+    - clusters_read — True if the cluster list was read; false if it failed, and then every count below is 0 or null and the run fails
+    - clusters — Number of AKS clusters in scope
+    - clusters_with_kubernetes_api_read — Number of clusters whose pods, network policies and namespaces were all read; a stopped cluster counts, since it runs nothing
+    - clusters_with_kubernetes_api_unread — Number of clusters where a list could not be read: no AKS-managed Entra integration, a missing role, or an API server the run could not reach; the run fails
+    - clusters_stopped — Number of clusters that are stopped, which have no API server and run no workload
+    - clusters_without_entra_integration — Number of clusters without AKS-managed Microsoft Entra integration (none, or the legacy kind), whose Kubernetes API this fetcher cannot read
+    - clusters_enforcing_network_policies — Number of clusters with a network policy engine (azure, calico or cilium); only there do NetworkPolicy objects have any effect
+    - clusters_without_network_policy_engine — Number of clusters with no network policy engine, where every network policy below is unenforced
+    - clusters_with_azure_policy_addon — Number of clusters with the Azure Policy add-on, which can enforce pod security rules at admission
+
+    Are namespaces restricted?
+    - system_namespaces — List of the namespaces treated as the platform's own (system_namespaces setting, or the default list); they are left out of every namespace, workload and container count below except system_workloads
+    - namespaces — Number of namespaces outside the system namespaces; null if any cluster's namespace list was not read
+    - namespaces_enforcing_pod_security — Number of those namespaces whose pod-security.kubernetes.io/enforce label is baseline or restricted, so the API server rejects pods that break that level; null if any namespace list was not read
+    - namespaces_enforcing_restricted_pod_security — Number of those namespaces enforcing the restricted level; null if any namespace list was not read
+    - namespaces_without_pod_security_enforcement — Number of those namespaces with no enforce label or the privileged level; another admission controller such as Azure Policy may still restrict them; null if any namespace list was not read
+    - network_policies — Number of network policies outside the system namespaces; null if any cluster's policies were not read
+    - namespaces_with_network_policy — Number of namespaces with at least one network policy; null if any cluster's policies or namespaces were not read
+    - namespaces_without_network_policy — Number of namespaces with no network policy, where every pod accepts and sends any traffic; null if any cluster's policies or namespaces were not read
+    - namespaces_with_default_deny_ingress — Number of namespaces with a policy that selects every pod, covers ingress and allows nothing, so only traffic another policy allows gets in; null if any cluster's policies or namespaces were not read
+    - namespaces_with_default_deny_egress — Number of namespaces with a policy that selects every pod, covers egress and allows nothing; null if any cluster's policies or namespaces were not read
+
+    Are containers restricted?
+    - pods — Number of pods that are running or pending, in every namespace; null if any cluster's pods were not read
+    - pods_finished_skipped — Number of pods in the Succeeded or Failed phase, such as completed jobs, which are not assessed; null if any cluster's pods were not read
+    - system_workloads — Number of workloads in the system namespaces, listed but not judged; null if any cluster's pods were not read
+    - windows_workloads — Number of Windows workloads (by the pod's os field or node selector) outside the system namespaces, listed but not judged because Linux security contexts do not apply to them; null if any cluster's pods were not read
+    - workloads — Number of Linux workloads outside the system namespaces, each a set of pods run by one Deployment, StatefulSet, DaemonSet, Job or other controller, or a bare pod; null if any cluster's pods were not read
+    - containers — Number of containers and init containers in those workloads' pod template, counted once per workload, not per replica; a workload running two templates, as during a rollout, is represented by its least restricted one; null if any cluster's pods were not read
+    - containers_non_root_enforced — Number of containers with a non-zero runAsUser, or with no runAsUser and runAsNonRoot true, set on the container or its pod; a runAsUser of 0 is root and is not counted; null if any cluster's pods were not read
+    - containers_privilege_escalation_disabled — Number of containers with allowPrivilegeEscalation false; unset means allowed; null if any cluster's pods were not read
+    - containers_read_only_root_filesystem — Number of containers with readOnlyRootFilesystem true; null if any cluster's pods were not read
+    - containers_dropping_all_capabilities — Number of containers whose capabilities drop list includes ALL; null if any cluster's pods were not read
+    - containers_with_added_capabilities — Number of containers that add a Linux capability; null if any cluster's pods were not read
+    - privileged_containers — Number of containers with privileged true, which have the node's full access; null if any cluster's pods were not read
+    - containers_with_seccomp_profile — Number of containers whose seccomp profile, on the container or its pod, is RuntimeDefault or Localhost; null if any cluster's pods were not read
+    - workloads_using_host_namespaces — Number of workloads with hostNetwork, hostPID or hostIPC; null if any cluster's pods were not read
+    - workloads_with_host_path_volumes — Number of workloads that mount a path of the node's filesystem; null if any cluster's pods were not read
+    - workloads_hardened — Number of workloads where every container is non-root, has privilege escalation off, a read-only root filesystem, all capabilities dropped and none added, is not privileged, and the pod uses no host namespace or host path; null if any cluster's pods were not read
+    - workloads_not_hardened — Number of workloads that miss at least one of those; null if any cluster's pods were not read
+    - workload_hardening_percentage — Percentage of workloads that are hardened: workloads_hardened * 100 / workloads, 0 when there are none; null if any cluster's pods were not read
+    - workloads_selected_by_network_policy — Number of workloads whose every pod is selected by at least one network policy in its namespace; null if any cluster's pods or policies were not read
+    - workloads_without_network_policy — Number of workloads with a pod no network policy selects; null if any cluster's pods or policies were not read
+    - workload_rows_truncated — True if a cluster has more workloads than max_rows, so its workload list is cut (those not hardened are kept first) while every count above still covers them all
+
+    What was left out of scope?
+    - resource_exclusion_patterns — List of the resource_exclusions patterns as given
+    - resource_exclusion_patterns_unmatched — List of the patterns that matched nothing, such as a mistyped name
+    - excluded_clusters — Number of clusters a pattern took out of scope; null if the cluster list was not read
+    - in_scope_clusters — Number of clusters assessed; null if the cluster list was not read

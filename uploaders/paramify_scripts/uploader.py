@@ -36,132 +36,28 @@ import sys
 from datetime import date
 from pathlib import Path
 from typing import Callable, Dict, List, Optional
-from urllib.parse import urlparse
 
-import requests
 from dotenv import load_dotenv
 
 # Also runnable directly from any cwd, where only its own directory lands on
-# sys.path. Position in the repo is fixed, so derive the root rather than
-# duplicating the token-resolution rule locally.
+# sys.path. Its position in the repo is fixed, so derive the root.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from framework import yaml_io  # noqa: E402
 from framework.contract import DEFAULT_EVIDENCE_FREQUENCY  # noqa: E402
 from framework.custom_tags import (  # noqa: E402
     ENTITY_EVIDENCE,
     ENTITY_SCRIPT,
     build_tagger,
 )
-from framework.paramify_auth import (  # noqa: E402
-    READ_TOKEN_ENV,
-    UPLOAD_TOKEN_ENV,
-    resolve_base_url,
-    resolve_upload_token,
-)
-from framework.paramify_responses import already_present  # noqa: E402
+from framework.paramify.client import ApiError, Client  # noqa: E402
+from framework.paramify.connection import open_workspace  # noqa: E402
+from framework.paramify.resources import Resources  # noqa: E402
+from framework.sync.providers.desired import resolve_evidence_set  # noqa: E402
 
 logger = logging.getLogger("paramify_scripts_uploader")
 
-_REQUEST_TIMEOUT = 30
 _MARKER_KEY = "paramify-fetcher"
-
-
-# --------------------------------------------------------------------------- #
-# Paramify API client — /scripts + the association endpoint
-# --------------------------------------------------------------------------- #
-class ParamifyError(RuntimeError):
-    pass
-
-
-class ParamifyScriptsClient:
-    """Thin client over the Paramify REST API v0 scripts + association endpoints."""
-
-    def __init__(self, token: str, base_url: str, timeout: int = _REQUEST_TIMEOUT):
-        self.base_url = base_url.rstrip("/")
-        self.timeout = timeout
-        self.session = requests.Session()
-        self.session.headers.update({"Authorization": f"Bearer {token}"})
-
-    # -- scripts ---------------------------------------------------------- #
-    def list_scripts(self) -> List[Dict]:
-        """All scripts in the tenant. The API offers no name/marker filter, so we
-        fetch once and index client-side by the marker in each description."""
-        r = self.session.get(f"{self.base_url}/scripts", timeout=self.timeout)
-        r.raise_for_status()
-        return r.json().get("scripts", [])
-
-    def create_script(self, name: str, description: str, code: str) -> Dict:
-        body = {"name": name, "description": description, "code": code}
-        r = self.session.post(f"{self.base_url}/scripts", json=body, timeout=self.timeout)
-        if r.status_code not in (200, 201):
-            raise ParamifyError(f"create script {name!r} failed (HTTP {r.status_code}): {r.text[:300]}")
-        return r.json()
-
-    def update_script(self, script_id: str, name: str, description: str, code: str) -> Dict:
-        body = {"name": name, "description": description, "code": code}
-        r = self.session.patch(f"{self.base_url}/scripts/{script_id}", json=body, timeout=self.timeout)
-        if r.status_code not in (200, 201):
-            raise ParamifyError(f"update script {script_id} failed (HTTP {r.status_code}): {r.text[:300]}")
-        return r.json()
-
-    # -- evidence set (mirrors paramify_evidence; kept minimal on purpose) - #
-    def find_evidence_set(self, reference_id: str) -> Optional[str]:
-        r = self.session.get(
-            f"{self.base_url}/evidence",
-            params={"referenceId": reference_id},
-            timeout=self.timeout,
-        )
-        r.raise_for_status()
-        for ev in r.json().get("evidences", []):
-            if ev.get("referenceId") == reference_id:
-                return ev.get("id")
-        return None
-
-    def create_evidence_set(
-        self, reference_id: str, name: str, frequency: str = DEFAULT_EVIDENCE_FREQUENCY
-    ) -> Optional[str]:
-        body = {
-            "referenceId": reference_id,
-            "name": name,
-            "automated": True,
-            "frequency": frequency,
-            # The frequency schedule counts from the day the set is created.
-            "startDate": date.today().isoformat(),
-        }
-        r = self.session.post(f"{self.base_url}/evidence", json=body, timeout=self.timeout)
-        if r.status_code in (200, 201):
-            return r.json().get("id")
-        if already_present(r.status_code, r.text):
-            return self.find_evidence_set(reference_id)
-        raise ParamifyError(
-            f"create evidence set {reference_id} failed (HTTP {r.status_code}): {r.text[:300]}"
-        )
-
-    def get_or_create_evidence_set(
-        self, reference_id: str, name: str, frequency: str = DEFAULT_EVIDENCE_FREQUENCY
-    ) -> Optional[str]:
-        return self.find_evidence_set(reference_id) or self.create_evidence_set(reference_id, name, frequency)
-
-    # -- association ------------------------------------------------------ #
-    def associate_script(self, evidence_id: str, script_id: str) -> None:
-        """CONNECT a script to an evidence set. Tolerant of an already-connected
-        state (the API has no pre-check endpoint), so re-runs are idempotent.
-        What counts as "already connected" is framework.paramify_responses'
-        rule, shared with the other uploaders."""
-        body = {"associationType": "CONNECT", "subjectType": "SCRIPT", "subjectId": script_id}
-        r = self.session.post(
-            f"{self.base_url}/evidence/{evidence_id}/associate",
-            json=body,
-            timeout=self.timeout,
-        )
-        if r.status_code in (200, 201, 204):
-            return
-        if already_present(r.status_code, r.text):
-            return  # already associated — the state we wanted holds
-        raise ParamifyError(
-            f"associate script {script_id} -> evidence {evidence_id} failed "
-            f"(HTTP {r.status_code}): {r.text[:300]}"
-        )
 
 
 # --------------------------------------------------------------------------- #
@@ -198,39 +94,35 @@ def _emit(on_event: Optional[Callable[[dict], None]], event: dict) -> None:
         on_event(event)
 
 
-def _base_url_error(base_url: str) -> Optional[str]:
-    parsed = urlparse(base_url)
-    if parsed.scheme != "https" and (parsed.hostname or "") not in ("localhost", "127.0.0.1", "::1"):
-        return (
-            "base_url must be https to protect the API token "
-            f"(got {base_url!r}); only localhost may use http"
-        )
-    return None
-
-
 def load_config(path: Optional[str]) -> Dict:
-    if not path:
-        return {}
-    import yaml  # local import: keeps the client importable without pyyaml
-    data = yaml.safe_load(Path(path).read_text())
-    return data or {}
+    return (yaml_io.load_path(Path(path)) or {}) if path else {}
+
+
+def _evidence_id(resources: Resources, ref: Dict) -> str:
+    """The id of the fetcher's evidence set, creating the set when it is absent."""
+    found = resources.evidence_by_reference([ref["reference_id"]]).get(ref["reference_id"])
+    if found is None:
+        found = resources.create_evidence({
+            "referenceId": ref["reference_id"],
+            "name": ref["name"],
+            "frequency": ref["frequency"],
+            # The frequency schedule counts from the day the set is created.
+            "startDate": date.today().isoformat(),
+        })
+    return found.id
 
 
 def _resolve_reference(fetcher_name: str, es: Dict, overrides: Dict) -> Dict:
-    """Apply any per-fetcher reference_id/name/frequency override so scripts associate
-    to the SAME evidence set the evidence uploader targets (overrides share that config)."""
-    ov = overrides.get(fetcher_name, {}) or {}
-    return {
-        "reference_id": ov.get("reference_id", es["reference_id"]),
-        "name": ov.get("name", es["name"]),
-        "frequency": ov.get("frequency", es.get("frequency", DEFAULT_EVIDENCE_FREQUENCY)),
-    }
+    """The fetcher's evidence set with the uploader config's overrides applied, so
+    the script lands on the same set the evidence upload targets."""
+    resolved = resolve_evidence_set({"fetcher_name": fetcher_name, "evidence_set": es}, overrides) or {}
+    resolved.setdefault("frequency", DEFAULT_EVIDENCE_FREQUENCY)
+    return resolved
 
 
 def _discover_specs(root: Path, include: Optional[set] = None) -> List[Dict]:
     """Build one script spec per fetcher that declares an evidence set and has a
-    readable entry file. Discovery lives here (not the client) so the client stays
-    pure API I/O.
+    readable entry file.
 
     ``include`` restricts the sweep to fetchers whose name is in the set (the
     fetchers a manifest actually uses); ``None`` means every discovered fetcher.
@@ -283,29 +175,20 @@ def sync_scripts(
     include: Optional[set] = None,
     on_event: Optional[Callable[[dict], None]] = None,
     custom_tags: bool = True,
+    client: Optional[Client] = None,
 ) -> Dict:
     """Reconcile every fetcher's entry script into Paramify and associate it.
 
     Actions per fetcher: create (new), update (version bumped), drift (code
     changed but version did not — warn, skip unless --force), noop. Association
     is ensured on create/update (and on every fetcher when --reassociate).
+    A failure on one fetcher is recorded and the sweep goes on, except one no
+    later call can survive (a rejected token), which ends it.
     """
-    load_dotenv()
     config = config or {}
-    paramify_cfg = config.get("paramify") or {}
-    base_url, _ = resolve_base_url(paramify_cfg.get("base_url") or base_url)
-    url_error = _base_url_error(base_url)
-    if url_error:
-        logger.error(url_error)
-        raise ValueError(url_error)
-
+    base_url, resources = open_workspace(config, base_url=base_url, token=token, client=client,
+                                         dry_run=dry_run, log=logger)
     overrides = config.get("overrides") or {}
-    if not token:
-        token, _ = resolve_upload_token()
-    if not token and not dry_run:
-        msg = f"{UPLOAD_TOKEN_ENV} is not set (or {READ_TOKEN_ENV} as a fallback)"
-        logger.error(msg)
-        raise ValueError(msg)
 
     root = Path(root)
     specs = _discover_specs(root, include)
@@ -314,7 +197,7 @@ def sync_scripts(
     # up front so a malformed `tags:` block fails like any other config mistake.
     try:
         tagger = build_tagger(
-            None, base_url, config=config, root=root,
+            None if dry_run else resources, config=config, root=root,
             override_off=None if custom_tags else "--no-tags",
         )
     except ValueError as e:
@@ -324,18 +207,13 @@ def sync_scripts(
     logger.info("Syncing %d fetcher script(s) → %s%s", len(specs), base_url, " (dry-run)" if dry_run else "")
     _emit(on_event, {"event": "sync_start", "base_url": base_url, "dry_run": dry_run, "fetchers": len(specs)})
 
-    # A client is created whenever a token is available — even in dry-run, where
-    # it makes only read-only GETs so the plan reflects the real tenant state.
-    client = ParamifyScriptsClient(token, base_url) if token else None
-    if client is not None and not dry_run:
-        tagger.session = client.session
     index: Dict[str, Dict] = {}
-    if client is not None:
-        for s in client.list_scripts():
-            m = parse_marker(s.get("description"))
+    if resources is not None:
+        for script in resources.scripts():
+            m = parse_marker(script.description)
             key = m.get(_MARKER_KEY)
             if key:
-                index[key] = {"id": s.get("id"), "version": m.get("version"), "sha256": m.get("sha256")}
+                index[key] = {"id": script.id, "version": m.get("version"), "sha256": m.get("sha256")}
 
     results: List[Dict] = []
     counts = {"created": 0, "updated": 0, "drift": 0, "noop": 0, "associated": 0, "errors": 0}
@@ -351,6 +229,7 @@ def sync_scripts(
         info = tagger.tag(entity, entity_id, category)
         return info["tags"] if info["outcome"] in ("applied", "already") else []
 
+    stopped: Optional[str] = None
     for spec in specs:
         name = spec["fetcher_name"]
         category = spec.get("category")
@@ -358,9 +237,8 @@ def sync_scripts(
         cur = index.get(name)
         ref = _resolve_reference(name, spec["evidence_set"], overrides)
         description = build_description(name, spec["version"], sha)
-        display_name = ref["name"]  # decided: script display name == evidence_set name
+        display_name = ref["name"]
 
-        # Decide the action from the tenant marker (create when we couldn't list).
         if cur is None:
             action = "create"
         elif (cur.get("version") or "") != spec["version"]:
@@ -384,22 +262,23 @@ def sync_scripts(
             })
             continue
 
+        assert resources is not None  # not dry_run => a client, or connect() raised
+        script_id = cur["id"] if cur else None
         try:
-            script_id = cur["id"] if cur else None
             do_associate = reassociate
 
             if action == "create":
-                script_id = client.create_script(display_name, description, spec["code"]).get("id")
+                script_id = resources.create_script(display_name, description, spec["code"])
                 counts["created"] += 1
                 do_associate = True
             elif action == "update":
-                client.update_script(script_id, display_name, description, spec["code"])
+                resources.update_script(script_id, display_name, description, spec["code"])
                 counts["updated"] += 1
                 do_associate = True
             elif action == "drift":
                 counts["drift"] += 1
                 if force:
-                    client.update_script(script_id, display_name, description, spec["code"])
+                    resources.update_script(script_id, display_name, description, spec["code"])
                     do_associate = True
                     logger.warning("%s: entry changed without a version bump — pushed (--force)", name)
                 else:
@@ -408,14 +287,12 @@ def sync_scripts(
                                 "reason": "entry changed but version not bumped; rerun with --force",
                                 "tags": _tag(ENTITY_SCRIPT, script_id, category)})
                     continue
-            else:  # noop
+            else:
                 counts["noop"] += 1
 
             if do_associate and script_id:
-                evidence_id = client.get_or_create_evidence_set(ref["reference_id"], ref["name"], ref["frequency"])
-                if not evidence_id:
-                    raise ParamifyError(f"could not get or create evidence set {ref['reference_id']}")
-                client.associate_script(evidence_id, script_id)
+                evidence_id = _evidence_id(resources, ref)
+                resources.associate(evidence_id, "SCRIPT", script_id)
                 counts["associated"] += 1
                 _tag(ENTITY_EVIDENCE, evidence_id, category)
                 add_result({**base, "outcome": action, "script_id": script_id, "evidence_id": evidence_id,
@@ -427,8 +304,14 @@ def sync_scripts(
         except Exception as e:  # noqa: BLE001 — one bad fetcher must not abort the sweep
             logger.error("%s: sync failed: %s", name, e)
             counts["errors"] += 1
-            add_result({**base, "outcome": "error", "error": str(e)[:300]})
-            continue
+            add_result({**base, "outcome": "error", "error": str(e)[:300],
+                        **({"script_id": script_id} if script_id else {})})
+            if isinstance(e, ApiError) and e.fatal:
+                # No later call can succeed (a rejected token). A script created
+                # just now stays unassociated until a --reassociate run.
+                stopped = str(e)[:300]
+                logger.error("stopping the sweep: %s", stopped)
+                break
 
     summary = {
         "base_url": base_url,
@@ -437,6 +320,7 @@ def sync_scripts(
         **counts,
         "tags": tagger.summary(),
         "results": results,
+        "stopped": stopped,
         "ok": counts["errors"] == 0,
     }
     logger.info(
@@ -467,19 +351,24 @@ def main(argv=None) -> int:
     parser.add_argument("--all", dest="all_fetchers", action="store_true", help="Sync every fetcher in the repo, not just the manifest's")
     args = parser.parse_args(argv)
 
-    if args.root:
-        root = Path(args.root)
-    else:
-        from framework.api import find_repo_root
-        root = find_repo_root()
+    from framework import api
 
-    # Default to the manifest's fetchers; --all provisions the whole catalog.
+    root = Path(args.root) if args.root else api.find_repo_root()
+
+    # Default to the manifest's fetchers; --all provisions the whole catalog. A
+    # manifest that does not resolve is an error, never an empty manifest that
+    # syncs nothing.
     include = None
     if not args.all_fetchers:
-        from framework.api import read_manifest
-        mpath = Path(args.manifest) if args.manifest else (root / "manifest.yaml")
-        manifest = read_manifest(mpath)
-        entries = (manifest.get("run") or {}).get("fetchers") or []
+        try:
+            mpath = api.resolve_manifest_path(root, args.manifest) if args.manifest else root / "manifest.yaml"
+        except api.ManifestNotFound as e:
+            logger.error("%s", e)
+            return 1
+        if not mpath.is_file():
+            logger.error("no manifest at %s: name one with --manifest, or pass --all", mpath)
+            return 1
+        entries = (api.read_manifest(mpath).get("run") or {}).get("fetchers") or []
         include = {e.get("use") for e in entries if e.get("use")}
 
     try:

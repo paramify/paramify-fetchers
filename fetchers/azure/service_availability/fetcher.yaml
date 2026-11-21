@@ -1,5 +1,5 @@
 name: azure_service_availability
-version: 0.1.0
+version: 0.1.1
 description: >-
   Shows when each App Service app and SQL Managed Instance was unavailable and for how long, why, Front Door origin probe failures, and each app's health-check results.
 category: azure
@@ -168,7 +168,7 @@ evidence_set:
 
     Which resources are out of scope?
     - resource_exclusion_patterns — List of the configured resource exclusion patterns
-    - resource_exclusion_patterns_unmatched — List of the patterns that matched nothing
+    - resource_exclusion_patterns_unmatched — List of the patterns that matched nothing; null if any resource list failed
     - excluded_apps — Number of apps the patterns took out; null if the app list failed
     - excluded_front_door_profiles — Number of Front Door profiles the patterns took out; null if the profile list failed
     - excluded_sql_managed_instances — Number of SQL Managed Instances the patterns took out; null if the instance list failed

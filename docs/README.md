@@ -33,7 +33,12 @@ permissions:
 [Paramify](../fetchers/paramify/README.md) ·
 [Checkov](../fetchers/checkov/README.md) ·
 [ServiceNow](../fetchers/servicenow/README.md) ·
-[Jira](../fetchers/jira/README.md)
+[Jira](../fetchers/jira/README.md) ·
+[Oracle Cloud](../fetchers/oci/README.md) ·
+[FedRAMP Marketplace](../fetchers/fedramp_marketplace/README.md) ·
+[Qualys](../fetchers/qualys/README.md) ·
+[Sophos](../fetchers/sophos/README.md) ·
+[Cornerstone](../fetchers/cornerstone/README.md)
 
 ## Send results to Paramify
 
@@ -58,6 +63,9 @@ permissions:
 - [Onboard a new platform](platform_onboarding_guide.md)
 - [Write an issue-report fetcher](issue_report_fetchers_guide.md), and the
   [Wiz pipeline guide](wiz_pipeline_guide.md)
+- [Write a pipeline fetcher](pipeline_fetchers_guide.md), and the
+  [pipeline fetchers design](pipeline_fetchers_design.md): inventory and scan
+  fetchers that feed Paramify pipelines
 - [Write a comparator](comparators_guide.md), the
   [comparator reference](comparators.md), and the
   [comparator design](comparators_design.md)
