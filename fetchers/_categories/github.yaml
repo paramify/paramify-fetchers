@@ -20,6 +20,10 @@ secrets:
   - name: token
     env: GITHUB_TOKEN
     per_target: true
+    description: >-
+      Read-only fine-grained personal access token or GitHub App installation token
+      owned by the organization, with the permissions in fetchers/github/README.md
+      (Settings → Developer settings → Personal access tokens → Fine-grained tokens).
 
 auth:
   description: >-

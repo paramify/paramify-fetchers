@@ -184,6 +184,7 @@ def _parse_fetcher(data: dict, path: Path) -> Fetcher:
         evidence_set=evidence_set,
         ksis=list(data.get("ksis") or []),
         kind=data.get("kind", "evidence"),
+        source=data.get("source") or "paramify",
         issue_report=issue_report,
         pipeline=pipeline,
         depends_on=list(data.get("depends_on") or []),

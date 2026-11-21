@@ -259,16 +259,15 @@ def test_other_4xx_drops_with_the_api_message(tmp_path):
     assert drop["name"] == "b.json" and "HTTP 413" in drop["reason"] and "Payload Too Large" in drop["reason"]
 
 
-def test_plan_time_waf_drops_are_named_in_the_outcome(tmp_path):
+def test_a_file_holding_waf_strings_is_uploaded(tmp_path):
     fake = FakeParamify()
     bad = env(fetcher="x")
-    bad["payload"] = {"cmd": "/bin/sh -c x"}
+    bad["payload"] = {"desc": "fixed in ../lib; spawns /bin/sh; <script> in the PoC"}
     build(tmp_path, {"a.json": env(fetcher="x"), "b.json": bad}, [inv("x", ["a.json", "b.json"])], {"x": {"use": "x"}})
     h = Harness(fake, tmp_path)
     d = h.run()["delivery/x"]
-    assert d.result["state"] == "delivered_with_drops" and d.result["uploaded"] == ["a.json"]
-    [drop] = d.result["dropped"]
-    assert drop["name"] == "b.json" and drop["reason"].startswith("blocked by the production WAF: '/bin/sh'")
+    assert d.result["state"] == "delivered" and sorted(d.result["uploaded"]) == ["a.json", "b.json"]
+    assert d.result["dropped"] == []
 
 
 def test_temporary_failure_after_budget_holds_the_batch_open(tmp_path):
@@ -846,18 +845,13 @@ def inventory_run(tmp_path: Path, paramify=None) -> Path:
     return build(tmp_path, {"inv.json": body}, [inv("x", ["inv.json"])], paramify or {"x": {"use": "x"}})
 
 
-def test_pipeline_file_is_sent_and_scanned_as_the_envelope(tmp_path, monkeypatch):  # Review Focus 2
-    from framework.sync.providers import delivery as delivery_mod
-    scanned: List[bytes] = []
-    real_scan = delivery_mod.waf.scan
-    monkeypatch.setattr(delivery_mod.waf, "scan", lambda content, *a: (scanned.append(content), real_scan(content, *a))[1])
+def test_pipeline_file_is_sent_as_the_envelope(tmp_path):  # Review Focus 2
     fake = FakeParamify()
     h = Harness(fake, inventory_run(tmp_path), upload_cfg={"artifact_payload": "payload"})
     out = h.run()
     assert out["delivery/x"].status == "applied", out["delivery/x"].message
     sent = [p["file"][1] for p in h.sent if p["file"][0] == "inv.json"]
     assert len(sent) == 1 and set(json.loads(sent[0])) == {"schema_version", "metadata", "payload"}
-    assert scanned and all(set(json.loads(c)) == {"schema_version", "metadata", "payload"} for c in scanned)
 
 
 def test_ordinary_file_is_still_sent_as_the_payload_when_asked(tmp_path):

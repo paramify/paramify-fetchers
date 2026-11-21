@@ -15,9 +15,7 @@ For each entry, in this order (the first refusal ends the entry):
    no-op. A pipeline entry sends such a file again in its batch, with a
    warning: a direct upload built nothing. A pipeline entry on a set with
    validators is refused, unless this run's batch is already submitted or
-   approved (then it is a no-op);
-4. WAF: a file the production WAF would block is dropped at plan time,
-   unless the pre-check is off (`paramify upload --no-waf-check`).
+   approved (then it is a no-op).
 
 An entry is sent direct (the route before batches: no batch, no submit) when
 the workspace has no batches or the entry says `delivery: direct`; then it
@@ -56,7 +54,6 @@ from framework.paramify.resources import (
 )
 from framework.paramify.version import Capability
 from framework.sync.model import UNKNOWN, Action, Outcome, Ref, SyncContext
-from framework.sync.providers import waf
 from framework.sync.providers.delivery_routing import (
     DONE,
     PIPELINE_DIRECT,  # noqa: F401  (defined beside pipeline_refusal; re-exported here with the other copy)
@@ -94,8 +91,6 @@ WAF_BLOCKED = "blocked by the production WAF"
 PIPELINE_DIRECT_SENT = "sent direct: this workspace has no batches; the pipeline runs the pre-batch way"
 BATCHES_OFF = "batches are off for this workspace"
 DELIVERY_DIRECT = "delivery: direct"
-WAF_CHECK_OFF = ("WAF pre-check off (--no-waf-check): files that hold '../', '/bin/sh' or '<script' are "
-                 "sent as they are; if the WAF does block one, the upload drops that file and sends the rest")
 DIRECT = "DIRECT"  # the payload target of an entry sent direct
 _BATCH_TARGETS = ("ARTIFACT_REQUEST", "EVIDENCE")
 _FAILING = ("FAIL", "ERROR")
@@ -340,16 +335,12 @@ class DeliveryProvider:
         today: Callable[[], date] = date.today,
         on_event: Optional[Callable[[dict], None]] = None,
         capability: Optional[Capability] = None,
-        waf_check: bool = True,
     ) -> None:
         self._run_state = run_state
-        # False: send every file and let a real WAF 403 drop it (see Client.classify).
-        self._waf_check = waf_check
         self._capability = capability  # None: batches are assumed (offline)
         self._today = today
         self._on_event = on_event
         self._payload_mode = "envelope"
-        self._waf_hits: Dict[Tuple[str, str], List[str]] = {}
         self.entries: Dict[str, EntryDesired] = {}  # by entry key, for apply's re-plan
 
     # -- desired ---------------------------------------------------------- #
@@ -384,40 +375,22 @@ class DeliveryProvider:
             return raw
         return artifact_content(envelope, mode) if is_enveloped(envelope) else raw
 
-    def _scan(self, f: DeliveryFile) -> List[str]:
-        """WAF signatures in what the upload of `f` would send: the bytes, the note and the title."""
-        if not self._waf_check:
-            return []
-        mode = self._mode_for(f.pipeline)
-        key = (str(f.path), mode)
-        if key not in self._waf_hits:
-            try:
-                content = self._read(f.path, f.pipeline)
-            except OSError:
-                content = b""  # gone since desired(); apply reports it
-            self._waf_hits[key] = waf.scan(content, f.note, f.title)
-        return self._waf_hits[key]
+    def _split(self, entry: EntryDesired) -> Tuple[List[DeliveryFile], List[Dict[str, str]]]:
+        """(sendable files, skipped files).
 
-    def _split(self, entry: EntryDesired) -> Tuple[List[DeliveryFile], List[Dict[str, str]], List[Dict[str, str]]]:
-        """(sendable files, WAF drops, skipped files)."""
+        Every sendable file is sent. A file the production WAF refuses is
+        dropped when the upload gets the 403 (see `_send_files`), not guessed
+        at here: the upload routes are exempt from the WAF's body rules.
+        """
         files: List[DeliveryFile] = []
-        dropped: List[Dict[str, str]] = []
         skipped: List[Dict[str, str]] = []
         for f in entry.files:
             if f.skip_reason:
                 skipped.append({"original_file_name": f.original_file_name, "reason": f.skip_reason,
                                 "kind": f.skip_kind})
-                continue
-            hits = self._scan(f)
-            if hits:
-                found = ", ".join(f"'{s}' ({waf.RULES[s]})" for s in hits)
-                dropped.append({
-                    "original_file_name": f.original_file_name,
-                    "reason": f"blocked by the production WAF: {found}",
-                })
             else:
                 files.append(f)
-        return files, dropped, skipped
+        return files, skipped
 
     def _direct_reason(self, entry: EntryDesired) -> Optional[str]:
         """Why this entry is sent direct before any request routing, or None."""
@@ -501,11 +474,11 @@ class DeliveryProvider:
         return [self._plan_entry(e, observed.get(e.entry_key, UNKNOWN), today) for e in desired]
 
     def _plan_entry(self, e: EntryDesired, obs: Any, today: date) -> Action:
-        files, dropped, skipped = self._split(e)
+        files, skipped = self._split(e)
         payload: Dict[str, Any] = {
             "entry_key": e.entry_key, "reference_id": e.reference_id, "evidence_id": None, "target": None, "artifact_request_id": None,
             "planned_current": False, "resume_batch_id": None,
-            "files": [_file_json(f) for f in files], "dropped": dropped, "skipped": skipped,
+            "files": [_file_json(f) for f in files], "skipped": skipped,
             "pipeline": e.pipeline,
         }
 
@@ -514,10 +487,6 @@ class DeliveryProvider:
                           verb=verb, summary=summary, payload=payload, **kw)
 
         if not files:
-            if dropped:
-                return action("refuse", ALL_DROPPED, fix=(
-                    "remove the strings the production WAF blocks (named in each dropped file) "
-                    "from the evidence and collect again"))
             return action("noop", f"nothing to send: {_count(len(skipped), 'file')} skipped")
         refusal = pipeline_refusal(e)
         if refusal is not None:
@@ -745,9 +714,8 @@ class DeliveryProvider:
         # Files that are errors (unreadable, not evidence) show in the entry state
         # as drops, so a delivered entry that left some behind says so.
         return _Delivered(mode=mode, pipeline_type=(p.get("pipeline") or {}).get("type"), dropped=[
-            {"name": d["original_file_name"], "reason": d["reason"]}
-            for d in [*(p.get("dropped") or []),
-                      *(s for s in p.get("skipped") or [] if s.get("kind") == "error")]])
+            {"name": s["original_file_name"], "reason": s["reason"]}
+            for s in p.get("skipped") or [] if s.get("kind") == "error"])
 
     def _emit(self, action_id: str, name: str, outcome: str, n: Optional[int], of: int, size: int,
               reason: Optional[str] = None) -> None:

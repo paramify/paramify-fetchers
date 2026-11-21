@@ -30,6 +30,7 @@ run:
         assessment_id: 123e4567-e89b-12d3-a456-426614174000
         close_cycle: never
         allow_empty: false
+        allow_no_images: false
       targets:
         - profile: example-gov
           region: us-gov-west-1

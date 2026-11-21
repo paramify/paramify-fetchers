@@ -3,6 +3,7 @@ version: 0.1.0
 description: >-
   Shows whether Keycloak actually stores sign-in and admin events, and what they record over a window: failed and blocked sign-ins, lockouts, and changes to users, roles and clients.
 category: keycloak
+source: community
 
 supports_targets: false
 

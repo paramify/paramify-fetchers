@@ -1,5 +1,5 @@
 name: github_workflow_runs
-version: 0.1.0
+version: 0.2.0
 description: >-
   GitHub Actions run history: every workflow run in the window with its
   workflow, trigger, branch, commit, who started it and its result, and the
@@ -30,6 +30,14 @@ target_schema:
     description: >-
       Comma-separated repository names to collect. Unset collects every
       repository the token can see; a name the token cannot see fails the run.
+  exclude_repositories:
+    type: string
+    required: false
+    env: GITHUB_EXCLUDE_REPOSITORIES
+    description: >-
+      Comma-separated repository names to leave out, matched without regard
+      to case. Cannot be combined with repositories. The evidence lists the
+      names it left out and any that matched no repository.
   include_archived:
     type: boolean
     required: false
@@ -70,6 +78,14 @@ config_schema:
     description: >-
       Most artifacts read per repository; more in the window fails the run
       rather than cutting the list short.
+  include_branch_names:
+    type: boolean
+    required: false
+    default: true
+    env: GITHUB_WORKFLOW_RUNS_INCLUDE_BRANCH_NAMES
+    description: >-
+      Include each run's branch name (head_branch). Set false to leave branch
+      names out; on_default_branch is still worked out and reported.
 
 secrets: []
 

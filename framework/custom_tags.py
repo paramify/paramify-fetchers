@@ -42,7 +42,12 @@ import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Set, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Set, Tuple
+
+from framework.paramify.client import ApiError
+
+if TYPE_CHECKING:
+    from framework.paramify.resources import Resources
 
 logger = logging.getLogger("paramify_custom_tags")
 
@@ -172,7 +177,7 @@ def category_display_names(root: Path) -> Dict[str, str]:
 
 
 class Tagger:
-    """Applies the default tags to entities through one authenticated session.
+    """Applies the default tags to entities through the run's `Resources`.
 
     `plan(category)` is the names a resource of that category gets; `tag(...)`
     POSTs them. Each (entity, id) is posted at most once per run — an evidence
@@ -182,18 +187,14 @@ class Tagger:
 
     def __init__(
         self,
-        session: Any,
-        base_url: str,
+        resources: Optional["Resources"],
         *,
         policy: TagPolicy,
         display_names: Optional[Mapping[str, str]] = None,
-        timeout: int = 30,
     ):
-        self.session = session
-        self.base_url = base_url.rstrip("/")
+        self.resources = resources
         self.policy = policy
         self.display_names: Dict[str, str] = dict(display_names or {})
-        self.timeout = timeout
         #: Why tagging stopped for this run (a 403), or None while it is on.
         self.disabled: Optional[str] = None
         self.applied = 0
@@ -240,39 +241,41 @@ class Tagger:
         key = (entity, entity_id)
         if key in self._done:
             return {"outcome": "already", "tags": names}
-        if self.session is None:
+        if self.resources is None:
             return {"outcome": "dry_run", "tags": names}
         if self.disabled:
             self.skipped += 1
             return {"outcome": "forbidden", "tags": names}
 
-        url = f"{self.base_url}/custom-tags/{entity}/{entity_id}"
         try:
-            r = self.session.post(url, json={"names": names}, timeout=self.timeout)
-        except Exception as exc:  # noqa: BLE001 — network trouble must not fail the upload
-            self.failed += 1
-            logger.warning("custom tags: %s %s: %s", entity, entity_id, exc)
-            return {"outcome": "error", "tags": names, "error": str(exc)[:300]}
-
-        # 409 is tolerated the way the association endpoints' 409 is: the tag
-        # is already on the entity, which is the state we wanted.
-        if r.status_code in (200, 201, 409):
-            self._done.add(key)
-            self.applied += 1
-            return {"outcome": "applied", "tags": names}
-        if r.status_code == 403:
-            self.disabled = (
-                "the API key is not allowed to manage custom tags (HTTP 403); "
-                "ask a workspace admin for the custom-tags permission"
-            )
-            self.skipped += 1
-            logger.warning("custom tags: %s — the rest of this run proceeds untagged", self.disabled)
-            return {"outcome": "forbidden", "tags": names}
-
+            self.resources.add_tags(entity, entity_id, names)
+        except ApiError as exc:
+            # 409: the tag is already on the entity, which is the state we wanted.
+            # Unlike a missing association, a missing tag is visible in Paramify,
+            # so an unexplained 409 is not worth failing on.
+            if exc.status == 409:
+                return self._applied(key, names)
+            if exc.status == 403:
+                self.disabled = (
+                    "the API key is not allowed to manage custom tags (HTTP 403); "
+                    "ask a workspace admin for the custom-tags permission"
+                )
+                self.skipped += 1
+                logger.warning("custom tags: %s — the rest of this run proceeds untagged", self.disabled)
+                return {"outcome": "forbidden", "tags": names}
+            error = f"HTTP {exc.status}: {exc.body[:200]}" if exc.status else exc.message[:300]
+        except Exception as exc:  # noqa: BLE001 — tagging must never fail the upload
+            error = str(exc)[:300]
+        else:
+            return self._applied(key, names)
         self.failed += 1
-        detail = (getattr(r, "text", "") or "")[:200]
-        logger.warning("custom tags: %s %s: HTTP %s %s", entity, entity_id, r.status_code, detail)
-        return {"outcome": "error", "tags": names, "error": f"HTTP {r.status_code}: {detail}"}
+        logger.warning("custom tags: %s %s: %s", entity, entity_id, error)
+        return {"outcome": "error", "tags": names, "error": error}
+
+    def _applied(self, key: Tuple[str, str], names: List[str]) -> Dict[str, Any]:
+        self._done.add(key)
+        self.applied += 1
+        return {"outcome": "applied", "tags": names}
 
     def summary(self) -> Dict[str, Any]:
         return {
@@ -288,19 +291,17 @@ class Tagger:
 
 
 def build_tagger(
-    session: Any,
-    base_url: str,
+    resources: Optional["Resources"],
     *,
     config: Optional[Mapping[str, Any]] = None,
     root: Optional[Path] = None,
     display_names: Optional[Mapping[str, str]] = None,
-    timeout: int = 30,
     override_off: Optional[str] = None,
 ) -> Tagger:
     """The Tagger for one uploader run.
 
-    `session` is the client's authenticated requests.Session; pass None for a
-    dry run, where `plan()` still answers but `tag()` writes nothing. Display
+    `resources` writes the tags; pass None for a dry run, where `plan()` still
+    answers but `tag()` writes nothing. Display
     names come from `display_names`, or are read from `root`'s category files.
     `override_off` is a caller's reason to switch the feature off for this run
     (`--no-tags`). When tags are off — by that, by `PARAMIFY_CUSTOM_TAGS`, or
@@ -310,8 +311,8 @@ def build_tagger(
     """
     policy = resolve_tag_policy(config, override_off=override_off)
     if not policy.enabled:
-        return Tagger(None, base_url, policy=policy, timeout=timeout)
+        return Tagger(None, policy=policy)
     names = dict(display_names) if display_names is not None else (
         category_display_names(root) if root is not None else {}
     )
-    return Tagger(session, base_url, policy=policy, display_names=names, timeout=timeout)
+    return Tagger(resources, policy=policy, display_names=names)

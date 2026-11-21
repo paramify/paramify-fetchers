@@ -25,13 +25,13 @@ paramify manifest set-secret okta_phishing_resistant_mfa org_url OKTA_ORG_URL
 # Keep going until it says the manifest is runnable.
 
 # 3. Set your credentials and run
-export OKTA_API_TOKEN=<your token>
-export OKTA_ORG_URL=https://your-org.okta.com
+paramify env                          # lists the variables the manifest reads
+# In production your secret manager sets them; to try it locally:
+paramify env --write                  # adds them to .env, then fill in OKTA_API_TOKEN, ...
 paramify validate manifest.yaml
 paramify run     manifest.yaml         # evidence → ./evidence/run-<timestamp>/
 
-# 4. Upload to Paramify
-export PARAMIFY_UPLOAD_API_TOKEN=<your token>   # see uploaders/paramify_evidence/README.md for setup
+# 4. Upload to Paramify (PARAMIFY_UPLOAD_API_TOKEN; see uploaders/paramify_evidence/README.md)
 paramify upload                                  # push the latest run
 ```
 
@@ -52,6 +52,7 @@ paramify describe <fetcher>    # one fetcher's config / secrets / target fields
 paramify ksi                   # FedRAMP KSI coverage
 paramify doctor   [manifest]   # preflight: Python, CLIs/packages, manifest, upload
 paramify manifests             # discovered run manifests (manifests/*.yaml)
+paramify env      [-m manifest] # the variables a manifest needs; --write adds them to .env for testing
 paramify validate <manifest>   # validate a manifest without running
 paramify run      <manifest>   # run it
 paramify runs                  # past runs under an output dir (newest first)
@@ -206,6 +207,49 @@ Every `manifest` subcommand also accepts `--json` and returns a stable
 `{"ok", "path", "errors"}` object. Thus an agent can build a manifest step by
 step and read `errors` to find what is still missing.
 
+## What a manifest needs: `paramify env`
+
+`paramify env` prints the environment variables a manifest reads, grouped by
+tool, each with a one-line note saying what it is and whether it is required.
+Paramify's own upload token comes first. Use it to know what to put in your
+secret manager, which is where these belong in production: the runner reads
+its own environment, wherever the values come from. For local testing,
+`--write` puts them in a `.env` file instead. A run never needs `.env`.
+
+```bash
+paramify env                          # print what ./manifest.yaml needs (writes nothing)
+paramify env -m manifests/prod.yaml   # another manifest
+paramify env --json                   # the same as JSON, for a script that fills your secret manager
+paramify env --write                  # for local testing: append the missing variables to ./.env
+```
+
+`--json` gives one entry per variable (`name`, `tool`, `required`, `default`,
+`note`, the `fetchers` that read it, and whether it is `set` in the
+environment or the file) plus `unmapped`, the required secrets the manifest
+doesn't map yet. It never contains a value.
+
+- It lists what a run actually reads: the `${env:}` references the manifest
+  maps its secrets to (`set-secret ... OKTA_PROD_TOKEN`, a token per target),
+  `${env:}` references in config values, and the passthrough variables of
+  the category and of `run.platforms` (optional). A required secret the
+  manifest does not map yet is listed apart, with how to map it
+  (`paramify manifest set-secret`, or a line under a target's `secrets:`):
+  a run stops on it whatever `.env` holds. A config field's own `env` name is not listed; the
+  runner sets it for the fetcher from the manifest.
+- `--write` only appends. A line already in the file is never changed,
+  reordered or printed, so the output never shows a secret. New variables for a
+  tool that already has a section go under a `(continued)` header.
+- Optional variables are written commented out (with their default, if they
+  have one): an empty `AWS_ACCESS_KEY_ID=` would hide the ambient
+  credentials, and a default written out would override a later one.
+- It ends with the required variables that still have no value, in the file
+  or exported in your shell.
+- When there is a `.env` in the repo root, `run` and `doctor` fill any
+  variable that is unset or empty from it; a variable set in the environment
+  (by your secret manager, CI or shell) always wins, and without the file
+  nothing changes. The deploy image never contains one (`.dockerignore`).
+  `--path` merges into another file instead; nothing here reads that one for you.
+
 ## Collect, then upload
 
 Collection and upload are separate stages on purpose. The runner only
@@ -233,7 +277,6 @@ batches.
 | `--owner USERNAME` | Where a stack has one channel per owner, uses this owner's channel. It replaces the owner the run recorded. |
 | `--with-validators` | Syncs validators for the evidence sets of the run before the batches go out. If the sync fails, the upload sends no batch. With `--dry-run`, it only names the sync it would do. |
 | `--no-tags` | Skips the default custom tags for this upload. |
-| `--no-waf-check` | Sends files that hold a string the production WAF has blocked (`../`, `/bin/sh`, `<script`) instead of dropping them before the upload. If the WAF does block one, the upload drops that file and sends the rest. The plan notes that the check is off. |
 | `--config`, `-f`, `-o` | Choose the uploader config, the manifest, and the output directory. |
 | `--json` | Prints the summary: the legacy counts, plus `dropped`, `plan`, `entries`, `outcomes`, `batches` and, with `--with-validators`, `validators`. |
 

@@ -3,6 +3,7 @@ version: 0.1.0
 description: >-
   Shows whether a Keycloak realm enforces session timeouts, account lockout, password rules and phishing-resistant sign-in, and whether federation, sign-in notices and event logging are configured.
 category: keycloak
+source: community
 
 supports_targets: false
 

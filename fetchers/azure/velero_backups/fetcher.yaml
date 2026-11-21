@@ -74,14 +74,22 @@ config_schema:
     description: >
       How many days of each expected schedule's periods to check for missed runs, up to 90. A value that is not a
       whole number above 0 fails the run as bad_config.
-  deliberate_failure_tests:
+  retry_suffix:
     type: string
     required: false
-    env: AZURE_VELERO_DELIBERATE_FAILURE_TESTS
+    env: AZURE_VELERO_RETRY_SUFFIX
     description: >
-      Comma-separated name patterns (* and ? wildcards) for backups and restores that are planned failure tests. A
-      failed backup or a restore with errors whose name matches is counted in deliberate_failure_tests and never as a
-      current failure. It stays in the totals, so history is kept.
+      The suffix a retry adds to the name of the backup or restore it retries (such as -retry). When set, a failed
+      backup or a restore with errors is also resolved by its own retry: <name><suffix> finishing later without
+      failing. A failed retry, or none, leaves the failure current. No failure is ever excluded by its name or labels.
+  validation_label:
+    type: string
+    required: false
+    env: AZURE_VELERO_VALIDATION_LABEL
+    description: >
+      A label, as key=value, that marks validation backups (such as validation-test=true). Matching backups are
+      counted in validation_backups and validation_backups_failed and are still judged like every other backup. A
+      value not in that form fails the run as bad_config and leaves it unset.
   restore_test_interval_days:
     type: integer
     required: false
@@ -159,8 +167,8 @@ evidence_set:
     - backups_other_phase — Number of backups in any other phase, such as InProgress
     - backups_metadata_unreadable — Number of backups whose velero-backup.json could not be read or parsed
     - backups_volume_snapshots_incomplete — Number of backups that completed fewer volume snapshots (native and CSI) than they attempted
-    - backups_failed_unresolved — Number of Failed or PartiallyFailed backups that are not deliberate failure tests and have no later Completed backup of the same schedule (a current failure); a backup with no schedule label stays unresolved, since a later manual backup may cover other namespaces; resolved failures stay in backups_failed and backups_partially_failed
-    - backups_volume_snapshots_incomplete_unresolved — Number of backups with incomplete volume snapshots that are not deliberate failure tests and have no later Completed backup of the same schedule that completed every snapshot it attempted; a backup with no schedule label stays unresolved
+    - backups_failed_unresolved — Number of Failed or PartiallyFailed backups that have no later Completed backup of the same schedule (a current failure); a backup with no schedule label stays unresolved, since a later manual backup may cover other namespaces; resolved failures stay in backups_failed and backups_partially_failed
+    - backups_volume_snapshots_incomplete_unresolved — Number of backups with incomplete volume snapshots that have no later Completed backup of the same schedule that completed every snapshot it attempted; a backup with no schedule label stays unresolved
     - schedules_observed — Number of schedules named by a backup's velero.io/schedule-name label
     - schedules_with_success_within_window — Number of schedules whose newest Completed backup finished within the schedule's window (a success within the window): its interval plus 10% (at least 2 hours) when listed in expected_schedules, otherwise success_window_hours
     - schedules_without_success_within_window — List of schedule names without a success within the window
@@ -185,10 +193,13 @@ evidence_set:
     - restores_total — Number of restores Velero recorded in the backup storage locations; null unless every location's restores were read
     - restores_without_errors — Number of clean restores (a results file that lists no errors)
     - restores_with_errors — Number of restores whose results file lists at least one error
-    - restores_with_errors_unresolved — Number of restores with errors that are not deliberate failure tests and have no later restore without errors (a current failure); a restore with errors and no readable date is never resolved
+    - restores_with_errors_unresolved — Number of restores with errors not resolved by their own retry (a later <name><retry_suffix> restore without errors); a clean restore of anything else never resolves one, since storage doesn't record which backup a restore used, and a restore with errors and no readable date is never resolved
     - restores_results_missing — Number of restores whose results file is missing or could not be read
-    - deliberate_failure_tests — Number of failed backups and restores with errors whose name matches a deliberate_failure_tests pattern; null unless every location's backups and restores were read
-    - deliberate_failure_test_patterns — List of the deliberate_failure_tests patterns as given
+    - failures_resolved_by_retry — Number of failed backups and restores with errors resolved by their own retry (a later <name><retry_suffix> that did not fail); null while retry_suffix is not set or any location could not be read
+    - retry_suffix — The retry name suffix, as configured; null when not set
+    - validation_backups — Number of backups carrying validation_label; they are judged like every other backup; null while validation_label is not set
+    - validation_backups_failed — Number of validation backups that are Failed or PartiallyFailed; they also stay in every failure count
+    - validation_label — The validation label as key=value, as configured; null when not set
     - restores_date_unknown — Number of restores whose results file was read but has no readable date; they never count as recent
     - days_since_last_clean_restore — Days since the newest clean restore's results file was written; null if there is no clean restore
     - restore_test_interval_days — The adopted restore-test interval in days, as configured; null when not set
