@@ -16,6 +16,24 @@
           "type": "string",
           "description": "Base directory for outputs. Runner creates a per-run subdir like run-<timestamp> inside this."
         },
+        "schedule": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "every"
+          ],
+          "description": "How often this manifest runs. Each evidence set's frequency follows `every` unless the entry or upload.yaml sets one.",
+          "properties": {
+            "every": {
+              "$ref": "#/$defs/frequency"
+            },
+            "at": {
+              "type": "string",
+              "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+              "description": "Time of day to run, 24-hour HH:MM. Optional."
+            }
+          }
+        },
         "platforms": {
           "type": "object",
           "description": "Per-category (platform) config and auth, inherited by every fetcher in that category. Keyed by category name (e.g. 'aws', 'rippling').",
@@ -109,7 +127,7 @@
                 }
               },
               "paramify": {
-                "$ref": "#/$defs/paramify"
+                "$ref": "#/$defs/entry_paramify"
               }
             }
           }
@@ -121,9 +139,35 @@
     }
   },
   "$defs": {
+    "frequency": {
+      "enum": [
+        "DAILY",
+        "THREE_DAY",
+        "WEEKLY",
+        "BIWEEKLY",
+        "MONTHLY",
+        "QUARTERLY",
+        "BIANNUAL",
+        "ANNUAL"
+      ],
+      "description": "How often an evidence set expects a new artifact (Paramify's evidence `frequency`). NOT_SET isn't offered: a schedule always has a cadence."
+    },
     "paramify": {
+      "$ref": "#/$defs/paramify_fields",
+      "unevaluatedProperties": false
+    },
+    "entry_paramify": {
+      "$ref": "#/$defs/paramify_fields",
+      "unevaluatedProperties": false,
+      "properties": {
+        "frequency": {
+          "$ref": "#/$defs/frequency",
+          "description": "This entry's evidence set frequency. Wins over upload.yaml and run.schedule.every."
+        }
+      }
+    },
+    "paramify_fields": {
       "type": "object",
-      "additionalProperties": false,
       "description": "Where the uploader sends this evidence and how new evidence sets are approved.",
       "properties": {
         "stack": {

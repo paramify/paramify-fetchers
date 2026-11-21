@@ -110,10 +110,10 @@ async def _answer(app, pilot, key: str) -> None:
 
 
 def _delivery(lines: list) -> list:
-    """The delivery section of a plan: its action, warning and fix lines, then the totals."""
-    start = lines.index("delivery") + 1
-    end = next(i for i in range(start, len(lines)) if " · " in lines[i])
-    return lines[start:end + 1]
+    """The plan in the upload confirm, without its notes and question: the delivery,
+    warning, refusal and fix lines, then the tag count."""
+    end = lines.index("") if "" in lines else len(lines)
+    return [line for line in lines[:end] if not line.startswith(("! ", "+ "))]
 
 
 def _writes(fake) -> list:
@@ -132,7 +132,7 @@ def _banner(page) -> str:
 
 async def _uploaded(app, pilot) -> ParamifyPage:
     page = app.screen.query_one(ParamifyPage)
-    await _until(pilot, lambda: "upload complete" in _banner(page) and _log(page), "the upload")
+    await _until(pilot, lambda: "Uploaded " in _banner(page) and _log(page), "the upload")
     return page
 
 
@@ -147,11 +147,11 @@ def test_an_entry_goes_in_a_new_batch_on_its_channels_current_request(tmp_path, 
 
     lines = run_tui(body, path)
     assert _delivery(lines) == [
-        f"  deliver {FETCHER}: deliver 2 files to AR-1 (stack Prod, channel CH-1): new batch (approved on submit)",
-        "1 deliver · 0 noop · 0 refuse · 1 tag",
+        f"{FETCHER}: 2 files to AR-1 (stack Prod, channel CH-1): new batch (approved on submit)",
+        "Also tags 1 evidence set.",
     ]
     assert not [line for line in lines if line.startswith("!")]
-    assert lines[-1] == f"Upload 2 evidence file(s) to {URL}?"
+    assert lines[-1] == "Upload 2 files to api.example.test?"
     assert _writes(paramify) == []
 
 
@@ -181,18 +181,18 @@ def test_each_entry_gets_its_own_batch_or_route(tmp_path, paramify, run_tui):
         return await _confirm(app, pilot)
 
     assert _delivery(run_tui(body, path)) == [
-        f"  deliver {name}: deliver 3 files to AR-1 (stack Prod, channel CH-1): new batch (approved on submit)",
-        f"  deliver {name}#1: deliver 1 file to EVD-Y (evidence level): new batch (reviewed in the app)",
-        f"  deliver {name}#2: deliver 1 file to EVD-Z direct (channel CH-2): CH-2 has no artifact request",
+        f"{name}: 3 files to AR-1 (stack Prod, channel CH-1): new batch (approved on submit)",
+        f"{name}#1: 1 file to EVD-Y (evidence level): new batch (reviewed in the app)",
+        f"{name}#2: 1 file to EVD-Z direct (channel CH-2): CH-2 has no artifact request",
         "    ! CH-2 has no artifact request; sent direct, as before batches",
-        f"  deliver {name}#3: deliver 1 file to EVD-W direct (channel CH-3): delivery: direct",
-        f"  deliver {name}#4: deliver 1 file to EVD-V (evidence level): new batch (approved on submit)",
+        f"{name}#3: 1 file to EVD-W direct (channel CH-3): delivery: direct",
+        f"{name}#4: 1 file to EVD-V (evidence level): new batch (approved on submit)",
         "    ! evidence-level batch: does not count toward the solution capability",
-        f"  refuse {name}#5: no current or past artifact request on channel CH-5 of EVD-U",
-        "    → fix: create an artifact request on CH-5 in the app, or remove no_request: refuse from this entry "
+        f"✗ {name}#5: no current or past artifact request on channel CH-5 of EVD-U",
+        "    fix: create an artifact request on CH-5 in the app, or remove no_request: refuse from this entry "
         "to send it direct",
-        f"  deliver {name}#6: deliver 1 file to EVD-T (evidence level): new batch (approved when its validators pass)",
-        "6 deliver · 0 noop · 1 refuse · 6 tag",
+        f"{name}#6: 1 file to EVD-T (evidence level): new batch (approved when its validators pass)",
+        "Also tags 6 evidence sets.",
     ]
 
 
@@ -215,8 +215,8 @@ def test_the_owner_picks_the_channel_where_a_stack_has_one_per_owner(tmp_path, p
         return await _confirm(app, pilot)
 
     assert _delivery(run_tui(body, path)) == [
-        f"  deliver {FETCHER}: deliver 1 file to AR-2 (stack Prod, channel CH-2): new batch (approved on submit)",
-        "1 deliver · 0 noop · 0 refuse · 1 tag",
+        f"{FETCHER}: 1 file to AR-2 (stack Prod, channel CH-2): new batch (approved on submit)",
+        "Also tags 1 evidence set.",
     ]
 
 
@@ -228,10 +228,9 @@ def test_without_an_owner_the_entry_is_refused_with_the_owners_and_the_fix(tmp_p
         return await _confirm(app, pilot)
 
     assert _delivery(run_tui(body, path)) == [
-        f"  refuse {FETCHER}: EVD-X has 2 channels on stack Prod, one per owner: CH-1 (alice), CH-2 (bob)",
-        "    → fix: set an owner to choose one (paramify manifest set-owner, or paramify upload --owner); "
+        f"✗ {FETCHER}: EVD-X has 2 channels on stack Prod, one per owner: CH-1 (alice), CH-2 (bob)",
+        "    fix: set an owner to choose one (paramify manifest set-owner, or paramify upload --owner); "
         "owners: alice, bob",
-        "0 deliver · 0 noop · 1 refuse",
     ]
 
 
@@ -283,7 +282,7 @@ def test_a_stack_and_owner_picked_after_the_run_are_noted_and_route_nothing_yet(
     ]
     assert lines[:2] == [f"! {n}" for n in notes]
     # The run had no stack, so the upload still cannot choose a channel.
-    assert _delivery(lines)[0] == f"  refuse {name}: EVD-X has 2 channels and no stack is configured"
+    assert _delivery(lines)[0] == f"✗ {name}: EVD-X has 2 channels and no stack is configured"
     assert planned_writes == []
     # The upload after yes compares the run with the open manifest too.
     log = json.loads((tmp_path / "evidence" / f"run-{RUN_ID}" / "upload_log.json").read_text())
@@ -310,11 +309,11 @@ def test_with_batches_off_the_plan_says_so_first_and_sends_direct(tmp_path, para
     assert lines[0] == (f"! batches are off for this workspace ({reason}); "
                         "every entry is sent direct, as before batches")
     assert _delivery(lines) == [
-        f"  deliver {FETCHER}: deliver 2 files to EVD-X direct (channel CH-1): batches are off for this workspace",
-        "1 deliver · 0 noop · 0 refuse · 1 tag",
+        f"{FETCHER}: 2 files to EVD-X direct (channel CH-1): batches are off for this workspace",
+        "Also tags 1 evidence set.",
     ]
-    assert "[OK] a.json uploaded set=EVD-X channel=CH-1" in log
-    assert banner.startswith("evidence upload complete — uploaded=2 duplicates=0 errors=0")
+    assert "[OK] a.json uploaded → EVD-X (channel CH-1)" in log
+    assert banner.startswith("Uploaded 2 files.")
     assert paramify.batches == []
     uploads = [c[1] for c in _writes(paramify) if c[1].endswith("/artifacts/upload")]
     assert uploads == [f"/evidence/{ev.id}/artifacts/upload"] * 2
@@ -339,7 +338,7 @@ def test_an_api_that_refuses_the_batch_approval_still_uploads_and_says_why(tmp_p
 
     plan, banner = run_tui(body, path)
     assert _delivery(plan)[0].endswith(": new batch (approved on submit)")  # the plan cannot know
-    assert banner.startswith("evidence upload complete — uploaded=2 duplicates=0 errors=0")
+    assert banner.startswith("Uploaded 2 files.")
     assert [b.get("whenToApprove") for b in paramify.batch_bodies] == ["SUBMISSION", None]
     [batch] = paramify.batches
     assert batch["status"] == "SUBMITTED"
@@ -367,12 +366,12 @@ def test_yes_uploads_one_batch_and_the_next_plan_finds_it_delivered(tmp_path, pa
     [batch] = paramify.batches
     assert (batch["artifactRequestId"], batch["status"], batch["artifactCount"]) == (ar.id, "APPROVED", 2)
     assert paramify.batch_bodies[0]["whenToApprove"] == "SUBMISSION"  # whatever the set says
-    assert "[OK] a.json uploaded set=EVD-X channel=CH-1" in log
-    assert "[OK] b.json uploaded set=EVD-X channel=CH-1" in log
-    assert banner.startswith("evidence upload complete — uploaded=2 duplicates=0 errors=0")
+    assert "[OK] a.json uploaded → EVD-X (channel CH-1)" in log
+    assert "[OK] b.json uploaded → EVD-X (channel CH-1)" in log
+    assert banner.startswith("Uploaded 2 files.")
     entry = json.loads((tmp_path / "evidence" / f"run-{RUN_ID}" / "upload_log.json").read_text())["entries"][name]
     assert (entry["mode"], entry["batch_reference"], entry["channel"]) == ("batch", "BCH-1", "CH-1")
-    assert _delivery(again) == [f"  noop {name}: already delivered in BCH-1", "0 deliver · 1 noop · 0 refuse · 1 tag"]
+    assert _delivery(again) == ["Also tags 1 evidence set."]
 
 
 def test_an_entry_held_by_a_failed_file_resumes_its_open_batch(tmp_path, paramify, run_tui):
@@ -394,15 +393,15 @@ def test_an_entry_held_by_a_failed_file_resumes_its_open_batch(tmp_path, paramif
         return first, plan, _banner(page)
 
     (log, banner), plan, second = run_tui(body, path)
-    assert ("[FAIL] b.json error set=EVD-X channel=CH-1 "
+    assert ("[FAIL] b.json error → EVD-X (channel CH-1) "
             "POST /batches/bt-1/artifacts/upload failed after retrying (HTTP 503: ") in log
     assert '"error": {"message": "upstream unavailable", "path": "/batches/bt-1/artifacts/upload"}' in log
-    assert banner.startswith("evidence upload complete — uploaded=1 duplicates=0 errors=1")
+    assert banner.startswith("Uploaded 1 file, 1 error.")
     assert _delivery(plan) == [
-        f"  deliver {FETCHER}: deliver 1 file to AR-1 (stack Prod, channel CH-1): resume BCH-1 (1 missing)",
-        "1 deliver · 0 noop · 0 refuse · 1 tag",
+        f"{FETCHER}: 1 file to AR-1 (stack Prod, channel CH-1): resume BCH-1 (1 missing)",
+        "Also tags 1 evidence set.",
     ]
-    assert second.startswith("evidence upload complete — uploaded=1 duplicates=1 errors=0")
+    assert second.startswith("Uploaded 1 file, 1 already there.")
     [batch] = paramify.batches
     assert (batch["status"], batch["artifactCount"]) == ("APPROVED", 2)
 
@@ -421,10 +420,10 @@ def test_a_file_the_api_refuses_is_dropped_and_counted_in_the_banner(tmp_path, p
         return _log(page), _banner(page)
 
     log, banner = run_tui(body, path)
-    assert ("[FAIL] b.json dropped set=EVD-X channel=CH-1 "
+    assert ("[FAIL] b.json dropped → EVD-X (channel CH-1) "
             "POST /batches/bt-1/artifacts/upload failed (HTTP 422: ") in log
     assert '"error": {"message": "bad file", "path": "/batches/bt-1/artifacts/upload"}' in log
-    assert banner.startswith("evidence upload complete — uploaded=1 duplicates=0 errors=0 dropped=1")
+    assert banner.startswith("Uploaded 1 file, 1 dropped.")
 
 
 def test_no_on_the_confirm_sends_nothing(tmp_path, paramify, run_tui):
@@ -460,7 +459,7 @@ def test_yes_on_a_plan_that_failed_sends_nothing(tmp_path, paramify, run_tui, mo
         return lines, isinstance(app.screen, ConfirmModal)
 
     lines, still_open = run_tui(body, path)
-    assert lines == ['Cannot plan the upload: GET /evidence failed (HTTP 401: {"requestId": "r-1", '
+    assert lines == ['Couldn\'t plan the upload: GET /evidence failed (HTTP 401: {"requestId": "r-1", '
                      '"statusMessage": "Unauthorized", "error": {"message": "token expired", "path": "/evidence"}})']
     assert not still_open
     assert started == [] and _writes(paramify) == []

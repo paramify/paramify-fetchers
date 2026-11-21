@@ -1,0 +1,19 @@
+key: github_dependabot_alerts_enabled
+name: GitHub Dependabot Alerts Enabled
+type: AUTOMATED
+role: configuration
+source: community
+statement: >-
+  Dependabot alerts are on for every repository in scope. A repository with alerts off fails, because
+  its zero open alerts mean unmonitored rather than clean.
+regex: '"repositories_alerts_disabled":\s*\[\s*\]'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+- regexOperation:
+    type: MATCH_COUNT
+  criteria: NOT_EQUALS
+  value:
+    type: CUSTOM_TEXT
+    customText: '0'
+evidence_sets:
+- EVD-GITHUB-DEPENDABOT-ALERTS

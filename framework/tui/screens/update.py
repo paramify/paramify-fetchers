@@ -53,7 +53,7 @@ class UpdateScreen(ButtonRowNav, Screen):
 
     @property
     def _errors(self) -> List[str]:
-        return [] if self.plan.get("ok", True) else list(self.plan.get("errors") or ["the update could not be planned"])
+        return [] if self.plan.get("ok", True) else list(self.plan.get("errors") or ["the update couldn't be planned"])
 
     @property
     def _ready(self) -> bool:
