@@ -442,9 +442,11 @@ def main() -> int:
 
     assessments: list[dict] = []
     registration_status = UNKNOWN
+    read = False
     if subscription_id and cred is not None:
         # Step 3: the actual API call + projection + sort, described above.
         assessments, registration_status = collect_assessments(subscription_id, cred, collector)
+        read = registration_status == REGISTERED
     elif not subscription_id:
         # We never even got a subscription to try — record that explicitly so
         # the status file says WHY nothing was collected, instead of silently
@@ -470,6 +472,8 @@ def main() -> int:
     assessments, excluded = exclusions.split(
         assessments, "assessment", resource_id=lambda a: a["resource_id"],
         name=lambda a: a["display_name"] or a["name"])
+    if not read:
+        exclusions.mark_unread()
     exclusions.warn_unmatched(logger)
 
     # Step 4: assemble the raw evidence dict. build_payload wraps our

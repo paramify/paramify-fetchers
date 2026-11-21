@@ -1,10 +1,7 @@
 name: azure_ddos_protection
-version: 0.2.0
-description: >
-  Whether every public IP address — the subscription's Internet entry points — is
-  covered by Azure DDoS Protection, either through a DDoS protection plan on its
-  virtual network (Network Protection) or its own IP Protection, with what each IP is
-  attached to. Also every DDoS protection plan and which virtual networks use one.
+version: 0.2.1
+description: >-
+  Shows whether each Internet-facing public IP address is covered by Azure DDoS Protection, through its virtual network's DDoS plan or its own IP Protection.
 category: azure
 
 config_schema:
@@ -69,46 +66,52 @@ ksis:
 evidence_set:
   reference_id: EVD-AZURE-DDOS
   name: Azure DDoS Protection
-  instructions: >
-    Script: azure/ddos_protection/fetcher.py. Azure SDK calls (azure-mgmt-network NetworkManagementClient),
-    all reads, Reader is sufficient: ddos_protection_plans.list(),
-    virtual_networks.list_all(), public_ip_addresses.list_all(),
-    network_interfaces.list_all(), load_balancers.list_all(); plus the
-    Microsoft.Network registration state.
-    attached_to_type is read from the public IP's ipConfiguration id
-    (network_interface, load_balancer, bastion_host, azure_firewall,
-    virtual_network_gateway, application_gateway, other), or nat_gateway when a NAT
-    gateway holds it, or unattached; internet_facing is any attached IP. The IP's
-    virtual network is found by matching the attached resource against the subnets'
-    ipConfigurations and applicationGatewayIPConfigurations back-references, then
-    against network interfaces' subnets. A public load balancer frontend takes the
-    VNet of its backend pools — each pool's backendIPConfigurations (VM or scale-set
-    NIC IP configurations, matched the same way) and, for pools configured by IP
-    address, the pool's virtualNetwork and each backend address's virtualNetwork or
-    subnet — when they all sit in one VNet, since its protection follows that VNet.
-    effective_protection: "not_supported" for an IP held by a NAT gateway, which
-    Microsoft documents DDoS Protection cannot protect (counted apart from the
-    unprotected ones); "ip_protection" when the IP's ddosSettings.protectionMode is
-    Enabled; "disabled" when Disabled;
-    otherwise (VirtualNetworkInherited, which is also what an unset mode means)
-    "network_protection" when its virtual network has enableDdosProtection true and a
-    ddosProtectionPlan, "none" when that network has no plan or the IP is
-    unattached, and "unknown" when no single virtual network could be found for it —
-    a load balancer with empty backend pools or backends in several VNets, or a
-    resource type not listed above. This is configuration only: it does not show that
-    protection is reviewed for effectiveness (DDoS alerts, mitigation reports), and
-    Front Door / Application Gateway WAF policy is collected elsewhere. Maps to
-    KSI-CNA-RVP.
-    Public IPs, DDoS protection plans and virtual networks the patterns
-    take out are listed under results.excluded, each with the pattern that
-    matched. An in-scope public IP whose protection comes from an excluded
-    virtual network or plan keeps its verdict; a virtual network's
-    attached-IP counts cover only in-scope IPs. Summary fields:
-    resource_exclusion_patterns (the configured patterns, empty when none
-    are set), resource_exclusion_patterns_unmatched (patterns that matched
-    nothing, such as a mistyped name), excluded_ddos_protection_plans,
-    excluded_virtual_networks, excluded_public_ips (how many the patterns
-    took out) and in_scope_ddos_protection_plans,
-    in_scope_virtual_networks, in_scope_public_ips (how many stayed); a
-    kind's two counts are null when its list couldn't be read.
-    results.excluded is always present, empty when nothing is excluded.
+  instructions: |
+    Script: azure/ddos_protection/fetcher.py
+
+    Access: Reader on the subscription.
+
+    Commands Executed:
+    - subscriptions.list() — picks a subscription when none is set
+    - providers.get("Microsoft.Network") — tells "networking not in use" from "nothing there"
+    - ddos_protection_plans.list() — the DDoS protection plans
+    - virtual_networks.list_all() — each virtual network's DDoS setting, plan and subnet back-references
+    - public_ip_addresses.list_all() — each public IP's attachment and protection setting
+    - network_interfaces.list_all() — which virtual network an IP attached to a network interface belongs to
+    - load_balancers.list_all() — which virtual network an IP on a load balancer frontend belongs to, through its backend pools
+
+    Output: azure_ddos_protection_<subscription>.json — each public IP with what it is attached to and its effective DDoS protection, plus the DDoS plans, the virtual networks and the resources left out and why.
+
+    Summary fields:
+
+    Which resources are left out of scope?
+    - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
+    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no DDoS protection plan, virtual network or public IP, such as a mistyped name; null when any of those lists could not be read
+    - excluded_ddos_protection_plans — Number of DDoS protection plans left out of scope because a pattern matched; each is listed under excluded with the pattern; null when the plan list could not be read
+    - excluded_virtual_networks — Number of virtual networks left out of scope because a pattern matched; null when the virtual network list could not be read
+    - excluded_public_ips — Number of public IPs left out of scope because a pattern matched; null when the public IP list could not be read. An in-scope public IP whose protection comes from an excluded virtual network or plan keeps its verdict, and a virtual network's attached-IP counts cover only in-scope IPs
+
+    Which plans, virtual networks and public IPs were checked?
+    - in_scope_ddos_protection_plans — Number of DDoS protection plans read and in scope; null when the plan list could not be read
+    - in_scope_virtual_networks — Number of virtual networks read and in scope; null when the virtual network list could not be read
+    - in_scope_public_ips — Number of public IPs read and in scope; null when the public IP list could not be read
+    - total_ddos_protection_plans — Number of in-scope DDoS protection plans
+    - total_virtual_networks — Number of in-scope virtual networks
+    - total_public_ips — Number of in-scope public IPs, attached or not
+    - provider_registration_status — Whether the networking provider (Microsoft.Network) is registered on the subscription: registered, not_registered or unknown
+
+    Which virtual networks have a DDoS plan?
+    - virtual_networks_with_ddos_plan — Number of virtual networks with DDoS protection turned on and a plan linked
+    - virtual_networks_with_attached_public_ips — Number of virtual networks with at least one in-scope public IP attached to a resource in them
+    - virtual_networks_with_attached_public_ips_without_plan — Number of virtual networks with at least one attached public IP but no DDoS plan
+
+    Is every Internet-facing public IP protected?
+    - attached_public_ips — Number of public IPs attached to a resource, which makes them reachable from the Internet; protection here is configuration only and does not show that DDoS alerts or mitigation reports are reviewed
+    - attached_public_ips_by_effective_protection — Number of attached public IPs for each protection result:
+      - network_protection (covered by its virtual network's DDoS plan, with DDoS protection turned on)
+      - ip_protection (covered by its own DDoS IP Protection, mode Enabled)
+      - none (the IP inherits protection but its virtual network has no plan, or the IP is unattached)
+      - disabled (protection turned off on the IP)
+      - not_supported (held by a NAT gateway, which DDoS Protection cannot protect)
+      - unknown (no single virtual network could be found for it, such as a load balancer with empty backend pools or backends in several networks)
+    - attached_public_ips_unprotected — Number of attached public IPs whose protection is none or disabled; not_supported and unknown are not counted

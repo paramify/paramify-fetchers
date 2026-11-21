@@ -1,17 +1,7 @@
 name: azure_activity_log_alerts
-version: 0.3.0
-description: >
-  Every activity log alert rule in the subscription — enabled state, scopes,
-  description, notification action groups and the decoded conditions each rule fires
-  on — plus a derived map of which security-relevant control-plane operations those
-  rules actually cover: create/update and delete of network security groups and their
-  rules, public IP addresses, policy assignments, SQL server firewall rules and
-  security solutions, and whether a Service Health incident alert exists. Each rule's
-  action groups are resolved to the receivers they notify and checked against alert
-  processing rules that suppress them, and a second map covers App Service changes
-  (create/update, configuration, deployment, slot swap) counting only alerts that
-  reach a person. One evidence set answers all of it, rather than one fetcher per
-  operation.
+version: 0.3.1
+description: >-
+  Shows which security-relevant control-plane operations and App Service changes an enabled activity log alert covers, and whether those alerts reach a person.
 category: azure
 
 config_schema:
@@ -76,35 +66,91 @@ ksis:
 evidence_set:
   reference_id: EVD-AZURE-ACTIVITY-ALERTS
   name: Azure Activity Log Alerts
-  instructions: >
-    Script: azure/activity_log_alerts/fetcher.py. Azure SDK calls (azure-mgmt-monitor MonitorManagementClient):
-    activity_log_alerts.list_by_subscription_id(). Then raw ARM GETs, following
-    nextLink: Microsoft.Insights/actionGroups (api 2023-01-01) and
-    Microsoft.AlertsManagement/actionRules — alert processing rules (2021-08-08);
-    action groups referenced from another subscription are fetched by id and stay in
-    unresolved_action_group_ids on 403/404; an id that is not an ARM action group path
-    is never fetched. action_groups keeps the rule's own id list; resolved_action_groups
-    adds each group's enabled state and enabled receivers (email and SMS count only with
-    status Enabled, so Disabled and NotSpecified send nothing; webhook host only, phone
-    numbers masked to the last four digits). Routing is decided as in
-    azure_alert_rules: a processing rule's scope_match is "full" or "partial" (narrower
-    than a subscription-scoped alert, for instance); suppressed is true only for a
-    full-scope, unconditional, active RemoveAllActionGroups rule and null for any other
-    matching one; routes_to_person counts email, SMS, voice, app push, ARM role and
-    ITSM receivers; reaches_human is true, false or null (unknown, never "no").
-    monitored_operation_coverage and its totals are unchanged from 0.1.0 (enabled
-    rules). monitored_operation_coverage_reaching_human and change_operation_coverage
-    (results.change_operations, site and slot operations) are true when an alert that
-    reaches a person covers the operation, null when only one that might, false
-    otherwise; change_operations_possibly_covered counts the nulls.
+  instructions: |
+    Script: azure/activity_log_alerts/fetcher.py
 
-    Resources the resource_exclusions patterns take out are listed under excluded
-    instead, each with the pattern that matched. The summary echoes
-    resource_exclusion_patterns, lists resource_exclusion_patterns_unmatched
-    (patterns that matched no activity log alert rule, action group or processing
-    rule, such as a mistyped name), and counts excluded_activity_log_alerts,
-    excluded_action_groups and excluded_processing_rules, and
-    in_scope_activity_log_alerts, in_scope_action_groups and
-    in_scope_processing_rules (a kind's two counts are null when its list
-    couldn't be read; 0 alerts in scope means there are none or the patterns
-    took out every one, which a check can catch by requiring more than 0). The rest of the summary counts in-scope rules only.
+    Access: Reader or Monitoring Reader on the subscription. Optional: Reader on other subscriptions whose action groups the alerts use; without it, those alerts' verdicts read unknown.
+
+    Commands Executed:
+    - subscriptions.list() — picks a subscription when none is set
+    - providers.get() for Microsoft.Insights and Microsoft.AlertsManagement — skips an unregistered provider
+    - activity_log_alerts.list_by_subscription_id() — activity log alert rules and their conditions
+    - GET Microsoft.Insights/actionGroups — action groups and their receivers
+    - GET Microsoft.AlertsManagement/actionRules — processing rules that suppress or add action groups
+    - GET <action group id> (per referenced action group not in the subscription's own list, such as one in another subscription; an id that isn't an action group path is never fetched) — its receivers
+
+    Output: azure_activity_log_alerts_<subscription>.json — each activity log alert with the operations it fires on, the receivers it notifies (phone numbers cut to the last four digits, webhooks to their host) and whether it reaches a person, plus the operations it's judged against and the resources left out.
+
+    Summary fields:
+
+    Which resources are left out of scope?
+    - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
+    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no activity log alert rule, action group or processing rule, such as a mistyped name; null when a list could not be read
+    - excluded_activity_log_alerts — Number of activity log alert rules left out of scope because a pattern matched their resource group, region (they carry the region global) or id; each is listed under excluded with the pattern, and no other count includes it; null when the rule list could not be read
+    - excluded_action_groups — Number of action groups left out of scope because a pattern matched their resource group or id (they carry no region, so location: patterns never match them); routing is still worked out against them; null when the action group list could not be read
+    - excluded_processing_rules — Number of alert processing rules left out of scope because a pattern matched their resource group or id (they carry no region); routing is still worked out against them; null when the processing rule list could not be read
+    - in_scope_activity_log_alerts — Number of activity log alert rules read and in scope; 0 means none was read or the patterns took out every rule, which a check can catch by requiring more than 0; null when the rule list could not be read
+    - in_scope_action_groups — Number of action groups read and in scope; null when the action group list could not be read
+    - in_scope_processing_rules — Number of alert processing rules read and in scope; null when the processing rule list could not be read
+
+    What activity log alerts exist?
+    - total_activity_log_alerts — Number of in-scope activity log alert rules
+    - enabled_alerts — Number of enabled alert rules
+    - disabled_alerts — Number of disabled alert rules, which never fire; a rule Azure reports with no enabled value counts here
+    - alerts_with_action_groups — Number of alert rules with at least one action group of their own
+    - alerts_without_action_groups — Number of alert rules with no action group of their own
+    - provider_registration_status — Whether the Azure Monitor provider (Microsoft.Insights) is registered on the subscription: registered, not_registered or unknown
+
+    Are security-relevant operations alerted on?
+    - monitored_operation_coverage — For each security operation (create/update and delete of network security groups, their rules, public IP addresses, policy assignments, SQL server firewall rules and security solutions), true if an enabled alert fires on it, whether or not it reaches anyone; false if none does. Operation names are compared without regard to case:
+      - create_update_network_security_group (Microsoft.Network/networkSecurityGroups/write)
+      - delete_network_security_group (Microsoft.Network/networkSecurityGroups/delete, or its classic equivalent)
+      - create_update_network_security_group_rule (networkSecurityGroups/securityRules/write)
+      - delete_network_security_group_rule (networkSecurityGroups/securityRules/delete)
+      - create_update_public_ip_address (Microsoft.Network/publicIPAddresses/write)
+      - delete_public_ip_address (Microsoft.Network/publicIPAddresses/delete)
+      - create_update_policy_assignment (Microsoft.Authorization/policyAssignments/write)
+      - delete_policy_assignment (Microsoft.Authorization/policyAssignments/delete)
+      - create_update_sql_server_firewall_rule (Microsoft.Sql/servers/firewallRules/write)
+      - delete_sql_server_firewall_rule (Microsoft.Sql/servers/firewallRules/delete)
+      - create_update_security_solution (Microsoft.Security/securitySolutions/write)
+      - delete_security_solution (Microsoft.Security/securitySolutions/delete)
+    - monitored_operations_covered — Number of operations in monitored_operation_coverage that an enabled alert fires on
+    - monitored_operations_total — Number of operations in monitored_operation_coverage; always 12
+    - monitored_operation_percentage — Percentage of those operations that an enabled alert fires on = monitored_operations_covered / monitored_operations_total × 100 (a whole number, 0–100); the total is never 0
+    - all_monitored_operations_covered — True if an enabled alert fires on every operation in monitored_operation_coverage; false if any has none
+    - uncovered_monitored_operations — List of the operations in monitored_operation_coverage that no enabled alert fires on
+    - service_health_alert_configured — True if an enabled alert fires on Service Health incidents (category ServiceHealth and incident type Incident on the same rule); false if none does
+
+    Do the alerts reach a person?
+    - alerts_routing_to_enabled_receiver — Number of enabled alerts that always notify an action group that is enabled and has at least one enabled receiver (email and SMS receivers count only when their status is Enabled, so Disabled and NotSpecified send nothing)
+    - alerts_routing_unknown — Number of enabled alerts where it's unknown whether they notify anyone, because an action group couldn't be read or a deliverable one is added only some of the time
+    - alerts_suppressed — Number of enabled alerts whose notifications an active suppression rule always switches off: one covering the alert's whole scope, with no conditions, and either no schedule or a one-off schedule window that is in force now
+    - alerts_possibly_suppressed — Number of enabled alerts that a suppression rule might switch off: it covers only part of the alert's scope, has conditions, or has a schedule that can't be evaluated
+    - alerts_reaching_human — Number of enabled alerts that notify a person (by email, SMS, voice call, app push, Azure role or ITSM ticket) and aren't suppressed
+    - alerts_reaching_human_unknown — Number of enabled alerts where it's unknown whether they reach a person: they notify only code (webhooks, Logic Apps, Functions, runbooks or Event Hubs), an action group couldn't be read, or a suppression rule might apply
+    - monitored_operation_coverage_reaching_human — For each operation in monitored_operation_coverage, true if an alert that reaches a person fires on it; null if only an alert that might reach a person does; false otherwise:
+      - create_update_network_security_group (same operations as monitored_operation_coverage)
+      - delete_network_security_group (same)
+      - create_update_network_security_group_rule (same)
+      - delete_network_security_group_rule (same)
+      - create_update_public_ip_address (same)
+      - delete_public_ip_address (same)
+      - create_update_policy_assignment (same)
+      - delete_policy_assignment (same)
+      - create_update_sql_server_firewall_rule (same)
+      - delete_sql_server_firewall_rule (same)
+      - create_update_security_solution (same)
+      - delete_security_solution (same)
+
+    Does a person get alerted to App Service changes?
+    - change_operation_coverage — For each App Service change, on apps and on deployment slots, true if an alert that reaches a person fires on it; null if only an alert that might reach a person does; false otherwise:
+      - create_update_web_app (Microsoft.Web/sites/write, and the slot equivalent)
+      - update_web_app_configuration (sites/config/write, and the slot equivalent)
+      - deploy_web_app (sites/deployments/write, and the slot equivalent)
+      - swap_web_app_slots (sites/slotsswap/action, and the slot equivalent)
+    - change_operations_covered — Number of App Service changes marked true in change_operation_coverage
+    - change_operations_possibly_covered — Number of App Service changes marked null in change_operation_coverage
+    - change_operations_total — Number of App Service changes in change_operation_coverage; always 4
+    - all_change_operations_covered — True if every App Service change is marked true; false if any is marked false; null if none is false but some are only possibly covered
+    - uncovered_change_operations — List of the App Service changes marked false in change_operation_coverage

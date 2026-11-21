@@ -47,6 +47,20 @@ def event_row(e):
     }
 
 
+def in_repository_scope(event, allow, exclude):
+    """Whether an event survives the target's repository filters, matched as list_repos matches them.
+
+    An event that names no repository (a member added, an organization setting changed) is organization-wide and is
+    always kept. `repo` is "owner/name"; only the name is compared, without regard to case. include_archived is not
+    applied: an archived repository's events still happened.
+    """
+    repo = event.get("repo") or event.get("repository")
+    if not isinstance(repo, str) or not repo:
+        return True
+    name = repo.rsplit("/", 1)[-1].lower()
+    return name in allow if allow else name not in exclude
+
+
 def collect(client, org, repos, config):
     login = org["login"]
     days, cap = config["days_back"], config["max_events"]
@@ -74,12 +88,22 @@ def collect(client, org, repos, config):
         client.fail(f"GET orgs/{login}/audit-log", "Truncated",
                     f"more than {cap} events since {day}; raise GITHUB_AUDIT_MAX_EVENTS or shorten the window",
                     "partial_failure")
+    # The log is organization-wide, so the repository filters are applied to the events themselves: an excluded
+    # repository's events must not sit in evidence whose metadata says the repository was excluded.
+    allow, exclude = set(client.repositories_filter), set(client.exclude_repositories)
+    events_read = len(events)
+    if allow or exclude:
+        events = [e for e in events if in_repository_scope(e, allow, exclude)]
     by_action = {}
     for e in events:
         by_action[e.get("action") or "unknown"] = by_action.get(e.get("action") or "unknown", 0) + 1
     security = [event_row(e) for e in events if str(e.get("action") or "").split(".")[0] in SECURITY_FAMILIES]
     return {
-        "metadata": {"since": f"{day}T00:00:00Z", "include": "web", "truncated": truncated},
+        "metadata": {"since": f"{day}T00:00:00Z", "include": "web", "truncated": truncated,
+                     # Every count below covers the events kept. events_read is what the API returned.
+                     "repository_filter_applied": bool(allow or exclude),
+                     "events_read": events_read,
+                     "events_outside_repository_filter": events_read - len(events)},
         "summary": {
             "events_total": len(events),
             "security_events": len(security),

@@ -1,12 +1,7 @@
 name: azure_private_dns_zone_configuration
-version: 0.4.0
-description: >
-  Inventories Azure private DNS zones (Microsoft.Network/privateDnsZones) in the subscription. For
-  every zone: its virtual network links (auto-registration, resolution policy, link state, and
-  whether the linked VNet still exists) and its record sets. For every A record in a privatelink.*
-  zone: whether it resolves to a live private endpoint that serves that name, so stale records left
-  behind by deleted endpoints are visible. Zone names that exist more than once are listed with the
-  VNets each copy serves.
+version: 0.4.1
+description: >-
+  Shows each private DNS zone's virtual network links and records, and whether every private-link A record resolves to a live private endpoint that serves its name.
 category: azure
 
 config_schema:
@@ -73,118 +68,61 @@ ksis:
 evidence_set:
   reference_id: EVD-AZURE-PRIVATE-DNS-ZONE-CONFIG
   name: Azure Private DNS Zone Configuration
-  instructions: >
-    Script: azure/private_dns_zone_configuration/fetcher.py. Azure SDK calls: azure-mgmt-privatedns PrivateDnsManagementClient
-    private_zones.list(), and for each zone virtual_network_links.list(resource_group, zone) and
-    record_sets.list(resource_group, zone); a list that fails leaves virtual_network_links or
-    record_sets null (counted in zones_links_unknown / zones_records_unknown), never empty. SOA records
-    are omitted. azure-mgmt-network NetworkManagementClient private_dns_zone_groups.list(endpoint,
-    resource_group), in the endpoint's own subscription, for each private endpoint whose NIC holds an
-    IP of a privatelink A record; a read that fails is recorded and leaves only that endpoint's zone
-    groups unknown. Access: Reader on the subscription, which includes
-    Microsoft.Network/privateEndpoints/privateDnsZoneGroups/read; Reader on other subscriptions lets
-    their VNets, endpoints and zone groups resolve too. azure-mgmt-resourcegraph queries, paged by _shared/resource_graph.query_all and not
-    scoped to a subscription so resources in other subscriptions the credential can read still
-    resolve: the virtual networks the zones link to; for a private-link zone's linked VNet the
-    credential cannot read, the VNets whose own peering points at it, with the hubs each one peers
-    with (mv-expand over properties.virtualNetworkPeerings, remoteVirtualNetwork.id in~ (...),
-    peeringState Connected; a failed query leaves the zones that link those hubs unknown, while the
-    links keep the status already read); then the VNets peered (peeringState Connected) with a private-link zone's linked VNets and those
-    found the other way, each read by id (Resources | where id in~ (...), 200 ids a query; a failed
-    query leaves only its own VNets unknown: the links to them, and every private-link record of a
-    zone that resolves for one of them) with
-    its address prefixes, peerings and each subnet's prefixes and IP configuration ids; every network
-    interface owned by a private endpoint, with its private IPs, subnet and
-    properties.ipConfigurations[].properties.privateLinkConnectionProperties.fqdns (mv-expand ... limit
-    2000, above the 256 IP configurations a NIC can hold); every private endpoint's connection states;
-    the private IPs and subnets of other network interfaces and of load balancer frontends; every
-    private DNS zone and zone link; and the resource groups the credential can read (ResourceContainers).
-    A zone is a private-link zone when one of its labels is privatelink or privatelink-* (privatelink.
-    blob.core.windows.net, AKS's <guid>.privatelink.<region>.azmk8s.io, Azure Virtual Desktop's
-    privatelink-global.wvd.microsoft.com). A private IP is not unique across a tenant, so each IP of an
-    A record in such a zone is matched only within the virtual networks the zone resolves for: its
-    linked VNets and the VNets peered with them (an endpoint in a spoke peered with a hub the zone is
-    linked to counts; a resource holding the same address in an unrelated VNet does not). A peering
-    counts from either side, so a readable spoke peered with a linked hub the credential cannot read
-    is in scope too. Only one peering hop is followed, so in these layouts the network match finds
-    nothing: Virtual WAN (spokes reach each other through the hub's managed VNet, two hops); spoke to
-    spoke (the zone linked to one spoke, the endpoint in another, both peered only with a hub); and
-    Azure Virtual Network Manager mesh connectivity (connected groups create no peering objects). Their
-    records are still backed when the endpoint registers them through a private DNS zone group (below);
-    only hand-made records there read unverified where 0.1.0 said backed. A
-    linked VNet the credential cannot read stays in scope: a visible endpoint NIC in it still backs the
-    record, but its address space is unknown. An endpoint in a subscription the credential cannot read
-    is not visible, so its records read unverified until the credential can read that subscription.
-    ip_address_networks lists, per IP, the VNets it was matched in (those holding it or whose
-    address space contains it), [] when there were none, and null when a lookup it depends on failed.
-    Each IP gets a status in
-    ip_address_statuses: backed when an Approved private endpoint holds the IP and one of its FQDNs is
-    the record's full name (AKS keeps the privatelink label) or the record's name under the zone's
-    public suffix (the zone without its privatelink label; Key Vault's privatelink.vaultcore.azure.net,
-    privatelink.vaultcore.usgovcloudapi.net and privatelink.vaultcore.azure.cn map to vault.azure.net,
-    vault.usgovcloudapi.net and vault.azure.cn), so a blob record never matches an endpoint for
-    acct.file... or a vault; an
-    endpoint that publishes no FQDNs is matched by IP alone. endpoint_not_approved when the endpoint
-    serving the name is Pending, Rejected or Disconnected; ip_mismatch when a private endpoint holds
-    the IP but serves a different name; platform_managed when no private endpoint holds it but another
-    network interface or an internal load balancer does (an AKS private cluster's API server, for
-    one); stale when nothing holds the IP, it falls inside a readable virtual network, and every
-    resource group with a NIC in its subnet is readable (so an endpoint there could not have been
-    missed: a record left behind by a deleted endpoint); unverified when no VNet the zone resolves for
-    holds the IP and none it can read contains it (the zone has no links, its links point only at VNets
-    the credential cannot read and nothing visible there holds the IP, or one of the layouts above),
-    when a NIC in its subnet sits in a resource group the credential cannot read, or when the IP falls
-    inside more than one of those VNets (overlapping address spaces) and their verdicts differ, in
-    which case ip_address_networks names each rather than one being picked; unknown when a query it
-    depends on failed (including the zone's link list and the lookup of a VNet it resolves for), never
-    stale. The record's
-    private_endpoint_status is backed only when every IP is backed, partially_backed when some are
-    (so a dead IP next to a live one is not hidden), no_addresses for an A record with no IP, and
-    otherwise the most serious of ip_mismatch, endpoint_not_approved, stale, unknown, unverified,
-    platform_managed. Records in non-privatelink zones and the zone apex have private_endpoint_status
-    null.
-    An IP the network match reads stale, unverified or unknown is also backed when an Approved private
-    endpoint whose NIC holds every IP of the record has a private DNS zone group that registers this
-    exact zone (by resource id), the record's FQDN and exactly the record's IPs: the record is then the
-    endpoint's own Azure-maintained registration, so it is live. That proof does not depend on topology
-    (it covers Virtual WAN, spoke to spoke, AVNM mesh and forwarder-only DNS wherever zone groups are
-    used); it does not show that the zone's linked VNets can route to the endpoint, which the network
-    match does not show either. It never overrules what the zone's own VNets found: an IP that one of
-    them reads ip_mismatch, endpoint_not_approved or platform_managed (another endpoint, a Pending one,
-    or another NIC holds that address there) keeps its verdict, even when an endpoint elsewhere
-    registers the record. zone_group_backed is true when the proof backs at least one IP; false when
-    every endpoint that could have registered the record was read and none does, or when every IP has
-    such a finding; and null when one of those reads (or the endpoint or approval lookup) failed: the
-    record then keeps the network verdict, never backed by the zone group, and a stale verdict becomes
-    unknown. backed_by lists the proofs behind a backed or partially_backed record: network (an IP
-    matched as above) and/or zone_group; null otherwise.
-    virtual_network_status on a link is found; not_found when the credential can read the VNet's
-    resource group and the VNet is not in it; not_visible when its subscription or resource group is
-    not readable to this credential (a deleted resource group also lands here); unknown when a lookup
-    failed. Any unknown also sets metadata.partial_failure. resolution_policy NxDomainRedirect means
-    names missing from the zone fall back to public resolution.
-    summary.duplicate_zone_names lists zone names in this subscription that exist more than once
-    across every subscription the credential can read, with the VNets linked to all copies;
-    duplicate_zone_names_scope is readable_subscriptions, or target_subscription when the
-    cross-subscription query failed. Azure blocks linking one VNet to two zones of the same name, so
-    duplicates mean different VNets resolve those names differently.
-    summary.privatelink_records_backed over summary.privatelink_a_records is the share of privatelink
-    records that resolve only to live private endpoints. summary.links_to_unreadable_virtual_networks
-    is non-zero when the credential cannot read every subscription the zones serve, and falls to zero
-    once it can; summary.privatelink_records_unverified also counts records in zones with no links,
-    hand-made records in the layouts above, and records whose IPs fall in overlapping VNets that
-    disagree.
-    provider_registration_status
-    (registered / not_registered / unknown) is the Microsoft.Network resource provider's state, so
-    total_zones 0 on an unregistered subscription reads as "service not in use" rather than "in use,
-    none deployed".
+  instructions: |
+    Script: azure/private_dns_zone_configuration/fetcher.py
 
-    Resources the resource_exclusions patterns take out are listed under excluded
-    instead, each with the pattern that matched; summary.duplicate_zone_names lists
-    only names an in-scope zone has, with every copy's zone id and VNets.
+    Access: Reader on the subscription, which includes Microsoft.Network/privateEndpoints/privateDnsZoneGroups/read. Optional: Reader on the other subscriptions the zones serve; without it, their virtual networks, endpoints and zone groups cannot be read, so links to them read not_visible and records they would back read unverified.
+
+    Commands Executed:
+    - subscriptions.list() — picks a subscription when none is set
+    - providers.get("Microsoft.Network") — tells "networking not in use" from "no zones"
+    - private_zones.list() — every private DNS zone
+    - virtual_network_links.list() (per zone) — the links, with auto-registration, resolution policy and link state
+    - record_sets.list() (per zone) — the records, with SOA records left out
+    - private_dns_zone_groups.list() (per private endpoint whose network interface holds an IP of a private-link A record, in the endpoint's own subscription) — the zone group that registers a record
+    - Resource Graph queries, not scoped to a subscription — the virtual networks the zones link to and the networks peered with them, private endpoint network interfaces and connection states, other network interfaces and load balancer frontends holding private IPs, every private DNS zone and zone link the credential can read (for duplicate names), and the resource groups the credential can read
+
+    Output: azure_private_dns_zone_configuration_<subscription>.json — each zone with its links and records, each private-link A record's per-IP status and the proof behind it, and the zones left out and why.
+
+    Summary fields:
 
     Which resources are left out of scope?
-      - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
-      - resource_exclusion_patterns_unmatched — List of configured patterns that matched no private DNS zone, such as a mistyped name or a location: pattern, which never matches a global zone
-      - excluded_private_dns_zones — Number of private DNS zones left out of scope because a pattern matched their resource group or id; each is listed under excluded with the pattern, and no other count includes them, their links or their records
-      - in_scope_private_dns_zones — Number of private DNS zones read and in scope; 0 means none was read or the patterns took out every one, which a check can catch by requiring more than 0
+    - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg: or id:); empty when none are set, so every resource is in scope
+    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no private DNS zone, such as a mistyped name or a location: pattern, which never matches a global zone; null when the zone list could not be read
+    - excluded_private_dns_zones — Number of private DNS zones left out of scope because a pattern matched their resource group or id; each is listed under excluded with the pattern, and no other count includes it, its links or its records; 0 when the zone list could not be read
+    - in_scope_private_dns_zones — Number of private DNS zones read and in scope; 0 means none was read or the patterns took out every zone
+
+    Which zones were checked?
+    - total_zones — Number of in-scope private DNS zones; 0 reads as "none deployed" only when provider_registration_status is registered
+    - privatelink_zones — Number of zones where a label of the name is privatelink or starts with privatelink-, such as privatelink.blob.core.windows.net
+    - custom_zones — Number of zones that are not private-link zones
+    - zones_without_virtual_network_links — Number of zones whose link list was read and is empty, so no network resolves them
+    - zones_links_unknown — Number of zones whose link list could not be read; never counted as unlinked
+    - zones_records_unknown — Number of zones whose record list could not be read; never counted as having no records
+    - provider_registration_status — Whether the networking provider (Microsoft.Network) is registered on the subscription: registered, not_registered or unknown
+
+    Do zone names resolve the same way everywhere?
+    - duplicate_zone_names — List of zone names an in-scope zone has that exist more than once across the compared subscriptions, each with every copy's zone id and the virtual networks linked to it; Azure blocks linking one network to two zones of the same name, so duplicates mean different networks resolve the name differently
+    - duplicate_zone_names_scope — Whether the duplicate check covered every readable subscription: readable_subscriptions, or target_subscription when the cross-subscription query failed; null when no zone was read
+
+    Are the virtual network links healthy?
+    - total_virtual_network_links — Number of virtual network links across in-scope zones
+    - links_with_auto_registration — Number of links with auto-registration on, so the network's VMs register their own names in the zone
+    - links_with_nxdomain_redirect — Number of links whose resolution policy is NxDomainRedirect, so names missing from the zone fall back to public resolution
+    - links_not_completed — Number of links whose link state is not Completed
+    - links_to_deleted_virtual_networks — Number of links whose network was not found, though the credential can read its resource group
+    - links_to_unreadable_virtual_networks — Number of links whose network's subscription or resource group the credential cannot read, a deleted resource group included; falls to 0 once the credential can read them
+    - links_virtual_network_unknown — Number of links whose network lookup failed
+
+    Does every private-link record resolve to a live private endpoint?
+    - privatelink_a_records — Number of A records in private-link zones, which are the records that get a status; the zone apex and records in other zones get none. Each record gets one status: backed when every IP is backed, partially_backed when some are, no_addresses when it has no IP, and otherwise the most serious of its IPs' statuses, in the order ip_mismatch, endpoint_not_approved, stale, unknown, unverified, platform_managed
+    - privatelink_records_backed — Number of private-link A records where every IP is backed: an Approved private endpoint holds the IP and one of its FQDNs is the record's name (or the name under the zone's public suffix; an endpoint that publishes no FQDNs is matched by IP alone), matched only within the networks the zone resolves for (its links and the networks peered with them, one hop), or the endpoint's own private DNS zone group registers this zone, this name and exactly these IPs, unless a network the zone resolves for finds the IP held by an endpoint serving another name, an endpoint that is not Approved, or another network interface or load balancer
+    - privatelink_records_partially_backed — Number of those records where some IPs are backed and others are not, so a dead IP is not hidden by a live one
+    - privatelink_records_ip_mismatch — Number of those records with an IP that a private endpoint holds but for a different name
+    - privatelink_records_endpoint_not_approved — Number of those records whose serving private endpoint is Pending, Rejected or Disconnected
+    - privatelink_records_stale — Number of those records with an IP that nothing holds, inside a readable network of the zone, where every resource group with a network interface in its subnet is readable, so a deleted private endpoint left the record behind
+    - privatelink_records_platform_managed — Number of those records whose IP is held by another network interface or an internal load balancer and no private endpoint, such as an AKS private cluster's API server
+    - privatelink_records_no_addresses — Number of those records with no IP
+    - privatelink_records_unverified — Number of those records that could not be checked: no network the zone resolves for holds the IP and none it can read contains it (no links, links only to unreadable networks, or a layout the one-hop match misses such as Virtual WAN, spoke to spoke or Network Manager mesh), a resource group in the subnet is unreadable, or overlapping networks disagree
+    - privatelink_records_unknown — Number of those records where a query they depend on failed, including the zone's link list; never read as stale
+    - privatelink_records_backed_percentage — Percentage of those records that are backed = privatelink_records_backed / privatelink_a_records × 100 (rounded down to a whole number); 0 when privatelink_a_records is 0

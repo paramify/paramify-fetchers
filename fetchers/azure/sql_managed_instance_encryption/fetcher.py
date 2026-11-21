@@ -92,40 +92,57 @@ def instance_record(instance: dict, protector: dict | None, databases: list[dict
         "databases_collected": databases is not None,
         "databases": databases or [],
         "total_user_databases": None if users is None else len(users),
-        "tde_enabled_user_databases": tde.count(True),
-        "tde_disabled_user_databases": tde.count(False),
-        "tde_unknown_user_databases": tde.count(None),
+        "tde_enabled_user_databases": None if users is None else tde.count(True),
+        "tde_disabled_user_databases": None if users is None else tde.count(False),
+        "tde_unknown_user_databases": None if users is None else tde.count(None),
         "all_user_databases_tde_enabled": None if users is None else all_enabled(tde),
     }
 
 
-def summarize(instances: list[dict]) -> dict:
+def _total(values: list):
+    """Sum, or null while any term is null (an unread list)."""
+    return None if None in values else sum(values)
+
+
+def summarize(instances: list[dict] | None) -> dict:
+    """`None` means the instance list was not read: every count is null, not 0. A count built from a
+    protector or database list that failed for some instance is null too."""
+    if instances is None:
+        return {k: None for k in summarize([])}
+    protectors_read = all(i["encryption_protector"] is not None for i in instances)
     return {
         "total_managed_instances": len(instances),
-        "instances_customer_managed_key": sum(1 for i in instances if i["customer_managed_key"]),
-        "instances_key_auto_rotation": sum(
-            1 for i in instances if (i["encryption_protector"] or {}).get("auto_rotation_enabled")
+        "instances_customer_managed_key": (
+            sum(1 for i in instances if i["customer_managed_key"]) if protectors_read else None
         ),
-        "total_user_databases": (
-            sum(i["total_user_databases"] for i in instances)
-            if all(i["databases_collected"] for i in instances)
-            else None
+        "instances_key_auto_rotation": (
+            sum(1 for i in instances if i["encryption_protector"]["auto_rotation_enabled"])
+            if protectors_read else None
         ),
-        "tde_enabled_user_databases": sum(i["tde_enabled_user_databases"] for i in instances),
-        "tde_disabled_user_databases": sum(i["tde_disabled_user_databases"] for i in instances),
-        "tde_unknown_user_databases": sum(i["tde_unknown_user_databases"] for i in instances),
+        "total_user_databases": _total([i["total_user_databases"] for i in instances]),
+        "tde_enabled_user_databases": _total([i["tde_enabled_user_databases"] for i in instances]),
+        "tde_disabled_user_databases": _total([i["tde_disabled_user_databases"] for i in instances]),
+        "tde_unknown_user_databases": _total([i["tde_unknown_user_databases"] for i in instances]),
     }
 
 
 # --- collection (lazy azure imports) ---
 
 def collect(subscription_id, cred, collector: Collector, exclusions: ResourceExclusions | None = None,
-            excluded: list | None = None) -> list[dict]:
-    """Instances the exclusions take out are appended to `excluded` and get none of the per-instance reads."""
+            excluded: list | None = None) -> list[dict] | None:
+    """Instances the exclusions take out are appended to `excluded` and get none of the per-instance reads.
+    None when the instance list could not be read."""
     client = sql_client(subscription_id, cred, collector)
     if client is None:
-        return []
-    instances = list_instances(client, collector, project_instance)
+        if exclusions is not None:
+            exclusions.mark_unread()
+        return None
+    failures = len(collector.failures)
+    instances = list_instances(client, collector, project_instance, unread=None)
+    if exclusions is not None and len(collector.failures) > failures:
+        exclusions.mark_unread()
+    if instances is None:
+        return None
     if exclusions and excluded is not None:
         instances, out = exclusions.split(instances, "managed_instance")
         excluded += sorted(out, key=lambda e: e["id"] or "")
@@ -179,7 +196,7 @@ def main() -> int:
     subscription_id = sub["subscription_id"]
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
-    instances: list[dict] = []
+    instances: list[dict] | None = None
     excluded: list[dict] = []
     exclusions = ResourceExclusions.from_env()
     registration = REGISTRATION_UNKNOWN
@@ -203,8 +220,13 @@ def main() -> int:
             ),
         )
 
+    if not (subscription_id and cred is not None):
+        exclusions.mark_unread()
     exclusions.record_invalid(collector)
     exclusions.warn_unmatched(logger)
+    summary = summarize(instances)
+    in_scope = None if instances is None else len(instances)
+    instances = instances or []
 
     evidence = build_payload(
         subscription_id=subscription_id,
@@ -216,9 +238,9 @@ def main() -> int:
             "excluded": excluded,
         },
         summary={
-            **summarize(instances),
+            **summary,
             "provider_registration_status": registration,
-            **exclusions.summary(excluded, ("managed_instance",), {"managed_instances": len(instances)}),
+            **exclusions.summary(excluded, ("managed_instance",), {"managed_instances": in_scope}),
         },
     )
 

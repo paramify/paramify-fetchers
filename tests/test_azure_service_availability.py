@@ -587,6 +587,14 @@ def test_excluded_resources_get_no_calls_and_are_counted_out(monkeypatch):
     assert summary["resource_exclusion_patterns_unmatched"] == ["location:nowhere"]
 
 
+def test_unmatched_patterns_are_null_when_a_resource_list_failed(monkeypatch, caplog):
+    monkeypatch.setenv("AZURE_RESOURCE_EXCLUSIONS", "rg:typo")
+    client = FakeArm(failing={"/providers/Microsoft.Web/sites": azure_rest.ArmError(500, "InternalServerError", "boom")})
+    _, summary, _ = run(client)
+    assert summary["resource_exclusion_patterns_unmatched"] is None
+    assert "matched nothing" not in caplog.text
+
+
 def test_an_excluded_cdn_profile_is_not_counted(monkeypatch):
     monkeypatch.setenv("AZURE_RESOURCE_EXCLUSIONS", "id:" + CDN)
     client = FakeArm()

@@ -34,6 +34,7 @@ import json
 import os
 import shutil
 import socket
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Dict
@@ -48,6 +49,57 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 @pytest.fixture(scope="session")
 def repo_root() -> Path:
     return REPO_ROOT
+
+
+@pytest.fixture(autouse=True)
+def _no_update_check(monkeypatch):
+    """The TUI asks for the update notice on start, and the real check runs `git fetch`
+    in the background and writes .paramify/state.json. Tests never do either; the
+    tests of the check itself clear this (tests/test_update.py)."""
+    monkeypatch.setenv("PARAMIFY_NO_UPDATE_CHECK", "1")
+
+
+@pytest.fixture(autouse=True)
+def _no_upload_yaml_from_the_working_tree(monkeypatch):
+    """Tests never read the user's own `<repo>/upload.yaml`.
+
+    It is the uploader config the TUI and CLI read by default, it is not
+    tracked, and a developer often has one (CI never does). A test that plans an
+    upload with the real repo root as its root would read it and route to the
+    developer's evidence sets. For that root only, act as if there is none; a
+    test that passes its own tmp root still gets the real lookup.
+    """
+    from framework import api
+
+    real = api.default_upload_config
+
+    def default_upload_config(root):
+        if Path(root).resolve() == REPO_ROOT:
+            return None
+        return real(root)
+
+    monkeypatch.setattr(api, "default_upload_config", default_upload_config)
+
+
+@pytest.fixture(autouse=True)
+def _no_dotenv_from_the_working_tree(monkeypatch):
+    """Tests never copy the user's own `<repo>/.env` into os.environ.
+
+    `api.run` and `api.doctor` fill unset variables from `<root>/.env`. A
+    developer's file often holds real tokens (CI never has one), and with the
+    real repo root they would land in os.environ for every later test in the
+    process. For that root only, act as if there is none.
+    """
+    from framework import api
+
+    real = api.refresh_env
+
+    def refresh_env(root):
+        if Path(root).resolve() == REPO_ROOT:
+            return []
+        return real(root)
+
+    monkeypatch.setattr(api, "refresh_env", refresh_env)
 
 
 # --------------------------------------------------------------------------- #
@@ -468,3 +520,57 @@ def no_network(monkeypatch, tmp_path):
     if log.exists():
         attempts += log.read_text().splitlines()
     assert not attempts, f"network attempts (the app may have swallowed the error): {attempts}"
+
+
+FAKE_PARAMIFY_URL = "https://api.example.test"
+
+
+@functools.cache
+def _paramify_fake():
+    spec = importlib.util.spec_from_file_location("paramify_fake", Path(__file__).with_name("paramify_fake.py"))
+    module = importlib.util.module_from_spec(spec)
+    sys.modules.setdefault("paramify_fake", module)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.fixture
+def fake_paramify(monkeypatch):
+    """tests/paramify_fake.py as the workspace every Paramify call reaches (stacks, owners,
+    plan, upload), with a fake upload token. Request it after demo_workspace, which clears the token."""
+    from datetime import date
+
+    from framework.paramify.client import Client
+    from framework.paramify_auth import BASE_URL_ENV, UPLOAD_TOKEN_ENV
+    from framework.paramify import connection as connection_mod
+
+    fake = _paramify_fake().FakeParamify()
+    fake.set_today(date.today())
+    monkeypatch.setenv(UPLOAD_TOKEN_ENV, "fake-token")
+    monkeypatch.setenv(BASE_URL_ENV, FAKE_PARAMIFY_URL)
+    monkeypatch.setattr(connection_mod, "Client", functools.partial(
+        Client, session=fake.session, sleep=lambda _s: None, retry_budget_s=3))
+    return fake
+
+
+@pytest.fixture
+def stub_paramify_status(monkeypatch):
+    """Install a fixed api.paramify_status, so a test that opens the Paramify tab
+    never reads a workspace. Call it with token=False for the offline page."""
+
+    def install(token: bool = True, fetchers=None) -> dict:
+        status = {
+            "workspace": {"base_url": "https://app.paramify.com/api/v0", "base_url_source": "default",
+                          "token": token},
+            "fetchers": fetchers if fetchers is not None else [{
+                "name": "demo_hello", "kind": "evidence",
+                "evidence_set": {"reference_id": "EVD-DEMO-HELLO", "name": "Demo", "id": None, "exists": False,
+                                 "artifact_count": 0},
+                "script": None, "validators": [], "pairs": [], "ready": False,
+            }],
+            "capabilities": [], "pipelines_count": 0, "skipped": [], "errors": {},
+        }
+        monkeypatch.setattr("framework.api.paramify_status", lambda *a, **k: status)
+        return status
+
+    return install

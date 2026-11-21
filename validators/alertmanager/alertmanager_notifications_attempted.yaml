@@ -1,0 +1,21 @@
+key: alertmanager_notifications_attempted
+name: 'Alertmanager: Notifications Sent Since Start'
+type: AUTOMATED
+role: configuration
+source: community
+statement: >
+  Alertmanager attempted at least one notification since its process started (notifications_attempted
+  is 1 or more), so alerts are flowing to integrations rather than going nowhere. An attempt may have
+  failed: the failed-notifications check covers that. A notification counts when the integration's API
+  accepts it, which is not proof that a person received it. Counts reset when Alertmanager restarts
+  (counters_since). Does not check whether the collection run succeeded.
+
+regex: '"notifications_attempted":\s*[1-9]\d*\b'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-ALERTMANAGER-ALERT-DELIVERY
