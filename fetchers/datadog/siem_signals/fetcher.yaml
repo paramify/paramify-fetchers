@@ -16,12 +16,24 @@ output:
 secrets:
 - name: api_key
   env: DATADOG_API_KEY
+  description: >-
+    Datadog API key, which identifies the organization (Organization Settings → API
+    Keys).
 - name: app_key
   env: DATADOG_APP_KEY
+  description: >-
+    Datadog application key of a service account with the Datadog Read Only role
+    (Organization Settings → Service Accounts → the account → New Key).
 - name: base_url
   env: DATADOG_BASE_URL
+  required: false
+  description: >-
+    Datadog API base URL. Defaults to https://api.ddog-gov.com (Datadog for Government);
+    set https://api.datadoghq.com for commercial US1, or your site's API host.
 - name: signals_lookback_days
   env: DATADOG_SIGNALS_LOOKBACK_DAYS
+  required: false
+  description: How many days back to collect Cloud SIEM signals. Defaults to 30.
 ksis:
   - KSI-MLA-RVL
 

@@ -1,0 +1,19 @@
+key: github_production_no_admin_bypass
+name: GitHub Production Environments Without Admin Bypass
+type: AUTOMATED
+role: configuration
+source: community
+statement: >-
+  No production environment lets repository administrators skip its protection rules. Pair with GitHub
+  Production Admin Bypass Readable.
+regex: '"production_admins_can_bypass":\s*\[\s*\]'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+- regexOperation:
+    type: MATCH_COUNT
+  criteria: NOT_EQUALS
+  value:
+    type: CUSTOM_TEXT
+    customText: '0'
+evidence_sets:
+- EVD-GITHUB-DEPLOYMENT-CONTROLS

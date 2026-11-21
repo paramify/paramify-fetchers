@@ -1,0 +1,19 @@
+key: istio_egress_registry_only
+name: 'Istio: Egress Limited to Registered Services'
+type: AUTOMATED
+role: configuration
+source: community
+statement: >
+  The mesh's outbound traffic policy is REGISTRY_ONLY (outbound_traffic_policy), so sidecars send traffic
+  only to services in the mesh's registry, not to arbitrary external hosts. Istio's default, ALLOW_ANY,
+  fails. Covers traffic through sidecars only. Does not check whether the collection run succeeded.
+
+regex: '"outbound_traffic_policy":\s*"REGISTRY_ONLY"'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-ISTIO-MESH-SECURITY

@@ -478,6 +478,8 @@ def collect(subscription_id, cred, collector: Collector, exclusions: ResourceExc
     groups, out_groups = exclusions.split(groups, "container_group")
     if excluded is not None:
         excluded += sorted(out + out_apps + out_jobs + out_groups, key=lambda e: (e["kind"], e["id"] or ""))
+    if not all(read):
+        exclusions.mark_unread()
     exclusions.warn_unmatched(logger)
     monitor = (
         collector.guard("monitor.MonitorManagementClient (init)", lambda: monitor_client(subscription_id, cred))

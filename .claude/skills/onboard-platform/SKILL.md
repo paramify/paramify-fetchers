@@ -101,7 +101,10 @@ person. The conventions it reads are in `references/state.md`.
   `teardown.sh`. The derivation of each field goes in the fetcher's
   `evidence_set.instructions` (laid out as in `docs/authoring_fetcher_guide.md`:
   Script, Access, Commands Executed, Output, Summary fields), where an assessor
-  reads it; the build story goes
+  reads it. Hard limits: the description is one sentence of at most 30 words
+  ending in a period, with no fetcher name; no markdown; a summary field line
+  at most 800 characters; the instructions at most 20,000. The contract test
+  checks every new fetcher's text. The build story goes
   in `notes/`. The third run wrote 45–74-line module docstrings restating both.
   Committed code never cites `.onboarding/`, which is gitignored.
 - **In the public repo, the branch carries fetchers, never new validators.**

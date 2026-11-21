@@ -1,0 +1,19 @@
+key: github_default_branch_rulesets_enforced
+name: GitHub Default Branch Rulesets Enforced
+type: AUTOMATED
+role: configuration
+source: community
+statement: >-
+  No repository in scope has a ruleset targeting its default branch that is disabled or in evaluate mode.
+  A ruleset that exists but enforces nothing fails.
+regex: '"with_rulesets_not_enforced":\s*\[\s*\]'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+- regexOperation:
+    type: MATCH_COUNT
+  criteria: NOT_EQUALS
+  value:
+    type: CUSTOM_TEXT
+    customText: '0'
+evidence_sets:
+- EVD-GITHUB-BRANCH-PROTECTION

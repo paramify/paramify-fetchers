@@ -2,7 +2,9 @@
 """Who may deploy to production, and what was deployed: environment reviewers, wait timers, branch policies and production deployments."""
 
 import fnmatch
+import re
 import sys
+from collections import Counter
 from pathlib import Path
 from urllib.parse import quote
 
@@ -17,6 +19,10 @@ CONFIG = {
 }
 MAX_DAYS_BACK = 366
 SHA_BATCH = 20
+# A deployment a workflow job made links its run in every status (measured): .../actions/runs/<id>/job/<id>.
+RUN_URL = re.compile(r"/actions/runs/(\d+)(?:/|$)")
+# A job held by an environment's protection rules sits in "waiting", then goes to "queued" once released (measured).
+PASSED = ("queued", "in_progress", "success")
 
 
 def rule(env, kind):
@@ -51,8 +57,65 @@ def environment_record(client, base, env, production):
     }
 
 
+def run_id(status):
+    for field in ("log_url", "target_url"):
+        found = RUN_URL.search(str(status.get(field) or ""))
+        if found:
+            return int(found.group(1))
+    return None
+
+
+def gate(states):
+    """How a deployment fared at its environment's protection rules, from its states newest first: passed, waiting,
+    stopped (held, then rejected, cancelled or timed out before it ran), or None when the history shows neither."""
+    if any(s in PASSED for s in states):
+        return "passed"
+    if "waiting" in states:
+        return "waiting" if states[0] == "waiting" else "stopped"
+    return None
+
+
+def approvals(client, base, run, env_name):
+    """(the run's reviews of `env_name`, why unknown). A failure is recorded and answers (None, "failed").
+
+    Each entry is one review: it releases or rejects every job then waiting on the environment, and names the
+    environment once per job (measured). It carries no job and no time, so when one run made several deployments a
+    review cannot be tied to one of them. A run deleted after its retention answers 404: unknown, not unapproved.
+    """
+    before = len(client.failures)
+    found, body = client.lookup(f"{base}/actions/runs/{run}/approvals")
+    if not found:
+        return None, "failed" if len(client.failures) > before else "run_deleted"
+    rows = []
+    for a in body or []:
+        jobs = sum(1 for e in a.get("environments") or [] if e.get("name") == env_name)
+        if jobs:
+            user = a.get("user") or {}
+            rows.append({"user": user.get("login"),
+                         "bot": user.get("type") == "Bot" or str(user.get("login") or "").endswith("[bot]"),
+                         "state": a.get("state"), "comment": a.get("comment") or None, "jobs": jobs})
+    return rows, None
+
+
+def independent(d, made):
+    """Whether a person other than the deployment's creator approved it: False when none did, None when unknown.
+
+    A review names no job, but a reviewer approves a job only once. So the most jobs one such person approved in the
+    run is a floor on the jobs they released; when it covers every deployment the run made, each one had them.
+    """
+    if d["gate"] != "passed" or d["approvals"] is None:
+        return None
+    jobs = Counter()
+    for a in d["approvals"]:
+        if a["state"] == "approved" and not a["bot"] and a["user"] != d["creator"]:
+            jobs[a["user"]] += a["jobs"]
+    if not jobs:
+        return False
+    return True if max(jobs.values()) >= made else None
+
+
 def deployments(client, base, env_name, since, cap):
-    """Deployments to one environment since `since`, newest first, each with its latest status. None on failure."""
+    """Deployments to one environment since `since`, newest first, each with its status history. None on failure."""
     seen = []
     found = client.paginate_required(f"{base}/deployments", {"environment": env_name},
                                      until=lambda d: seen.append(d) or (to_epoch(d.get("created_at")) or since) < since
@@ -64,20 +127,35 @@ def deployments(client, base, env_name, since, cap):
                     f"more than {cap} deployments to {env_name} in the window; raise GITHUB_MAX_DEPLOYMENTS",
                     "partial_failure")
         return None
-    rows = []
+    rows, by_run = [], {}
     for d in found:
-        state, statuses = client.read(f"{base}/deployments/{d.get('id')}/statuses", {"per_page": 1})
+        state, statuses = client.read(f"{base}/deployments/{d.get('id')}/statuses", {"per_page": 100})
         if state is not None:
             if state != "failed":
                 client.fail(f"GET {base}/deployments/{d.get('id')}/statuses", "UnexpectedState", state,
                             "not_authorized")
             return None
-        latest = (statuses or [None])[0] or {}
+        statuses = [x for x in statuses or [] if isinstance(x, dict)]  # newest first
+        latest = statuses[0] if statuses else {}
+        via_app = (d.get("performed_via_github_app") or {}).get("slug")
+        # The oldest status is the one Actions wrote when the job asked for the environment.
+        run = next((run_id(x) for x in reversed(statuses) if run_id(x)), None) if via_app == "github-actions" else None
+        # One run can make several deployments, one per job (measured on cli/cli): its reviews are read once.
+        if run is not None and run not in by_run:
+            by_run[run] = approvals(client, base, run, env_name)
+        approved, unknown = (None, "not_made_by_actions") if via_app != "github-actions" else \
+            (None, "run_not_linked") if run is None else by_run[run]
+        if unknown == "failed":
+            return None
         rows.append({"id": d.get("id"), "created_at": d.get("created_at"), "ref": d.get("ref"), "sha": d.get("sha"),
                      "task": d.get("task"), "creator": (d.get("creator") or {}).get("login"),
-                     "via_app": (d.get("performed_via_github_app") or {}).get("slug"),
-                     "production_environment_flag": d.get("production_environment"),
-                     "latest_state": latest.get("state"), "latest_state_at": latest.get("created_at")})
+                     "via_app": via_app, "production_environment_flag": d.get("production_environment"),
+                     "latest_state": latest.get("state"), "latest_state_at": latest.get("created_at"),
+                     "gate": gate([x.get("state") for x in statuses]),
+                     "run_id": run, "approvals": approved, "approvals_unknown": unknown})
+    made = Counter(r["run_id"] for r in rows if r["run_id"] is not None and r["gate"] == "passed")
+    for r in rows:
+        r["independent_approval"] = independent(r, made[r["run_id"]])
     return rows
 
 
@@ -157,6 +235,11 @@ def collect(client, org, repos, config):
 
     def label(r, e):
         return f"{r['repository']}:{e['name']}"
+
+    def approved(d):
+        return [a for a in d["approvals"] or [] if a["state"] == "approved"]
+    # Approval is judged only for deployments that got past the gate; one held there never ran.
+    shipped = [(r, e, d) for r, e, d in deploys if d["gate"] == "passed" and d["approvals"] is not None]
     return {
         "metadata": {"since": iso(since)},
         "summary": {
@@ -182,6 +265,33 @@ def collect(client, org, repos, config):
                 f"{label(r, e)}#{d['id']}" for r, e, d in deploys if d["via_app"] != "github-actions"),
             "production_deployments_by_state": {s: sum(1 for *_, d in deploys if (d["latest_state"] or "none") == s)
                                                 for s in sorted({d["latest_state"] or "none" for *_, d in deploys})},
+            "production_deployments_by_gate": {g: sum(1 for *_, d in deploys if (d["gate"] or "none") == g)
+                                               for g in sorted({d["gate"] or "none" for *_, d in deploys})},
+            # Held by the protection rules (waiting for review, or rejected or cancelled there): the gate working.
+            "production_deployments_held_at_gate": sorted(
+                f"{label(r, e)}#{d['id']}" for r, e, d in deploys if d["gate"] in ("waiting", "stopped")),
+            # Of the deployments that passed the gate, which the run's reviews approved. Unknown (no status, not made
+            # by Actions, no run linked, or the run deleted) is listed apart from approved by nobody.
+            "production_deployments_approved": len([d for *_, d in shipped if approved(d)]),
+            "production_deployments_without_approval": sorted(
+                f"{label(r, e)}#{d['id']}" for r, e, d in shipped if not approved(d)),
+            "production_deployments_approval_unknown": sorted(
+                f"{label(r, e)}#{d['id']}" for r, e, d in deploys
+                if d["gate"] not in ("waiting", "stopped") and (d["gate"] is None or d["approvals"] is None)),
+            # A person other than the creator approved it. A run's reviews cannot be tied to one of its deployments,
+            # so a bot or the creator is named only when every approving review of the run was theirs, and a run whose
+            # reviews cannot cover each of its deployments with a person is listed as ambiguous.
+            "production_deployments_approved_independently": len([d for *_, d in shipped
+                                                                  if d["independent_approval"]]),
+            "production_deployments_without_independent_approver": sorted(
+                f"{label(r, e)}#{d['id']}" for r, e, d in shipped if approved(d) and d["independent_approval"] is False),
+            "production_deployments_approved_by_bot": sorted(
+                f"{label(r, e)}#{d['id']}" for r, e, d in shipped if approved(d) and all(a["bot"] for a in approved(d))),
+            "production_deployments_self_approved": sorted(
+                f"{label(r, e)}#{d['id']}" for r, e, d in shipped
+                if approved(d) and all(a["user"] == d["creator"] for a in approved(d))),
+            "production_deployments_approver_ambiguous": sorted(
+                f"{label(r, e)}#{d['id']}" for r, e, d in shipped if approved(d) and d["independent_approval"] is None),
             "repositories_with_production_environment": len({r["repository"] for r, _ in prod}),
             "not_collected": [r["repository"] for r in records if not r["collected"]],
         },
