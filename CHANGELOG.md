@@ -40,6 +40,12 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`alertmanager_alert_delivery` fetcher and `alertmanager` category.** Reads Prometheus Alertmanager's v2 API and
+  metrics endpoint, GET only: the route tree and receivers (names and integration types only, never receiver
+  settings), active, silenced and inhibited alerts, silences, and notification attempts and failures since the process
+  started, per receiver when Alertmanager runs with receiver-name-in-metrics, otherwise per integration type. Reports
+  receivers and routes that deliver nowhere. A delivered notification means the integration accepted it, not that a
+  person received it. Unread endpoints leave their fields null rather than 0.
 - **The TUI shows which environment variables a manifest is missing, and stops a run that would fail on them.**
   - The manifest settings row has an `env` button (`✓ all set` or `✗ 2 missing`), each fetcher's status names what it
     needs (`✗ needs OKTA_API_TOKEN`), and the line under the table splits what a run needs from what only an upload needs.
