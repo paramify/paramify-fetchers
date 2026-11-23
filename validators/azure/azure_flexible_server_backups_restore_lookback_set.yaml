@@ -1,0 +1,19 @@
+key: azure_flexible_server_backups_restore_lookback_set
+name: 'Azure PostgreSQL and MySQL Backups: Restore Lookback Is Configured'
+type: AUTOMATED
+role: configuration
+source: community
+statement: >
+  A restore lookback is configured (restore_lookback_days is a whole number above 0). Fails while it
+  is not set, which marks the interval as undecided rather than a restore as missing. Does not check
+  whether the collection run succeeded.
+
+regex: '"restore_lookback_days":\s*(?<restore_lookback_days>[1-9]\d*)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-FLEXIBLE-SERVER-BACKUPS

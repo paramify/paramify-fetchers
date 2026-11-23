@@ -349,15 +349,23 @@ def collect_validators(
         select_validators,
     )
 
+    from framework.validators import manifest_tracked
+
     registry = discover_validators(root)
-    if reference_ids is not None:
+    if reference_ids is not None and manifest_path is not None:
+        # A manifest's selection applies to an explicit set list too.
+        fetchers = discover_fetchers(root)
+        pipeline = pipeline_reference_ids(fetchers)
+        selected = manifest_tracked(api.read_manifest(manifest_path), fetchers, registry.values(),
+                                    set(reference_ids) - pipeline)
+    elif reference_ids is not None:
         pipeline = pipeline_reference_ids(discover_fetchers(root))
         selected = select_validators(registry.values(), set(reference_ids) - pipeline)
     elif manifest_path is not None:
         fetchers = discover_fetchers(root)
         manifest = api.read_manifest(manifest_path)
-        refs = manifest_reference_ids(manifest, fetchers)
-        selected = select_validators(registry.values(), refs)
+        # Only what the manifest tracks, not every validator for its sets.
+        selected = manifest_tracked(manifest, fetchers, registry.values())
     else:
         selected = list(registry.values())
     return [_validator_to_dict(v) for v in selected]

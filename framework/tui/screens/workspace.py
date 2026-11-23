@@ -12,7 +12,7 @@ from __future__ import annotations
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.screen import Screen
-from textual.widgets import TabbedContent, TabPane
+from textual.widgets import Input, TabbedContent, TabPane, TextArea
 
 from framework.tui.components.chrome import AppHeader, HintFooter
 from framework.tui.screens.catalog import CatalogPanel
@@ -21,10 +21,11 @@ from framework.tui.screens.fetchers import FetchersPage
 from framework.tui.screens.paramify import ParamifyPage
 from framework.tui.screens.pipelines import PipelinesPage
 from framework.tui.screens.run import RunPage
+from framework.tui.screens.validators import ValidatorsPage
 
 
 class WorkspaceScreen(Screen):
-    TAB_IDS = ["tab-fetchers", "tab-run", "tab-evidence", "tab-paramify", "tab-pipelines"]
+    TAB_IDS = ["tab-fetchers", "tab-run", "tab-evidence", "tab-validators", "tab-paramify", "tab-pipelines"]
 
     # A one-shot callable that overrides the default focus for the next pane
     # activation (used by the search shortcut to land on the filter box instead
@@ -33,20 +34,23 @@ class WorkspaceScreen(Screen):
 
     # Screen-level bindings shown on every tab's footer (after the page-specific
     # hints). Keep in sync with BINDINGS below.
-    # esc is listed because it is the only way out of a focused text field back
-    # to the shortcut keys: an Input consumes every printable key, so while one
-    # holds focus none of the hints above it are live.
-    WORKSPACE_HINTS = [("1-5", "tabs"), ("m", "manifest"), ("esc", "leave field"), ("q", "quit")]
+    WORKSPACE_HINTS = [("1-6", "tabs"), ("m", "manifest"), ("q", "quit")]
+    # While a text field has focus it takes every printable key, so the keys
+    # above do nothing and esc (back to them) is the one worth showing.
+    FIELD_HINTS = [("esc", "leave field")]
 
     BINDINGS = [
         Binding("1", "go_tab(0)", "Fetchers"),
         Binding("2", "go_tab(1)", "Run"),
         Binding("3", "go_tab(2)", "Evidence"),
-        Binding("4", "go_tab(3)", "Paramify"),
-        Binding("5", "go_tab(4)", "Pipelines"),
+        Binding("4", "go_tab(3)", "Validators"),
+        Binding("5", "go_tab(4)", "Paramify"),
+        Binding("6", "go_tab(5)", "Pipelines"),
         Binding("slash", "focus_search", "Search"),
         Binding("escape", "unfocus", "Unfocus", show=False),
         Binding("m", "switch_manifest", "Manifest…"),
+        # Not in the hints: the manifest's issues line and the Run tab name it where it matters.
+        Binding("E", "environment", "Environment"),
         Binding("r", "refresh", "Refresh", show=False),
         Binding("q", "app.quit", "Quit"),  # app.* — a bare "quit" resolves in the screen namespace (no-op)
     ]
@@ -60,9 +64,11 @@ class WorkspaceScreen(Screen):
                 yield RunPage(id="run-page")
             with TabPane("Evidence", id="tab-evidence"):
                 yield EvidencePage(id="evidence-page")
+            # "beta": a tag after the name, in the theme's warning color.
+            with TabPane("Validators [$warning]beta[/]", id="tab-validators"):
+                yield ValidatorsPage(id="validators-page")
             with TabPane("Paramify", id="tab-paramify"):
                 yield ParamifyPage(id="paramify-page")
-            # "beta": a tag after the name, in the theme's warning color.
             with TabPane("Pipelines [$warning]beta[/]", id="tab-pipelines"):
                 yield PipelinesPage(id="pipelines-page")
         yield HintFooter()
@@ -81,7 +87,7 @@ class WorkspaceScreen(Screen):
             self.query_one(EvidencePage).rebuild_runs()
         except Exception:
             pass
-        for page in (ParamifyPage, PipelinesPage):
+        for page in (ParamifyPage, PipelinesPage, ValidatorsPage):
             try:
                 self.query_one(page).rebuild()
             except Exception:
@@ -102,7 +108,9 @@ class WorkspaceScreen(Screen):
         tab = (tabs.active or "").removeprefix("tab-")
         name = self.app.manifest_path.name if self.app.manifest_path else "?"
         self.query_one(AppHeader).set_crumb(f"{name}  ›  {tab}")
-        self.query_one(HintFooter).set_hints(self._hints(tabs.active_pane) + self.WORKSPACE_HINTS)
+        typing = isinstance(self.focused, (Input, TextArea))
+        self.query_one(HintFooter).set_hints(
+            self._hints(tabs.active_pane) + (self.FIELD_HINTS if typing else self.WORKSPACE_HINTS))
 
     def _hints(self, pane) -> list:
         """The keys that work where focus is: the HINTS of the nearest widget
@@ -185,3 +193,6 @@ class WorkspaceScreen(Screen):
 
     def action_switch_manifest(self) -> None:
         self.app.open_manifest_picker()
+
+    def action_environment(self) -> None:
+        self.app.open_environment()

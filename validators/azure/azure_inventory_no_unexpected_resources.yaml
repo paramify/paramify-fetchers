@@ -1,0 +1,27 @@
+key: azure_inventory_no_unexpected_resources
+name: 'Azure Resource Inventory: No Unexpected Resources'
+type: AUTOMATED
+role: completeness
+source: community
+statement: >
+  Every in-scope resource and resource group, an empty group included, is either required or
+  matched by an allowed_resources pattern (unexpected_resources is 0), and the inventory is not
+  empty (total_resources is above 0), so the deployed population holds nothing the boundary does
+  not account for, even beside a required resource in the same group. Resources and resource
+  groups left out of scope by resource_exclusions are not judged. Fails while neither list is set,
+  the inventory or the resource groups could not be read, the inventory is empty or every resource
+  is excluded, or the counts appear other than exactly once. Does not show that each resource is
+  configured correctly. Does not check whether the collection run succeeded.
+
+regex: '"total_resources":\s*(?<total_resources>[1-9]\d*)[\s\S]*?"unexpected_resources":\s*(?<unexpected_resources>\d+)'
+rules_summary: MATCH_COUNT EQUALS 1; MATCH_GROUP[2] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "1" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 2 }   # unexpected_resources
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-RESOURCE-INVENTORY

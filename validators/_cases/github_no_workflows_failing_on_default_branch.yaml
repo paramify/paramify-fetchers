@@ -1,0 +1,14 @@
+validator: github_no_workflows_failing_on_default_branch
+cases:
+- name: compliant
+  expect: PASS
+  artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"workflows_failing_on_default_branch":[]}}}'
+- name: listed
+  expect: FAIL
+  artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"workflows_failing_on_default_branch":["example-repo"]}}}'
+- name: unread
+  expect: FAIL
+  artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"workflows_failing_on_default_branch":null}}}'
+- name: renamed
+  expect: FAIL
+  artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"workflows_failing_on_default_branch_renamed":[]}}}'

@@ -1,0 +1,22 @@
+key: azure_velero_backup_records_readable
+name: 'Azure Velero: Every Backup Record Readable'
+type: AUTOMATED
+role: integrity
+source: community
+statement: >
+  Every backup's velero-backup.json in storage could be read and parsed (backups_metadata_unreadable
+  is 0), so no backup is left out of the phase and schedule counts. Does not check whether the
+  collection run succeeded.
+
+regex: '"backups_metadata_unreadable":\s*(?<backups_metadata_unreadable>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # backups_metadata_unreadable
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-VELERO-BACKUPS

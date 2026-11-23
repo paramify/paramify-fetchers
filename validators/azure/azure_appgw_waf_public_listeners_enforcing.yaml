@@ -1,0 +1,25 @@
+key: azure_appgw_waf_public_listeners_enforcing
+name: 'Application Gateway WAF: Every Public Web Listener Blocks Attacks'
+type: AUTOMATED
+role: configuration
+source: community
+statement: >
+  Every web listener on a public frontend IP has a WAF Enabled in Prevention mode, counting its own
+  policy, else the gateway's policy, else the legacy WAF configuration, and every path-rule policy
+  it routes through (public_listeners_not_enforcing is 0). A WAF policy that could not be read
+  counts against it. Shows the WAF is set to block, not which rules it runs or that any attack was
+  blocked. Fails if the count appears other than exactly once. Does not check whether the collection
+  run succeeded.
+
+regex: '"public_listeners_not_enforcing":\s*(?<public_listeners_not_enforcing>\d+)'
+rules_summary: MATCH_COUNT EQUALS 1; MATCH_GROUP[1] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "1" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # public_listeners_not_enforcing
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-APPGW-WAF

@@ -115,7 +115,7 @@ def test_the_pipelines_tab_carries_a_beta_tag(tmp_path, run_tui):
     assert spans == [("beta", "$warning")]
 
 
-def test_tabs_are_fetchers_run_evidence_paramify(tmp_path, run_tui):
+def test_tabs_are_fetchers_run_evidence_validators_paramify_pipelines(tmp_path, run_tui):
     async def body(app, pilot):
         tabs = app.screen.query_one(TabbedContent)
         labels = [str(t.label) for t in tabs.query("ContentTab")]  # not the Paramify lens tabs
@@ -124,7 +124,7 @@ def test_tabs_are_fetchers_run_evidence_paramify(tmp_path, run_tui):
         return labels, tabs.active, _focus_id(app)
 
     labels, active, focus = run_tui(body, _manifest_with(tmp_path))
-    assert labels == ["Fetchers", "Run", "Evidence", "Paramify", "Pipelines beta"]
+    assert labels == ["Fetchers", "Run", "Evidence", "Validators beta", "Paramify", "Pipelines beta"]
     assert active == "tab-fetchers" and focus == "catalog-tree"
 
 
@@ -203,19 +203,19 @@ def test_tab_reaches_every_part_of_the_page(tmp_path, run_tui):
     ]
 
 
-def test_arrows_walk_the_stack_owner_save_row(tmp_path, run_tui):
+def test_arrows_walk_the_settings_row(tmp_path, run_tui):
     async def body(app, pilot):
         app.screen.query_one("#manifest-stack").focus()
         await pilot.pause()
         seen = [_focus_id(app)]
-        for key in ("right", "right", "right"):
+        for key in ("right",) * 5:
             await pilot.press(key)
             await pilot.pause()
             seen.append(_focus_id(app))
         return seen
 
     assert run_tui(body, _manifest_with(tmp_path, "demo_hello")) == [
-        "manifest-stack", "manifest-owner", "btn-save", "manifest-stack",
+        "manifest-stack", "manifest-owner", "manifest-schedule", "manifest-env", "btn-save", "manifest-stack",
     ]
 
 
@@ -223,7 +223,7 @@ def test_empty_manifest_hint(tmp_path, run_tui):
     async def body(app, pilot):
         return _text(app.screen.query_one("#manifest-empty-hint", Static).content)
 
-    assert "press a on a fetcher to add it" in run_tui(body, _manifest_with(tmp_path))
+    assert "Press a on a fetcher to add it." in run_tui(body, _manifest_with(tmp_path))
 
 
 def test_switching_manifest_moves_the_marks(tmp_path, run_tui):
@@ -344,7 +344,7 @@ def test_footer_hints_follow_focus(tmp_path, run_tui):
     assert "targets" in in_manifest and "validate" in in_manifest
     # `a` in the manifest moves to the catalog filter; the hint says so.
     assert "a find to add" in in_manifest and "a add" not in in_manifest
-    assert "1-5" in in_catalog and "1-5" in in_manifest  # the workspace keys stay
+    assert "1-6" in in_catalog and "1-6" in in_manifest  # the workspace keys stay
 
 
 def _sizes(path: Path, size: tuple) -> dict:
@@ -465,7 +465,7 @@ def test_the_add_notice_says_how_to_reach_the_entry(tmp_path, run_tui):
         return notices
 
     notices = run_tui(body, _manifest_with(tmp_path))
-    wired = [n for n in notices if "secrets wired" in n]
+    wired = [n for n in notices if "default env vars" in n]
     assert wired, notices
     assert "tab, then e" in wired[-1], "the notice names a key that does nothing in the catalog"
 
@@ -586,3 +586,46 @@ def test_the_catalog_cursor_stays_bright_while_the_filter_drives_it(tmp_path, ru
     assert focus == "manifest-entries"
     assert _rgb(in_filter) == _rgb(primary), "the catalog cursor is gray while the filter drives it"
     assert _rgb(elsewhere) != _rgb(primary), "the catalog cursor stays bright with focus in the manifest"
+
+
+def _button_text(app, button) -> str:
+    """What the button shows on screen: the screen's cells across its region,
+    so a label clipped by a button too narrow for it reads clipped here too."""
+    r = button.region
+    line = app.screen._compositor.render_strips()[r.y]
+    return line.crop(r.x, r.right).text.strip()
+
+
+def test_a_settings_button_grows_to_its_new_label(tmp_path, run_tui, monkeypatch):
+    """Picking an owner or a frequency shows the whole value, not its first
+    letter in a button still sized for the dash it showed before."""
+    from framework.tui.modals import FormModal, PickerModal
+
+    monkeypatch.setattr(api, "upload_readiness", lambda *a, **k: {"token_present": True})
+    monkeypatch.setattr(api, "list_channel_owners", lambda *a, **k: [{"owner": "tate.mccauley", "sets": 2}])
+
+    async def body(app, pilot):
+        await _settle(app, pilot)
+        q = app.screen.query_one
+        before = (_button_text(app, q("#manifest-owner")), _button_text(app, q("#manifest-schedule")))
+
+        q("#manifest-owner").press()
+        await _settle(app, pilot)
+        assert isinstance(app.screen, PickerModal)
+        app.screen.dismiss("tate.mccauley")
+        await _settle(app, pilot)
+
+        q = app.screen.query_one
+        q("#manifest-schedule").press()
+        await _settle(app, pilot)
+        assert isinstance(app.screen, FormModal)
+        app.screen.dismiss({"frequency": {"every": "DAILY"}})
+        await _settle(app, pilot)
+
+        q = app.screen.query_one
+        return before, _button_text(app, q("#manifest-owner")), _button_text(app, q("#manifest-schedule"))
+
+    before, owner, schedule = run_tui(body, _manifest_with(tmp_path, "demo_hello"))
+    assert before == ("—", "—")
+    assert owner == "tate.mccauley"
+    assert schedule == "daily"

@@ -1,0 +1,26 @@
+key: github_merges_have_human_approval
+name: GitHub Merges Have Human Approval
+type: AUTOMATED
+role: configuration
+source: community
+statement: >-
+  No pull request merged into a default branch in the window lacked an approving review from a person
+  other than its author. Bot approvals do not count. Does not assert the approval was on the final commit.
+regex: '"merged_without_human_approval":\s*(?<merged_without_human_approval>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0
+validation_rules:
+- regexOperation:
+    type: MATCH_COUNT
+  criteria: NOT_EQUALS
+  value:
+    type: CUSTOM_TEXT
+    customText: '0'
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 1
+  criteria: EQUALS
+  value:
+    type: CUSTOM_TEXT
+    customText: '0'
+evidence_sets:
+- EVD-GITHUB-PR-CHECKS

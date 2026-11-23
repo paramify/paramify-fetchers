@@ -206,6 +206,23 @@ paramify doctor daily
 
 The manifest is runnable. Next: [run it, then upload](cli_guide.md#collect-then-upload).
 
+### Choose the validators each fetcher tracks
+
+By default an entry tracks every Paramify-made validator for its evidence set
+and none of the community-made ones. To change that, open the TUI's
+**Validators** tab (key `4`), pick a fetcher, and tick or untick validators
+with `space`. `enter` shows a validator's regex and rules. The tab writes the
+exact list to the entry:
+
+```yaml
+  - use: fedramp_marketplace_vendor_certification_status
+    validators: [collection_succeeded, fedramp_feed_fresh, fedramp_vendor_certified]
+```
+
+Delete the `validators:` line (or press `a` on the tab) to go back to the
+defaults. The Paramify tab's counts and `paramify validators sync -m` only
+cover tracked validators. Untracking doesn't remove anything from Paramify.
+
 ---
 
 ## Troubleshooting
