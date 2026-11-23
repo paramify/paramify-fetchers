@@ -1,0 +1,29 @@
+{
+  "_comment": "Synthetic AWS Config SelectAggregateResourceConfig rows for the same resources, in the ARN form Config records. aws_config_inventory passes the arn through as unique_asset_identifier.",
+  "records": {
+    "ec2_package": {
+      "accountId": "111122223333",
+      "awsRegion": "us-east-1",
+      "resourceType": "AWS::EC2::Instance",
+      "resourceId": "i-0123456789abcdef0",
+      "arn": "arn:aws:ec2:us-east-1:111122223333:instance/i-0123456789abcdef0",
+      "resourceName": "web-1"
+    },
+    "ecr_image": {
+      "accountId": "111122223333",
+      "awsRegion": "us-east-1",
+      "resourceType": "AWS::ECR::Repository",
+      "resourceId": "example-service",
+      "arn": "arn:aws:ecr:us-east-1:111122223333:repository/example-service",
+      "resourceName": "example-service"
+    },
+    "lambda_package": {
+      "accountId": "111122223333",
+      "awsRegion": "us-east-1",
+      "resourceType": "AWS::Lambda::Function",
+      "resourceId": "example-fn",
+      "arn": "arn:aws:lambda:us-east-1:111122223333:function:example-fn",
+      "resourceName": "example-fn"
+    }
+  }
+}

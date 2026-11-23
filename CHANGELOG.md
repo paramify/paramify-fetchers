@@ -60,6 +60,19 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`aws_inspector_findings_report` 0.1.0: every active Inspector finding as one CSV, linked to Inventory.**
+  - Covers EC2 instances (package and network reachability findings), ECR images, Lambda functions and Lambda code
+    in one account and region, for a Paramify VULNERABILITY assessment through `paramify issues upload`.
+  - The `Resource ARN` column holds the ARN that `aws_config_inventory` writes for the same resource: the instance
+    ARN built from Inspector's instance ID, the Lambda function ARN without its version qualifier, and the ECR
+    repository ARN for an image finding (the digest and tags stay in their own columns). The fetcher declares it as
+    `pipeline.asset_id_field` with `id_scheme: aws-arn`. `Finding ARN` is the row identity.
+  - `scan_types` names the scan types to collect. Empty collects each enabled scan type and skips the others. A named
+    scan type that is not enabled, or no enabled scan type at all, fails the run with no report.
+  - All or nothing: any failed call or page, or an unexpected resource ID, writes no report and exits non-zero.
+  - Shares its client, pagination, finding queries and atomic CSV publication with the Inspector ECR fetchers
+    (`fetchers/aws/_shared/inspector_common.py`). Their output does not change.
+
 - **`github_secret_scanning_report` 0.1.0: open secret scanning alerts as a vulnerability report.** The same shape
   for open secret scanning alerts, metadata only: type, validity, first location path, state and dates. Alerts are
   requested with `hide_secret`, and only named fields are copied, so the secret value never reaches the report.

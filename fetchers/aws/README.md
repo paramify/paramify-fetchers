@@ -8,6 +8,7 @@ AWS fetchers pull evidence and scan reports from your AWS accounts using the AWS
 - [`inspector_vulnerability_scanning`](inspector_vulnerability_scanning/) reports account enablement and whether active findings exist.
 - [`inspector_ecr_findings`](inspector_ecr_findings/README.md) collects detailed active findings, image inventory and coverage as evidence.
 - [`inspector_ecr_report`](inspector_ecr_report/README.md) converts the same Inspector APIs to a CSV for a Paramify vulnerability assessment. The existing uploader posts it directly to the intake API. No S3 bucket or KMS key is needed.
+- [`inspector_findings_report`](inspector_findings_report/README.md) converts every active Inspector finding (EC2 instances, ECR images, Lambda functions and Lambda code) to a CSV for a Paramify vulnerability assessment. Its `Resource ARN` column matches the `aws_config_inventory` record of each resource, so findings link to Inventory.
 
 ## Config inventory prerequisites
 
