@@ -148,11 +148,12 @@ def tracked_for(entry: dict, ref: str, validators: Iterable[Validator]) -> List[
     return [v for v in avail if v.key in keys]
 
 
-def manifest_tracked(manifest: dict, fetchers: Dict[str, Fetcher],
-                     validators: Iterable[Validator], refs: Set[str] | None = None) -> List[Validator]:
-    """Union of what the manifest's entries track (optionally only for `refs`)."""
+def manifest_tracked_sets(manifest: dict, fetchers: Dict[str, Fetcher],
+                          validators: Iterable[Validator], refs: Set[str] | None = None) -> Dict[str, List[str]]:
+    """Each tracked validator's key -> the manifest's evidence sets that track it, in manifest order
+    (optionally only for `refs`). A validator listed against many sets is paired only with these."""
     validators = list(validators)
-    out: Dict[str, Validator] = {}
+    out: Dict[str, List[str]] = {}
     for entry in (manifest.get("run") or {}).get("fetchers") or []:
         name = entry.get("use") if isinstance(entry, dict) else None
         fetcher = fetchers.get(name) if name else None
@@ -162,8 +163,18 @@ def manifest_tracked(manifest: dict, fetchers: Dict[str, Fetcher],
         if refs is not None and ref not in refs:
             continue
         for v in tracked_for(entry, ref, validators):
-            out[v.key] = v
-    return list(out.values())
+            sets = out.setdefault(v.key, [])
+            if ref not in sets:
+                sets.append(ref)
+    return out
+
+
+def manifest_tracked(manifest: dict, fetchers: Dict[str, Fetcher],
+                     validators: Iterable[Validator], refs: Set[str] | None = None) -> List[Validator]:
+    """Union of what the manifest's entries track (optionally only for `refs`)."""
+    validators = list(validators)
+    by_key = {v.key: v for v in validators}
+    return [by_key[k] for k in manifest_tracked_sets(manifest, fetchers, validators, refs)]
 
 
 def write_regex(path: Path, regex: str) -> None:

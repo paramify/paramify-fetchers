@@ -12,6 +12,17 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **The TUI's validator sync (Paramify tab, `v`) now pairs and updates validators that already exist.** Before, it
+  created missing validators and paired only those, and told you to pair the rest in Paramify yourself. The preview
+  now lists three things and does them all on one yes:
+  - creates the missing validators and pairs them;
+  - pairs validators already in Paramify with the manifest's evidence sets they aren't paired with yet, and only
+    those sets, not every set the validator lists;
+  - updates validators whose content differs from your files, named in the confirm because it replaces edits made in
+    Paramify. One that matches is not sent. Paramify's default `disposition: PASS` and a trailing newline don't
+    count as a difference.
+  After `w` in the validator workbench, the hint points at `v` instead of `paramify validators sync --update`.
+  The CLI is unchanged, except that `--update` now skips a validator that already matches.
 - **Plainer TUI wording.**
   - Results read as sentences instead of key=value: "Uploaded 3 files, 1 already there.", not
     `uploaded=3 duplicates=1 errors=0`.

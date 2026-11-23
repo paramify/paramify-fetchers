@@ -281,3 +281,85 @@ def test_missing_tag_permission_keeps_the_sync_ok(tmp_path):
     assert s["ok"] and s["errors"] == 0 and len(fake.validators) == 2
     assert len([c for c in fake.calls if c[1].startswith("/custom-tags/")]) == 1
     assert s["tags"]["disabled"]
+
+
+# --- pair_existing and content-aware --update (the TUI's [v] asks for both) ---
+
+OTHER_SET = "EVD-SQS-ENC"
+
+
+def _alb_as_paramify_stores_it():
+    """The registry validator as the API returns it: rules gain a default disposition, text a newline."""
+    v = _alb()
+    rules = [dict(r, disposition="PASS") for r in v["validation_rules"]]
+    return {"statement": v["statement"] + "\n", "type": v["type"], "regex": v["regex"],
+            "validationRules": rules}
+
+
+def test_pair_existing_pairs_an_existing_validator_with_its_set(tmp_path):
+    fake = _workspace(ALB_SET)
+    existing = fake.add_validator("ALB Encryption In Transit")
+    s = _run([_alb()], fake, tmp_path, pair_existing=True)
+    assert s["skipped"] == 1 and s["paired_existing"] == 1 and s["ok"]
+    assert _linked(fake) == {(ALB_SET, existing["id"])}
+    assert s["results"][0]["paired"] == [ALB_SET]
+
+
+def test_pair_existing_leaves_an_already_paired_set_alone(tmp_path):
+    fake = FakeParamify()
+    existing = fake.add_validator("ALB Encryption In Transit")
+    fake.add_evidence(ALB_SET, validators=["ALB Encryption In Transit"])
+    s = _run([_alb()], fake, tmp_path, pair_existing=True, config={"tags": False})
+    assert s["paired_existing"] == 0 and s["associate_errors"] == 0
+    assert _writes(fake) == []
+    assert "paired" not in s["results"][0]
+    assert existing["id"]  # adopted, not recreated
+
+
+def test_pair_existing_stays_inside_pair_sets(tmp_path):
+    fake = _workspace(ALB_SET, OTHER_SET)
+    existing = fake.add_validator("ALB Encryption In Transit")
+    v = dict(_alb(), evidence_sets=[ALB_SET, OTHER_SET], pair_sets=[ALB_SET])
+    _run([v], fake, tmp_path, pair_existing=True)
+    assert _linked(fake) == {(ALB_SET, existing["id"])}  # not every set it lists
+
+
+def test_a_dry_run_reports_what_it_would_pair_and_writes_nothing(tmp_path):
+    fake = _workspace(ALB_SET)
+    fake.add_validator("ALB Encryption In Transit")
+    s = _run([_alb()], fake, tmp_path, pair_existing=True, dry_run=True)
+    assert s["results"][0]["would_pair"] == [ALB_SET] and s["paired_existing"] == 1
+    assert _writes(fake) == []
+
+
+def test_update_leaves_a_validator_that_matches_the_registry(tmp_path):
+    fake = _workspace(ALB_SET)
+    fake.add_validator("ALB Encryption In Transit", **_alb_as_paramify_stores_it())
+    s = _run([_alb()], fake, tmp_path, update=True, config={"tags": False})
+    assert s["updated"] == 0 and s["skipped"] == 1
+    assert s["results"][0]["differs"] is False
+    assert _writes(fake) == []
+
+
+def test_update_patches_a_validator_that_differs(tmp_path):
+    fake = _workspace(ALB_SET)
+    tuned = dict(_alb_as_paramify_stores_it(), regex=r'"alb_total":\s*(\d+)\s*,')
+    existing = fake.add_validator("ALB Encryption In Transit", **tuned)
+    s = _run([_alb()], fake, tmp_path, update=True)
+    assert s["updated"] == 1 and s["results"][0]["differs"] is True
+    assert existing["regex"] == _alb()["regex"]
+
+
+def test_a_dry_run_says_which_validators_differ(tmp_path):
+    fake = _workspace(ALB_SET)
+    fake.add_validator("ALB Encryption In Transit", **dict(_alb_as_paramify_stores_it(), statement="tuned"))
+    s = _run([_alb()], fake, tmp_path, update=True, dry_run=True)
+    assert s["results"][0]["outcome"] == "would_update" and s["results"][0]["differs"] is True
+    assert _writes(fake) == []
+
+
+def test_a_remote_rule_with_a_field_the_registry_lacks_differs():
+    local = {"name": "n", "validationRules": [{"criteria": "EQUALS"}]}
+    assert syncer.differs(local, {"name": "n", "validationRules": [{"criteria": "EQUALS", "disposition": "PASS"}]}) is False
+    assert syncer.differs(local, {"name": "n", "validationRules": [{"criteria": "EQUALS", "disposition": "FAIL"}]}) is True
+    assert syncer.differs(local, {}) is None
