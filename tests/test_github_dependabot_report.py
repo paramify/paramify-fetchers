@@ -1,4 +1,4 @@
-"""github_dependabot_report against a fake organization (the `gh` fixture, in fetchers/github/conftest.py).
+"""github_dependabot_report against a fake organization (the `github_report_fake` fixture, tests/github_fake.py).
 
 Most of what is pinned here is the shared report path (_shared/alert_report.py): open alerts only, the Asset ID
 equal to the inventory's identifier, every page read, and no file at all when any read fails.
@@ -8,6 +8,11 @@ from __future__ import annotations
 
 import pytest
 
+@pytest.fixture
+def gh(github_report_fake):
+    return github_report_fake
+
+
 NAME = "dependabot_report"
 
 
@@ -16,7 +21,7 @@ def routes(gh, alerts=None, **extra):
     base = f"repos/{gh.ORG}"
     return {
         **gh.org_routes(repos),
-        f"{base}/api/dependabot/alerts": gh.fixture(__file__, "dependabot_alerts.json") if alerts is None else alerts,
+        f"{base}/api/dependabot/alerts": gh.fixture(NAME, "dependabot_alerts.json") if alerts is None else alerts,
         f"{base}/docs/dependabot/alerts": [],
         f"{base}/legacy/dependabot/alerts": (403, {"message": "Dependabot alerts are disabled for this repository."}),
         **extra,

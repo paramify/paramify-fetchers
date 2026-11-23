@@ -1,10 +1,10 @@
-"""Test scaffolding for the GitHub alert reports (fetchers/github/*_report/tests), driven without GitHub.
+"""A fake GitHub for the alert report tests (tests/test_github_*_report.py), driven without GitHub.
 
-The `gh` fixture holds everything a report test needs, because pytest's importlib mode makes a conftest
-unimportable. `gh.run` runs one report fetcher against a fake organization and returns what it left behind: the
-exit code, the CSV rows (None when no report was written), the failure status and every call made. Routes copy
-the category's test vocabulary (tests/test_github_fetchers.py): path -> list (paged by Link), dict, or
-(status, body).
+tests/conftest.py loads this module and hands `harness(monkeypatch, tmp_path)` to a test as the
+`github_report_fake` fixture. `run` runs one report fetcher against a fake organization and returns what it left
+behind: the exit code, the CSV rows (None when no report was written), the failure status and every call made.
+Routes copy the category's test vocabulary (tests/test_github_fetchers.py): path -> list (paged by Link), dict,
+or (status, body). JSON fixtures stay in each fetcher's tests/fixtures directory.
 """
 
 from __future__ import annotations
@@ -18,11 +18,10 @@ from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import parse_qs, urlencode, urlparse
 
-import pytest
 import requests
 from requests.structures import CaseInsensitiveDict
 
-GITHUB = Path(__file__).resolve().parent
+GITHUB = Path(__file__).resolve().parents[1] / "fetchers" / "github"
 API = "https://api.github.test"
 ORG = "acme"
 
@@ -84,13 +83,12 @@ def load_fetcher(name):
     return module
 
 
-def fixture(test_file, name):
-    """A JSON fixture from the tests/fixtures directory beside `test_file`."""
-    return json.loads((Path(test_file).parent / "fixtures" / name).read_text())
+def fixture(fetcher, name):
+    """A JSON fixture from fetchers/github/<fetcher>/tests/fixtures."""
+    return json.loads((GITHUB / fetcher / "tests" / "fixtures" / name).read_text())
 
 
-@pytest.fixture
-def gh(monkeypatch, tmp_path):
+def harness(monkeypatch, tmp_path):
     def run(name, routes, **env):
         module = load_fetcher(name)
         gc = sys.modules["github_client"]
@@ -124,5 +122,6 @@ def gh(monkeypatch, tmp_path):
         client = sys.modules["github_client"].GitHubClient(API, "t")
         return inventory.record(client, repository, {})["unique_asset_identifier"]
 
-    return SimpleNamespace(run=run, repo=repo, org_routes=org_routes, fixture=fixture, response=response,
+    return SimpleNamespace(run=run, load=load_fetcher, repo=repo, org_routes=org_routes, fixture=fixture,
+                           response=response,
                            inventory_asset_id=inventory_asset_id, API=API, ORG=ORG)

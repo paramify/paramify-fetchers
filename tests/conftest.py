@@ -611,6 +611,22 @@ def fake_paramify(monkeypatch):
     return fake
 
 
+@functools.cache
+def _github_fake():
+    spec = importlib.util.spec_from_file_location("github_fake", Path(__file__).with_name("github_fake.py"))
+    module = importlib.util.module_from_spec(spec)
+    sys.modules.setdefault("github_fake", module)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.fixture
+def github_report_fake(monkeypatch, tmp_path):
+    """tests/github_fake.py as the organization a GitHub alert report reads: `.run(name, routes, **env)` runs
+    fetchers/github/<name>/fetcher.py against it and returns the exit code, CSV rows, status and calls."""
+    return _github_fake().harness(monkeypatch, tmp_path)
+
+
 @pytest.fixture
 def stub_paramify_status(monkeypatch):
     """Install a fixed api.paramify_status, so a test that opens the Paramify tab

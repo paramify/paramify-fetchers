@@ -1,12 +1,17 @@
-"""github_code_scanning_report against a fake organization (the `gh` fixture, in fetchers/github/conftest.py).
+"""github_code_scanning_report against a fake organization (the `github_report_fake` fixture, tests/github_fake.py).
 
-The shared report path is pinned in dependabot_report/tests; this pins the code scanning columns, the feature
+The shared report path is pinned in tests/test_github_dependabot_report.py; this pins the code scanning columns, the feature
 states that are not failures, and the failure path.
 """
 
 from __future__ import annotations
 
 import pytest
+
+@pytest.fixture
+def gh(github_report_fake):
+    return github_report_fake
+
 
 NAME = "code_scanning_report"
 GHAS_OFF = (403, {"message": "Advanced Security must be enabled for this repository to use code scanning."})
@@ -17,7 +22,7 @@ def routes(gh, **extra):
     base = f"repos/{gh.ORG}"
     return {
         **gh.org_routes(repos),
-        f"{base}/api/code-scanning/alerts": gh.fixture(__file__, "code_scanning_alerts.json"),
+        f"{base}/api/code-scanning/alerts": gh.fixture(NAME, "code_scanning_alerts.json"),
         f"{base}/never/code-scanning/alerts": (404, {"message": "no analysis found"}),
         f"{base}/ghas-off/code-scanning/alerts": GHAS_OFF,
         f"{base}/clean/code-scanning/alerts": [],

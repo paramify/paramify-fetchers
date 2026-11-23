@@ -1,4 +1,4 @@
-"""github_secret_scanning_report against a fake organization (the `gh` fixture, in fetchers/github/conftest.py).
+"""github_secret_scanning_report against a fake organization (the `github_report_fake` fixture, tests/github_fake.py).
 
 The fixtures carry a `secret` value on every alert, as GitHub would if hide_secret were ignored: no part of any
 secret may reach the report or any file the run leaves behind.
@@ -8,6 +8,11 @@ from __future__ import annotations
 
 import pytest
 
+@pytest.fixture
+def gh(github_report_fake):
+    return github_report_fake
+
+
 NAME = "secret_scanning_report"
 PRIVATE_KEY = "-----BEGIN RSA PRIVATE KEY-----\nMIISYNTHETICkeyMATERIAL\n-----END RSA PRIVATE KEY-----"
 GENERIC = {"number": 11, "state": "open", "created_at": "2026-10-07T10:00:00Z", "secret_type": "rsa_private_key",
@@ -16,7 +21,7 @@ GENERIC = {"number": 11, "state": "open", "created_at": "2026-10-07T10:00:00Z", 
 
 
 def alerts(gh):
-    provider = gh.fixture(__file__, "secret_scanning_alerts.json")
+    provider = gh.fixture(NAME, "secret_scanning_alerts.json")
     # GitHub returns provider patterns unless secret_type names the generic ones.
     return lambda query: [GENERIC] if "rsa_private_key" in query.get("secret_type", "") else provider
 
@@ -34,7 +39,7 @@ def routes(gh, **extra):
 
 
 def secrets(gh):
-    every = gh.fixture(__file__, "secret_scanning_alerts.json") + [GENERIC]
+    every = gh.fixture(NAME, "secret_scanning_alerts.json") + [GENERIC]
     return [a["secret"] for a in every]
 
 
@@ -73,12 +78,8 @@ def test_every_alert_read_asks_github_to_hide_the_secret(gh):
     assert any("rsa_private_key" in q.get("secret_type", "") for q in asked)
 
 
-def test_a_row_copies_only_the_fields_it_names():
-    from importlib.util import module_from_spec, spec_from_file_location
-    from pathlib import Path
-    spec = spec_from_file_location("ssr_row_test", Path(__file__).resolve().parents[1] / "fetcher.py")
-    module = module_from_spec(spec)
-    spec.loader.exec_module(module)
+def test_a_row_copies_only_the_fields_it_names(gh):
+    module = gh.load(NAME)
     leaky = {"secret": "LEAK", "first_location_detected": {"path": "p", "secret": "LEAK", "text": "LEAK"},
              **{field: "LEAK" for field in ("secret_value", "raw", "snippet")}}
     assert "LEAK" not in repr(module.row(leaky))
@@ -101,7 +102,7 @@ def test_a_failed_repository_writes_no_report(gh, failure):
 
 
 def test_a_failed_generic_walk_writes_no_report(gh):
-    provider = gh.fixture(__file__, "secret_scanning_alerts.json")
+    provider = gh.fixture(NAME, "secret_scanning_alerts.json")
 
     def generic_fails(query):
         return (502, {"message": "Bad Gateway"}) if query.get("secret_type") else provider
