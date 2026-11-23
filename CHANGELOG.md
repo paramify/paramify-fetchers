@@ -50,6 +50,15 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`azure_dns_resolver_policy` fetcher.** Reads each Azure DNS security policy (DNS resolver policy) with its
+  security rules, linked virtual networks and diagnostic settings, and every virtual network in the subscription.
+  Counts enabled rules by action, policies with an enabled Block rule, policies blocking Azure's threat-intelligence
+  list (AzureDnsThreatIntel, visible only through the 2025-10-01-preview API; the fetcher falls back to 2025-05-01
+  and leaves those fields null where a cloud doesn't serve the preview), virtual networks no blocking policy covers,
+  and policies whose query logs go nowhere. A Block rule counts only when no enabled Allow rule of higher priority can
+  reach its domains (one that might is named in `possibly_overridden_by`, and the coverage reads null); only virtual
+  network links that finished provisioning count; and with the policy list unread, each network's coverage is null.
+  Domain lists are counted, not copied. Takes `resource_exclusions`.
 - **The TUI shows which environment variables a manifest is missing, and stops a run that would fail on them.**
   - The manifest settings row has an `env` button (`✓ all set` or `✗ 2 missing`), each fetcher's status names what it
     needs (`✗ needs OKTA_API_TOKEN`), and the line under the table splits what a run needs from what only an upload needs.

@@ -1,0 +1,118 @@
+name: azure_dns_resolver_policy
+version: 0.1.0
+description: >-
+  Shows each Azure DNS security policy's rules and linked virtual networks, whether it blocks Azure's threat-intelligence domains, whether query logs are exported, and which virtual networks no blocking policy covers.
+category: azure
+source: community
+
+config_schema:
+  resource_exclusions:
+    type: patterns
+    prefixes: [rg, location, id]
+    bare: false
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Resources outside the authorization boundary, to leave out of scope, as
+      case-insensitive glob patterns listed in the manifest, each with a
+      prefix: rg:<resource group> (read from the resource id), location:<region>
+      (the region's name without spaces, such as eastus2; a resource with no
+      location never matches one) or id:<resource id> (also matches that
+      resource's child resources). * matches any run of characters and ? one
+      character. A matching DNS resolver policy or virtual network is listed
+      under excluded with the pattern and left out of every count and verdict.
+      Coverage is still worked out against every policy, so an in-scope virtual
+      network linked to an excluded policy keeps its verdict. A pattern without
+      one of these prefixes fails the run. Set it once under platforms.azure.config
+      for every Azure fetcher that has this field; fetchers without it ignore it.
+      Each item is a pattern, or a pattern with a reason. Empty: every resource is
+      in scope.
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: azure_dns_resolver_policy.json
+  aggregation: per_target
+
+target_schema:
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id to collect from. Optional — omit to use the first
+      enabled subscription the ambient credential can see ("collect where
+      deployed"); set one target per subscription to fan out.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: >
+      Deployment environment label (e.g. prod / preprod) written into the evidence
+      metadata. Optional — set per target for multi-subscription runs.
+
+secrets: []          # DefaultAzureCredential only — no handed-over secret (see _categories/azure.yaml)
+
+evidence_set:
+  reference_id: EVD-AZURE-DNS-RESOLVER-POLICY
+  name: Azure DNS Security Policy
+  description: >-
+    Each Azure DNS security policy with its security rules, linked virtual networks, threat-intelligence blocking and
+    query log export, and every virtual network with whether a blocking policy covers it.
+  instructions: |
+    Script: azure/dns_resolver_policy/fetcher.py
+
+    Access: Reader on the subscription.
+
+    Commands Executed:
+    - subscriptions.list() — picks a subscription when none is set
+    - providers.get("Microsoft.Network") — tells "networking not in use" from "nothing there"
+    - GET /subscriptions/{id}/providers/Microsoft.Network/dnsResolverPolicies — the DNS security policies, with api-version 2025-10-01-preview, the only one that shows Azure's threat-intelligence list; where a cloud doesn't serve it, 2025-05-01
+    - GET {policy}/dnsSecurityRules — each policy's rules: priority, action, state and domain lists
+    - GET {policy}/virtualNetworkLinks — the virtual networks each policy applies to; only links whose provisioningState is Succeeded count, and the rest are listed under links_not_provisioned
+    - GET {policy}/providers/Microsoft.Insights/diagnosticSettings — whether the policy's DNS query logs are sent anywhere
+    - GET /subscriptions/{id}/providers/Microsoft.Network/dnsResolverDomainLists — the domain lists the rules use, counted, not copied; their domains are compared only to tell whether a higher-priority Allow rule reaches a Block rule's domains
+    - GET /subscriptions/{id}/providers/Microsoft.Network/virtualNetworks — every virtual network, to show those no policy covers
+
+    Output: azure_dns_resolver_policy_<subscription>.json — each policy with its rules, provisioned and unprovisioned virtual network links and log destinations; each virtual network with the policies linked to it and whether one blocks; each domain list with its domain count; and the resources left out and why. Rules run in priority order (lowest number first) and the first match wins, so each enabled Block rule shows takes_effect: true when no enabled Allow rule of higher priority can reach its domains, or null with possibly_overridden_by naming the Allow rules that might (one whose domains overlap, or whose or the Block rule's domains can't be seen, such as a managed threat-intelligence list). A policy blocks only through a Block rule that takes effect; with the policy list unread, each virtual network's coverage is null, not false. A blocking rule shows queries for listed domains are refused by configuration, not that any were.
+
+    Summary fields:
+
+    Which API was read?
+    - api_version — The DNS resolver policy api-version that answered: 2025-10-01-preview or 2025-05-01; null if the policies could not be read
+    - threat_intel_visible — True if the preview API answered, so whether a rule uses Azure's threat-intelligence list (AzureDnsThreatIntel) can be seen; false if only the GA API did, and every threat-intelligence field is null; null if the policies could not be read
+
+    What do the policies enforce?
+    - security_rules — Number of security rules across the in-scope policies; null if any policy's rules could not be read, as are the two fields below
+    - security_rules_enabled — Number of those rules that are enabled
+    - enabled_rules_by_action — Number of enabled rules for each action: Allow, Alert (log only) and Block
+    - policies_blocking — Number of in-scope policies with at least one enabled Block rule that takes effect (no higher-priority Allow rule can override it); null if any policy's rules could not be read, or any policy's only Block rules might be overridden
+    - policies_block_possibly_overridden — Number of in-scope policies whose enabled Block rules might all be overridden by a higher-priority Allow rule; null if any policy's rules could not be read
+    - policies_blocking_threat_intel — Number of in-scope policies with an enabled Block rule on Azure's threat-intelligence list that takes effect; null unless threat_intel_visible is true, or when any such rule might be overridden
+    - domain_lists — Number of DNS domain lists in the subscription; null if they could not be read
+
+    Which virtual networks do they cover?
+    - virtual_networks_linked_to_policy — Number of in-scope virtual networks with a successfully provisioned link to at least one policy; null if the virtual networks, the policy list or any policy's links could not be read
+    - links_not_provisioned — Number of virtual network links across the in-scope policies whose provisioningState is not Succeeded (creating, updating, deleting or failed), which cover nothing; null if any policy's links could not be read
+    - virtual_networks_without_blocking_policy — Number of in-scope virtual networks not linked to any policy with an enabled Block rule that takes effect; null if the policy list or any policy's links or rules could not be read, or a linked policy's Block rules might be overridden
+    - virtual_networks_without_threat_intel_block — Number of in-scope virtual networks not linked to any policy blocking Azure's threat-intelligence list; null unless threat_intel_visible is true
+
+    Are DNS queries logged?
+    - policies_with_query_logs_exported — Number of in-scope policies with a diagnostic setting sending an enabled log category to a workspace, storage account, event hub or partner; null if any policy's settings could not be read, as is the field below
+    - policies_without_query_logs_exported — Number of in-scope policies sending no logs anywhere
+
+    What was left out of scope?
+    - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
+    - resource_exclusion_patterns_unmatched — List of configured patterns that matched no DNS resolver policy or virtual network, such as a mistyped name; null when either list could not be read
+    - excluded_dns_resolver_policies — Number of DNS resolver policies left out of scope because a pattern matched; each is listed under excluded with the pattern; null when the policy list could not be read
+    - excluded_virtual_networks — Number of virtual networks left out of scope because a pattern matched; null when the virtual network list could not be read. An in-scope virtual network linked to an excluded policy keeps its verdict
+    - in_scope_dns_resolver_policies — Number of DNS resolver policies read and in scope; null when the policy list could not be read
+    - in_scope_virtual_networks — Number of virtual networks read and in scope; null when the virtual network list could not be read
+
+    Is the provider registered?
+    - provider_registration_status — Whether the networking provider (Microsoft.Network) is registered on the subscription: registered, not_registered or unknown
