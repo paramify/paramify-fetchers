@@ -12,10 +12,10 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
-- **`azure_entra_sign_in_logs` 0.4.0: lockouts that occurred.** `sign_ins_locked_out` counts interactive sign-ins
-  Entra rejected with ResultType 50053 (smart lockout, or a sign-in from an IP with malicious activity, which Entra
-  logs under the same code), and `users_locked_out` counts the users they belong to. With the sign-in logs unread,
-  both are null.
+- **`azure_entra_sign_in_logs` 0.4.0: 50053 sign-in rejections.** `sign_ins_rejected_50053` counts interactive
+  sign-ins Entra rejected with ResultType 50053, and `users_rejected_50053` counts the users they belong to. Entra logs
+  both smart lockout and sign-ins from a malicious IP address under that code, so the counts are evidence, not a
+  pass or fail on smart lockout. With the sign-in logs unread, both are null.
 - **`aws_inspector_ecr_findings` and `aws_inspector_ecr_report` 0.3.0: image counts and an opt-in for an empty scope.**
   - The evidence summary adds `repository_image_count`, every image in the selected repositories before tag,
     push-date and usage filters, next to `image_count`, the images that match them. Both are logged. No new API calls.

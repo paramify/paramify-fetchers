@@ -70,9 +70,10 @@ WINDOWS_SIGN_IN_APP_ID = "38aa3b87-a06d-4817-b275-7a316988d93b"
 MULTI_FACTOR = "multiFactorAuthentication"
 SINGLE_FACTOR = "singleFactorAuthentication"
 RISKY_LEVELS = ("medium", "high")
-# Entra's smart lockout result: the account is locked after repeated bad passwords, or the sign-in came from an IP with
-# malicious activity. Entra logs both under this one code.
-LOCKED_OUT_RESULT = "50053"
+# ResultType 50053: Entra rejected the sign-in because smart lockout locked the account after repeated bad passwords, or
+# because it came from an IP address with malicious activity. Entra logs both under this one code, so a count of it
+# can't show which happened; it is reported as evidence, not judged.
+REJECTED_50053_RESULT = "50053"
 # Entra logs some sign-ins of a known user with no user principal name, or with an id in its place, and an attempt
 # for an account that does not exist under an all-zero user id. A person is therefore counted by the Entra object
 # id, and by the name only where the log has no usable id; counting names alone reads one person as several.
@@ -297,7 +298,7 @@ def overview_query(settings: Dict[str, Any]) -> str:
     risky = ", ".join(f"'{r}'" for r in RISKY_LEVELS)
     return base_query(settings) + (
         "| summarize SignIns = count(), Succeeded = countif(Ok), Failed = countif(not(Ok)), "
-        f"LockedOut = countif(tostring(ResultType) == '{LOCKED_OUT_RESULT}'), "
+        f"Rejected50053 = countif(tostring(ResultType) == '{REJECTED_50053_RESULT}'), "
         f"SucceededMultiFactor = countif(Ok and Req == '{MULTI_FACTOR}'), "
         "SucceededSingleFactor = countif(Ok and SingleFactor), "
         "SucceededSingleFactorPhishingResistant = countif(Ok and SingleFactorPhishingResistant), "
@@ -332,10 +333,10 @@ def users_query(settings: Dict[str, Any]) -> str:
 
 def user_count_query(settings: Dict[str, Any]) -> str:
     return base_query(settings) + (
-        f"| summarize LockedOut = countif(tostring(ResultType) == '{LOCKED_OUT_RESULT}'), "
+        f"| summarize Rejected50053 = countif(tostring(ResultType) == '{REJECTED_50053_RESULT}'), "
         "SucceededSingleFactor = countif(Ok and SingleFactor) by UserKey "
         "| summarize Users = count(), UsersWithSingleFactorSuccess = countif(SucceededSingleFactor > 0), "
-        "UsersLockedOut = countif(LockedOut > 0)"
+        "UsersRejected50053 = countif(Rejected50053 > 0)"
     )
 
 
@@ -514,7 +515,7 @@ def sign_in_summary(overview: Dict[str, Any], users: Dict[str, Any]) -> Dict[str
         "sign_ins": _int(overview.get("SignIns")),
         "succeeded": succeeded,
         "failed": _int(overview.get("Failed")),
-        "locked_out": _int(overview.get("LockedOut")),
+        "rejected_50053": _int(overview.get("Rejected50053")),
         "succeeded_multi_factor": multi,
         "succeeded_single_factor": _int(overview.get("SucceededSingleFactor")),
         "succeeded_single_factor_phishing_resistant": _int(overview.get("SucceededSingleFactorPhishingResistant")),
@@ -525,7 +526,7 @@ def sign_in_summary(overview: Dict[str, Any], users: Dict[str, Any]) -> Dict[str
         "phishing_resistant_percentage": coverage_percentage(phishing, succeeded),
         "users_signed_in": _int(users.get("Users")),
         "users_with_single_factor_success": _int(users.get("UsersWithSingleFactorSuccess")),
-        "users_locked_out": _int(users.get("UsersLockedOut")),
+        "users_rejected_50053": _int(users.get("UsersRejected50053")),
         "first_sign_in": overview.get("FirstSignIn") or None,
         "last_sign_in": overview.get("LastSignIn") or None,
     }
@@ -830,8 +831,8 @@ def summarize(workspaces: List[Dict[str, Any]], settings: Dict[str, Any]) -> Dic
         "sign_ins": known(_sum(read, "sign_ins")),
         "sign_ins_succeeded": known(succeeded),
         "sign_ins_failed": known(_sum(read, "failed")),
-        "sign_ins_locked_out": known(_sum(read, "locked_out")),
-        "users_locked_out": known(_sum(read, "users_locked_out")),
+        "sign_ins_rejected_50053": known(_sum(read, "rejected_50053")),
+        "users_rejected_50053": known(_sum(read, "users_rejected_50053")),
         "succeeded_multi_factor": known(multi),
         "succeeded_single_factor": known(single),
         "succeeded_single_factor_phishing_resistant": known(_sum(read, "succeeded_single_factor_phishing_resistant")),

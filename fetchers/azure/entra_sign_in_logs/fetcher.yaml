@@ -1,6 +1,6 @@
 name: azure_entra_sign_in_logs
 version: 0.4.0
-description: Shows from Entra sign-in and audit logs whether successful sign-ins required MFA and phishing-resistant methods, what changed in authentication and Conditional Access policies, and counts of non-interactive and service-principal sign-ins.
+description: Shows from Entra sign-in and audit logs whether successful sign-ins required MFA and phishing-resistant methods, changes to authentication and Conditional Access policies, and counts of non-interactive, service-principal and 50053-rejected sign-ins.
 category: azure
 
 supports_targets: true
@@ -184,8 +184,8 @@ evidence_set:
     - sign_ins — Number of interactive sign-ins in the lookback; non-interactive and service principal sign-ins are counted under their own fields below
     - sign_ins_succeeded — Number of sign-ins with ResultType 0
     - sign_ins_failed — Number of sign-ins with any other ResultType
-    - sign_ins_locked_out — Number of sign-ins Entra rejected with ResultType 50053: smart lockout locked the account after repeated bad passwords, or the sign-in came from an IP address with malicious activity (Entra logs both under this code). Shows lockout taking effect; 0 in a quiet period is normal
-    - users_locked_out — Number of users with at least one sign-in counted in sign_ins_locked_out, counted by Entra object id as users_signed_in is
+    - sign_ins_rejected_50053 — Number of sign-ins Entra rejected with ResultType 50053. Entra logs two causes under this one code: smart lockout locking the account after repeated bad passwords, and a sign-in from an IP address with malicious activity, so the count alone can't show that smart lockout took effect. Evidence only, with no pass or fail; 0 in a quiet period is normal
+    - users_rejected_50053 — Number of users with at least one sign-in counted in sign_ins_rejected_50053, counted by Entra object id as users_signed_in is
     - succeeded_multi_factor — Number of successful sign-ins whose authentication requirement was multiFactorAuthentication
     - succeeded_single_factor — Number of successful sign-ins whose authentication requirement was singleFactorAuthentication, not counting Windows device logons or sign-ins that used a phishing-resistant method on their own
     - succeeded_single_factor_phishing_resistant — Number of successful sign-ins with no MFA requirement that used a phishing-resistant method on its own, such as a passkey, which is not a password alone
