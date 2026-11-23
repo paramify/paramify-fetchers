@@ -1,0 +1,17 @@
+validator: azure_ai_services_not_open_to_all_networks
+cases:
+  - name: compliant
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"accounts_open_to_all_networks":0,"search_services_open_to_all_networks":0}}}'
+
+  - name: accounts_open_to_all_networks_nonzero
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"accounts_open_to_all_networks":1,"search_services_open_to_all_networks":0}}}'
+
+  - name: search_services_open_to_all_networks_nonzero
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"accounts_open_to_all_networks":0,"search_services_open_to_all_networks":1}}}'
+
+  - name: accounts_open_to_all_networks_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"accounts_open_to_all_networks_renamed":0,"search_services_open_to_all_networks":0}}}'

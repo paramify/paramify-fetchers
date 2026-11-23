@@ -1,0 +1,21 @@
+key: github_repositories_in_scope_read
+name: GitHub Repositories in Scope Read
+type: AUTOMATED
+role: completeness
+source: community
+statement: >-
+  The fetcher read at least one repository in scope. A scope that matched no repository, or a count that
+  was not read, fails. Does not assert the scope is the right one.
+regex: '"repositories_total":\s*(?<repositories_total>[1-9]\d*)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+- regexOperation:
+    type: MATCH_COUNT
+  criteria: NOT_EQUALS
+  value:
+    type: CUSTOM_TEXT
+    customText: '0'
+evidence_sets:
+- EVD-GITHUB-BRANCH-PROTECTION
+- EVD-GITHUB-CODE-SCANNING
+- EVD-GITHUB-DEPENDABOT-ALERTS

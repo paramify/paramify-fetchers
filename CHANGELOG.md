@@ -17,6 +17,28 @@ schemas and the `paramify` CLI — not the internal code.
   long as its slowest job instead of the sum of them, and the next assessment's reports no longer wait on the previous
   job. Each job's outcome is still written to `_intake_log.json` as soon as it settles, and `--wait-timeout` still
   applies to each job. Job status lines now follow all the upload lines instead of each assessment's own.
+- **`github_non_user_credentials` 0.3.0: limit to collected repositories.** A new `scope_to_repositories` setting
+  keeps apps, fine-grained tokens and organization Actions secrets only when they can reach a collected repository or
+  their reach is unknown, and marks each kept row with `reaches_collected_repositories`. Apps installed on selected
+  repositories stay as unknown, since GitHub shows that list only to the app itself, unless the organization's
+  confirmation is named in `apps_confirmed_reaching` or `apps_confirmed_not_reaching`; those apps carry
+  `reach_source: organization_confirmation` and are named in the metadata. Left-out and unknown counts are recorded.
+  Organization secret rows now carry `visibility`. Off by default.
+- **`github_workflow_runs` 0.3.0: scheduled-run actors.** Scheduled runs no longer name a user as `actor`, since GitHub
+  credits them to whoever last changed the schedule; `triggering_actor` is kept only on a re-run. A new
+  `include_actors` setting (default true) removes both fields from every run. The summary adds `runs_scheduled`.
+- **Plainer TUI wording.**
+  - Results read as sentences instead of key=value: "Uploaded 3 files, 1 already there.", not
+    `uploaded=3 duplicates=1 errors=0`.
+  - The upload confirm lists what is delivered where and anything refused, and leaves out no-op and tag steps.
+  - Counts use real plurals, messages name hosts instead of full API URLs, and `esc leave field` shows only while
+    you are typing.
+  - The Pipelines tab is one line when a manifest has nothing to send.
+  - Fixes: the Evidence tab sent you to tab 3 to run (it's 2), and the welcome screen said "1 fetchers".
+- **TUI tab keys: Validators is tab 4.** Paramify moves from `4` to `5` and Pipelines from `5` to `6`.
+- **`paramify validators sync -m` and the Paramify tab cover only the validators a manifest tracks.** Without a
+  `validators:` list an entry tracks every Paramify-made validator for its evidence set, which is every validator
+  the registry ships today, so nothing changes until an entry lists its own or a community validator is added.
 - **`aws_inspector_ecr_findings` and `aws_inspector_ecr_report` 0.3.0: image counts and an opt-in for an empty scope.**
   - The evidence summary adds `repository_image_count`, every image in the selected repositories before tag,
     push-date and usage filters, next to `image_count`, the images that match them. Both are logged. No new API calls.
@@ -33,6 +55,48 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **The TUI shows which environment variables a manifest is missing, and stops a run that would fail on them.**
+  - The manifest settings row has an `env` button (`✓ all set` or `✗ 2 missing`), each fetcher's status names what it
+    needs (`✗ needs OKTA_API_TOKEN`), and the line under the table splits what a run needs from what only an upload needs.
+  - The button (or `E`) opens a short list of just the missing variables and where to get each one, with a button that
+    adds them to `.env` as blank lines, as `paramify env --write` does.
+  - ctrl+r on the Run tab doesn't start while a variable a fetcher reads is empty, and says which.
+  - Only whether a variable has a value is ever checked. The TUI never shows, logs or takes a value.
+
+- **Evidence set frequency follows how often a manifest runs, and reaches sets that already exist.**
+  - The manifest settings row has a `frequency` button (daily, every 3 days, weekly, …), saved as `run.schedule.every`.
+    An entry can override it in its form (`e`). On the CLI: `paramify manifest set-frequency MANIFEST FREQUENCY
+    [--fetcher NAME]`.
+  - Order, highest first: the entry, a per-fetcher `frequency` in `upload.yaml`, `defaults.frequency` in `upload.yaml`
+    (now read), the manifest's frequency, the fetcher's own default (every 3 days).
+  - An upload now changes the frequency on an existing evidence set (`PATCH /evidence/{id}`) when one was chosen, and
+    the upload confirm shows it: `~ EVD-IAM-MFA: frequency every 3 days → daily`. A fetcher's default never changes an
+    existing set, and a key that can't edit sets skips the change, says so, and still uploads.
+  - The stack, owner, frequency and env buttons widen to fit a new value straight away. They used to keep their old
+    width and show `owner: t` until the window was resized.
+
+- **Validator results and a local test in the TUI (Validators tab).**
+  - Each validator shows PASS or FAIL from its latest result in Paramify, and the Paramify tab's validators cell
+    counts failures (`2/2 · 1 failing`).
+  - The validator window tests it against your last run with Node, as Paramify does, and shows each rule's mark and
+    the value it read, with a plain reason when it fails.
+  - On a failure, `a` asks Claude why (read-only `claude -p`, asked once per session before anything is sent). Any
+    regex it proposes is tested on the same files before it is shown, and `w` writes a passing one to the
+    validator's YAML after a confirm. Without Claude Code the key says so; `c` copies the same report to paste
+    anywhere. `PARAMIFY_ASK_CLAUDE=0` turns Ask Claude off.
+  - After `w` the window names the command that sends the new regex: `paramify validators sync -m MANIFEST --update`.
+    The Paramify tab's sync skips validators Paramify already has, so it doesn't send it.
+
+- **Choose the validators each fetcher tracks (TUI Validators tab, beta).** The tab lists the manifest's fetchers
+  and, for each, every registry validator for its evidence set in a Paramify section and a community section.
+  `space` tracks or untracks one and saves the manifest; `enter` shows the claim, regex, rules in plain words,
+  evidence sets and YAML file; `a` goes back to the defaults. The choice is saved as a `validators:` list on the
+  manifest entry. Validators gain an optional `source: paramify | community` field (absent = `paramify`);
+  community-made validators are tracked only when an entry lists them. Untracking never changes Paramify.
+- **Community-made fetchers are labelled in the TUI.** `fetcher.yaml` takes an optional
+  `source: paramify | community` (absent = `paramify`), also in `paramify catalog --json`. A community fetcher gets an
+  orange COMMUNITY label in the catalog, the manifest table and the Validators tab, and its detail says it was made
+  by the community and to read its code before giving it secrets.
 - **One-line install.** `curl -fsSL https://raw.githubusercontent.com/paramify/paramify-fetchers/main/install.sh |
   bash` clones the repo to `~/paramify-fetchers`, installs the CLI and TUI into the clone's `.venv`, and links
   `paramify` into `~/.local/bin`. In a terminal it shows a spinner and elapsed time for each step, offers to add

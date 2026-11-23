@@ -1,0 +1,31 @@
+validator: storage_accounts_approved_key_source
+cases:
+  - name: microsoft_and_customer_managed
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"storage_accounts":[{"name":"sa1","encryption_type":"Microsoft.Storage","customer_managed_key":false},{"name":"sa2","encryption_type":"Microsoft.Keyvault","customer_managed_key":true}]}}}'
+
+  - name: microsoft_managed_pretty_printed
+    expect: PASS
+    note: guards the whitespace backtrack.
+    artifact: |
+      {
+        "metadata": {"exit_code": 0},
+        "payload": {"results": {"storage_accounts": [
+          {"customer_managed_key": false, "encryption_type":   "Microsoft.Storage", "name": "sa1"}
+        ]}}
+      }
+
+  - name: unexpected_key_source
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"storage_accounts":[{"name":"sa1","encryption_type":"Microsoft.Storage"},{"name":"sa2","encryption_type":"Contoso.Hsm"}]}}}'
+
+  - name: key_source_missing
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"storage_accounts":[{"name":"sa1","encryption_type":null}]}}}'
+
+  - name: key_renamed_ALONE_THIS_PASSES
+    expect: PASS
+    note: >
+      Deliberate. storage_encryption_fields_present fails here; see
+      set_EVD-AZURE-STORAGE-ENC.yaml.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"storage_accounts":[{"name":"sa1","key_source":"Contoso.Hsm"}]}}}'

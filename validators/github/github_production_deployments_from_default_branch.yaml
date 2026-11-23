@@ -1,0 +1,19 @@
+key: github_production_deployments_from_default_branch
+name: GitHub Production Deployments From Default Branch
+type: AUTOMATED
+role: configuration
+source: community
+statement: >-
+  Every production deployment in the window deployed a commit that is on the default branch. Pair with
+  GitHub Production Deployment Commits Known.
+regex: '"production_deployments_not_on_default_branch":\s*\[\s*\]'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+- regexOperation:
+    type: MATCH_COUNT
+  criteria: NOT_EQUALS
+  value:
+    type: CUSTOM_TEXT
+    customText: '0'
+evidence_sets:
+- EVD-GITHUB-DEPLOYMENT-CONTROLS

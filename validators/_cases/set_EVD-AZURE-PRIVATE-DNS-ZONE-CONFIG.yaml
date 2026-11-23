@@ -1,0 +1,9 @@
+evidence_set: EVD-AZURE-PRIVATE-DNS-ZONE-CONFIG
+cases:
+  - name: compliant
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"links_not_completed":0,"links_to_deleted_virtual_networks":0,"links_to_unreadable_virtual_networks":0,"links_virtual_network_unknown":0,"privatelink_records_ip_mismatch":0,"privatelink_records_partially_backed":0,"privatelink_records_stale":0,"privatelink_records_unknown":0,"privatelink_records_unverified":0,"zones_without_virtual_network_links":0}}}'
+
+  - name: failed_collection
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":1},"payload":{"results":{},"summary":{"links_not_completed":0,"links_to_deleted_virtual_networks":0,"links_to_unreadable_virtual_networks":0,"links_virtual_network_unknown":0,"privatelink_records_ip_mismatch":0,"privatelink_records_partially_backed":0,"privatelink_records_stale":0,"privatelink_records_unknown":0,"privatelink_records_unverified":0,"zones_without_virtual_network_links":0}}}'

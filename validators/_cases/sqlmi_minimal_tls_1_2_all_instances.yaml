@@ -1,0 +1,39 @@
+validator: sqlmi_minimal_tls_1_2_all_instances
+cases:
+  - name: all_instances_1_2_or_1_3
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"managed_instances":[{"name":"mi-a","minimal_tls_version":"1.2","minimal_tls_version_recommended":true},{"name":"mi-b","minimal_tls_version":"1.3","minimal_tls_version_recommended":true}]}}}'
+
+  - name: all_instances_1_2_pretty_printed
+    expect: PASS
+    note: guards the whitespace backtrack, where \s* matching nothing would let the lookahead see ' "1.2"'.
+    artifact: |
+      {
+        "metadata": {"exit_code": 0},
+        "payload": {"results": {"managed_instances": [
+          {"minimal_tls_version":  "1.2", "minimal_tls_version_recommended": true, "name": "mi-a"}
+        ]}}
+      }
+
+  - name: one_instance_1_0
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"managed_instances":[{"name":"mi-a","minimal_tls_version":"1.2"},{"name":"mi-b","minimal_tls_version":"1.0"}]}}}'
+
+  - name: one_instance_none
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"managed_instances":[{"name":"mi-a","minimal_tls_version":"None"}]}}}'
+
+  - name: one_instance_unset
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"managed_instances":[{"name":"mi-a","minimal_tls_version":null}]}}}'
+
+  - name: version_prefix_is_not_1_2
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"managed_instances":[{"name":"mi-a","minimal_tls_version":"1.25"}]}}}'
+
+  - name: key_renamed_ALONE_THIS_PASSES
+    expect: PASS
+    note: >
+      Deliberate. sqlmi_configuration_fields_present fails here; see
+      set_EVD-AZURE-SQLMI-CONFIG.yaml.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"managed_instances":[{"name":"mi-a","min_tls":"1.0"}]}}}'

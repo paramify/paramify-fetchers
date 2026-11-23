@@ -1,0 +1,21 @@
+validator: azure_redis_cache_all_private_only
+cases:
+  - name: compliant
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"exceptions":{"unknown_state":[]},"private_only_caches":2,"total_caches":2}}}'
+
+  - name: private_only_caches_short
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"exceptions":{"unknown_state":[]},"private_only_caches":1,"total_caches":2}}}'
+
+  - name: unknown_state_nonempty
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"exceptions":{"unknown_state":["item-b"]},"private_only_caches":2,"total_caches":2}}}'
+
+  - name: no_total_caches
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"exceptions":{"unknown_state":[]},"private_only_caches":0,"total_caches":0}}}'
+
+  - name: unknown_state_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"private_only_caches":2,"total_caches":2,"unknown_state_renamed":[]}}}'
