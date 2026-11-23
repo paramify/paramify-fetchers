@@ -17,6 +17,12 @@ schemas and the `paramify` CLI — not the internal code.
   AWS CLI zip or reads kubectl's `stable.txt`. The scheduler runs cronie's `crond`; the crontab and its env snapshot
   are unchanged. The image still runs as root.
 
+### Fixed
+- **`aws_codebuild_pipeline_config` 0.2.1 and `aws_opensearch_encryption_status` 0.2.1 work with jq 1.8.** Both split
+  names into batches with jq's private `_nwise`, which jq 1.8 removed. Under jq 1.8 the batching filter failed to
+  compile, no batch ran, and the fetcher reported no CodeBuild projects or OpenSearch domains without an error. The
+  batches now come from `range`, which gives the same batches on jq 1.7 and 1.8.
+
 ## [0.7.0-beta] - 2026-11-24
 ### Breaking
 

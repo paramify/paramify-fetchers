@@ -1,5 +1,5 @@
 name: aws_codebuild_pipeline_config
-version: 0.2.0
+version: 0.2.1
 description: Collects AWS CodeBuild project configuration (source, environment, logging, and artifact encryption) for build-pipeline change-management evidence.
 category: aws
 

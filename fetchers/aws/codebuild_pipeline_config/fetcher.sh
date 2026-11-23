@@ -74,7 +74,7 @@ else
             continue
         fi
         printf '%s\n' "$batch_info" >> "$_PROJECTS_JSON"
-    done < <(printf '%s' "$project_names" | jq -r '[.[]?] | _nwise(100) | join(" ")')
+    done < <(printf '%s' "$project_names" | jq -r '[.[]?] | . as $a | range(0; $a | length; 100) | $a[.:.+100] | join(" ")')
 
     # batch-get-projects returns the full project config; keep only the
     # KSI-CMT-VTD fields: source, environment, logging, artifact encryption.

@@ -66,7 +66,7 @@ else
         if ! aws opensearch describe-domains --domain-names $batch --query 'DomainStatusList' --output json >> "$_DOMAINS_JSON" 2>/dev/null; then
             echo "aws opensearch describe-domains ($batch) failed" >> "$_FAILURE_LOG"
         fi
-    done < <(printf '%s' "$domains" | jq -r '[.[]?] | _nwise(5) | join(" ")')
+    done < <(printf '%s' "$domains" | jq -r '[.[]?] | . as $a | range(0; $a | length; 5) | $a[.:.+5] | join(" ")')
 
     # Rows follow list-domain-names order, whatever order each batch came back in.
     printf '%s' "$domains" | jq --slurpfile names /dev/stdin --slurpfile batches "$_DOMAINS_JSON" '
