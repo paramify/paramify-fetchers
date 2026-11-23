@@ -3,6 +3,7 @@ version: 0.1.0
 description: Converts every active Inspector finding for EC2 instances, ECR images, Lambda functions and Lambda code to a complete CSV for a Paramify vulnerability assessment, linked to aws_config_inventory by resource ARN.
 category: aws
 kind: issue_report
+status: beta
 pipeline:
   type: vulnerability
   id_scheme: aws-arn
