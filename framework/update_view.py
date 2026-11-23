@@ -238,6 +238,7 @@ def breaking(rows: Sequence[dict]) -> List[RenderableType]:
     for b in mine:
         who = (", ".join(m["manifest"] for m in b["manifests"]) if b["why"] == "fetchers"
                else "your own fetchers" if b["why"] == "custom" else "everyone")
+        who += f" · {b.get('release') or 'unreleased'}"  # the release it came from, as New names them
         out.append(wrapped(("⚠ ", "yellow"), (b["title"], "bold"), ("   " + who, "dim")))
         if b.get("fix"):
             out.append(wrapped(("fix: ", "dim"), (b["fix"], ""), indent=4))
