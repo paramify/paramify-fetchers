@@ -10,6 +10,8 @@ name: CI
 #   test      — every fetcher.yaml / category file validates against its JSON Schema
 #   azure-sdk — the Azure SDK operation groups the fetchers read still exist
 #   oci-sdk   — the OCI fetchers run against recorded responses (needs the oci extra)
+#   release-check — only on the release PR (branch release/next): the release
+#               file is complete and consistent (tools/release.py check)
 #   smoke     — the CLI discovery surface works across all fetchers, and the
 #               demo run / validate / upload --dry-run output matches its goldens
 #   tui       — the terminal UI on the lowest textual 8 with the oldest Python and
@@ -49,6 +51,7 @@ jobs:
       scope: ${{ steps.plan.outputs.scope }}
       azure: ${{ steps.plan.outputs.azure }}
       oci: ${{ steps.plan.outputs.oci }}
+      release: ${{ steps.plan.outputs.release }}
       pythons: ${{ steps.matrix.outputs.pythons }}
       tui: ${{ steps.matrix.outputs.tui }}
     steps:
@@ -369,12 +372,39 @@ jobs:
       - name: gitleaks (full history)
         run: gitleaks git --verbose --redact
 
+  release-check:
+    name: release-check (release PR)
+    needs: changes
+    # Only the release PR, which always comes from release/next. Skipped on every
+    # other pull request, and ci-ok allows that.
+    if: needs.changes.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The check reads the tags and the history since the last release.
+          fetch-depth: 0
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - run: python -m pip install -e .
+      # On a pull request the checkout is the merge commit; its second parent is
+      # the PR head, which is the release branch itself.
+      - name: check the release file
+        run: |
+          ref=HEAD
+          if git rev-parse --verify -q HEAD^2 > /dev/null; then ref=HEAD^2; fi
+          python tools/release.py check --ref "$ref"
+
   ci-ok:
     name: ci-ok
     # always(): a failed or cancelled job above would otherwise skip this one,
     # and a skipped required check counts as passing.
     if: always()
-    needs: [changes, lint, test, azure-sdk, oci-sdk, smoke, tui, install, secrets]
+    needs: [changes, lint, test, azure-sdk, oci-sdk, release-check, smoke, tui, install, secrets]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -384,12 +414,12 @@ jobs:
         run: |
           set -euo pipefail
           jq -r 'to_entries[] | "\(.key): \(.value.result)"' <<<"$NEEDS"
-          # Only the two SDK jobs may be skipped, and only when `changes` itself
+          # Only the two SDK jobs and release-check may be skipped, and only when `changes` itself
           # passed: if it failed, everything after it is skipped, not cleared.
           jq -e '
             .changes.result == "success"
             and ([to_entries[]
-                  | select(.key != "azure-sdk" and .key != "oci-sdk")
+                  | select(.key != "azure-sdk" and .key != "oci-sdk" and .key != "release-check")
                   | .value.result] | all(. == "success"))
-            and ([."azure-sdk".result, ."oci-sdk".result] | all(. == "success" or . == "skipped"))
+            and ([."azure-sdk".result, ."oci-sdk".result, ."release-check".result] | all(. == "success" or . == "skipped"))
           ' <<<"$NEEDS" > /dev/null || { echo "::error::a job failed, was cancelled, or did not run"; exit 1; }

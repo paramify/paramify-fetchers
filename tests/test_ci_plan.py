@@ -19,7 +19,7 @@ _spec = importlib.util.spec_from_file_location("ci_plan", REPO_ROOT / "tools" / 
 ci_plan = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(ci_plan)
 
-FULL = {"scope": "full", "azure": "true", "oci": "true"}
+FULL = {"scope": "full", "azure": "true", "oci": "true", "release": "false"}
 
 FETCHER_PR = [
     "fetchers/aws/iam_roles/fetcher.py",
@@ -41,7 +41,7 @@ def test_an_unreadable_or_empty_diff_runs_everything():
 
 
 def test_a_fetcher_pull_request_gets_the_fetchers_scope_without_the_sdk_jobs():
-    assert ci_plan.plan("pull_request", FETCHER_PR) == {"scope": "fetchers", "azure": "false", "oci": "false"}
+    assert ci_plan.plan("pull_request", FETCHER_PR) == {"scope": "fetchers", "azure": "false", "oci": "false", "release": "false"}
 
 
 @pytest.mark.parametrize("path", [
@@ -79,7 +79,7 @@ def test_one_file_outside_the_fetcher_scope_runs_everything(path):
     "docs/azure_fetchers.md",
 ])
 def test_azure_paths_run_the_azure_job_only(path):
-    assert ci_plan.plan("pull_request", [path]) == {"scope": "fetchers", "azure": "true", "oci": "false"}
+    assert ci_plan.plan("pull_request", [path]) == {"scope": "fetchers", "azure": "true", "oci": "false", "release": "false"}
 
 
 @pytest.mark.parametrize("path", [
@@ -89,7 +89,7 @@ def test_azure_paths_run_the_azure_job_only(path):
     "docs/oci_fetchers.md",
 ])
 def test_oci_paths_run_the_oci_job_only(path):
-    assert ci_plan.plan("pull_request", [path]) == {"scope": "fetchers", "azure": "false", "oci": "true"}
+    assert ci_plan.plan("pull_request", [path]) == {"scope": "fetchers", "azure": "false", "oci": "true", "release": "false"}
 
 
 @pytest.mark.parametrize("path", [
@@ -103,7 +103,7 @@ def test_oci_is_matched_as_a_word_not_a_substring(path):
 
 @pytest.mark.parametrize("path", ["fetchers/_lib/discovery.py", "fetchers/_categories/aws.yaml"])
 def test_shared_fetcher_code_runs_both_sdk_jobs(path):
-    assert ci_plan.plan("pull_request", [path]) == {"scope": "fetchers", "azure": "true", "oci": "true"}
+    assert ci_plan.plan("pull_request", [path]) == {"scope": "fetchers", "azure": "true", "oci": "true", "release": "false"}
 
 
 def test_every_file_the_tui_job_runs_is_outside_the_fetcher_scope():
@@ -126,3 +126,15 @@ def test_every_sdk_test_file_turns_its_job_on():
     for path in REPO_ROOT.glob("tests/test_oci_*.py"):
         rel = path.relative_to(REPO_ROOT).as_posix()
         assert ci_plan.plan("pull_request", [rel])["oci"] == "true", rel
+
+
+def test_release_branch_turns_on_release_check():
+    assert ci_plan.plan("pull_request", FETCHER_PR, "release/next")["release"] == "true"
+    # The release PR changes CHANGELOG and pyproject, so it also runs everything.
+    assert ci_plan.plan("pull_request", ["pyproject.toml"], "release/next") == {**FULL, "release": "true"}
+
+
+@pytest.mark.parametrize("head_ref", ["", "feat/x", "release/next-2", "my-release/next"])
+def test_other_branches_skip_release_check(head_ref):
+    assert ci_plan.plan("pull_request", FETCHER_PR, head_ref)["release"] == "false"
+    assert ci_plan.plan("push", None, head_ref)["release"] == "false"
