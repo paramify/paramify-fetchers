@@ -68,7 +68,7 @@ jobs:
       # The version lists live here, not in the planner, so the workflow still
       # says what runs. 3.11 is the oldest Python that pyproject's
       # requires-python allows. 3.14 is the one deploy/Dockerfile and the dev
-      # venvs run, so keep it in step with the Dockerfile's FROM.
+      # venvs run, so keep it in step with the Dockerfile's python-3.14 package.
       #
       # tui rows: the lowest textual the tui extra allows and the newest it
       # resolves to, so a textual release that breaks the console fails here

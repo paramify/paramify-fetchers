@@ -64,7 +64,8 @@ case "${1:-}" in
     crontab /app/deploy/crontab
     echo "[entrypoint] installed crontab:"
     crontab -l | sed 's/^/    /'
-    exec cron -f
+    # cronie's daemon is `crond`; -n keeps it in the foreground under tini.
+    exec crond -n
     ;;
   ""|-h|--help)
     echo "usage: <command>            run any command (default: paramify list)"

@@ -10,6 +10,13 @@ schemas and the `paramify` CLI — not the internal code.
 
 ## [Unreleased]
 
+### Changed
+- **The container image is built on Chainguard's `wolfi-base`** (`deploy/Dockerfile`: `python:3.14-slim` →
+  `cgr.dev/chainguard/wolfi-base`, pinned by digest). Python stays 3.14, now from the Wolfi `python-3.14` package.
+  `aws-cli`, `kubectl` and the other tools come from the Wolfi package repo too, so the build no longer downloads the
+  AWS CLI zip or reads kubectl's `stable.txt`. The scheduler runs cronie's `crond`; the crontab and its env snapshot
+  are unchanged. The image still runs as root.
+
 ## [0.7.0-beta] - 2026-11-24
 ### Breaking
 

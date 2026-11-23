@@ -81,8 +81,10 @@ Three options, in order of preference:
 docker compose -f deploy/docker-compose.yml build
 ```
 
-First build pulls `aws-cli`, `kubectl`, and (by default) `checkov`, so it takes a
-few minutes. For a faster local image without the checkov scanners:
+The image is built on Chainguard's `wolfi-base`. The first build installs Python,
+`aws-cli`, `kubectl` and the other tools from the Wolfi package repo, and (by
+default) installs `checkov` with pip, so it takes a few minutes. For a faster
+local image without the checkov scanners:
 
 ```bash
 docker compose -f deploy/docker-compose.yml build --build-arg INSTALL_EXTRAS=tui
@@ -229,7 +231,6 @@ You don't SSH in — use Docker:
 | `secret … must be a flat JSON object` | The secret isn't `{"VAR":"value", …}` — fix its shape |
 | Fetcher exits with "missing secret" | A `${env:VAR}` in the manifest has no matching key in the secret — align the names |
 | Evidence not on host | Run from the repo root so `./evidence` maps correctly |
-| `unzip` / `bad CRC` during image build (aws-cli step) | Corrupted download of the ~50MB AWS CLI zip — common on fresh Docker Desktop installs. Retry the build; if it persists, `docker builder prune -f` then rebuild. The Dockerfile retries and tests the zip before installing. |
 
 ## Running this in production
 
