@@ -43,6 +43,9 @@ RUN apk add --no-cache \
 # whatever the Wolfi Python package links into /usr/bin.
 RUN python3.14 -m venv /opt/venv
 ENV PATH=/opt/venv/bin:$PATH
+# The python:*-slim images set this, and the fetchers were tested under it.
+# wolfi-base sets no locale; glibc has C.UTF-8 built in.
+ENV LANG=C.UTF-8
 
 WORKDIR /app
 COPY . .
