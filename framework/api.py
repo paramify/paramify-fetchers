@@ -29,6 +29,7 @@ import tempfile
 import threading
 from concurrent.futures import Future
 from datetime import datetime, timezone
+from functools import partial
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as pkg_version
 from pathlib import Path
@@ -1887,7 +1888,7 @@ def run(
                 try:
                     stages[i] = entry_staging_dir(run_dir, i)
                     future.set_result(execute(entry, keys[id(entry)], stages[i],
-                                              lambda fn, _i=i: gate.send(_i, fn), group))
+                                              partial(gate.send, i), group))
                 except BaseException as e:  # noqa: BLE001 — re-raised on the run's thread, in order
                     future.set_exception(e)
 
