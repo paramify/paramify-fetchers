@@ -5,6 +5,7 @@ description: >-
 category: crowdstrike
 
 kind: inventory
+status: beta
 pipeline:
   type: inventory
   id_scheme: crowdstrike-device-id
