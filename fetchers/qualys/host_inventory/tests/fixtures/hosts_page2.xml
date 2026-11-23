@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE HOST_LIST_OUTPUT SYSTEM "https://qualysapi.qualys.com/api/5.0/fo/asset/host/host_list_output.dtd">
+<HOST_LIST_OUTPUT>
+  <RESPONSE>
+    <DATETIME>2026-11-20T08:00:01Z</DATETIME>
+    <HOST_LIST>
+      <HOST>
+        <ID>103</ID>
+        <ASSET_ID>9003</ASSET_ID>
+        <IPV6>2001:db8::3</IPV6>
+        <TRACKING_METHOD>QAGENT</TRACKING_METHOD>
+        <OS><![CDATA[Amazon Linux 2023]]></OS>
+        <LAST_VULN_SCAN_DATETIME>2026-11-19T11:00:00Z</LAST_VULN_SCAN_DATETIME>
+      </HOST>
+    </HOST_LIST>
+  </RESPONSE>
+</HOST_LIST_OUTPUT>

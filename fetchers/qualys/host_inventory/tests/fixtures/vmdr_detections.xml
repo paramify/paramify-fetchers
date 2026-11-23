@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE HOST_LIST_VM_DETECTION_OUTPUT SYSTEM "https://qualysapi.qualys.com/api/6.0/fo/asset/host/vm/detection/host_list_vm_detection_output.dtd">
+<HOST_LIST_VM_DETECTION_OUTPUT>
+  <RESPONSE>
+    <DATETIME>2026-11-20T08:05:00Z</DATETIME>
+    <HOST_LIST>
+      <HOST>
+        <ID>101</ID>
+        <ASSET_ID>9001</ASSET_ID>
+        <IP>192.0.2.10</IP>
+        <TRACKING_METHOD>IP</TRACKING_METHOD>
+        <OS><![CDATA[Ubuntu Linux 22.04]]></OS>
+        <DNS><![CDATA[web1]]></DNS>
+        <DNS_DATA>
+          <HOSTNAME><![CDATA[web1]]></HOSTNAME>
+          <DOMAIN><![CDATA[example.test]]></DOMAIN>
+          <FQDN><![CDATA[web1.example.test]]></FQDN>
+        </DNS_DATA>
+        <NETBIOS><![CDATA[WEB1]]></NETBIOS>
+        <DETECTION_LIST>
+          <DETECTION>
+            <UNIQUE_VULN_ID>5550001</UNIQUE_VULN_ID>
+            <QID>38739</QID>
+            <TYPE>Confirmed</TYPE>
+            <SEVERITY>4</SEVERITY>
+            <PORT>22</PORT>
+            <PROTOCOL>tcp</PROTOCOL>
+            <SSL>0</SSL>
+            <RESULTS><![CDATA[synthetic]]></RESULTS>
+            <STATUS>Active</STATUS>
+            <FIRST_FOUND_DATETIME>2026-10-01T02:30:00Z</FIRST_FOUND_DATETIME>
+            <LAST_FOUND_DATETIME>2026-11-18T02:30:00Z</LAST_FOUND_DATETIME>
+            <IS_IGNORED>0</IS_IGNORED>
+            <IS_DISABLED>0</IS_DISABLED>
+          </DETECTION>
+        </DETECTION_LIST>
+      </HOST>
+    </HOST_LIST>
+  </RESPONSE>
+</HOST_LIST_VM_DETECTION_OUTPUT>

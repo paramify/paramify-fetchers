@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE HOST_LIST_OUTPUT SYSTEM "https://qualysapi.qualys.com/api/5.0/fo/asset/host/host_list_output.dtd">
+<HOST_LIST_OUTPUT>
+  <RESPONSE>
+    <DATETIME>2026-11-20T08:00:01Z</DATETIME>
+    <HOST_LIST>
+      <HOST>
+        <IP>192.0.2.99</IP>
+        <TRACKING_METHOD>IP</TRACKING_METHOD>
+      </HOST>
+    </HOST_LIST>
+  </RESPONSE>
+</HOST_LIST_OUTPUT>

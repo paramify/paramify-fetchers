@@ -10,16 +10,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "_shared"))
 from qualys_client import QualysError, text  # noqa: E402
 from qualys_evidence import (  # noqa: E402
     NOT_RETURNED,
-    PAGE_SIZE,
     days_between,
     host_identity,
     int_config,
+    list_hosts,
     parse_time,
     run,
 )
 
 OUTPUT_FILE = "qualys_scan_coverage.json"
-HOST_PATH = "/api/5.0/fo/asset/host/"
 IP_PATH = "/api/2.0/fo/asset/ip/"
 EXCLUDED_PATH = "/api/2.0/fo/asset/excluded_ip/"
 IP_TAGS = ("IP", "IP_RANGE", "IPV6", "IPV6_RANGE")
@@ -152,9 +151,7 @@ def ip_coverage(ranges, excluded, host_ips):
 
 def collect(client, ledger, now):
     window = int_config("QUALYS_SCAN_WINDOW_DAYS", 31)
-    hosts = [host_item(h, now, window) for h in client.records(
-        HOST_PATH, {"action": "list", "details": "All", "show_tags": "0", "truncation_limit": PAGE_SIZE},
-        "HOST", "list_hosts")]
+    hosts = [host_item(h, now, window) for h in list_hosts(client)]
     host_ips = set()
     for h in hosts:
         for value in (h["ip"], h["ipv6"]):

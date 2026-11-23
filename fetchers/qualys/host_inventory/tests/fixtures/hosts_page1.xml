@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE HOST_LIST_OUTPUT SYSTEM "https://qualysapi.qualys.com/api/5.0/fo/asset/host/host_list_output.dtd">
+<HOST_LIST_OUTPUT>
+  <RESPONSE>
+    <DATETIME>2026-11-20T08:00:00Z</DATETIME>
+    <HOST_LIST>
+      <HOST>
+        <ID>101</ID>
+        <ASSET_ID>9001</ASSET_ID>
+        <IP>192.0.2.10</IP>
+        <TRACKING_METHOD>IP</TRACKING_METHOD>
+        <DNS><![CDATA[web1]]></DNS>
+        <DNS_DATA>
+          <HOSTNAME><![CDATA[web1]]></HOSTNAME>
+          <DOMAIN><![CDATA[example.test]]></DOMAIN>
+          <FQDN><![CDATA[web1.example.test]]></FQDN>
+        </DNS_DATA>
+        <NETBIOS><![CDATA[WEB1]]></NETBIOS>
+        <OS><![CDATA[Ubuntu Linux 22.04]]></OS>
+        <LAST_VULN_SCAN_DATETIME>2026-11-18T02:10:00Z</LAST_VULN_SCAN_DATETIME>
+        <LAST_VM_SCANNED_DATE>2026-11-18T02:30:00Z</LAST_VM_SCANNED_DATE>
+        <LAST_VM_SCANNED_DURATION>1200</LAST_VM_SCANNED_DURATION>
+        <LAST_VM_AUTH_SCANNED_DATE>2026-11-18T02:30:00Z</LAST_VM_AUTH_SCANNED_DATE>
+      </HOST>
+      <HOST>
+        <ID>102</ID>
+        <ASSET_ID>9002</ASSET_ID>
+        <IP>192.0.2.11</IP>
+        <TRACKING_METHOD>DNS</TRACKING_METHOD>
+        <DNS><![CDATA[db1.example.test]]></DNS>
+        <OS><![CDATA[Windows Server 2022]]></OS>
+        <LAST_VULN_SCAN_DATETIME>2026-10-01T02:10:00Z</LAST_VULN_SCAN_DATETIME>
+        <LAST_VM_SCANNED_DATE>2026-10-01T02:30:00Z</LAST_VM_SCANNED_DATE>
+      </HOST>
+    </HOST_LIST>
+    <WARNING>
+      <CODE>1980</CODE>
+      <TEXT>2 record limit exceeded. Use URL to get next batch of results.</TEXT>
+      <URL><![CDATA[https://qualysapi.qualys.com/api/5.0/fo/asset/host/?action=list&details=All&show_tags=0&show_asset_id=1&truncation_limit=2&id_min=103]]></URL>
+    </WARNING>
+  </RESPONSE>
+</HOST_LIST_OUTPUT>

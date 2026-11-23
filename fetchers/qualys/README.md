@@ -8,6 +8,7 @@ Qualys fetchers read the Qualys VM/PC API (XML) with one read-only API user:
 | `qualys_scan_schedules` | Active scan schedules, how often they run, whether their option profiles authenticate, how recent scans ended |
 | `qualys_vulnerability_findings` | Open detections by severity and type, and which are past their remediation timeframe |
 | `qualys_vulnerability_remediation` | Detections fixed in the lookback window, on time or late, and reopened ones |
+| `qualys_host_inventory` | Every host, keyed by its Qualys host ID, for a Paramify inventory pipeline. Links each `qualys_vmdr_vulnerability_findings` row to its host ([details](host_inventory/README.md)) |
 
 A detection's age, and its days to fix, count from its last reopening when
 Qualys reopened it, and from first found otherwise.
