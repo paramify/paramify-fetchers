@@ -18,7 +18,10 @@ schemas and the `paramify` CLI — not the internal code.
   rule-id conditions that include it; null when other conditions make it depend on each alert's data; false
   otherwise. `rules_reaching_automation`, `rules_possibly_reaching_automation`,
   `rules_not_reaching_automation` (enabled rules only) and `all_enabled_rules_reach_automation` summarize it. The
-  counts are named outside the `enabled_rules_*` run of keys so validators that read those keys in order still match. A refused automation listing is noted and leaves them null.
+  counts are named outside the `enabled_rules_*` run of keys so validators that read those keys in order still match. A refused automation listing is noted and leaves them null. An automation rule that only closes the incident
+  doesn't count, an alert trigger counts only for Scheduled, NRT and Microsoft security rules, and rule-id conditions
+  match the full rule id, workspace and subscription included (a bare name is only possible). Each rule lists the
+  matched automation rules' action types. The verdict is null when a failed read could have hidden rules.
 - **`azure_aks_cluster_configuration` 0.7.0: autoscaling for expected pools.** A new `expected_autoscaling_pools`
   setting lists the node pools that must have the cluster autoscaler on, as `pool` (every cluster) or `cluster/pool`.
   Missing pools and pools without the autoscaler are counted and named, a pool at zero nodes stays expected, and

@@ -75,6 +75,7 @@ def project_rule(rule: Dict[str, Any]) -> Dict[str, Any]:
     incident = props.get("incidentConfiguration") or {}
     query = props.get("query")
     return {
+        "id": rule.get("id"),
         "name": rule.get("name"),
         "display_name": props.get("displayName"),
         "kind": rule.get("kind"),
@@ -379,14 +380,53 @@ def is_fusion(rule: Dict[str, Any]) -> bool:
 
 # Rule kinds that always raise incidents, whatever incidentConfiguration says.
 INCIDENT_KINDS = frozenset({"Fusion", INCIDENT_CREATION})
+# Alert-triggered automation runs only for alerts from these kinds (Microsoft Learn: "Alert-triggered automation is
+# available only for alerts created by Scheduled, NRT, and Microsoft security analytics rules").
+ALERT_TRIGGER_KINDS = frozenset({"Scheduled", "NRT", INCIDENT_CREATION})
 RULE_ID_PROPERTIES = frozenset({"incidentrelatedanalyticruleids", "alertanalyticruleids"})
 IN_OPERATORS = frozenset({"equals", "contains"})
 NOT_IN_OPERATORS = frozenset({"notequals", "notcontains"})
 
 
 def _rule_key(value: Any) -> str:
-    """The analytics rule's name (its id's last segment), case-folded, as automation conditions name it by id."""
-    return str(value or "").rstrip("/").rsplit("/", 1)[-1].lower()
+    """An analytics rule reference as automation conditions hold it: its full ARM id (subscription, workspace and name),
+    case-folded, so a rule with the same name in another workspace or subscription doesn't match."""
+    return str(value or "").strip().rstrip("/").lower()
+
+
+def rule_membership(values: List[str], rule: Dict[str, Any]) -> Optional[bool]:
+    """Whether a rule-id condition's values name this rule: True on its full id, None when only a bare name or a rule
+    with no id could match (the workspace and subscription can't be confirmed), else False."""
+    rule_id, name = _rule_key(rule.get("id")), str(rule.get("name") or "").lower()
+    uncertain = False
+    for v in values:
+        if "/" in v:
+            if rule_id and v == rule_id:
+                return True
+            if not rule_id and v.rsplit("/", 1)[-1] == name:
+                uncertain = True
+        elif v == name:
+            uncertain = True
+    return None if uncertain else False
+
+
+def _action_label(action: Dict[str, Any]) -> str:
+    """An automation action's type, and for ModifyProperties what it sets: status and classification by value, other
+    properties by name only. Owners, labels and task text are never copied."""
+    kind = action.get("actionType") or "unknown"
+    if kind != "ModifyProperties":
+        return kind
+    config = action.get("actionConfiguration") or {}
+    parts = [f"{k}={config[k]}" for k in ("status", "classification", "severity") if config.get(k)]
+    parts += [k for k in ("owner", "labels", "classificationReason", "classificationComment") if config.get(k)]
+    return f"ModifyProperties({', '.join(parts)})" if parts else kind
+
+
+def closes_only(actions: List[Dict[str, Any]]) -> bool:
+    """True when every action only closes the incident (ModifyProperties setting status Closed), as an auto-close rule
+    that silences a noisy detection does, or when there is no action at all: nothing responds to the match."""
+    return all(a.get("actionType") == "ModifyProperties"
+               and str((a.get("actionConfiguration") or {}).get("status") or "").lower() == "closed" for a in actions)
 
 
 def automation_rule_record(raw: Dict[str, Any], now: datetime) -> Dict[str, Any]:
@@ -406,7 +446,8 @@ def automation_rule_record(raw: Dict[str, Any], now: datetime) -> Dict[str, Any]
         "triggers_on": logic.get("triggersOn"),
         "triggers_when": logic.get("triggersWhen"),
         "conditions": conditions,
-        "actions": sorted({a.get("actionType") or "unknown" for a in props.get("actions") or []}),
+        "actions": [_action_label(a) for a in sorted(props.get("actions") or [], key=lambda a: a.get("order") or 0)],
+        "closes_only": closes_only(props.get("actions") or []),
     }
 
 
@@ -415,6 +456,8 @@ def applies_to(automation: Dict[str, Any], rule: Dict[str, Any]) -> Optional[boo
     alert's own data (a condition on severity, title, entities and so on), which no configuration read can settle."""
     if not automation["active"] or (automation["triggers_when"] or "").lower() != "created":
         return False
+    if automation.get("closes_only"):
+        return False  # it only closes the incident: nothing responds to the match
     on = (automation["triggers_on"] or "").lower()
     if on == "incidents":
         creates = True if rule.get("kind") in INCIDENT_KINDS else rule.get("creates_incidents")
@@ -422,14 +465,18 @@ def applies_to(automation: Dict[str, Any], rule: Dict[str, Any]) -> Optional[boo
             return False
         maybe = creates is None
     elif on == "alerts":
+        if rule.get("kind") not in ALERT_TRIGGER_KINDS:
+            return False
         maybe = False
     else:
         return False
-    key = _rule_key(rule.get("name"))
     for c in automation["conditions"]:
         prop, op = (c["property"] or "").lower(), (c["operator"] or "").lower()
         if (c["type"] or "").lower() == "property" and prop in RULE_ID_PROPERTIES and op in IN_OPERATORS | NOT_IN_OPERATORS:
-            if (key in c["values"]) != (op in IN_OPERATORS):
+            named = rule_membership(c["values"], rule)
+            if named is None:
+                maybe = True
+            elif named != (op in IN_OPERATORS):
                 return False
         else:
             maybe = True
@@ -438,10 +485,13 @@ def applies_to(automation: Dict[str, Any], rule: Dict[str, Any]) -> Optional[boo
 
 def automation_reach(rule: Dict[str, Any], automations: List[Dict[str, Any]]) -> Dict[str, Any]:
     verdicts = [(a, applies_to(a, rule)) for a in automations]
-    sure = sorted(a["display_name"] or a["name"] or "" for a, v in verdicts if v is True)
-    maybe = sorted(a["display_name"] or a["name"] or "" for a, v in verdicts if v is None)
+    label = lambda a: a["display_name"] or a["name"] or ""  # noqa: E731
+    sure = sorted(label(a) for a, v in verdicts if v is True)
+    maybe = sorted(label(a) for a, v in verdicts if v is None)
     return {"reaches_automation": True if sure else None if maybe else False,
-            "automation_rules": sure, "automation_rules_possibly": maybe}
+            "automation_rules": sure, "automation_rules_possibly": maybe,
+            # What each matched automation rule does, so a reader sees a playbook apart from a task or a property change.
+            "automation_rule_actions": {label(a): a["actions"] for a, v in verdicts if v is not False}}
 
 
 def reach_summary(rules: List[Dict[str, Any]], automations_read: bool) -> Dict[str, Any]:
@@ -586,7 +636,8 @@ def collect(client, ws: Dict[str, Any], collector) -> Dict[str, Any]:
         notes.append(f"automation rule listing failed, so whether each rule reaches automation is unknown: {exc}")
     for r in rules or []:
         r.update(automation_reach(r, automations) if automations is not None
-                 else {"reaches_automation": None, "automation_rules": None, "automation_rules_possibly": None})
+                 else {"reaches_automation": None, "automation_rules": None, "automation_rules_possibly": None,
+                       "automation_rule_actions": None})
     products: Optional[Dict[str, Any]] = {}
     if rules is not None and templates is not None:
         templates = templates + preview_templates(client, path, rules, templates, notes)
@@ -623,6 +674,8 @@ def collect(client, ws: Dict[str, Any], collector) -> Dict[str, Any]:
         "query_text_included": with_text,
         **({"confirmed_alert_connections": sorted(confirmed)} if confirmed else {}),
         "rules": rules,
+        # The preview listing adds NRT and other preview-only kinds; without it some rules may be hidden.
+        "preview_rules_read": preview is not None,
         **(rule_summary(rules) if rules is not None else {}),
         **(reach_summary(rules, automations is not None) if rules is not None else {}),
         "automation_rules_read": len(automations) if automations is not None else None,
@@ -674,22 +727,24 @@ def summarize(workspaces: List[Dict[str, Any]]) -> Dict[str, Any]:
         "ingesting_tables_not_read": _total(collected, "ingesting_tables_not_read"),
         "ingesting_tables_read_only_by_templates": _total(collected, "ingesting_tables_read_only_by_templates"),
         "enabled_rules_tables_unknown": _total(collected, "enabled_rules_tables_unknown"),
-        **reach_totals(collected),
+        **reach_totals(workspaces),
     }
 
 
-def reach_totals(collected: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Totals over every workspace read; unknown (null) when any workspace's automation rules couldn't be read."""
+def reach_totals(workspaces: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Totals over every workspace; unknown (null) when any workspace's analytics or automation rules couldn't be read.
+    The verdict is also unknown, not true, when a failed preview listing could have hidden rules."""
     fields = ("rules_reaching_automation", "rules_possibly_reaching_automation",
               "rules_not_reaching_automation")
-    known = bool(collected) and all(w.get(fields[0]) is not None for w in collected)
-    totals = {f: sum(w[f] for w in collected) if known else None for f in fields}
+    known = bool(workspaces) and all(w.get(fields[0]) is not None for w in workspaces)
+    totals = {f: sum(w[f] for w in workspaces) if known else None for f in fields}
     sure, maybe, never = (totals[f] for f in fields)
     enabled = None if not known else sure + maybe + never
+    hidden = any(w.get("preview_rules_read") is False for w in workspaces)
     return {
         **totals,
         "all_enabled_rules_reach_automation": (
-            None if not known or not enabled else False if never else None if maybe else True),
+            None if not known or not enabled else False if never else None if maybe or hidden else True),
     }
 
 

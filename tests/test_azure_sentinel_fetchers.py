@@ -3318,13 +3318,21 @@ def test_retry_wait_reads_the_service_hint():
 
 # --- analytics rules: does a match reach automation? ---
 
-def _automation(name="a", on="Incidents", when="Created", enabled=True, conditions=(), expires=None):
+RUN_PLAYBOOK = {"order": 1, "actionType": "RunPlaybook"}
+CLOSE = {"order": 1, "actionType": "ModifyProperties",
+         "actionConfiguration": {"status": "Closed", "classification": "BenignPositive", "classificationReason": "x"}}
+
+
+def _automation(name="a", on="Incidents", when="Created", enabled=True, conditions=(), expires=None, actions=(RUN_PLAYBOOK,)):
     logic = {"isEnabled": enabled, "triggersOn": on, "triggersWhen": when, "conditions": list(conditions)}
     if expires:
         logic["expirationTimeUtc"] = iso(expires)
-    raw = {"name": name, "properties": {"displayName": name, "triggeringLogic": logic,
-                                        "actions": [{"order": 1, "actionType": "RunPlaybook"}]}}
+    raw = {"name": name, "properties": {"displayName": name, "triggeringLogic": logic, "actions": list(actions)}}
     return MODS["sentinel_analytics_rules"].automation_rule_record(raw, NOW)
+
+
+def _rule(name="r1", kind="Scheduled", creates=True, workspace=None):
+    return {"id": f"{workspace or SI_A}/alertRules/{name}", "name": name, "kind": kind, "creates_incidents": creates}
 
 
 def _rule_ids(operator, *names):
@@ -3338,24 +3346,39 @@ SEVERITY = {"conditionType": "Property", "conditionProperties": {
 
 
 @pytest.mark.parametrize("automation, rule, expected", [
-    (_automation(), {"name": "r1", "kind": "Scheduled", "creates_incidents": True}, True),
-    # An incident trigger can't run for a rule that raises alerts only; an alert trigger can.
-    (_automation(), {"name": "r1", "kind": "Scheduled", "creates_incidents": False}, False),
-    (_automation(on="Alerts"), {"name": "r1", "kind": "Scheduled", "creates_incidents": False}, True),
+    (_automation(), _rule(), True),
+    # An incident trigger can't run for a rule that raises alerts only; an alert trigger can, for the kinds it serves.
+    (_automation(), _rule(creates=False), False),
+    (_automation(on="Alerts"), _rule(creates=False), True),
+    (_automation(on="Alerts"), _rule("n", kind="NRT", creates=None), True),
+    (_automation(on="Alerts"), _rule("m", kind="MicrosoftSecurityIncidentCreation", creates=None), True),
+    (_automation(on="Alerts"), _rule("f", kind="Fusion", creates=None), False),
+    (_automation(on="Alerts"), _rule("ml", kind="MLBehaviorAnalytics", creates=None), False),
     # Fusion and Microsoft incident creation rules always raise incidents.
-    (_automation(), {"name": "f", "kind": "Fusion", "creates_incidents": None}, True),
-    (_automation(), {"name": "r1", "kind": "Scheduled", "creates_incidents": None}, None),
-    # A rule-id condition settles it, matched by the rule's name and without case; other conditions depend on data.
-    (_automation(conditions=[_rule_ids("Contains", "r1", "r2")]), {"name": "R1", "kind": "Scheduled", "creates_incidents": True}, True),
-    (_automation(conditions=[_rule_ids("Contains", "r2")]), {"name": "r1", "kind": "Scheduled", "creates_incidents": True}, False),
-    (_automation(conditions=[_rule_ids("NotContains", "r1")]), {"name": "r1", "kind": "Scheduled", "creates_incidents": True}, False),
-    (_automation(conditions=[_rule_ids("NotContains", "r2")]), {"name": "r1", "kind": "Scheduled", "creates_incidents": True}, True),
-    (_automation(conditions=[SEVERITY]), {"name": "r1", "kind": "Scheduled", "creates_incidents": True}, None),
-    (_automation(conditions=[SEVERITY, _rule_ids("Contains", "r2")]), {"name": "r1", "kind": "Scheduled", "creates_incidents": True}, False),
+    (_automation(), _rule("f", kind="Fusion", creates=None), True),
+    (_automation(), _rule(creates=None), None),
+    # A rule-id condition settles it, by the rule's full id (workspace and subscription included), without case.
+    (_automation(conditions=[_rule_ids("Contains", "r1", "r2")]), _rule("R1"), True),
+    (_automation(conditions=[_rule_ids("Contains", "r2")]), _rule(), False),
+    (_automation(conditions=[_rule_ids("NotContains", "r1")]), _rule(), False),
+    (_automation(conditions=[_rule_ids("NotContains", "r2")]), _rule(), True),
+    (_automation(conditions=[SEVERITY]), _rule(), None),
+    (_automation(conditions=[SEVERITY, _rule_ids("Contains", "r2")]), _rule(), False),
+    # The same rule name in another workspace is a different rule.
+    (_automation(conditions=[_rule_ids("Contains", "r1")]), _rule(workspace=SI_A.replace("law-sentinel", "law-other")), False),
+    # A bare name can't confirm the workspace or subscription: possible, not sure.
+    (_automation(conditions=[{"conditionType": "Property", "conditionProperties": {
+        "propertyName": "IncidentRelatedAnalyticRuleIds", "operator": "Contains", "propertyValues": ["r1"]}}]), _rule(), None),
+    # An automation rule that only closes the incident doesn't respond to it, nor does one with no action.
+    (_automation(actions=(CLOSE,)), _rule(), False),
+    (_automation(actions=()), _rule(), False),
+    (_automation(actions=(CLOSE, {**RUN_PLAYBOOK, "order": 2})), _rule(), True),
+    (_automation(actions=({"order": 1, "actionType": "ModifyProperties", "actionConfiguration": {"severity": "High"}},)),
+     _rule(), True),
     # Disabled, expired or update-triggered rules don't run when a rule matches.
-    (_automation(enabled=False), {"name": "r1", "kind": "Scheduled", "creates_incidents": True}, False),
-    (_automation(expires=NOW - timedelta(days=1)), {"name": "r1", "kind": "Scheduled", "creates_incidents": True}, False),
-    (_automation(when="Updated"), {"name": "r1", "kind": "Scheduled", "creates_incidents": True}, False),
+    (_automation(enabled=False), _rule(), False),
+    (_automation(expires=NOW - timedelta(days=1)), _rule(), False),
+    (_automation(when="Updated"), _rule(), False),
 ])
 def test_an_automation_rule_applies_to_an_analytics_rule(automation, rule, expected):
     assert MODS["sentinel_analytics_rules"].applies_to(automation, rule) is expected
@@ -3363,11 +3386,13 @@ def test_an_automation_rule_applies_to_an_analytics_rule(automation, rule, expec
 
 def test_reach_takes_the_surest_automation_rule_and_names_them():
     ar = MODS["sentinel_analytics_rules"]
-    rule = {"name": "r1", "kind": "Scheduled", "creates_incidents": True}
+    rule = _rule()
     maybe = _automation("by severity", conditions=[SEVERITY])
     sure = _automation("catch-all")
-    assert ar.automation_reach(rule, [maybe]) == {"reaches_automation": None, "automation_rules": [],
-                                                  "automation_rules_possibly": ["by severity"]}
+    closer = _automation("auto-close", actions=(CLOSE,))
+    assert ar.automation_reach(rule, [maybe, closer]) == {
+        "reaches_automation": None, "automation_rules": [], "automation_rules_possibly": ["by severity"],
+        "automation_rule_actions": {"by severity": ["RunPlaybook"]}}
     assert ar.automation_reach(rule, [maybe, sure])["reaches_automation"] is True
     assert ar.automation_reach(rule, [])["reaches_automation"] is False
 
@@ -3380,6 +3405,11 @@ def test_reach_totals_and_verdict():
                 "rules_not_reaching_automation": never}
     assert ar.reach_totals([ws(3, 0, 0), ws(2, 0, 0)])["all_enabled_rules_reach_automation"] is True
     assert ar.reach_totals([ws(3, 1, 0)])["all_enabled_rules_reach_automation"] is None
+    # A failed preview listing could hide NRT rules: the counts stand, the verdict is unknown.
+    hidden = ar.reach_totals([{**ws(3, 0, 0), "preview_rules_read": False}])
+    assert (hidden["rules_reaching_automation"], hidden["all_enabled_rules_reach_automation"]) == (3, None)
+    # A workspace whose rules weren't read at all leaves everything unknown.
+    assert ar.reach_totals([ws(3, 0, 0), {"rules": None}])["all_enabled_rules_reach_automation"] is None
     assert ar.reach_totals([ws(3, 1, 1)])["all_enabled_rules_reach_automation"] is False
     assert ar.reach_totals([ws(0, 0, 0)])["all_enabled_rules_reach_automation"] is None
     unread = ar.reach_totals([ws(3, 0, 0), ws(None, None, None)])
@@ -3407,3 +3437,12 @@ def test_a_refused_automation_listing_leaves_reach_unknown_and_is_noted(azure, t
     assert any("automation rule listing failed" in n for n in ws["notes"])
     assert ev["summary"]["rules_reaching_automation"] is None
     assert ev["summary"]["all_enabled_rules_reach_automation"] is None
+
+
+def test_automation_actions_are_labelled_without_owners_or_text():
+    a = _automation(actions=(CLOSE, {"order": 2, "actionType": "ModifyProperties", "actionConfiguration": {
+        "owner": {"email": "soc-lead@example.com"}, "labels": [{"labelName": "x"}]}},
+        {"order": 3, "actionType": "AddIncidentTask", "actionConfiguration": {"title": "secret task"}}))
+    assert a["actions"] == ["ModifyProperties(status=Closed, classification=BenignPositive, classificationReason)",
+                            "ModifyProperties(owner, labels)", "AddIncidentTask"]
+    assert a["closes_only"] is False and "soc-lead" not in str(a) and "secret task" not in str(a)
