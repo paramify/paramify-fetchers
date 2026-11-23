@@ -105,10 +105,11 @@ def artifact(name="a.json", bid="bt-12", note_text=None, created="2026-10-29T10:
     return Artifact(f"af-{name}-{bid}", name, note(entry="aws_x") if note_text is None else note_text, bid, created, ())
 
 
-def observed(ev=None, *, stacks=(), requests=(AR_NOW,), current=("ar-41",), batches=(), artifacts=None, found=()):
+def observed(ev=None, *, stacks=(), requests=(AR_NOW,), current=("ar-41",), batches=(), artifacts=None, found=(),
+             queue=()):
     return EntryObserved(
         evidence=ev, stacks=list(stacks), requests=list(requests), current_ids=set(current),
-        batches=list(batches), artifacts=dict(artifacts or {}), found=list(found),
+        batches=list(batches), artifacts=dict(artifacts or {}), found=list(found), queue=list(queue),
     )
 
 
@@ -480,7 +481,7 @@ def test_batches_rejected_refuses(tmp_path):
     # A person rejected this run's evidence: a re-upload never resends it.
     a = _with_batch(tmp_path, "REJECTED")
     assert a.verb == "refuse" and a.summary == "this run's batch BCH-12 was rejected"
-    assert a.fix == "BCH-12 was rejected in Paramify; collect again to send new evidence"
+    assert a.fix == ("BCH-12 was rejected in Paramify, and later batches on its channel or evidence set wait behind it: resubmit and approve it in Paramify, or delete it there (its files stay on the evidence set, outside any batch); then collect again to send new evidence")
     assert a.payload["resume_batch_id"] is None
     assert a.changes["batch"] == {"id": "bt-12", "reference_id": "BCH-12", "status": "REJECTED"}
 
@@ -508,7 +509,8 @@ def test_batches_another_runs_open_batch_warns(tmp_path):
                      artifact("b.json", "bt-9", note(run_id="R0", entry="aws_x"), "2026-10-30T08:00:00Z")]}
     a = plan_one(entry(tmp_path), observed(evidence(CH_P), batches=[old], artifacts=arts))
     assert a.verb == "deliver" and a.payload["resume_batch_id"] is None
-    assert a.warnings == ["BCH-9 from run R0 has been open 3 days"]
+    assert a.warnings == ["BCH-9 (OPEN, from run R0, open 3 days) is ahead of this batch on channel CHN-1: "
+                          "Paramify holds this batch until BCH-9 is submitted and approved, or deleted"]
 
 
 def test_batches_not_from_this_tool_ignored(tmp_path):
@@ -518,13 +520,17 @@ def test_batches_not_from_this_tool_ignored(tmp_path):
     assert a.verb == "deliver" and a.payload["resume_batch_id"] is None and len(a.payload["files"]) == 2
 
 
-def test_foreign_open_batch_is_not_mentioned(tmp_path):
+def test_open_batches_of_others_in_the_line_warn_too(tmp_path):
+    # Paramify holds a batch behind every earlier one on its channel, whoever made it.
     foreign = batch("bt-5", "BCH-5", status="OPEN")
     other_fetcher = batch("bt-6", "BCH-6", status="OPEN")
     arts = {"bt-5": [artifact("a.json", "bt-5", "manual upload", "2026-01-01T00:00:00Z")],
             "bt-6": [artifact("z.json", "bt-6", note(use="aws_y", run_id="R0", entry="aws_y"))]}
     a = plan_one(entry(tmp_path), observed(evidence(CH_P), batches=[foreign, other_fetcher], artifacts=arts))
-    assert a.verb == "deliver" and a.warnings == []
+    assert a.verb == "deliver"
+    assert a.warnings == [f"{r} (OPEN) is ahead of this batch on channel CHN-1: "
+                          f"Paramify holds this batch until {r} is submitted and approved, or deleted"
+                          for r in ("BCH-5", "BCH-6")]
 
 
 def test_attribute_reports_earlier_open_batch_with_its_run_id():
@@ -541,7 +547,8 @@ def test_earlier_open_batch_with_no_readable_date_has_unknown_age(tmp_path):
     old = batch("bt-9", "BCH-9")
     arts = {"bt-9": [artifact(bid="bt-9", note_text=note(run_id="R0", entry="aws_x"), created="")]}
     a = plan_one(entry(tmp_path), observed(evidence(CH_P), batches=[old], artifacts=arts))
-    assert a.warnings == ["BCH-9 from run R0 is still open (age unknown)"]
+    assert a.warnings == ["BCH-9 (OPEN, from run R0, age unknown) is ahead of this batch on channel CHN-1: "
+                          "Paramify holds this batch until BCH-9 is submitted and approved, or deleted"]
 
 
 def test_run_id_token_matches_whole_token_only():
@@ -574,7 +581,10 @@ def test_two_entries_same_use_attribute_separately(tmp_path):
     assert (a1.id, a1.verb, a1.payload["batch_id"]) == ("delivery/aws_x", "noop", "bt-1")
     assert (a2.id, a2.verb, a2.payload["resume_batch_id"]) == ("delivery/aws_x#1", "deliver", "bt-2")
     assert [f["original_file_name"] for f in a2.payload["files"]] == ["b.json"]
-    assert a1.warnings == [] and a2.warnings == []
+    # Both entries' batches are on one channel: the second waits for the first.
+    assert a1.warnings == [] and a2.warnings == [
+        "BCH-1 (SUBMITTED) is ahead of this batch on channel CHN-1: "
+        "Paramify holds this batch until BCH-1 is approved or deleted"]
 
 
 # ---- files ------------------------------------------------------------------
@@ -724,7 +734,7 @@ def test_rollover_resume_on_unobserved_request_says_earlier(tmp_path):
 def test_rollover_rejected_batch_on_old_request_refuses(tmp_path):
     batches, arts = _old_request_batch("REJECTED", ar="ar-gone")
     a = plan_one(entry(tmp_path), observed(evidence(CH_P), requests=[AR_NOW], batches=batches, artifacts=arts))
-    assert a.verb == "refuse" and a.fix == "BCH-12 was rejected in Paramify; collect again to send new evidence"
+    assert a.verb == "refuse" and a.fix == ("BCH-12 was rejected in Paramify, and later batches on its channel or evidence set wait behind it: resubmit and approve it in Paramify, or delete it there (its files stay on the evidence set, outside any batch); then collect again to send new evidence")
 
 
 def test_rollover_resume_on_evidence_level_batch(tmp_path):
@@ -734,12 +744,15 @@ def test_rollover_resume_on_evidence_level_batch(tmp_path):
     assert a.payload["target"] == "EVIDENCE" and a.payload["artifact_request_id"] is None
 
 
-def test_rollover_other_runs_open_batch_on_old_request_not_mentioned(tmp_path):
+def test_rollover_other_runs_open_batch_on_old_request_is_ahead_in_the_line(tmp_path):
+    # The line is the channel, not the request: last period's open batch holds this one.
     batches, arts = _old_request_batch("OPEN", run_id="R0")
     a = plan_one(entry(tmp_path), observed(evidence(CH_P), requests=[AR_PAST, AR_NOW], batches=batches,
                                            artifacts=arts))
     assert a.verb == "deliver" and a.payload["resume_batch_id"] is None
-    assert a.payload["artifact_request_id"] == "ar-41" and a.warnings == []
+    assert a.payload["artifact_request_id"] == "ar-41"
+    assert a.warnings == ["BCH-12 (OPEN, from run R0, open 3 days) is ahead of this batch on channel CHN-1: "
+                          "Paramify holds this batch until BCH-12 is submitted and approved, or deleted"]
 
 
 def test_observe_rollover_finds_this_runs_batch_on_the_old_request(tmp_path):
@@ -789,13 +802,15 @@ def test_read_count_is_bounded_by_open_batches_on_the_target(tmp_path):
     [a] = plan_run(fake, tmp_path)
     assert a.verb == "deliver" and a.payload["resume_batch_id"] == mine.id
     assert [f["original_file_name"] for f in a.payload["files"]] == ["b.json"]
-    assert len(a.warnings) == 3 and all("is still open" in w or "has been open" in w for w in a.warnings)
+    # The 45 submitted batches on the old request wait for review: they are ahead in the line too.
+    assert len(a.warnings) == 4 and "49 batches are ahead of this batch on channel" in a.warnings[-1]
     artifact_reads = [c for c in fake.calls if c[1] == f"/evidence/{ev.id}/artifacts"]
     open_count = len(open_on_target) + 1  # the other runs' open batches and this run's
     assert len(artifact_reads) == 1 + open_count
     assert artifact_reads[0][2] == {"originalFileName": ["a.json", "b.json"]}
     listings = [c[2] for c in fake.calls if c[1] == "/batches"]
-    assert listings and all(p.get("status") == "OPEN" for p in listings)
+    assert sorted(p.get("status") for p in listings) == ["OPEN", "REJECTED", "SUBMITTED"]
+    assert all(p.get("evidenceId") == ev.id for p in listings)
     assert [c[1] for c in fake.calls if c[1].startswith("/batches/")] == [f"/batches/{mine.id}"]
 
 
@@ -1126,3 +1141,83 @@ def test_open_pipeline_batch_on_a_set_with_a_new_validator_still_refuses(tmp_pat
                    batches=[batch(ar=None)], artifacts={"bt-12": arts})
     a = plan_one(entry(tmp_path, pipeline=INV, no_request="evidence"), obs)
     assert a.verb == "refuse" and "VAL-1" in a.summary
+
+
+# ---- the line: Paramify approves a batch only after every earlier one -------
+# On its channel (or its evidence set, with no channel). Stage, 2026-11-23: a
+# rejected batch holds the line; approving or deleting it releases it.
+
+def test_line_submitted_batch_ahead_on_the_channel_warns_and_is_carried_to_apply(tmp_path):
+    waiting = Batch("bt-9", "BCH-9", "SUBMITTED", "ev-1", "ar-40", 1, "MANUAL")
+    a = plan_one(entry(tmp_path), observed(evidence(CH_P), requests=[AR_PAST, AR_NOW], queue=[waiting]))
+    assert a.verb == "deliver" and a.payload["resume_batch_id"] is None
+    assert a.warnings == ["BCH-9 (SUBMITTED) is ahead of this batch on channel CHN-1: "
+                          "Paramify holds this batch until BCH-9 is approved or deleted"]
+    assert a.payload["ahead"] == [{"id": "bt-9", "reference_id": "BCH-9"}]
+
+
+def test_line_rejected_batch_ahead_says_a_rejection_does_not_release_it(tmp_path):
+    rejected_one = batch("bt-9", "BCH-9", "REJECTED")
+    a = plan_one(entry(tmp_path), observed(evidence(CH_P), queue=[rejected_one]))
+    assert a.warnings == ["BCH-9 (REJECTED) is ahead of this batch on channel CHN-1: Paramify holds this batch "
+                          "until BCH-9 is resubmitted and approved, or deleted; a rejection does not release it"]
+
+
+def test_line_is_the_evidence_set_when_it_has_no_channel(tmp_path):
+    waiting = batch("bt-9", "BCH-9", "SUBMITTED", ar=None)
+    a = plan_one(entry(tmp_path), observed(evidence(), queue=[waiting]))
+    assert a.warnings == ["BCH-9 (SUBMITTED) is ahead of this batch on the evidence set: "
+                          "Paramify holds this batch until BCH-9 is approved or deleted"]
+
+
+def test_line_batches_on_another_channel_or_approved_are_not_ahead(tmp_path):
+    other = batch("bt-7", "BCH-7", "SUBMITTED", ar="ar-77")
+    done = batch("bt-8", "BCH-8", "APPROVED", ar="ar-40")
+    a = plan_one(entry(tmp_path, stack="st-1"),
+                 observed(evidence(CH_P, CH_G), stacks=[PROD, GOV], requests=[AR_PAST, AR_NOW, AR_OTHER_CHANNEL],
+                          queue=[other, done]))
+    assert a.verb == "deliver" and a.warnings == [] and a.payload["ahead"] == []
+
+
+def test_line_a_resumed_batch_waits_only_for_older_ones(tmp_path):
+    mine = batch("bt-12", "BCH-12", "OPEN")
+    older, newer = batch("bt-9", "BCH-9", "SUBMITTED"), batch("bt-13", "BCH-13", "SUBMITTED")
+    a = plan_one(entry(tmp_path), observed(evidence(CH_P), batches=[mine], artifacts={"bt-12": [artifact()]},
+                                           queue=[older, mine, newer]))
+    assert a.verb == "deliver" and a.payload["resume_batch_id"] == "bt-12"
+    assert a.payload["ahead"] == [{"id": "bt-9", "reference_id": "BCH-9"}]
+
+
+def test_line_this_runs_submitted_batch_still_waiting_is_a_noop_with_the_warning(tmp_path):
+    mine = batch("bt-12", "BCH-12", "SUBMITTED")
+    held = batch("bt-9", "BCH-9", "REJECTED")
+    arts = {"bt-12": [artifact("a.json"), artifact("b.json")]}
+    a = plan_one(entry(tmp_path), observed(evidence(CH_P), batches=[mine], artifacts=arts, queue=[held, mine]))
+    assert a.verb == "noop" and a.summary == "already delivered in BCH-12"
+    assert a.payload["ahead"] == [{"id": "bt-9", "reference_id": "BCH-9"}]
+    assert len(a.warnings) == 1 and a.warnings[0].startswith("BCH-9 (REJECTED) is ahead of this batch")
+
+
+def test_line_with_many_batches_ahead_names_three_and_counts_the_rest(tmp_path):
+    queue = [batch(f"bt-{n}", f"BCH-{n}", "SUBMITTED") for n in range(1, 7)]
+    a = plan_one(entry(tmp_path), observed(evidence(CH_P), queue=queue))
+    assert len(a.warnings) == 4 and len(a.payload["ahead"]) == 6
+    assert a.warnings[:3] == [f"BCH-{n} (SUBMITTED) is ahead of this batch on channel CHN-1: "
+                              f"Paramify holds this batch until BCH-{n} is approved or deleted" for n in (1, 2, 3)]
+    assert a.warnings[3] == ("6 batches are ahead of this batch on channel CHN-1 and not approved; "
+                             "3 more: BCH-4, BCH-5, BCH-6")
+
+
+def test_observe_reads_the_line_once_per_status_on_the_evidence_set(tmp_path):
+    fake = FakeParamify()
+    ev = fake.add_evidence("EVD-X", approval="MANUAL")
+    build(tmp_path, {"a.json": env(fetcher="x")}, [inv("x", ["a.json"])], {"x": {"use": "x"}})
+    res = Resources(Client("t", "https://api.example.test", session=fake.session))
+    first = res.create_batch(evidence_id=ev.id)
+    res.upload_to_batch(first.id, "z.json", b"{}", {"note": "uploaded by hand"})
+    res.submit_batch(first.id)
+    fake.calls.clear()
+    [a] = plan_run(fake, tmp_path)
+    assert a.verb == "deliver" and a.payload["ahead"] == [{"id": first.id, "reference_id": first.reference_id}]
+    listings = [c[2] for c in fake.calls if c[1] == "/batches"]
+    assert sorted(p["status"] for p in listings) == ["OPEN", "REJECTED", "SUBMITTED"]

@@ -12,6 +12,18 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **The upload reports batches that wait in line.** Paramify 1.82 approves a batch only after it approves every
+  earlier batch on the same channel. When the evidence set has no channel, the line is the evidence set. A batch that
+  waits reads `SUBMITTED`, also when its mode is `SUBMISSION`. A rejected batch holds the line too. Before, the
+  upload reported such a batch as approved on submission. Now:
+  - The plan gives a warning for each open, submitted or rejected batch ahead of the entry's batch. A person or
+    another tool can make these batches. More than three batches ahead give one more warning with the count.
+  - After the submit, the upload reads these batches again. It reports `SUBMITTED: waiting behind BCH-…` and lists
+    them in the new `waiting_behind` field of the entry.
+  - A pipeline batch that waits is not approved. The TUI's `[WAIT]` line names the batches ahead.
+  - The message for a held batch and the fix for a rejected batch say that the batch holds the line.
+  Observe reads the open, submitted and rejected batches of the set (three reads). Before, it read the open batches
+  on the target only. See [Batches wait in line](docs/uploader_guide.md#batches-wait-in-line).
 - **`jira_site_inventory` 0.2.0: limit to named projects.** A new `projects` setting (`JIRA_PROJECTS`, project keys or
   exact names) limits projects, issue types, statuses, service desks and issues to the named projects; the others are
   only counted in `metadata.projects_left_out`. Statuses then come from each project's own status list. The issue

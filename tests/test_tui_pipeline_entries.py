@@ -174,6 +174,14 @@ def test_only_an_unapproved_pipeline_entry_gets_a_warning_line():
     assert line.style == palette.WARN
 
 
+def test_a_pipeline_entry_waiting_in_the_line_names_the_batch_ahead():
+    entries = {"a": {"pipeline": {"type": "inventory", "approved": False}, "batch_reference": "BCH-2",
+                     "waiting_behind": ["BCH-1"]}}
+    [line] = pipeline_wait_lines(entries)
+    assert line.plain == ("  [WAIT] a: BCH-2 is waiting behind BCH-1; the inventory pipeline runs once "
+                          "BCH-1 is approved or deleted in Paramify")
+
+
 def test_P_is_listed_only_on_a_pipeline_row(tmp_path, run_tui):
     async def body(app, pilot):
         await pilot.press("1")

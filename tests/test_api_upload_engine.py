@@ -184,7 +184,10 @@ def test_a_rejected_batch_of_the_run_refuses_the_reupload(fake, root, tmp_path):
     out = api.upload_run(run, root)
     entry = out["entries"]["x"]
     assert entry["state"] == "refused" and out["ok"] is False and out["errors"] == 1
-    assert entry["message"] == "BCH-1 was rejected in Paramify; collect again to send new evidence"
+    assert entry["message"] == (
+        "BCH-1 was rejected in Paramify, and later batches on its channel or evidence set wait behind it: "
+        "resubmit and approve it in Paramify, or delete it there (its files stay on the evidence set, "
+        "outside any batch); then collect again to send new evidence")
     assert all(c[0] == "GET" for c in fake.calls)
 
 
