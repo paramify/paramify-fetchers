@@ -118,7 +118,7 @@ Rules (enforced by the schema and the test, section 4):
   `fetcher.yaml` version at the release commit; `note` is one line, at most
   110 characters, written for the person running the fetcher.
 - `draft: true` may appear on any `highlights` row or `fetchers` line. It may
-  exist only on a `release/*` branch; it never reaches `main`.
+  exist only on a `release/next` branch; it never reaches `main`.
 - Breaking rows stay in `highlights`, never in `fetchers`. That is what keeps
   them visible to clones running older update code: `update._highlight_files`
   reads `highlights` rows loosely and ignores unknown keys.
@@ -185,7 +185,7 @@ run on a laptop; the workflows only call it.
    `releases/unreleased.yaml` and no fetcher version changed since the last
    tag (my call). CHANGELOG-only changes (CI, docs, internals) wait for the
    next release that has something to show.
-2. When a `release/*` pull request is already open, it **redrafts** that
+2. When a `release/next` pull request is already open, it **redrafts** that
    branch instead of opening a second one (see "When `main` moves" below),
    and on the Thursday run also sends a reminder DM.
 3. Picks the version from the previous release (section 5).
@@ -204,7 +204,7 @@ run on a laptop; the workflows only call it.
    3. `"TODO: say what changed for the user"`.
    Each line gets `draft: true`.
 7. Marks every `highlights` row with `draft: true`, so Tate reads each one too.
-8. Commits to `release/vX.Y.Z-beta`, pushes, opens the pull request with Tate
+8. Commits to `release/next`, pushes, opens the pull request with Tate
    as assignee and reviewer, and DMs Tate (section 6).
 
 **When `main` moves while the release PR is open** (my call). `main` keeps
@@ -214,23 +214,30 @@ would conflict, because both sides edit the top of the CHANGELOG and
 ship with no note. So `draft` is rerunnable on an open release branch:
 
 - It rebuilds the branch from the current `main`: the same steps 3 to 8,
-  force-pushed to the same branch, so the PR stays the same PR.
-- It keeps Tate's work: a `fetchers` line or `highlights` row that Tate already
-  unmarked (matched by fetcher name, or by tag and title) is carried over as
-  edited, with no `draft` mark. Rows Tate deleted stay deleted (the branch
-  records them in a `# dropped:` comment the next draft reads). Only what is
-  new since the last draft gets `draft: true`.
-- If the version changes (a breaking row arrives), the branch and file are
-  renamed and the DM says so.
+  force-pushed to the same branch, so the PR stays the same PR. The branch is
+  always `release/next`, whatever the version, so a version change never
+  needs a new branch or PR.
+- It keeps Tate's work by starting from the release file as it is on the
+  branch, edits and deletions included. The draft commit records the `main`
+  commit it was built on (a `Release-Base: <sha>` trailer). The rebuild adds
+  only what `main` gained since that commit: `unreleased.yaml` rows that were
+  not there, and fetchers whose version moved. Those get `draft: true`. A
+  fetcher line whose fetcher moved to a newer version again keeps its note but
+  gets the new version and `draft: true`.
+- Only the release file keeps hand edits. The CHANGELOG, `pyproject.toml` and
+  `unreleased.yaml` are regenerated from `main` on every rebuild, so CHANGELOG
+  fixes go to `main` in an ordinary pull request.
+- If the version changes (a breaking row arrives), the file is renamed, the
+  PR title changes, and the DM says so.
 - A workflow runs it on every push to `main` while a release PR is open, so the
   branch is never behind for long. If `main` moves inside that window, the PR
   shows a conflict or an out-of-date branch and can't merge until the next
   redraft; it fails safe.
 
-**`check`** (CI on `release/*` pull requests, and by hand): runs the rules in
+**`check`** (CI on `release/next` pull requests, and by hand): runs the rules in
 section 4 that need git history and prints what to fix.
 
-**`publish`** (on merge of a `release/*` pull request, or by hand):
+**`publish`** (on merge of a `release/next` pull request, or by hand):
 
 1. Refuses, and DMs Tate, if the merged notes still carry `draft: true` (a
    guard in case the PR merged red).
@@ -272,7 +279,7 @@ In `tests/test_release_highlights.py` (every file, every CI run):
 5. No `fetchers[].note` starts with `TODO`.
 6. Removed: the "3 to 5 non-breaking rows" rule. A quiet week can have one row.
 
-In `tools/release.py check`, on `release/*` pull requests only. Ordinary pull
+In `tools/release.py check`, on `release/next` pull requests only. Ordinary pull
 requests bump fetcher versions all the time and never add `fetchers` lines,
 so these rules would fail every one of them. They apply to the one release
 file whose version has no tag yet:
@@ -337,7 +344,7 @@ GitHub also notifies Tate as assignee and requested reviewer.
 - `.github/workflows/release-publish.yml`: `pull_request` `closed`, when merged
   and the head branch starts with `release/`. Runs `tools/release.py publish`.
 - `.github/workflows/release-redraft.yml`: `push` to `main`. Does nothing
-  unless a `release/*` pull request is open; then runs `tools/release.py draft`
+  unless a `release/next` pull request is open; then runs `tools/release.py draft`
   on it.
 - `ci.yml`: a `release-check` job, `fetch-depth: 0`, that runs only when the
   head branch starts with `release/`. The scope decision goes through
@@ -363,7 +370,7 @@ GitHub also notifies Tate as assignee and requested reviewer.
   `ci-ok` check from GitHub Actions. It also blocks deleting or force-pushing
   `main`. It has no review rule and no "branch must be up to date" rule, and
   nobody can bypass it. The workflows never push to `main` directly, and the
-  ruleset targets only `main`, so the app can push `release/*` branches and
+  ruleset targets only `main`, so the app can push `release/next` branches and
   tags. Because the "up to date" rule is off, `publish` keeps its own check
   that the tagged commit matches what was reviewed (section 3).
 
@@ -395,8 +402,9 @@ GitHub also notifies Tate as assignee and requested reviewer.
   `v0.6.0-beta`, which is likely well over a hundred. Keep every breaking row;
   cut the new rows to the ones that matter.
 - The CHANGELOG's `[Unreleased]` has repeated `### Added` / `### Changed`
-  headings. Merging them is a hand edit in this PR (my call: worth doing once,
-  not something `draft` does).
+  headings. Merge them in an ordinary pull request to `main` before the first
+  draft (my call: worth doing once, not something `draft` does). Hand edits to
+  the CHANGELOG on the release branch would be lost on the next rebuild.
 
 ## Order of work
 
