@@ -319,8 +319,9 @@ def summarize(workspaces: list[dict]) -> dict:
 # --- collection (lazy azure imports) ---
 
 def collect_workspaces(subscription_id, cred, collector: Collector, exclusions: ResourceExclusions | None = None,
-                       excluded: list | None = None) -> list[dict]:
-    """One workspaces.list(), then three GETs per workspace; excluded ones are appended to `excluded` unread."""
+                       excluded: list | None = None) -> list[dict] | None:
+    """One workspaces.list(), then three GETs per workspace; excluded ones are appended to `excluded` unread. None
+    when the workspace list couldn't be read."""
 
     def _client():
         from azure.mgmt.loganalytics import LogAnalyticsManagementClient  # lazy
@@ -333,7 +334,7 @@ def collect_workspaces(subscription_id, cred, collector: Collector, exclusions: 
     if client is None:
         if exclusions is not None:
             exclusions.mark_unread()
-        return []
+        return None
 
     # ItemPaged: the SDK follows nextLink itself, here and below.
     workspaces = collector.guard(
@@ -343,7 +344,7 @@ def collect_workspaces(subscription_id, cred, collector: Collector, exclusions: 
     if workspaces is None:
         if exclusions is not None:
             exclusions.mark_unread()
-        workspaces = []
+        return None
     if exclusions and excluded is not None:
         workspaces, out = exclusions.split(workspaces, "workspace")
         excluded += sorted(out, key=lambda e: e["id"] or "")
@@ -392,7 +393,7 @@ def main() -> int:
     subscription_id = sub["subscription_id"]
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
-    workspaces: list[dict] = []
+    workspaces: list[dict] | None = None
     excluded: list[dict] = []
     exclusions = ResourceExclusions.from_env()
     registration = REGISTRATION_UNKNOWN
@@ -417,7 +418,9 @@ def main() -> int:
             ),
         )
 
-    if not (subscription_id and cred is not None):
+    listed = workspaces is not None
+    workspaces = workspaces or []
+    if not listed:
         exclusions.mark_unread()
     exclusions.record_invalid(collector)
     exclusions.warn_unmatched(logger)
@@ -434,7 +437,7 @@ def main() -> int:
         summary={
             **summarize(workspaces),
             "provider_registration_status": registration,
-            **exclusions.summary(excluded, ("workspace",), {"workspaces": len(workspaces)}),
+            **exclusions.summary(excluded, ("workspace",), {"workspaces": len(workspaces) if listed else None}),
         },
     )
 

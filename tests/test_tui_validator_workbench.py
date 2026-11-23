@@ -324,11 +324,10 @@ def test_ask_claude_shows_what_it_sends_then_a_tested_fix_and_w_writes_it(tmp_pa
 
 @needs_node
 @pytest.mark.parametrize("tracked", [True, False])
-def test_after_w_it_names_the_command_that_sends_the_new_regex(tmp_path, monkeypatch, run_tui, tracked):
-    """The Paramify tab's sync (5, v) skips a validator Paramify already has, so
-    it never sends a changed regex. The window and the notice after w name the
-    command that does, and say to track the validator first when the manifest
-    doesn't."""
+def test_after_w_it_points_at_the_paramify_tabs_sync(tmp_path, monkeypatch, run_tui, tracked):
+    """The Paramify tab's sync (5, v) updates a validator whose file changed, so
+    the window and the notice after w send the fix there, not to a command, and
+    say to track the validator first when the manifest doesn't."""
     manifest, registry = make_workspace(tmp_path)
     if not tracked:
         m = api.read_manifest(manifest)
@@ -350,15 +349,11 @@ def test_after_w_it_names_the_command_that_sends_the_new_regex(tmp_path, monkeyp
         seen["notices"] = [str(n.message) for n in app._notifications]
 
     run_tui(body, manifest)
-    command = f"paramify validators sync -m {manifest} --update"
-    assert command in seen["claude"]
-    assert "--update also overwrites edits made in Paramify to the other validators this manifest tracks." \
-        in seen["claude"]
     saved = next(n for n in seen["notices"] if n.startswith("Saved "))
-    assert saved.endswith(command)
-    assert "Sync validators on the Paramify tab" not in saved
+    assert "paramify validators sync" not in seen["claude"] and "paramify validators sync" not in saved
     if tracked:
-        assert "The Paramify tab (5) skips validators Paramify already has. Send it with:" in saved
+        hint = "To send it, press v on the Paramify tab (5): it shows what changed and updates it on a yes."
+        assert hint in seen["claude"] and saved.endswith(hint)
     else:
         assert "This manifest doesn't track it, so press space to track it." in saved
 

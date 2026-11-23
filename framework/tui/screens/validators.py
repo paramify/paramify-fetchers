@@ -379,23 +379,13 @@ class ValidatorModal(ModalScreen[bool]):
         except ValueError:
             return path
 
-    def _sync_command(self) -> str:
-        """The command that sends a changed regex. The Paramify tab's sync (v)
-        creates missing validators but skips one Paramify already has, so it
-        can't send a fix; --update patches existing ones and creates the rest."""
-        path = getattr(self.app, "manifest_path", None)
-        shown: Path | str = "<manifest>"
-        if path is not None:
-            try:
-                shown = Path(path).resolve().relative_to(Path(self.root).resolve())
-            except (TypeError, ValueError):
-                shown = path
-        return f"paramify validators sync -m {shown} --update"
-
     def _how_to_send(self) -> str:
+        """Where a written fix goes from here: the Paramify tab's sync (v)
+        previews it as an update and sends it on a yes."""
         if not self.tracked:
-            return "This manifest doesn't track it, so press space to track it. Then send it to Paramify with:"
-        return "The Paramify tab (5) skips validators Paramify already has. Send it with:"
+            return ("This manifest doesn't track it, so press space to track it. Then press v on the "
+                    "Paramify tab (5) to send it.")
+        return "To send it, press v on the Paramify tab (5): it shows what changed and updates it on a yes."
 
     def _failing(self) -> bool:
         local = self.local or {}
@@ -619,9 +609,7 @@ class ValidatorModal(ModalScreen[bool]):
             lines.append(Text(why, style=palette.WARN))
         if self._can_write():
             tip = Text("\nw", style=f"bold {palette.ACCENT}")
-            tip.append(f" writes it to {self._rel()}. {self._how_to_send()} {self._sync_command()}\n"
-                       "--update also overwrites edits made in Paramify to the other validators "
-                       "this manifest tracks.", style=palette.MUTED)
+            tip.append(f" writes it to {self._rel()}. {self._how_to_send()}", style=palette.MUTED)
             lines.append(tip)
         else:
             lines.append(Text("\nNot offered: it doesn't pass cleanly on your run. a asks again.",
@@ -657,7 +645,7 @@ class ValidatorModal(ModalScreen[bool]):
             self.proposal = None
             self.query_one("#vm-claude", Static).remove_class("shown")
             self.query_one("#vm-rest", Static).update(self._rest())
-            self.notify(f"Saved {self._rel()}. {self._how_to_send()} {self._sync_command()}", timeout=10)
+            self.notify(f"Saved {self._rel()}. {self._how_to_send()}", timeout=10)
             self.action_test()
 
         self.app.push_screen(ConfirmModal(f"Write this regex to {self._rel()}?\n\n{regex}"), done)

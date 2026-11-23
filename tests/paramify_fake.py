@@ -158,8 +158,9 @@ class FakeParamify:
         self.scripts.append(row)
         return row
 
-    def add_validator(self, name: str) -> Dict[str, Any]:
-        row = {"id": f"vl-{self._next('vl')}", "name": name}
+    def add_validator(self, name: str, **content: Any) -> Dict[str, Any]:
+        """A validator already in the workspace; `content` is its other fields (statement, regex, ...)."""
+        row = {"id": f"vl-{self._next('vl')}", "name": name, **content}
         self.validators.append(row)
         return row
 
@@ -322,6 +323,13 @@ class FakeParamify:
                 # connected (seen live 2026-08-31); the exact wording is assumed.
                 return FakeResponse(400, text="Subject is already connected to this evidence")
             self.associations.add(link)
+            if body["subjectType"] == "VALIDATOR":
+                # As the API does: the set now lists the validator it was paired with.
+                ev = next(e for e in self._evidence if e["id"] == m.group(1))
+                made = next((v for v in self.validators if v["id"] == body["subjectId"]), {})
+                ev["validators"].append({"validatorEvidencePairId": f"vp-{self._next('vp')}",
+                                         "id": body["subjectId"], "name": made.get("name") or "",
+                                         "type": made.get("type") or "AUTOMATED"})
             return FakeResponse(201, {})
         return FakeResponse(404, text="Not Found")
 
