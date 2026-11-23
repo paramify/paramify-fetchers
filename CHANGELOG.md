@@ -12,6 +12,17 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **The TUI's validator sync (Paramify tab, `v`) now pairs and updates validators that already exist.** Before, it
+  created missing validators and paired only those, and told you to pair the rest in Paramify yourself. The preview
+  now lists three things and does them all on one yes:
+  - creates the missing validators and pairs them;
+  - pairs validators already in Paramify with the manifest's evidence sets they aren't paired with yet, and only
+    those sets, not every set the validator lists;
+  - updates validators whose content differs from your files, named in the confirm because it replaces edits made in
+    Paramify. One that matches is not sent. Paramify's default `disposition: PASS` and a trailing newline don't
+    count as a difference.
+  After `w` in the validator workbench, the hint points at `v` instead of `paramify validators sync --update`.
+  The CLI is unchanged, except that `--update` now skips a validator that already matches.
 - **`github_non_user_credentials` 0.3.0: limit to collected repositories.** A new `scope_to_repositories` setting
   keeps apps, fine-grained tokens and organization Actions secrets only when they can reach a collected repository or
   their reach is unknown, and marks each kept row with `reaches_collected_repositories`. Apps installed on selected
