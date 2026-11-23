@@ -36,7 +36,7 @@ from textual.widgets import (
 )
 
 from framework import api
-from framework.sync.render import render_plan
+from framework.sync.render import confirm_lines
 from framework.tui import palette
 from framework.tui.components.table import DataTable
 from framework.tui.modals import ConfirmModal
@@ -46,14 +46,13 @@ from framework.tui.screens.paramify_events import (
     latest_run_scoped,
     pipeline_wait_lines,
     upload_event_lines,
+    upload_summary,
 )
+from framework.tui.words import agree, host, plural
 
-NO_TOKEN = (
-    "No Paramify API token found. Set PARAMIFY_UPLOAD_API_TOKEN (or PARAMIFY_API_TOKEN) in the "
-    "environment, then press ctrl+r. Until then this page shows what the manifest and the registry hold."
-)
+NO_TOKEN = "No Paramify API token. Set PARAMIFY_UPLOAD_API_TOKEN, then press ctrl+r."
 EMPTY = "No fetchers in this manifest yet.\nAdd them on the Fetchers tab (1)."
-ONLY_SCAN = "This manifest's fetchers all send scan reports. They are on the Pipelines tab (5)."
+ONLY_SCAN = "This manifest's fetchers all send scan reports. They are on the Pipelines tab (6)."
 NO_LINKS = "No capability uses this evidence set yet.\nLink its validators to a capability in Paramify."
 CAPS_OFFLINE = "Capabilities are read from Paramify.\nThey show once a token is set."
 READING = "reading the workspace…"
@@ -75,8 +74,8 @@ _SCRIPT_DETAIL = {
     "in_sync": ("✓ in sync", palette.OK),
     "update": ("update: the local script is newer", palette.WARN),
     "create": ("+ create: not in Paramify yet", palette.INFO),
-    "drift": ("drift: changed in Paramify (scripts sync --force overwrites)", palette.WARN),
-    "error": ("error: see paramify scripts sync --dry-run", palette.FAIL),
+    "drift": ("drift: changed in Paramify; the sync keeps that copy", palette.WARN),
+    "error": ("error: press s to see why", palette.FAIL),
 }
 
 
@@ -119,11 +118,18 @@ _SCRIPT_MARKS = {
 
 
 class ArtifactsReady(Message):
-    """The newest artifact date of one evidence set, from the worker thread."""
+    """The newest artifact date of one evidence set, and each validator's latest
+    result there (api.latest_validator_results), from the worker thread.
+    `results` None: the artifacts couldn't be read, so what is known stays.
+    `generation` is the status read the worker started under; a message from
+    an older read is dropped."""
 
-    def __init__(self, set_id: str, newest: str | None) -> None:
+    def __init__(self, set_id: str, newest: str | None, results: dict | None = None,
+                 generation: int = 0) -> None:
         self.set_id = set_id
         self.newest = newest
+        self.results = results
+        self.generation = generation
         super().__init__()
 
 
@@ -154,9 +160,19 @@ def _capability_ids(row: dict) -> set:
     return {p["capability_id"] for p in row["pairs"]}
 
 
-def grid_cells(row: dict, online: bool, errors: dict | None = None) -> list:
+def failing_count(row: dict, results: dict | None) -> int:
+    """How many of the row's paired validators failed on their latest result
+    (FAIL or ERROR), from api.latest_validator_results; 0 when not read."""
+    return sum(
+        (api.result_for(results or {}, v.get("id"), v["name"]) or {}).get("result") in ("FAIL", "ERROR")
+        for v in row["validators"] if v["paired"]
+    )
+
+
+def grid_cells(row: dict, online: bool, errors: dict | None = None, results: dict | None = None) -> list:
     """One status row as grid cells (spec §6.3). A cell whose read failed is
-    "?", as in `paramify status`."""
+    "?", as in `paramify status`. `results` (the set's latest validator results,
+    read after the status) adds "· 1 failing" to the validators cell."""
     errors = errors or {}
     validators = row["validators"]
     if not online:
@@ -185,6 +201,10 @@ def grid_cells(row: dict, online: bool, errors: dict | None = None) -> list:
         validators_cell = Text(f"?/{len(validators)}", style=palette.WARN)
     else:
         validators_cell = _fraction(have, len(validators))
+        failing = failing_count(row, results)
+        if failing:
+            validators_cell.append(" · ", style=palette.MUTED)
+            validators_cell.append(f"{failing} failing", style=palette.FAIL)
     if "capabilities" in errors or sets_unknown:
         caps_cell = _unknown()
     else:
@@ -223,11 +243,11 @@ def totals_text(rows: list, shown: int, errors: dict | None = None) -> Text:
     with_validators = [r for r in rows if r["validators"]]
     part("validators", sum(all(v["paired"] is True for v in r["validators"]) for r in with_validators),
          sets_known, of=len(with_validators))
-    text.append("capabilities ", style=palette.MUTED)
+    text.append("capability links ", style=palette.MUTED)
     if sets_known and "capabilities" not in errors:
-        text.append(f"{sum(len(r['pairs']) for r in rows)} links")
+        text.append(f"{sum(len(r['pairs']) for r in rows)}")
     else:
-        text.append("? links", style=palette.WARN)
+        text.append("?", style=palette.WARN)
     text.append("     ")
     part("uploaded", sum((r["evidence_set"]["artifact_count"] or 0) > 0 for r in rows), sets_known)
     if shown != n:
@@ -288,6 +308,9 @@ class ParamifyPage(ParamifyWriter, Vertical):
         self._reread = False
         self._stale = True
         self._newest: dict = {}
+        self._results: dict = {}  # {set id: api.latest_validator_results(...)}, read with _newest
+        # Bumped by each status read that lands: artifacts read under an older one are dropped.
+        self._generation = 0
         self._rows: dict = {}
         self._filter = ""
         self._hide_ready = False
@@ -441,6 +464,8 @@ class ParamifyPage(ParamifyWriter, Vertical):
             self._rows = {}
             self._error = None
             self._newest = {}
+            self._results = {}
+            self._generation += 1
             self._cap_pairs = {}
             self._cap_others = {}
             for table in ("#pf-grid", "#pf-caps", "#pf-cap-grid", "#pf-pairs"):
@@ -519,11 +544,20 @@ class ParamifyPage(ParamifyWriter, Vertical):
             self._status_at = time.monotonic()
             self._status_clock = datetime.now().strftime("%H:%M")
             self._newest = {}
+            self._results = {}
+            self._generation += 1
         # Never focus from here: a read can land while the user is on another tab.
         # When the redraw hides the grid (an empty manifest), Textual moves focus
         # to the next focusable widget: the hint, which takes focus for that.
         self._draw()
         self._refresh_hints()
+        if message.error is None and self._online():
+            # Each set's latest validator results, for the grid's "· 1 failing".
+            ids = [r["evidence_set"]["id"] for r in self._status["fetchers"]
+                   if r["evidence_set"]["id"] and r["evidence_set"]["artifact_count"]
+                   and any(v["paired"] for v in r["validators"])]
+            if ids:
+                self._all_artifacts_worker(ids, self._generation)
         if reread:
             self.request_status()
 
@@ -547,11 +581,11 @@ class ParamifyPage(ParamifyWriter, Vertical):
             if self._error_setup:
                 problem = f"{self._error.rstrip('.')}.{since} Fix it, then press ctrl+r."
             else:
-                problem = f"Could not read the workspace: {self._error}.{since} ctrl+r to try again."
+                problem = f"Couldn't read the workspace: {self._error}.{since} ctrl+r to try again."
         elif status is not None and not status["workspace"]["token"]:
             problem = NO_TOKEN
         elif status is not None:
-            parts = [f"Could not read {part.replace('_', ' ')}: {msg}." for part, msg in status["errors"].items()
+            parts = [f"Couldn't read {part.replace('_', ' ')}: {msg}." for part, msg in status["errors"].items()
                      if part in ("evidence_sets", "scripts")]
             if parts:
                 problem = " ".join(parts) + " ctrl+r to try again."
@@ -560,7 +594,7 @@ class ParamifyPage(ParamifyWriter, Vertical):
         line = Text()
         if status is not None:
             ws = status["workspace"]
-            line.append(ws.get("base_url") or "", style=palette.INFO)
+            line.append(host(ws.get("base_url"), ""), style=palette.INFO)
             if ws["token"]:
                 line.append("    token ✓", style=palette.OK)
                 rows = status["fetchers"]
@@ -568,7 +602,7 @@ class ParamifyPage(ParamifyWriter, Vertical):
                     ready = sum(r["ready"] for r in rows)
                     line.append(f"    {ready}/{len(rows)} ready", style=palette.OK if ready == len(rows) else palette.WARN)
             if status["pipelines_count"]:
-                line.append(f"    {status['pipelines_count']} scan-report fetchers → Pipelines (5)", style=palette.MUTED)
+                line.append(f"    {status['pipelines_count']} scan-report fetchers → Pipelines (6)", style=palette.MUTED)
             if status["skipped"]:
                 line.append(f"    skipped: {', '.join(status['skipped'])}", style=palette.WARN)
         if self._reading:
@@ -605,7 +639,8 @@ class ParamifyPage(ParamifyWriter, Vertical):
         with self.prevent(DataTable.RowHighlighted):
             grid.clear()
             for row in shown:
-                grid.add_row(*grid_cells(row, online, status["errors"]), key=row["name"])
+                grid.add_row(*grid_cells(row, online, status["errors"],
+                                         self._results.get(row["evidence_set"]["id"])), key=row["name"])
             if target is not None:
                 grid.move_cursor(row=grid.get_row_index(target))
         empty = not rows
@@ -691,7 +726,7 @@ class ParamifyPage(ParamifyWriter, Vertical):
             refocus = self.app.focused in (grid, self.query_one("#pf-cap-filter"))
             self._cap_view_parts(False)
             error.update(Text(CAPS_OFFLINE) if not self._online() else Text(
-                f"Could not list the workspace's solution capabilities: {problem}.\n"
+                f"Couldn't list the workspace's solution capabilities: {problem}.\n"
                 "The by-fetcher view still works. ctrl+r to try again.", style=palette.WARN))
             panel.border_title = "capabilities"
             if refocus:
@@ -760,7 +795,7 @@ class ParamifyPage(ParamifyWriter, Vertical):
             if self._reading:
                 text = READING
             elif status is None:
-                text = "Could not read the workspace. ctrl+r to try again." if self._error else ""
+                text = "Couldn't read the workspace. ctrl+r to try again." if self._error else ""
             elif self._cap_filter and status["capabilities"]:
                 text = f"No capability matches “{self._cap_filter}”."
             elif not status["capabilities"]:
@@ -815,9 +850,9 @@ class ParamifyPage(ParamifyWriter, Vertical):
         if other and "evidence_sets" in ((self._status or {}).get("errors") or {}):
             # Unread, the manifest's own pairs look like other sets' pairs.
             table.add_row(Text("?", style=palette.WARN), _dim("—"),
-                          Text(f"{other} pair(s); the evidence sets were not read", style=palette.WARN))
+                          Text(f"{plural(other, 'pair')}; the evidence sets weren't read", style=palette.WARN))
         elif other:
-            table.add_row(_dim("other evidence sets"), _dim("—"), _dim(f"{other} pair(s), not in this manifest"))
+            table.add_row(_dim("other evidence sets"), _dim("—"), _dim(f"{plural(other, 'pair')}, not in this manifest"))
 
     def action_hide_ready(self) -> None:
         """Hide the fetchers that are ready, so the grid lists what needs work;
@@ -874,7 +909,7 @@ class ParamifyPage(ParamifyWriter, Vertical):
         self._show_caps(row, online)
         set_id = row["evidence_set"]["id"]
         if online and set_id and (row["evidence_set"]["artifact_count"] or 0) and set_id not in self._newest:
-            self._artifacts_worker(set_id)
+            self._artifacts_worker(set_id, self._generation)
 
     def _show_no_match(self) -> None:
         """The filter or w hides every fetcher: say so where the detail was."""
@@ -913,6 +948,7 @@ class ParamifyPage(ParamifyWriter, Vertical):
         validators = row["validators"]
         if validators:
             table = Table.grid(padding=(0, 1))
+            results = self._results.get(es["id"]) or {}
             for i, v in enumerate(validators):
                 if not online:
                     mark = _dim("·")
@@ -920,10 +956,16 @@ class ParamifyPage(ParamifyWriter, Vertical):
                     mark = _unknown()
                 else:
                     mark = Text("✓", style=palette.OK) if v["paired"] else Text("+", style=palette.INFO)
-                table.add_row(Text(f"V{i + 1}", style=palette.ACCENT), mark, Text(v["name"]))
-            body += [_dim("validators"), table]
+                # Its latest result in Paramify, once the artifacts are read.
+                result = api.result_for(results, v.get("id"), v["name"]) if v["paired"] else None
+                table.add_row(Text(f"V{i + 1}", style=palette.ACCENT), mark, Text(v["name"]),
+                              palette.verdict_pill(result["result"]) if result else Text(""))
+            head = _dim("validators")
+            if results:
+                head.append("   latest result in Paramify →", style=palette.MUTED)
+            body += [head, table]
         else:
-            body.append(_dim("validators  none in the registry for this set"))
+            body.append(_dim("validators  none yet"))
         return Group(*body)
 
     def _show_caps(self, row: dict, online: bool) -> None:
@@ -941,10 +983,10 @@ class ParamifyPage(ParamifyWriter, Vertical):
             if not online:
                 empty.update(Text(CAPS_OFFLINE))
             elif error:
-                empty.update(Text(f"Could not read the capabilities: {error}", style=palette.WARN))
+                empty.update(Text(f"Couldn't read the capabilities: {error}", style=palette.WARN))
             elif sets_unknown:
                 reason = errors.get("evidence_sets") or "not read"
-                empty.update(Text(f"Could not read the evidence sets: {reason}", style=palette.WARN))
+                empty.update(Text(f"Couldn't read the evidence sets: {reason}", style=palette.WARN))
             else:
                 empty.update(Text(NO_LINKS))
             return
@@ -970,16 +1012,43 @@ class ParamifyPage(ParamifyWriter, Vertical):
                 table.add_row(label, fn, *marks)
 
     @work(thread=True, exclusive=True, group="paramify-artifacts")
-    def _artifacts_worker(self, set_id: str) -> None:
+    def _artifacts_worker(self, set_id: str, generation: int) -> None:
         try:
             artifacts = api.list_artifacts(set_id)
         except Exception:  # noqa: BLE001 — the count still shows; only the date is lost
-            artifacts = []
+            # No results: a failing count already read stays as it is.
+            self.post_message(ArtifactsReady(set_id, None, None, generation))
+            return
         created = (artifacts[0].get("created_at") or "") if artifacts else ""
-        self.post_message(ArtifactsReady(set_id, created[:16].replace("T", " ") or None))
+        self.post_message(ArtifactsReady(set_id, created[:16].replace("T", " ") or None,
+                                         api.latest_validator_results(artifacts), generation))
+
+    @work(thread=True, exclusive=True, group="paramify-results")
+    def _all_artifacts_worker(self, set_ids: list, generation: int) -> None:
+        for set_id in set_ids:
+            try:
+                artifacts = api.list_artifacts(set_id)
+            except Exception:  # noqa: BLE001 — that row just shows no failing count
+                continue
+            created = (artifacts[0].get("created_at") or "") if artifacts else ""
+            self.post_message(ArtifactsReady(set_id, created[:16].replace("T", " ") or None,
+                                             api.latest_validator_results(artifacts), generation))
 
     def on_artifacts_ready(self, message: ArtifactsReady) -> None:
+        if message.generation != self._generation:
+            return  # read for an older status: newer results may already be here
+        if message.results is None:
+            # The read failed: keep what is known, and don't read it again on every move.
+            self._newest.setdefault(message.set_id, None)
+            return
         self._newest[message.set_id] = message.newest
+        self._results[message.set_id] = message.results
+        status = self._status or {}
+        grid = self.query_one("#pf-grid", DataTable)
+        for row in status.get("fetchers") or []:
+            if row["evidence_set"]["id"] == message.set_id and row["name"] in grid.rows:
+                cells = grid_cells(row, self._online(), status.get("errors"), message.results)
+                grid.update_cell(row["name"], grid.ordered_columns[3].key, cells[3], update_width=True)
         row = self._rows.get(self._cursor_key() or "")
         if row is not None and row["evidence_set"]["id"] == message.set_id:
             self.query_one("#pf-set", Static).update(self._set_info(row, self._online()))
@@ -1021,7 +1090,8 @@ class ParamifyPage(ParamifyWriter, Vertical):
         return {r["name"] for r in (self._status or {}).get("fetchers") or []}
 
     def _base_url(self) -> str:
-        return ((self._status or {}).get("workspace") or {}).get("base_url") or "Paramify"
+        """Where writes go, as a host name for messages."""
+        return host(((self._status or {}).get("workspace") or {}).get("base_url"))
 
     # -- actions: upload (u) ---------------------------------------------- #
 
@@ -1033,7 +1103,7 @@ class ParamifyPage(ParamifyWriter, Vertical):
         try:
             latest, scoped = latest_run_scoped(self.app, "evidence")
         except Exception as exc:  # noqa: BLE001
-            self.notify(f"Cannot list runs: {exc}", severity="error")
+            self.notify(f"Couldn't list runs: {exc}", severity="error")
             return
         if latest is None:
             self.notify("No run with evidence yet. Collect it on the Run tab (2).")
@@ -1041,7 +1111,7 @@ class ParamifyPage(ParamifyWriter, Vertical):
         try:
             preflight = api.upload_preflight(latest["dir"], self.app.root_path)
         except Exception as exc:  # noqa: BLE001
-            self.notify(f"Cannot check the upload: {exc}", severity="error")
+            self.notify(f"Couldn't check the upload: {exc}", severity="error")
             return
         if not preflight.get("ok"):
             self.notify(" ".join(preflight.get("errors") or ["The upload is not ready."]), severity="error", timeout=12)
@@ -1053,16 +1123,16 @@ class ParamifyPage(ParamifyWriter, Vertical):
         self._refresh_hints()
         self._plan_worker(
             latest["dir"], self.app.root_path, bool(preflight.get("token_present")),
-            f"Upload {preflight['file_count']} evidence file(s) to {preflight['base_url']}?", manifest,
+            f"Upload {plural(preflight['file_count'], 'file')} to {host(preflight['base_url'])}?", manifest,
         )
 
     @work(thread=True, exclusive=True, group="paramify-action")
     def _plan_worker(self, run_dir: str, root, online: bool, question: str, manifest_path=None) -> None:
         try:
-            lines = render_plan(api.plan_upload(run_dir, root, online=online, manifest_path=manifest_path))
+            lines = confirm_lines(api.plan_upload(run_dir, root, online=online, manifest_path=manifest_path))
             error = False
         except Exception as exc:  # noqa: BLE001 — shown in the confirm, never uploaded
-            lines, error = [f"Cannot plan the upload: {exc}"], True
+            lines, error = [f"Couldn't plan the upload: {exc}"], True
         self.app.call_from_thread(self._confirm_upload, run_dir, "\n".join(lines), question, error, manifest_path)
 
     def _confirm_upload(self, run_dir: str, body: str, question: str, error: bool, manifest_path) -> None:
@@ -1090,32 +1160,25 @@ class ParamifyPage(ParamifyWriter, Vertical):
 
     def _handle_upload_event(self, ev: dict) -> None:
         etype = ev.get("event")
-        noun = "evidence"
+        noun = "file"
         for line in upload_event_lines(ev, noun):
             self._log(line)
         if etype == "upload_start":
             mode = " (dry-run)" if ev.get("dry_run") else ""
-            self._set_banner(Text(f"uploading {ev.get('files', 0)} {noun}(s) to {ev.get('base_url', '')}{mode}",
+            self._set_banner(Text(f"Uploading {plural(ev.get('files', 0), 'file')} to {host(ev.get('base_url'))}{mode}…",
                                   style=palette.WARN))
         elif etype == "upload_complete":
             for line in pipeline_wait_lines(ev.get("entries") or {}):
                 self._log(line)
             self._finalize_upload(ev)
         elif etype == "_upload_failed":
-            self._log(Text(f"upload failed: {ev.get('error', '')}", style=f"bold {palette.FAIL}"))
-            self._done(Text(f"upload failed: {ev.get('error', '')}", style=palette.FAIL))
+            self._log(Text(f"Upload failed: {ev.get('error', '')}", style=f"bold {palette.FAIL}"))
+            self._done(Text(f"Upload failed: {ev.get('error', '')}", style=palette.FAIL))
 
     def _finalize_upload(self, ev: dict) -> None:
-        msg = Text(
-            "evidence upload complete — "
-            f"uploaded={ev.get('uploaded', 0)} "
-            f"duplicates={ev.get('skipped_duplicate', 0)} "
-            f"errors={ev.get('errors', 0)}"
-            + (f" dropped={ev['dropped']}" if ev.get("dropped") else ""),
-            style=palette.OK if ev.get("ok") else palette.FAIL,
-        )
+        msg = Text(upload_summary(ev), style=palette.OK if ev.get("ok") else palette.FAIL)
         if ev.get("halted"):
-            msg.append(f"   stopped early: {ev['halted']}", style=palette.FAIL)
+            msg.append(f"   Stopped early: {ev['halted']}", style=palette.FAIL)
         if ev.get("log_path"):
             msg.append(f"   {ev['log_path']}", style="dim")
         self._done(msg)
@@ -1132,7 +1195,7 @@ class ParamifyPage(ParamifyWriter, Vertical):
             self.notify("No evidence fetchers in this manifest.")
             return
         self._planning = True
-        self._begin_log(Text("previewing the scripts sync…", style=palette.WARN))
+        self._begin_log(Text("Previewing the scripts sync…", style=palette.WARN))
         self._scripts_preview_worker(self.app.root_path, names)
 
     @work(thread=True, exclusive=True, group="paramify-action")
@@ -1163,31 +1226,31 @@ class ParamifyPage(ParamifyWriter, Vertical):
         self._planning = False
         create, update, drift = counts.get("create", 0), counts.get("update", 0), counts.get("drift", 0)
         self._log_failures(failures)
-        kept = (f"\n\n{drift} script(s) changed in Paramify stay as they are. "
+        kept = (f"\n\n{plural(drift, 'script')} changed in Paramify {agree(drift, 'stays as it is', 'stay as they are')}. "
                 "`paramify scripts sync --force` overwrites them.") if drift else ""
-        failed = (f"\n\nThe preview failed for {len(failures)} fetcher script(s); "
+        failed = (f"\n\nThe preview failed for {plural(len(failures), 'script')}; "
                   "the log under the grid says why.") if failures else ""
         if not create and not update:
             if failures:
-                self._done(Text(f"scripts: the preview failed for {len(failures)} fetcher script(s), "
-                                "nothing synced", style=palette.FAIL))
+                self._done(Text(f"Scripts: the preview failed for {plural(len(failures), 'script')}, "
+                                "so nothing was synced.", style=palette.FAIL))
                 return
-            self._done(Text("scripts: nothing to sync" + (f", {drift} changed in Paramify (kept)" if drift else ""),
+            self._done(Text("Scripts: nothing to sync" + (f" ({drift} changed in Paramify, kept)" if drift else "") + ".",
                             style=palette.OK))
             return
 
         def go(ok: bool) -> None:
             if ok:
                 self._acting = True
-                self._begin_log(Text("syncing scripts…", style=palette.WARN))
+                self._begin_log(Text("Syncing scripts…", style=palette.WARN))
                 self._scripts_worker(self.app.root_path, names)
             else:
-                self._set_banner(Text("scripts sync cancelled", style=palette.MUTED))
+                self._set_banner(Text("Scripts sync cancelled.", style=palette.MUTED))
             self._refresh_hints()
 
         self.app.push_screen(ConfirmModal(
-            f"Sync {create + update} fetcher script(s) to {self._base_url()}: "
-            f"{create} create, {update} update, and pair each one with its evidence set?{kept}{failed}"
+            f"Sync {plural(create + update, 'script')} to {self._base_url()} "
+            f"({create} new, {update} updated) and pair each one with its evidence set?{kept}{failed}"
         ), go)
 
     @work(thread=True, exclusive=True, group="paramify-action")
@@ -1209,13 +1272,13 @@ class ParamifyPage(ParamifyWriter, Vertical):
             self._log(Text(f"  [{label}] {ev.get('fetcher', '?')}{ref}" + (f"  {reason}" if reason else ""), style=style))
         elif etype == "sync_complete":
             self._done(Text(
-                f"scripts sync complete — created={ev.get('created', 0)} updated={ev.get('updated', 0)} "
-                f"associated={ev.get('associated', 0)} errors={ev.get('errors', 0)}",
+                f"Scripts: {ev.get('created', 0)} created, {ev.get('updated', 0)} updated, "
+                f"{ev.get('associated', 0)} paired" + (f", {plural(ev['errors'], 'error')}" if ev.get("errors") else "") + ".",
                 style=palette.OK if ev.get("ok") else palette.FAIL,
             ))
         elif etype == "_failed":
-            self._log(Text(f"scripts sync failed: {ev.get('error', '')}", style=f"bold {palette.FAIL}"))
-            self._done(Text(f"scripts sync failed: {ev.get('error', '')}", style=palette.FAIL))
+            self._log(Text(f"Scripts sync failed: {ev.get('error', '')}", style=f"bold {palette.FAIL}"))
+            self._done(Text(f"Scripts sync failed: {ev.get('error', '')}", style=palette.FAIL))
 
     # -- actions: validators (v) ------------------------------------------ #
 
@@ -1228,7 +1291,7 @@ class ParamifyPage(ParamifyWriter, Vertical):
         if path is None:
             return
         self._planning = True
-        self._begin_log(Text("previewing the validators sync…", style=palette.WARN))
+        self._begin_log(Text("Previewing the validators sync…", style=palette.WARN))
         self._validators_preview_worker(self.app.root_path, path)
 
     @work(thread=True, exclusive=True, group="paramify-action")
@@ -1261,34 +1324,40 @@ class ParamifyPage(ParamifyWriter, Vertical):
         unpaired = sum(1 for r in rows if r["evidence_set"].get("exists") for v in r["validators"]
                        if v["paired"] is False)
         if not create and failures:
-            self._done(Text(f"validators: the preview failed for {len(failures)} validator(s), nothing created "
-                            f"({exist} in Paramify already)", style=palette.FAIL))
+            self._done(Text(f"Validators: the preview failed for {plural(len(failures), 'validator')}, so nothing "
+                            f"was created ({exist} in Paramify already).", style=palette.FAIL))
             return
         if not create:
-            text = f"validators: nothing to create ({exist} in Paramify already)."
+            text = f"Validators: nothing to create ({exist} in Paramify already)."
             if unpaired:
-                text += (f" {unpaired} validator(s) exist but are not paired with their evidence set."
-                         " Pair them in Paramify.")
+                exists = agree(unpaired, "exists but isn't", "exist but aren't")
+                text += (f" {plural(unpaired, 'validator')} {exists} paired with "
+                         f"{agree(unpaired, 'its', 'their')} evidence set. Pair "
+                         f"{agree(unpaired, 'it', 'them')} in Paramify.")
             self._done(Text(text, style=palette.WARN if unpaired else palette.OK))
             return
 
         def go(ok: bool) -> None:
             if ok:
                 self._acting = True
-                self._begin_log(Text("syncing validators…", style=palette.WARN))
+                self._begin_log(Text("Syncing validators…", style=palette.WARN))
                 self._validators_worker(self.app.root_path, manifest_path)
             else:
-                self._set_banner(Text("validators sync cancelled", style=palette.MUTED))
+                self._set_banner(Text("Validators sync cancelled.", style=palette.MUTED))
             self._refresh_hints()
 
         if missing:
-            ask = (f"Create {create} validator(s) in {self._base_url()}? {missing} evidence set(s) do not exist "
-                   "yet, and a validator is paired only when it is created: press s first to create the sets.")
+            does = agree(missing, "doesn't", "don't")
+            ask = (f"Create {plural(create, 'validator')} in {self._base_url()}? {plural(missing, 'evidence set')} "
+                   f"{does} exist yet, and a validator is paired only when it's created: "
+                   f"press s first to create {agree(missing, 'it', 'them')}.")
         else:
-            ask = f"Create {create} validator(s) in {self._base_url()} and pair each one with its evidence sets?"
-        failed = (f"\n\nThe preview failed for {len(failures)} validator(s); the log under the grid says why."
+            ask = f"Create {plural(create, 'validator')} in {self._base_url()} and pair each one with its evidence sets?"
+        failed = (f"\n\nThe preview failed for {plural(len(failures), 'validator')}; the log under the grid says why."
                   if failures else "")
-        self.app.push_screen(ConfirmModal(f"{ask} {exist} exist already and stay as they are.{failed}"), go)
+        kept = (f" {exist} already {agree(exist, 'exists and stays as it is', 'exist and stay as they are')}."
+                if exist else "")
+        self.app.push_screen(ConfirmModal(f"{ask}{kept}{failed}"), go)
 
     @work(thread=True, exclusive=True, group="paramify-action")
     def _validators_worker(self, root, manifest_path) -> None:
@@ -1308,7 +1377,7 @@ class ParamifyPage(ParamifyWriter, Vertical):
             reason = f"  {ev['error']}" if ev.get("error") else ""
             self._log(Text(f"  [{outcome}] {ev.get('key', '?')}{reason}", style=style))
         elif etype == "sync_complete":
-            self._done(Text("validators sync complete", style=palette.OK if ev.get("ok", True) else palette.FAIL))
+            self._done(Text("Validators synced.", style=palette.OK if ev.get("ok", True) else palette.FAIL))
         elif etype == "_failed":
-            self._log(Text(f"validators sync failed: {ev.get('error', '')}", style=f"bold {palette.FAIL}"))
-            self._done(Text(f"validators sync failed: {ev.get('error', '')}", style=palette.FAIL))
+            self._log(Text(f"Validators sync failed: {ev.get('error', '')}", style=f"bold {palette.FAIL}"))
+            self._done(Text(f"Validators sync failed: {ev.get('error', '')}", style=palette.FAIL))

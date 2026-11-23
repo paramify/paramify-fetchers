@@ -1,0 +1,18 @@
+validator: azure_policy_no_fully_disabled_assignments
+cases:
+  - name: none_fully_disabled
+    expect: PASS
+    note: members disabled by an initiative's own defaults do not count
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"assignments_by_effect_class":{"audit_only":11,"disabled":0,"enforcing":6,"unresolved":0},"disabled_effect_assignments":0,"member_policy_effect_counts":{"audit":212,"disabled":9}}}}'
+
+  - name: one_assignment_every_member_disabled
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"assignments_by_effect_class":{"audit_only":10,"disabled":1,"enforcing":6,"unresolved":0},"disabled_effect_assignments":1}}}'
+
+  - name: ten_is_not_zero
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"disabled_effect_assignments":10}}}'
+
+  - name: rollup_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"assignments_by_effect_class":{"disabled":0},"disabled_assignments":0}}}'

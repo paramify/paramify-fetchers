@@ -1,0 +1,14 @@
+validator: github_merges_have_human_approval
+cases:
+- name: compliant
+  expect: PASS
+  artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"merged_without_human_approval":0}}}'
+- name: nonzero
+  expect: FAIL
+  artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"merged_without_human_approval":2}}}'
+- name: unread
+  expect: FAIL
+  artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"merged_without_human_approval":null}}}'
+- name: renamed
+  expect: FAIL
+  artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"merged_without_human_approval_renamed":0}}}'

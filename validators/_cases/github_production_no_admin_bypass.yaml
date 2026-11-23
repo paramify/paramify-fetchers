@@ -1,0 +1,14 @@
+validator: github_production_no_admin_bypass
+cases:
+- name: compliant
+  expect: PASS
+  artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"production_admins_can_bypass":[]}}}'
+- name: listed
+  expect: FAIL
+  artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"production_admins_can_bypass":["example-repo"]}}}'
+- name: unread
+  expect: FAIL
+  artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"production_admins_can_bypass":null}}}'
+- name: renamed
+  expect: FAIL
+  artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"production_admins_can_bypass_renamed":[]}}}'

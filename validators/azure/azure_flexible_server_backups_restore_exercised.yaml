@@ -1,0 +1,22 @@
+key: azure_flexible_server_backups_restore_exercised
+name: 'Azure PostgreSQL and MySQL Backups: Point-in-Time Restore Exercised Within the Lookback'
+type: AUTOMATED
+role: configuration
+source: community
+statement: >
+  At least one server was created by an Azure point-in-time restore within restore_lookback_days. Also
+  fails while no lookback is configured (see 'Restore Lookback Is Configured' for the cause), so an
+  undecided or unread value is never reported as a pass. Only servers that still exist are seen, so a
+  restore test that deleted its server does not count. Shows a restore was performed, not that the
+  restored database or application worked, and not the recovery time. Does not check whether the
+  collection run succeeded.
+
+regex: '"restored_servers_within_lookback":\s*(?<restored_servers_within_lookback>[1-9]\d*)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-FLEXIBLE-SERVER-BACKUPS

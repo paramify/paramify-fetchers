@@ -8,11 +8,13 @@ caller's push_screen callback maps onto framework.api mutators.
   PickerModal      -> str (the chosen option id) or None
   ConfirmModal     -> bool
   PreviewModal     -> None (read-only YAML view)
+  EnvironmentModal -> None (which variables a run reads have a value; never the values)
 """
 
 from __future__ import annotations
 
-from typing import Dict, List, Tuple
+from pathlib import Path
+from typing import Callable, Dict, List, Tuple
 
 from rich.text import Text
 from textual import events, on
@@ -23,6 +25,7 @@ from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Label, OptionList, Static, Tree
 from textual.widgets.option_list import Option
 
+from framework.tui import palette, render
 from framework.tui.components.forms import FieldRow
 from framework.tui.components.keys import (
     BUTTON_ROW_BINDINGS,
@@ -31,6 +34,7 @@ from framework.tui.components.keys import (
     FilterListNav,
 )
 from framework.tui.components.table import DataTable
+from framework.tui.words import agree, plural
 
 
 class FormModal(ButtonRowNav, ModalScreen[dict]):
@@ -43,7 +47,7 @@ class FormModal(ButtonRowNav, ModalScreen[dict]):
     # Friendlier section headings; the dict key stays the result key.
     GROUP_LABELS = {
         "config": "config",
-        "secrets": "secrets  ·  enter the ENV VAR NAME, not the value",
+        "secrets": "secrets  ·  env var names, not the values",
         "values": "target fields",
     }
 
@@ -69,11 +73,15 @@ class FormModal(ButtonRowNav, ModalScreen[dict]):
                 yield Label(self._subtitle, id="modal-subtitle")
             with VerticalScroll(id="modal-body"):
                 any_fields = False
+                shown = [g for g, fields in self._groups.items() if fields]
                 for gname, fields in self._groups.items():
                     if not fields:
                         continue
                     any_fields = True
-                    yield Label(self.GROUP_LABELS.get(gname, gname), classes="group-label")
+                    # One section: the title already says what it is (secrets keep theirs: it says
+                    # the fields take env var names).
+                    if len(shown) > 1 or gname == "secrets":
+                        yield Label(self.GROUP_LABELS.get(gname, gname), classes="group-label")
                     for spec in fields:
                         yield FieldRow(spec, group=gname)
                 if not any_fields:
@@ -261,9 +269,7 @@ class TargetsModal(ModalScreen[None]):
         if rows:
             table.move_cursor(row=min(cursor, len(rows) - 1))
         self.query_one("#targets-count", Static).update(
-            f"{len(rows)} target(s) · fields come from the fetcher's target_schema"
-            if rows
-            else "no targets yet — press 'a' to add one"
+            plural(len(rows), "target") if rows else "No targets yet. Press a to add one."
         )
 
     def _index(self) -> int:
@@ -334,6 +340,44 @@ class ConfirmModal(ButtonRowNav, ModalScreen[bool]):
         self.dismiss(False)
 
 
+class ReportModal(ButtonRowNav, ModalScreen[bool]):
+    """Exactly what will be sent, and one question (from the error card, branch
+    feat/tui-error-card). Lands on Back: sending to an AI service is opt-in."""
+
+    AUTO_FOCUS = "#report-no"
+
+    BINDINGS = [
+        Binding("escape", "no", "Back"),
+        Binding("n", "no", "Back"),
+        Binding("y", "yes", "Yes"),
+        *BUTTON_ROW_BINDINGS,
+    ]
+
+    def __init__(self, report: str, title: str, subtitle: str, question: str, yes_label: str) -> None:
+        super().__init__()
+        self._report, self._title, self._subtitle = report, title, subtitle
+        self._question, self._yes_label = question, yes_label
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="modal-card", classes="wide"):
+            yield Label(self._title, id="modal-title")
+            yield Label(self._subtitle, id="modal-subtitle")
+            with VerticalScroll(id="modal-body"):
+                yield Static(self._report, id="preview-text", markup=False)
+            yield Label(Text(self._question), id="report-question")
+            with Horizontal(id="modal-buttons"):
+                yield Button(f"{self._yes_label} (y)", variant="primary", id="report-yes")
+                yield Button("Back (n)", id="report-no")
+
+    @on(Button.Pressed, "#report-yes")
+    def action_yes(self) -> None:
+        self.dismiss(True)
+
+    @on(Button.Pressed, "#report-no")
+    def action_no(self) -> None:
+        self.dismiss(False)
+
+
 class PreviewModal(ModalScreen[None]):
     """Read-only scrollable view of the manifest YAML."""
 
@@ -362,3 +406,113 @@ class PreviewModal(ModalScreen[None]):
         # Clicking outside the card returns to the page (in addition to esc/q/p).
         if not self.query_one("#modal-card").region.contains(event.screen_x, event.screen_y):
             self.dismiss(None)
+
+
+class EnvironmentModal(ButtonRowNav, ModalScreen[None]):
+    """What the manifest still needs from the environment: the required variables
+    with no value, split by whether they block a run or an upload.
+
+    One action, as a button that is always there: add the missing names to .env
+    as blank lines, for the user to fill in. Once they are written, the line above
+    the buttons says so. Close (or esc) re-checks, since the manifest page reads
+    the environment again when the view closes.
+
+    Presence only: `read` and `write` return api.generate_env()'s dict, which
+    holds names and notes and never a value, so nothing here can show, log or
+    take one. Like TargetsModal it renders; the caller owns the api calls.
+    `notice` says why it opened on its own (a run that stopped).
+    """
+
+    BINDINGS = [Binding("escape", "done", "Close"), *BUTTON_ROW_BINDINGS]
+
+    def __init__(self, title: str, read: Callable[[], dict], write: Callable[[], dict], notice: str = "") -> None:
+        super().__init__()
+        self._title = title
+        self._read = read
+        self._write = write
+        self._notice = notice
+        self._env: dict = {}
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="modal-card", classes="env"):
+            yield Label("", id="modal-title")
+            if self._notice:
+                yield Static(Text(self._notice), id="env-notice")
+            with VerticalScroll(id="modal-body"):
+                yield Static("", id="env-list")
+            yield Static("", id="env-unmapped")
+            yield Static("", id="env-others")
+            with Horizontal(id="modal-buttons"):
+                yield Button("Add blank lines to .env", variant="primary", id="env-write")
+                yield Button("Close", id="env-close")
+
+    def on_mount(self) -> None:
+        self._load(self._read)
+        self.query_one("#env-write", Button).focus()
+
+    def _load(self, how: Callable[[], dict]) -> bool:
+        try:
+            self._env = how()
+        except Exception as exc:  # an unreadable .env, a manifest discovery can't read
+            self.notify(f"Couldn't read the environment: {exc}", severity="error")
+            return False
+        self._paint()
+        return True
+
+    def _paint(self) -> None:
+        variables = self._env.get("variables") or []
+        missing = render.env_missing(variables)
+        title = self.query_one("#modal-title", Label)
+        if missing:
+            title.update(f"{plural(len(missing), 'variable')} {agree(len(missing), 'needs', 'need')} a value")
+        else:
+            title.update(Text("✓ Everything this manifest needs is set.", style=palette.OK))
+        if self._notice and not render.env_missing(variables, run=True):
+            # The run that stopped would start now: its reason no longer holds.
+            self.query_one("#env-notice", Static).display = False
+
+        self.query_one("#modal-body", VerticalScroll).display = bool(missing)
+        self.query_one("#env-list", Static).update(render.env_needed(variables))
+
+        n_set = sum(1 for v in variables if v["set"])
+        lines = []
+        if missing and n_set:
+            lines.append(f"{plural(n_set, 'other')} {agree(n_set, 'is', 'are')} set. ")
+        where = Path(self._env.get("path") or ".env").name
+        if self._env.get("text"):
+            lines.append(f"The button adds the names to {where} with blank values; fill them in there.")
+        elif missing:
+            lines.append(f"Already written to {where} with blank values: fill them in there, "
+                         "then open this again.")
+        else:
+            lines.append("Values are never shown here.")
+        self.query_one("#env-others", Static).update(Text("".join(lines), style=palette.MUTED))
+
+        unmapped = self._env.get("unmapped") or []
+        line = self.query_one("#env-unmapped", Static)
+        line.display = bool(unmapped)
+        if unmapped:
+            names = [f"{u['fetcher']} {u['secret']}" + (" (each target)" if u["per_target"] else "")
+                     for u in unmapped]
+            text = Text("Not mapped in the manifest yet, so a run stops on them: ", style=palette.WARN)
+            text.append(", ".join(names), style="dim")
+            line.update(text)
+
+    @on(Button.Pressed, "#env-write")
+    def action_write(self) -> None:
+        before = self._env.get("path")
+        if not self._load(self._write):
+            return
+        added = self._env.get("added") or []
+        where = Path(self._env.get("path") or before or ".env").name
+        # The write's result says what it added; read again so the view shows the
+        # file as it is now (nothing left to add, so no button).
+        self._load(self._read)
+        if added:
+            self.notify(f"Added {plural(len(added), 'blank line')} to {where}. Fill in the values there.")
+        else:
+            self.notify(f"Already written to {where}: nothing new to add.")
+
+    @on(Button.Pressed, "#env-close")
+    def action_done(self) -> None:
+        self.dismiss(None)

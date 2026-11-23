@@ -1,0 +1,21 @@
+key: azure_endpoint_availability_window_complete
+name: 'Azure Endpoint Availability: Measurement Window Is Complete'
+type: AUTOMATED
+role: completeness
+source: community
+statement: >
+  Every expected endpoint, or every enabled test when none are listed, has a result in every hour of
+  the lookback (measurement_window_complete is true), so the availability figures cover the whole
+  period rather than the hours that happened to be measured. Fails when an hour is missing, an
+  expected endpoint has no test, or a test's results could not be read. Does not check whether the
+  collection run succeeded.
+
+regex: '"measurement_window_complete":\s*true\b'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-ENDPOINT-AVAILABILITY

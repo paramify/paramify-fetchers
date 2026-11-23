@@ -30,7 +30,17 @@ from datetime import datetime, timezone
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as pkg_version
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Mapping,
+    Optional,
+    Sequence,
+    Tuple,
+)
 
 import yaml
 from dotenv import load_dotenv
@@ -42,6 +52,7 @@ from framework import envgen, patterns, yaml_io
 from framework import samples as _samples
 from framework.config_loader import discover_fetchers, discover_platforms
 from framework.contract import (
+    SCHEDULE_FREQUENCIES,
     ConfigField,
     Fetcher,
     ManifestEntry,
@@ -234,6 +245,7 @@ def _fetcher_descriptor(f, platform_spec=None) -> dict:
         "description": f.description,
         "category": f.category,
         "kind": f.kind,
+        "source": f.source,
         "supports_targets": f.supports_targets,
         "config": [_config_descriptor(c) for c in f.config_schema.values()],
         # Category-declared secrets are part of what this fetcher takes, so the
@@ -1771,6 +1783,8 @@ def run(
         "started_at": started_at,
         "completed_at": completed_at,
         "invocations": [_invocation_record(r) for r in all_results],
+        # The upload reads `every` as the frequency of each set no entry or upload.yaml sets.
+        "schedule": dict(parsed.schedule),
         "paramify": {
             keys[id(e)]: {"use": e.use, **manifest_loader.resolved_paramify(
                 parsed, e, pipeline=e.use in fetchers and fetchers[e.use].is_pipeline)}
@@ -2180,6 +2194,73 @@ def set_owner(m: dict, owner: Optional[str], use: Optional[str] = None) -> dict:
     else:
         block.pop("owner", None)
     return m
+
+
+def set_schedule(m: dict, every: Optional[str], at: Optional[str] = None) -> dict:
+    """Record how often the manifest runs: `run.schedule: {every, at}`.
+
+    Each evidence set's frequency follows `every` unless the entry or upload.yaml
+    sets one. No `every` removes the schedule; no `at` runs at any time of day.
+    """
+    run = _run(m)
+    if not every:
+        run.pop("schedule", None)
+        return m
+    schedule: Dict[str, Any] = {"every": every}
+    if at:
+        schedule["at"] = at
+    run["schedule"] = schedule
+    return m
+
+
+def set_frequency(m: dict, frequency: Optional[str], use: Optional[str] = None) -> dict:
+    """Record how often evidence sets expect a new artifact: manifest-wide
+    (`run.schedule.every`, keeping any `at`), or with `use` for one fetcher entry
+    (its `paramify.frequency`, see _paramify_block). A blank `frequency` removes
+    it. Raises ValueError for a value that isn't one of SCHEDULE_FREQUENCIES:
+    NOT_SET is Paramify's, but a schedule always has a cadence.
+    """
+    value = (frequency or "").strip().upper()
+    if value and value not in SCHEDULE_FREQUENCIES:
+        raise ValueError(f"{frequency!r} isn't a frequency; use one of {', '.join(SCHEDULE_FREQUENCIES)}")
+    if use is None:
+        return set_schedule(m, value or None, (_run(m).get("schedule") or {}).get("at") if value else None)
+    block = _paramify_block(m, use)
+    if value:
+        block["frequency"] = value
+    else:
+        block.pop("frequency", None)
+    return m
+
+
+def default_upload_values(root: Path) -> dict:
+    """The default upload.yaml under `root`, parsed; {} when there is none or it can't
+    be read (a display value: the upload itself reports a bad config)."""
+    try:
+        path = default_upload_config(root)
+        cfg = (yaml_io.load_path(path) or {}) if path else {}
+    except Exception:  # noqa: BLE001
+        cfg = {}
+    return cfg if isinstance(cfg, dict) else {}
+
+
+def entry_frequency(m: dict, entry: Mapping[str, Any], declared: Optional[str], root: Path,
+                    upload_cfg: Optional[dict] = None) -> Tuple[str, str]:
+    """(frequency, source) for one manifest entry's evidence set, as an upload of a
+    run made now would resolve it (see desired.resolve_frequency). `upload_cfg` is
+    the parsed upload.yaml (a caller showing many entries reads it once); without
+    it, the default one under `root` is read. An upload with --config may differ."""
+    from framework.sync.providers.desired import resolve_frequency
+
+    cfg = upload_cfg if upload_cfg is not None else default_upload_values(root)
+    use = str(entry.get("use") or "")
+    return resolve_frequency(
+        declared,
+        entry=(entry.get("paramify") or {}).get("frequency"),
+        fetcher_override=((cfg.get("overrides") or {}).get(use) or {}).get("frequency"),
+        upload_default=(cfg.get("defaults") or {}).get("frequency"),
+        schedule_every=(_run(m).get("schedule") or {}).get("every"),
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -3671,7 +3752,8 @@ def list_artifacts(evidence_set_id: str) -> List[dict]:
         validators = []
         for v in a.get("validators") or []:
             if isinstance(v, dict):
-                validators.append({"name": v.get("name") or "", "result": v.get("result") or ""})
+                validators.append({"id": v.get("id") or "", "name": v.get("name") or "",
+                                   "result": v.get("result") or ""})
         artifacts.append({
             "id": a["id"],
             "title": a.get("title") or "",
@@ -3688,6 +3770,69 @@ def list_artifacts(evidence_set_id: str) -> List[dict]:
         })
     artifacts.sort(key=lambda a: a.get("created_at") or "", reverse=True)
     return artifacts
+
+
+def latest_validator_results(artifacts: List[dict]) -> Dict[str, dict]:
+    """Each validator's latest result in Paramify, from one set's artifacts.
+
+    `artifacts` as list_artifacts returns them, newest first. Validation runs on
+    upload, so a validator's latest result is the one on the newest artifact that
+    has one (the reading `pfy validators failing` uses): an empty or NOT_SET
+    result is not one, so an older real verdict shows through it. Keyed by
+    Paramify validator id, and by name too for a validator with no id match:
+    {id or name: {"id", "name", "result", "at", "artifact"}}, where `result` is
+    PASS, FAIL or ERROR and `at` is the upload time ("2026-11-19 14:02"). A
+    validator no artifact has a real result for is absent (not run).
+    """
+    out: Dict[str, dict] = {}
+    for art in artifacts:
+        for v in art.get("validators") or []:
+            result = v.get("result") or ""
+            if result in ("", "NOT_SET"):
+                continue
+            found = {"id": v.get("id") or "", "name": v.get("name") or "",
+                     "result": result,
+                     "at": (art.get("created_at") or "")[:16].replace("T", " "),
+                     "artifact": art.get("title") or art.get("file_name") or ""}
+            for key in (found["id"], f"name:{found['name']}"):
+                if key and key != "name:" and key not in out:
+                    out[key] = found
+    return out
+
+
+def result_for(results: Dict[str, dict], paramify_id: Optional[str], name: str) -> Optional[dict]:
+    """One registry validator's entry in latest_validator_results: by its
+    Paramify id when known, else by name. None when it has no result."""
+    return (results.get(paramify_id) if paramify_id else None) or results.get(f"name:{name}")
+
+
+def validator_results(root: Path, reference_id: str, validators: Iterable,
+                      config_path: Optional[Path] = None) -> dict:
+    """The latest Paramify result of each registry validator on one evidence set.
+
+    Read-only: two GETs (the evidence sets, then this set's artifacts). Returns
+    {"state": "no_token" | "no_set" | "ok", "results": {registry key: entry}},
+    each entry as latest_validator_results gives it. A validator with no result
+    yet is absent. Matches by the `validators sync` lock's id, then by name, as
+    paramify_status pairs them. Raises RuntimeError when a read fails.
+    """
+    root = Path(root)
+    config_path = _upload_config(root, config_path)
+    readiness = upload_readiness(root, config_path=config_path)
+    if not readiness.get("token_present"):
+        return {"state": "no_token", "results": {}}
+    sets = {s["reference_id"]: s for s in list_evidence_sets(base_url=readiness.get("base_url"))}
+    found = sets.get(reference_id)
+    if found is None:
+        return {"state": "no_set", "results": {}}
+    latest = latest_validator_results(list_artifacts(found["id"]))
+    lock = _validator_lock(root, config_path)
+    results = {}
+    for v in validators:
+        entry = result_for(latest, lock.get(v.key), v.name)
+        if entry is not None:
+            results[v.key] = entry
+    return {"state": "ok", "results": results}
 
 
 def _artifact_filename(evidence_set: dict, artifact: dict) -> str:
@@ -3828,7 +3973,8 @@ def paramify_status(root: Path, manifest_path: Path, config_path: Optional[Path]
                        "evidence_set": {"reference_id", "name", "id" | None,
                                         "exists": bool | None, "artifact_count": int | None},
                        "script": "in_sync" | "update" | "create" | "drift" | "error" | None,
-                       "validators": [{"key", "role", "name", "paired": bool | None}],
+                       "validators": [{"key", "role", "name", "paired": bool | None,
+                                       "id": the Paramify id once read (None: not paired)}],
                        "pairs": [{"pair_id", "validator_key", "capability_id", "function"}],
                        "ready": bool}],
          "capabilities": [{"id", "reference_id", "name",
@@ -3905,7 +4051,7 @@ def paramify_status(root: Path, manifest_path: Path, config_path: Optional[Path]
             "script": None,
             "validators": [
                 {"key": v.key, "role": v.role or "", "name": v.name, "paired": None}
-                for v in registry if ref in v.evidence_sets
+                for v in _registry.tracked_for(entry, ref, registry)  # what the entry tracks
             ],
             "pairs": [],
             "ready": False,
@@ -3976,6 +4122,7 @@ def paramify_status(root: Path, manifest_path: Path, config_path: Optional[Path]
         for v in row["validators"]:
             vid = lock.get(v["key"]) if lock.get(v["key"]) in ids else names.get(v["name"])
             v["paired"] = vid is not None
+            v["id"] = vid  # its Paramify id, which its results are read by
             if vid is not None:
                 key_by_id[vid] = v["key"]
         for cap in status["capabilities"]:
@@ -4165,7 +4312,8 @@ def refresh_env(root: Path) -> List[str]:
 _FILLED_FROM_DOTENV: set = set()
 
 
-def generate_env(root: Path, manifest: Mapping[str, Any], write: bool = False, path: Optional[Path] = None) -> dict:
+def generate_env(root: Path, manifest: Mapping[str, Any], write: bool = False, path: Optional[Path] = None,
+                 found: Optional[Mapping[str, Any]] = None) -> dict:
     """The .env a manifest needs, merged with the one at `path` (default
     env_file(root)) without changing anything already in it.
 
@@ -4182,6 +4330,7 @@ def generate_env(root: Path, manifest: Mapping[str, Any], write: bool = False, p
     target}): the run
     stops on those whatever .env holds. Writes only when `write` is set:
     atomically, through a symlinked .env to its file, keeping CRLF line endings.
+    `found` is a discover(root) the caller already has (the TUI's rebuild).
     """
 
     path = Path(path) if path else env_file(root)
@@ -4190,7 +4339,7 @@ def generate_env(root: Path, manifest: Mapping[str, Any], write: bool = False, p
     if target.is_file():
         with target.open(newline="") as fh:
             existing = fh.read()
-    found = discover(root)
+    found = found or discover(root)
     groups, unmapped = envgen.env_groups(found["fetchers"], found["platforms"], manifest)
     text, result = envgen.merged(existing, groups)
     if write and result.text:

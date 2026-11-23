@@ -1,0 +1,25 @@
+key: azure_aks_node_os_auto_upgrade_all_clusters
+name: 'Azure AKS: Every Cluster Patches Node OS Automatically'
+type: AUTOMATED
+role: configuration
+source: community
+statement: >
+  Every AKS cluster (at least one) has a node OS upgrade channel that replaces or patches node images
+  automatically (SecurityPatch or NodeImage). Unmanaged does not count: it leaves node images alone,
+  though the node OS may still install its own updates (counted in node_os_unmanaged_clusters); None
+  installs nothing. Supports automatic node OS patching only: an enabled channel does not show that
+  updates were applied, and Kubernetes version upgrades are a separate setting this does not check.
+  Does not check whether the collection run succeeded.
+
+regex: '"node_os_auto_upgrade_clusters":\s*(?<node_os_auto_upgrade_clusters>\d+)[\s\S]*?"total_clusters":\s*(?<total_clusters>[1-9]\d*)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS MATCH_GROUP[2]
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # node_os_auto_upgrade_clusters
+    criteria: EQUALS
+    value: { type: MATCH_GROUP, groupNumber: 2 }            # total_clusters
+
+evidence_sets:
+  - EVD-AZURE-AKS-CONFIG

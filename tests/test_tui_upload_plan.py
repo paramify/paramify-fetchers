@@ -288,7 +288,7 @@ def _open_confirm(tmp_path, run_tui, check, monkeypatch):
     path, _ = _manifest(tmp_path)
 
     async def body(app, pilot):
-        await pilot.press("4")
+        await pilot.press("5")
         await pilot.pause()
         page = app.screen.query_one(ParamifyPage)
         page.action_upload_run()
@@ -303,7 +303,7 @@ def _confirm_text(app) -> str:
     return str(app.screen._message)
 
 
-def test_confirm_shows_the_plan_totals(tmp_path, monkeypatch, no_token, run_tui):
+def test_confirm_shows_the_plan(tmp_path, monkeypatch, no_token, run_tui):
     _upload_ready(tmp_path, monkeypatch, token=True)
     seen = {}
 
@@ -315,7 +315,7 @@ def test_confirm_shows_the_plan_totals(tmp_path, monkeypatch, no_token, run_tui)
 
     text = _open_confirm(tmp_path, run_tui, _confirm_text, monkeypatch)
     assert seen["online"] is True
-    assert "1 deliver" in text and "evidence file(s)" in text
+    assert "x: new set" in text and "Upload 1 file to" in text
 
 
 def test_the_plan_compares_the_run_with_the_open_manifest(tmp_path, monkeypatch, no_token, run_tui):
@@ -395,7 +395,7 @@ def test_log_shows_brackets_in_file_names_and_reasons(tmp_path, run_tui, stub_pa
     path, _ = _manifest(tmp_path)
 
     async def body(app, pilot):
-        await pilot.press("4")
+        await pilot.press("5")
         await pilot.pause()
         page = app.screen.query_one(ParamifyPage)
         page._begin_log(Text("uploading"))
@@ -417,7 +417,7 @@ def test_log_panel_renders_delivery_file_progress(tmp_path, run_tui, stub_parami
     path, _ = _manifest(tmp_path)
 
     async def body(app, pilot):
-        await pilot.press("4")
+        await pilot.press("5")
         await pilot.pause()
         page = app.screen.query_one(ParamifyPage)
         page._begin_log(Text("uploading"))
@@ -503,8 +503,8 @@ def _notes(app) -> list:
 
 
 @pytest.mark.parametrize("button, lister, message", [
-    ("#manifest-stack", "list_stacks", "Could not list stacks: HTTP 401: token expired"),
-    ("#manifest-owner", "list_channel_owners", "Could not list channel owners: HTTP 401: token expired"),
+    ("#manifest-stack", "list_stacks", "Couldn't list stacks: HTTP 401: token expired"),
+    ("#manifest-owner", "list_channel_owners", "Couldn't list channel owners: HTTP 401: token expired"),
 ])
 def test_a_listing_error_is_shown_and_changes_nothing(tmp_path, token, no_network, monkeypatch, run_tui,
                                                       button, lister, message):
@@ -619,7 +619,7 @@ def test_entry_editor_shows_the_entry_settings_and_drops_a_name_only_with_its_st
     path, _ = _manifest(tmp_path)
     m = yaml.safe_load(path.read_text())
     settings = {"stack": "stk-1", "stack_name": "Alpha", "owner": "bob", "approval": "MANUAL",
-                "no_request": "refuse", "delivery": "direct"}
+                "no_request": "refuse", "delivery": "direct", "frequency": "WEEKLY"}
     m["run"]["fetchers"][0]["paramify"] = dict(settings)
     path.write_text(yaml.safe_dump(m))
 
@@ -642,9 +642,150 @@ def test_entry_editor_shows_the_entry_settings_and_drops_a_name_only_with_its_st
     shown, options = run_tui(edit, path)
     assert shown == {k: v for k, v in settings.items() if k != "stack_name"}
     assert options == {"approval": ["MANUAL", "SUBMISSION_WITH_PASSING_VALIDATORS", "SUBMISSION"],
-                       "no_request": ["direct", "evidence", "refuse"], "delivery": ["auto", "direct"]}
+                       "no_request": ["direct", "evidence", "refuse"], "delivery": ["auto", "direct"],
+                       "frequency": ["DAILY", "THREE_DAY", "WEEKLY", "BIWEEKLY", "MONTHLY", "QUARTERLY",
+                                     "BIANNUAL", "ANNUAL"]}
     assert _run_block(path)["fetchers"][0]["paramify"] == settings  # saved unchanged, name kept
 
     run_tui(lambda app, pilot: edit(app, pilot, stack="stk-2"), path)
     assert _run_block(path)["fetchers"][0]["paramify"] == {
         **{k: v for k, v in settings.items() if k != "stack_name"}, "stack": "stk-2"}
+
+
+# ---- the schedule ------------------------------------------------------------------
+
+async def _set_schedule(app, pilot, every):
+    await _manifest_page(app, pilot)
+    app.screen.query_one("#manifest-schedule", Button).press()
+    await _settle(app, pilot)
+    assert isinstance(app.screen, FormModal)
+    rows = {r.spec["key"]: r for r in app.screen.query("FieldRow")}
+    assert set(rows) == {"every"}  # frequency only: a time of day is for scheduling, not asked here
+    rows["every"].query_one(Select).value = every
+    await pilot.pause()
+    await pilot.press("ctrl+s")
+    await _settle(app, pilot)
+    return str(app.screen.query_one("#manifest-schedule", Button).label)
+
+
+def test_the_frequency_is_set_shown_and_removed(tmp_path, no_token, run_tui):
+    path, _ = _manifest(tmp_path)
+
+    label = run_tui(lambda app, pilot: _set_schedule(app, pilot, "DAILY"), path)
+    assert label == "daily"
+    assert _run_block(path)["schedule"] == {"every": "DAILY"}
+
+    run_tui(lambda app, pilot: _set_schedule(app, pilot, BLANK), path)
+    assert "schedule" not in _run_block(path)
+
+
+def test_a_time_already_in_the_manifest_is_kept(tmp_path, no_token, run_tui):
+    path, _ = _manifest(tmp_path)
+    m = yaml.safe_load(path.read_text())
+    api.set_schedule(m, "WEEKLY", "02:00")
+    api.dump_manifest(m, path, REPO_ROOT)
+
+    label = run_tui(lambda app, pilot: _set_schedule(app, pilot, "DAILY"), path)
+    assert label == "daily"
+    assert _run_block(path)["schedule"] == {"every": "DAILY", "at": "02:00"}
+
+
+def test_the_detail_says_where_the_frequency_comes_from(tmp_path, no_token, run_tui):
+    path, name = _manifest(tmp_path)
+    m = yaml.safe_load(path.read_text())
+    api.set_schedule(m, "WEEKLY")
+    api.dump_manifest(m, path, REPO_ROOT)
+
+    async def body(app, pilot):
+        panel = await _manifest_page(app, pilot)
+        return _plain(app, panel.current_detail())
+
+    text = run_tui(body, path)
+    assert "weekly  follows the schedule" in text, text
+
+
+def _plain(app, renderable) -> str:
+    from rich.console import Console
+
+    console = Console(width=120, color_system=None)
+    with console.capture() as cap:
+        console.print(renderable)
+    return cap.get()
+
+
+def test_an_older_not_set_schedule_opens_and_is_kept(tmp_path, no_token, run_tui):
+    """NOT_SET isn't offered (nor valid any more); a manifest that has it must still open the form."""
+    path, _ = _manifest(tmp_path)
+    m = yaml.safe_load(path.read_text())
+    m["run"]["schedule"] = {"every": "NOT_SET", "at": "02:00"}
+    path.write_text(yaml.safe_dump(m))
+
+    async def body(app, pilot):
+        await _manifest_page(app, pilot)
+        app.screen.query_one("#manifest-schedule", Button).press()
+        await _settle(app, pilot)
+        assert isinstance(app.screen, FormModal)
+        value = app.screen.query_one(Select).value
+        await pilot.press("ctrl+s")  # unchanged
+        await _settle(app, pilot)
+        return value
+
+    assert run_tui(body, path) == BLANK
+    assert _run_block(path)["schedule"] == {"every": "NOT_SET", "at": "02:00"}
+
+    label = run_tui(lambda app, pilot: _set_schedule(app, pilot, "WEEKLY"), path)
+    assert label == "weekly" and _run_block(path)["schedule"] == {"every": "WEEKLY", "at": "02:00"}
+
+
+def test_the_entry_form_keeps_a_frequency_it_cant_show(tmp_path, no_token, no_network, run_tui):
+    path, _ = _manifest(tmp_path)
+    m = yaml.safe_load(path.read_text())
+    m["run"]["fetchers"][0]["paramify"] = {"frequency": "NOT_SET"}
+    path.write_text(yaml.safe_dump(m))
+
+    async def edit(app, pilot, owner=None, frequency=None):
+        panel = await _manifest_page(app, pilot)
+        await pilot.press("e")
+        await pilot.pause()
+        rows = {r.spec["key"]: r for r in app.screen.query("FieldRow") if r.group == "paramify"}
+        shown = rows["frequency"].query_one(Select).value
+        if owner is not None:
+            rows["owner"].query_one(Input).value = owner
+        if frequency is not None:
+            rows["frequency"].query_one(Select).value = frequency
+        await pilot.pause()
+        await pilot.press("ctrl+s")
+        await _settle(app, pilot)
+        return shown, dict(panel._manifest["run"]["fetchers"][0]["paramify"])
+
+    # The schema refuses NOT_SET, so the edit stays in memory until it is fixed.
+    shown, kept = run_tui(lambda app, pilot: edit(app, pilot, owner="bob"), path)
+    assert shown == BLANK and kept == {"frequency": "NOT_SET", "owner": "bob"}
+
+    # A frequency the user picks replaces it, and the manifest saves again.
+    run_tui(lambda app, pilot: edit(app, pilot, owner="bob", frequency="DAILY"), path)
+    assert _run_block(path)["fetchers"][0]["paramify"] == {"frequency": "DAILY", "owner": "bob"}
+
+
+def test_the_detail_reads_upload_yaml_once_and_names_the_default(tmp_path, no_token, run_tui, monkeypatch):
+    path, name = _manifest(tmp_path)
+    reads = []
+
+    def values(root):
+        reads.append(root)
+        return {"overrides": {name: {"frequency": "MONTHLY"}}}
+
+    monkeypatch.setattr(api, "default_upload_values", values)
+
+    async def body(app, pilot):
+        panel = await _manifest_page(app, pilot)
+        reads.clear()
+        texts = [_plain(app, panel.current_detail()) for _ in range(3)]
+        once = len(reads)
+        panel.rebuild()
+        _plain(app, panel.current_detail())
+        return texts[0], once, len(reads)
+
+    text, once, after_rebuild = run_tui(body, path)
+    assert "monthly  from the default upload.yaml" in text, text
+    assert once <= 1 and after_rebuild == once + 1

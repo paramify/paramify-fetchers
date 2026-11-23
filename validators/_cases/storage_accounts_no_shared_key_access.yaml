@@ -1,0 +1,18 @@
+validator: storage_accounts_no_shared_key_access
+cases:
+  - name: shared_key_disallowed_everywhere
+    expect: PASS
+    note: the summary's shared_key_access_accounts key must not count.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"storage_accounts":[{"name":"sa1","allow_shared_key_access":false},{"name":"sa2","allow_shared_key_access":false}]},"summary":{"shared_key_access_accounts":0}}}'
+
+  - name: one_account_allows_shared_key
+    expect: FAIL
+    note: a common non-compliant shape.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"storage_accounts":[{"name":"sa1","allow_shared_key_access":false},{"name":"sa2","allow_shared_key_access":true}]},"summary":{"shared_key_access_accounts":1}}}'
+
+  - name: key_renamed_ALONE_THIS_PASSES
+    expect: PASS
+    note: >
+      Deliberate. storage_encryption_fields_present fails here; see
+      set_EVD-AZURE-STORAGE-ENC.yaml.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"storage_accounts":[{"name":"sa1","shared_key_access":true}]}}}'
