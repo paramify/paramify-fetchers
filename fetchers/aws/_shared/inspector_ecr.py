@@ -28,6 +28,7 @@ from dotenv import load_dotenv
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "_lib"))
 from fetcher_status import report_failure
+from report_csv import csv_safe
 
 RESOURCE_TYPE = "AWS_ECR_CONTAINER_IMAGE"
 # Highest first, after UNTRIAGED: a min_severity threshold keeps every severity
@@ -833,13 +834,6 @@ def csv_rows(evidence):
                 "Reference URLs": json.dumps(package.get("referenceUrls", [])),
                 "Related Vulnerabilities": json.dumps(package.get("relatedVulnerabilities", [])),
             }
-
-
-def csv_safe(value):
-    # CSV quoting alone does not stop spreadsheet formula interpretation.
-    if isinstance(value, str) and value.lstrip(" \t\r\n").startswith(("=", "+", "-", "@")):
-        return "'" + value
-    return value
 
 
 def scope_suffix(meta, scope):

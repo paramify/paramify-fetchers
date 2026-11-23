@@ -309,17 +309,23 @@ def target_shape(schema):
 
 
 BP_TARGET = target_shape(yaml.safe_load((GITHUB / "branch_protection" / "fetcher.yaml").read_text())["target_schema"])
+INVENTORY_SCHEME = yaml.safe_load((GITHUB / "repository_inventory" / "fetcher.yaml").read_text())["pipeline"]["id_scheme"]
 
 
 @pytest.mark.parametrize("name", FETCHERS)
 def test_every_fetcher_follows_the_shape(name):
     m, spec = MODS[name], yaml.safe_load((GITHUB / name / "fetcher.yaml").read_text())
     assert m.NAME == spec["name"] == f"github_{name}"
-    assert callable(m.collect)
     assert target_shape(spec["target_schema"]) == BP_TARGET  # one target shape for the whole category
-    assert spec["evidence_set"]["reference_id"].startswith("EVD-GITHUB-")
     declared = {f["env"] for f in spec.get("config_schema", {}).values()}
     assert {env for env, _ in getattr(m, "CONFIG", {}).values()} <= declared
+    if spec.get("kind") == "issue_report":
+        # An alert report (_shared/alert_report.py): its rows link to the repository inventory's records.
+        assert callable(m.list_alerts) and callable(m.row) and m.KIND.endswith("/alerts")
+        assert spec["pipeline"] == {"type": "vulnerability", "id_scheme": INVENTORY_SCHEME, "asset_id_field": "Asset ID"}
+        return
+    assert callable(m.collect)
+    assert spec["evidence_set"]["reference_id"].startswith("EVD-GITHUB-")
     instructions = spec["evidence_set"]["instructions"]
     if "\nCommands Executed:\n" not in instructions:
         # Old-style prose instructions stay short. Those in the Script/Access/Commands/Output/Summary format are

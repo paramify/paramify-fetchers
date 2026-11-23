@@ -60,6 +60,11 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`github_dependabot_report` 0.1.0: open Dependabot alerts as a vulnerability report.** An issue report that writes
+  every open Dependabot alert in the organization as one CSV row, with the repository's inventory identifier in an
+  `Asset ID` column (`pipeline: vulnerability`, `id_scheme: github-repository-url`), so findings link to
+  `github_repository_inventory`. Any failed read writes no report. See `fetchers/github/README.md#alert-reports`.
+
 - **`status: beta` in `fetcher.yaml` marks a fetcher that is not proven yet.** The field takes `stable` (the default)
   or `beta`. A beta fetcher gets a BETA label after its name everywhere the TUI names it (catalog, manifest table,
   both detail panes, with a note in the details) and `[beta]` on the first line of `paramify describe`.

@@ -166,7 +166,8 @@ include = ["framework*"]
 # on duplicate test_fetcher.py basenames. importlib import-mode additionally makes
 # duplicate basenames safe if a path outside tests/ is ever collected explicitly.
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+# fetchers/ holds the tests a fetcher keeps in its own tests/ directory (for example fetchers/github/*_report/tests).
+testpaths = ["tests", "fetchers"]
 addopts = "--import-mode=importlib"
 
 # Lint + import order for the framework's OWN code. Ported v0.x fetchers under

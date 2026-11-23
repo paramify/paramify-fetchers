@@ -120,6 +120,16 @@ def as_bool(value: Any) -> Optional[bool]:
     return None
 
 
+def repository_asset_id(api_url: str, repo_id: Any) -> str:
+    """A repository's asset ID: its REST URL by numeric id, unique per host and stable across renames and transfers.
+
+    The inventory's unique_asset_identifier and the alert reports' Asset ID column, so the two always match.
+    """
+    if repo_id in (None, ""):
+        raise ValueError("a repository without an id has no asset ID")
+    return f"{api_url.rstrip('/')}/repositories/{repo_id}"
+
+
 def split_list(value: Optional[str]) -> List[str]:
     return [v for v in re.split(r"[,\s]+", value or "") if v]
 
@@ -690,20 +700,10 @@ def run(name: str, collect: Callable[[GitHubClient, dict, List[dict], Dict[str, 
     ignored in `filters_ignored`. It does not fail on them: the fetchers usually share one target, and narrowing the
     others must not break the inventory.
     """
-    logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"),
-                        format="%(asctime)s %(levelname)s %(name)s %(message)s")
-    load_dotenv()
-    try:
-        target = _target_from_env()
-        settings = {key: _env_value(env, default) for key, (env, default) in (config or {}).items()}
-    except ValueError as exc:
-        report_failure(str(exc), "bad_config")
+    started = start(config, check)
+    if started is None:
         return 1
-    # Settings that conflict with each other fail before the first API call, like a value of the wrong type.
-    problem = check(settings) if check else None
-    if problem:
-        report_failure(problem, "bad_config")
-        return 1
+    target, settings = started
 
     filters_ignored = []
     if inventory:
@@ -759,18 +759,44 @@ def run(name: str, collect: Callable[[GitHubClient, dict, List[dict], Dict[str, 
                          "data": [] if client.failures else records})
     output_dir = Path(os.environ.get("EVIDENCE_DIR", "./evidence"))
     output_dir.mkdir(parents=True, exist_ok=True)
-    host = urlparse(target["api_url"]).hostname or "github"
-    suffix = re.sub(r"[^a-zA-Z0-9_-]", "_", target["org"] if host == "api.github.com" else f"{host}_{target['org']}")
-    path = output_dir / f"{name}_{suffix}.json"
+    path = output_dir / f"{name}_{file_suffix(target)}.json"
     path.write_text(json.dumps(evidence, indent=2))
     logger.info("Evidence saved to %s", path)
+    return report_failures(client) if client.failures else 0
 
-    if client.failures:
-        reason = "; ".join(f"{f['operation']}: {f['message']}" for f in client.failures[:10])
-        more = f" (+{len(client.failures) - 10} more)" if len(client.failures) > 10 else ""
-        report_failure(f"{len(client.failures)} collection failure(s): {reason}{more}", client.failure_code())
-        return 1
-    return 0
+
+def start(config: Optional[Config] = None,
+          check: Optional[Callable[[Dict[str, Any]], Optional[str]]] = None) -> Optional[Tuple[Dict[str, Any], Dict[str, Any]]]:
+    """Logging, .env, then (target, settings) from the environment. None once a bad_config failure is reported."""
+    logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"),
+                        format="%(asctime)s %(levelname)s %(name)s %(message)s")
+    load_dotenv()
+    try:
+        target = _target_from_env()
+        settings = {key: _env_value(env, default) for key, (env, default) in (config or {}).items()}
+    except ValueError as exc:
+        report_failure(str(exc), "bad_config")
+        return None
+    # Settings that conflict with each other fail before the first API call, like a value of the wrong type.
+    problem = check(settings) if check else None
+    if problem:
+        report_failure(problem, "bad_config")
+        return None
+    return target, settings
+
+
+def file_suffix(target: Dict[str, Any]) -> str:
+    """The organization, and the host when it is not github.com, as a filename-safe suffix: one file per target."""
+    host = urlparse(target["api_url"]).hostname or "github"
+    return re.sub(r"[^a-zA-Z0-9_-]", "_", target["org"] if host == "api.github.com" else f"{host}_{target['org']}")
+
+
+def report_failures(client: GitHubClient, outcome: str = "") -> int:
+    """Report the client's recorded failures (the first ten) as the run's failure. Returns the exit code, 1."""
+    reason = "; ".join(f"{f['operation']}: {f['message']}" for f in client.failures[:10])
+    more = f" (+{len(client.failures) - 10} more)" if len(client.failures) > 10 else ""
+    report_failure(f"{len(client.failures)} collection failure(s){outcome}: {reason}{more}", client.failure_code())
+    return 1
 
 
 def _target_from_env() -> Dict[str, Any]:
