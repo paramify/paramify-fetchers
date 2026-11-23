@@ -19,10 +19,10 @@ Environment: SLACK_RELEASE_WEBHOOK (a Slack workflow webhook; without it the
 message is printed), RELEASE_REVIEWER (default 21tmccauley) and
 RELEASE_REMINDER=1 (the Thursday run: also remind when a PR is still open).
 `draft` fetches `origin` first when the clone has that remote. It builds the
-branch in a temporary worktree, so the checkout is not touched, and it refuses
-to run over uncommitted changes to tracked files or local release/next commits
-that are not pushed. `--no-push` is a dry run: it builds the local branch and
-prints the pull request and the DM instead of sending them.
+commit in a temporary worktree and pushes it straight to origin's release/next,
+so it never touches the checkout or any local branch; a rebuild reads
+origin/release/next. `--no-push` is a dry run: it builds the commit, leaves it
+unreferenced, prints its sha, the pull request and the DM, and sends nothing.
 """
 
 from __future__ import annotations
@@ -192,46 +192,6 @@ def _on_branch(root: Path, rows: List[dict]) -> Tuple[Optional[dict], List[dict]
     return previous, [r for r in rows if _key(r) not in seen], base
 
 
-def _keep_advice(remote_sha: Optional[str]) -> str:
-    if remote_sha:
-        return f"push them, or drop them with: git branch -f {BRANCH} origin/{BRANCH}"
-    return f"push them (git push origin {BRANCH}), or delete the branch: git branch -D {BRANCH}"
-
-
-def _refuse_local_work(root: Path, base_sha: str, remote_sha: Optional[str]) -> Optional[str]:
-    """Stop before a draft could hide or lose work in this clone.
-
-    Returns the local release/next tip when it has unpushed draft commits (with
-    a Release-Base trailer): `_refuse_changed_draft` checks it after the build.
-    """
-    if git(root, "status", "--porcelain", "--untracked-files=no").strip():
-        raise ReleaseError("the checkout has uncommitted changes; commit or stash them, then run draft again")
-    tip = _rev(root, f"refs/heads/{BRANCH}")
-    if tip is None:
-        return None
-    log = git(root, "log", "--format=%x00%(trailers:key=Release-Base,valueonly)", tip,
-              "--not", base_sha, *([remote_sha] if remote_sha else []))
-    trailers = log.split("\0")[1:]
-    mine = sum(1 for trailer in trailers if not trailer.strip())
-    if mine:
-        lacks = f"that origin/{BRANCH} lacks" if remote_sha else "that are not pushed"
-        raise ReleaseError(f"local {BRANCH} has {_plural(mine, 'commit')} {lacks}; {_keep_advice(remote_sha)}")
-    return tip if trailers else None
-
-
-def _refuse_changed_draft(
-    root: Path, tip: Optional[str], built: Optional[str], remote_sha: Optional[str]
-) -> None:
-    """An unpushed draft commit may be amended by hand: keep it unless it matches the build or origin."""
-    if tip is None:
-        return
-    trees = {git(root, "rev-parse", f"{sha}^{{tree}}").strip() for sha in (built, remote_sha) if sha}
-    if git(root, "rev-parse", f"{tip}^{{tree}}").strip() not in trees:
-        where = f"origin/{BRANCH} and a fresh draft" if remote_sha else "a fresh draft"
-        raise ReleaseError(f"local {BRANCH} {tip[:12]} is not pushed and differs from {where}; "
-                           f"{_keep_advice(remote_sha)}")
-
-
 # --------------------------------------------------------------------------- #
 # GitHub and Slack
 # --------------------------------------------------------------------------- #
@@ -345,7 +305,10 @@ def _header(text: Optional[str]) -> str:
 
 
 def _build(root: Path, base_sha: str, files: Dict[str, Optional[str]], doc: dict, today: str) -> str:
-    """Commit the release on top of base in a temporary worktree; returns the commit."""
+    """Commit the release on top of base in a temporary, detached worktree; returns the commit.
+
+    The commit is referenced by no local branch; `draft` pushes it or prints it.
+    """
     version = doc["version"]
     try:
         changelog = release_notes.cut_changelog(files[CHANGELOG] or "", version, today)
@@ -361,14 +324,6 @@ def _build(root: Path, base_sha: str, files: Dict[str, Optional[str]], doc: dict
         git(tree, "add", CHANGELOG, PYPROJECT, "releases/")
         git(tree, "commit", "-q", "-m", f"chore(release): v{version}", "-m", f"Release-Base: {base_sha}")
         return git(tree, "rev-parse", "HEAD").strip()
-
-
-def _point_branch(root: Path, sha: str) -> None:
-    """Move local release/next to `sha`; a checkout on it (clean, as checked) moves too."""
-    if git(root, "branch", "--show-current").strip() == BRANCH:
-        git(root, "reset", "--quiet", "--keep", sha)
-    else:
-        git(root, "branch", "--quiet", "--force", BRANCH, sha)
 
 
 def _same(doc: dict, previous: dict) -> bool:
@@ -394,7 +349,6 @@ def draft(root: Path, *, base: str, today: str, gh: GitHub, notify: Notify = not
         git(root, "fetch", "--quiet", "--prune", "--tags", "origin")
     base_sha = git(root, "rev-parse", f"{base}^{{commit}}").strip()
     remote_sha = _rev(root, f"refs/remotes/origin/{BRANCH}")
-    local_tip = _refuse_local_work(root, base_sha, remote_sha)
     send: Notify = notify if push else (lambda text, url: print(f"Would notify: {text} {url}"))
 
     tag = last_tag(root, base_sha)
@@ -425,17 +379,16 @@ def draft(root: Path, *, base: str, today: str, gh: GitHub, notify: Notify = not
     doc["version"] = version
 
     if pr and previous is not None and built_on == base_sha and _same(doc, previous):
-        _refuse_changed_draft(root, local_tip, None, remote_sha)  # origin is what a build would give
         if reminder:
             send(f"v{version} is still waiting for you.", pr["url"])
         return "unchanged"
 
     built = _build(root, base_sha, files, doc, today)
-    _refuse_changed_draft(root, local_tip, built, remote_sha)
-    _point_branch(root, built)
     if push:
         git(root, "push", "--quiet", f"--force-with-lease=refs/heads/{BRANCH}:{remote_sha or ''}",
-            "origin", f"refs/heads/{BRANCH}:refs/heads/{BRANCH}")
+            "origin", f"{built}:refs/heads/{BRANCH}")
+    else:
+        print(f"Built {built} (not pushed). Read it with: git show {built}:releases/{version}.yaml")
 
     title, pr_body = f"Release v{version}", _pr_body(root, doc, base_sha)
     if pr is None:

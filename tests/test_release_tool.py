@@ -11,6 +11,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import re
 import socket
 import subprocess
 import threading
@@ -77,15 +78,15 @@ def _sha(repo: Path, ref: str = "HEAD") -> str:
     return _git(repo, "rev-parse", ref).strip()
 
 
-def _show(repo: Path, path: str, ref: str = "release/next") -> str:
+def _show(repo: Path, path: str, ref: str = "origin/release/next") -> str:
     return _git(repo, "show", f"{ref}:{path}")
 
 
-def _exists(repo: Path, path: str, ref: str = "release/next") -> bool:
+def _exists(repo: Path, path: str, ref: str = "origin/release/next") -> bool:
     return subprocess.run(["git", "cat-file", "-e", f"{ref}:{path}"], cwd=repo, capture_output=True).returncode == 0
 
 
-def _release_file(repo: Path, version: str, ref: str = "release/next") -> dict:
+def _release_file(repo: Path, version: str, ref: str = "origin/release/next") -> dict:
     return yaml.safe_load(_show(repo, f"releases/{version}.yaml", ref))
 
 
@@ -98,8 +99,8 @@ def _unmarked(items: list) -> list:
 
 
 def _on_branch_edit(clone: Path, version: str, edit, message: str = "Tate's edits", push: bool = True) -> None:
-    """Tate checks out release/next, edits the release file, commits and (by default) pushes."""
-    _git(clone, "switch", "-q", "release/next")
+    """Tate checks out origin's release/next, edits the release file, commits and (by default) pushes."""
+    _git(clone, "switch", "-q", "-C", "release/next", "origin/release/next")
     path = f"releases/{version}.yaml"
     doc = yaml.safe_load((clone / path).read_text())
     files = edit(doc) or {path: yaml.safe_dump(doc, sort_keys=False)}
@@ -205,11 +206,12 @@ def test_first_draft_builds_the_branch_and_opens_the_pr(clone, week, upstream):
     gh, notes = FakeGitHub(), []
     assert _draft(clone, gh, notes) == "opened"
 
-    # Built beside the checkout: the clone stays on main, clean.
+    # Built beside the checkout and pushed by sha: the clone stays on main, with no local release/next.
     assert _git(clone, "branch", "--show-current").strip() == "main"
     assert _git(clone, "status", "--porcelain") == ""
     assert _git(clone, "worktree", "list").count("\n") == 1
-    assert _sha(upstream, "release/next") == _sha(clone, "release/next")
+    assert _git(clone, "branch", "--list", "release/next") == ""
+    assert _sha(upstream, "release/next") == _sha(clone, "origin/release/next")
 
     doc = _release_file(clone, "0.7.0-beta")
     assert doc["version"] == "0.7.0-beta" and str(doc["date"]) == TODAY
@@ -227,7 +229,7 @@ def test_first_draft_builds_the_branch_and_opens_the_pr(clone, week, upstream):
     assert 'version = "0.7.0"' in _show(clone, "pyproject.toml")
     assert _show(clone, "releases/unreleased.yaml") == UNRELEASED_HEADER + "version: unreleased\nhighlights: []\n"
 
-    message = _git(clone, "log", "-1", "--format=%B", "release/next")
+    message = _git(clone, "log", "-1", "--format=%B", "origin/release/next")
     assert message.startswith("chore(release): v0.7.0-beta")
     assert f"Release-Base: {_sha(clone, 'origin/main')}" in message
 
@@ -252,55 +254,35 @@ def test_no_push_is_a_dry_run(clone, week, upstream, capsys):
     out = capsys.readouterr().out
     assert "Would open pull request: Release v0.7.0-beta" in out
     assert "Would notify: v0.7.0-beta is ready to review" in out
-    assert _exists(clone, "releases/0.7.0-beta.yaml")  # the local branch is there to read
+    built = re.search(r"git show ([0-9a-f]{40}):releases/0.7.0-beta.yaml", out)[1]
+    assert _release_file(clone, "0.7.0-beta", ref=built)["version"] == "0.7.0-beta"
+    assert _git(clone, "branch", "--list", "release/next") == ""
     assert _git(upstream, "branch", "--list", "release/next") == ""
 
 
-def test_draft_refuses_a_dirty_tree(clone, week):
-    (clone / "CHANGELOG.md").write_text("half an edit\n")
-    gh = FakeGitHub()
-    with pytest.raises(release.ReleaseError, match="commit or stash"):
-        _draft(clone, gh, [])
-    assert (clone / "CHANGELOG.md").read_text() == "half an edit\n"
-    assert gh.calls == [] and _git(clone, "branch", "--list", "release/next") == ""
-
-
-def test_draft_refuses_unpushed_commits_on_local_release_next(clone, week, upstream):
-    gh, notes = FakeGitHub(), []
-    _draft(clone, gh, notes)
-    _on_branch_edit(clone, "0.7.0-beta", lambda d: d["fetchers"][0].update(note="Mine"), push=False)
-    mine = _sha(clone, "release/next")
-    with pytest.raises(release.ReleaseError, match="1 commit that origin/release/next lacks"):
-        _draft(clone, gh, notes)
-    assert _sha(clone, "release/next") == mine and len(gh.calls) == 1
-
-
-def test_draft_refuses_an_amended_draft_commit_that_is_not_pushed(clone, week, upstream):
+def test_draft_leaves_the_checkout_and_local_branches_alone(clone, week, upstream):
     gh = FakeGitHub()
     _draft(clone, gh, [])
-    _git(clone, "switch", "-q", "release/next")
+    first = _sha(upstream, "release/next")
+    # Tate has release/next checked out with an amended, unpushed draft commit and a dirty file.
+    _git(clone, "switch", "-q", "-C", "release/next", "origin/release/next")
     path = clone / "releases" / "0.7.0-beta.yaml"
     path.write_text(path.read_text().replace("reads more rows", "Reads every row"))
-    _git(clone, "commit", "-q", "-a", "--amend", "--no-edit")  # keeps the Release-Base trailer
+    _git(clone, "commit", "-q", "-a", "--amend", "--no-edit")
     amended = _sha(clone, "release/next")
-    with pytest.raises(release.ReleaseError, match=f"{amended[:12]}.*git branch -f release/next origin/release/next"):
-        _draft(clone, gh, [])
+    (clone / "CHANGELOG.md").write_text("half an edit\n")
+    status = _git(clone, "status", "--porcelain")
+    _commit(upstream, {"docs/other.md": "main moved\n"}, "docs: other")
+
+    assert _draft(clone, gh, []) == "rebuilt"
+
+    assert _git(clone, "branch", "--show-current").strip() == "release/next"
     assert _sha(clone, "release/next") == amended
-
-
-def test_an_unpushed_no_push_draft_that_matches_does_not_block(clone, week):
-    gh = FakeGitHub()
-    assert _draft(clone, gh, [], push=False) == "opened"
-    assert _draft(clone, gh, []) == "opened"  # the leftover equals what the draft builds
-
-
-def test_unpushed_commits_without_a_remote_branch_get_advice_that_works(clone, week):
-    _draft(clone, FakeGitHub(), [], push=False)
-    _on_branch_edit(clone, "0.7.0-beta", lambda d: d["fetchers"][0].update(note="Mine"), push=False)
-    with pytest.raises(release.ReleaseError) as err:
-        _draft(clone, FakeGitHub(), [])
-    assert "origin/release/next" not in str(err.value).split(";", 1)[1]
-    assert "git push origin release/next" in str(err.value) and "git branch -D release/next" in str(err.value)
+    assert (clone / "CHANGELOG.md").read_text() == "half an edit\n"
+    assert _git(clone, "status", "--porcelain") == status
+    rebuilt = _sha(upstream, "release/next")
+    assert rebuilt not in (first, amended)
+    assert _sha(upstream, "release/next^") == _sha(upstream, "main")
 
 
 def test_draft_refuses_a_version_with_a_v(clone, week):
@@ -319,7 +301,7 @@ def test_second_draft_with_unchanged_main_changes_nothing(clone, week, upstream)
     _draft(clone, gh, notes)
     tip = _sha(upstream, "release/next")
     assert _draft(clone, gh, notes) == "unchanged"
-    assert _sha(upstream, "release/next") == tip == _sha(clone, "release/next")
+    assert _sha(upstream, "release/next") == tip == _sha(clone, "origin/release/next")
     assert [c[0] for c in gh.calls] == ["create_pr"] and len(notes) == 1
 
 
@@ -348,9 +330,8 @@ def test_rebuild_keeps_tates_edits_and_adds_new_rows(clone, week, upstream):
     assert lines["demo_alpha"]["note"] == "Reads every row, not only the first page"
     assert lines["demo_gamma"]["note"] == "handles empty pages"
     assert _marked(doc) == ["paramify tidy cleans up", "demo_gamma"]
-    assert f"Release-Base: {_sha(upstream, 'main')}" in _git(clone, "log", "-1", "--format=%B", "release/next")
-    assert _sha(upstream, "release/next") == _sha(clone, "release/next") == _sha(clone, "HEAD")
-    assert _git(clone, "status", "--porcelain") == ""  # Tate's checkout moved to the rebuild
+    assert f"Release-Base: {_sha(upstream, 'main')}" in _git(clone, "log", "-1", "--format=%B", "origin/release/next")
+    assert _sha(upstream, "release/next") == _sha(clone, "origin/release/next")
     assert [c[0] for c in gh.calls] == ["create_pr", "edit_pr"]
     assert notes[-1] == ("v0.7.0-beta has more to read: 1 fetcher line, 1 new row to read.", PR_URL)
 
@@ -368,8 +349,9 @@ def test_rebuild_without_a_trailer_uses_the_rows_in_the_file(clone, week, upstre
     gh, notes = FakeGitHub(), []
     _draft(clone, gh, notes)
     # Someone rewrote the branch by hand: no Release-Base trailer anywhere.
-    _git(clone, "switch", "-q", "release/next")
+    _git(clone, "switch", "-q", "-C", "release/next", "origin/release/next")
     _git(clone, "commit", "-q", "--amend", "-m", "chore(release): v0.7.0-beta")
+    _git(clone, "push", "-q", "--force", "origin", "release/next")
     _on_branch_edit(clone, "0.7.0-beta", lambda d: d.update(highlights=_unmarked(d["highlights"]),
                                                             fetchers=_unmarked(d["fetchers"])))
     later_row = {"tag": "cli", "title": "paramify tidy cleans up"}
@@ -426,7 +408,7 @@ def test_a_branch_deleted_upstream_does_not_block_the_next_draft(clone, week, up
     gh.open_pr = None  # the PR was closed and its branch deleted
     _git(upstream, "branch", "-q", "-D", "release/next")
     assert _draft(clone, gh, []) == "opened"
-    assert _sha(upstream, "release/next") == _sha(clone, "release/next")
+    assert _sha(upstream, "release/next") == _sha(clone, "origin/release/next")
 
 
 # --------------------------------------------------------------------------- #
@@ -435,7 +417,7 @@ def test_a_branch_deleted_upstream_does_not_block_the_next_draft(clone, week, up
 
 def test_check_names_a_missing_line_and_a_wrong_version(clone, week):
     assert release.check(clone) == []  # main: no release file without a tag
-    _draft(clone, FakeGitHub(), [], push=False)
+    _draft(clone, FakeGitHub(), [])
     _on_branch_edit(clone, "0.7.0-beta", lambda d: d.update(
         version="0.6.1-beta", fetchers=[f for f in d["fetchers"] if f["name"] != "demo_alpha"]), push=False)
 
@@ -463,9 +445,9 @@ def _upstream_tag(upstream: Path, tag: str) -> str:
 
 def test_publish_refuses_a_draft(clone, week, upstream):
     _draft(clone, FakeGitHub(), [])
-    head = _sha(clone, "release/next")
+    head = _sha(clone, "origin/release/next")
     _git(clone, "switch", "-q", "-C", "main", "origin/main")
-    _git(clone, "merge", "-q", "--no-ff", "-m", "merge", "release/next")
+    _git(clone, "merge", "-q", "--no-ff", "-m", "merge", head)
     gh, notes = FakeGitHub(), []
     with pytest.raises(release.ReleaseError, match="draft"):
         release.publish(clone, head_sha=head, merge_sha=_sha(clone), gh=gh, notify=lambda t, u: notes.append(t))
