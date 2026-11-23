@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Force this version (X.Y.Z or X.Y.Z-beta). Leave empty to pick it from the changes."
+        description: "Force this version (X.Y.Z or X.Y.Z-beta), the one the changes call for or later. Leave empty to pick it from the changes."
         required: false
         default: ""
 

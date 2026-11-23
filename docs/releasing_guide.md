@@ -126,7 +126,12 @@ message.
 | `release-redraft` | Each push to `main` | Runs `draft` only if a release PR is open. |
 | `release-publish` | A merged PR from `release/next` | Runs `publish`. |
 
-All three use the same `release` concurrency group, so two runs never overlap.
+`release-draft` and `release-redraft` use the `release` concurrency group, so
+two drafts never overlap. `release-publish` has its own group,
+`release-publish`, so a new draft cannot cancel a publish that waits to run.
+A draft that runs after the merge and before the tag stops, and tells you to
+run `publish`.
+
 All three use the GitHub App token, not `GITHUB_TOKEN`. A PR that
 `GITHUB_TOKEN` opens does not start CI, and `ci-ok` would never report.
 Each workflow sends a failure DM with a link to its run.
