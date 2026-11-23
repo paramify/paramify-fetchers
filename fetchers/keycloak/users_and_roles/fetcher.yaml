@@ -44,13 +44,14 @@ evidence_set:
   instructions: |
     Script: keycloak/users_and_roles/fetcher.py
 
-    Access: A Keycloak client with service accounts enabled whose service account holds the realm-management client roles view-users, view-clients and view-events, and nothing else, reached from a network that can call the Keycloak admin endpoint. On Keycloak 26.8.2 and later, the client also needs the built-in kc-admin-api client scope as a default scope, or every call is refused with 401. A call refused for a missing role records that role in api_failures. A per-user call refused once is not repeated for the other users, and every user's value for it reads null.
+    Access: A Keycloak client with service accounts enabled whose service account holds the realm-management client roles view-users, view-clients and view-events, and nothing else, reached from a network that can call the Keycloak admin endpoint. On Keycloak 26.8.2 and later, the client also needs the built-in kc-admin-api client scope as a default scope, or every call is refused with 401. A call refused for a missing role records that role in api_failures. A per-user call refused once is not repeated for the other users, and every user's value for it reads null. Set KEYCLOAK_REALM to the application realm whose users are judged. The master realm is not supported and fails the run as bad_config: its administrators' roles live in per-realm clients rather than realm-management, and they can manage every realm, so they need their own review. The service-account client can still live in master through KEYCLOAK_AUTH_REALM.
 
     Commands Executed:
     - POST /realms/{auth realm}/protocol/openid-connect/token — a client-credentials token for the service account (no role)
     - GET /admin/realms/{realm}/users — every user, page by page; Keycloak leaves service accounts out (view-users)
     - GET /admin/realms/{realm}/clients?clientId=realm-management — the client that holds the admin roles (view-clients)
     - GET /admin/realms/{realm}/events/config — whether successful sign-ins are stored and how long they are kept (view-events)
+    - GET /admin/realms/{realm}/events?dateTo={day before the window}&max=1 — whether any stored event is older than the window, so the history reaches back across it (view-events)
     - GET /admin/realms/{realm}/events?type=LOGIN — stored successful sign-ins in the window, page by page, read for each user's newest sign-in (view-events)
     - GET /admin/realms/{realm}/users/{id}/credentials — the types of authenticator each user has registered (view-users)
     - GET /admin/realms/{realm}/users/{id}/groups — each user's groups (view-users)
@@ -58,11 +59,12 @@ evidence_set:
     - GET /admin/realms/{realm}/users/{id}/role-mappings/clients/{realm-management id}/composite — each user's effective admin roles (view-users)
     - GET /admin/realms/{realm}/users/{id}/federated-identity — the external identity providers each user is linked to (view-users)
 
-    Output: keycloak_users_and_roles.json — each user's id, username, enabled state, creation time, required actions, LDAP federation, linked identity providers, authenticator types, groups, effective realm and admin roles, privileged roles held, newest sign-in in the window and whether the account is inactive. Email addresses, first and last names, user attributes and credential data are never copied. A user brokered from an external identity provider may use a second factor there, which this evidence cannot see; such users are counted apart.
+    Output: keycloak_users_and_roles.json — each user's id, username, enabled state, creation time, required actions, LDAP federation, linked identity providers, authenticator types, whether it holds a local password and can sign in with a credential Keycloak checks, groups, effective realm and admin roles, privileged roles held, newest sign-in in the window and whether the account is inactive. Email addresses, first and last names, user attributes and credential data are never copied. Service-account users are left out by their link to a client (serviceAccountClientId), never by username, so a person whose username starts with service-account- is still read. A user brokered from an external identity provider with no local password may use a second factor there, which this evidence cannot see; such users are counted apart. A brokered user who still holds a local password can sign in with it, so is judged as a local user.
 
     Summary fields:
 
     Which users were read?
+    - realm — The realm read, from KEYCLOAK_REALM; every count below is for this realm only
     - users_read — True if the user list was read; false if it could not be, and every count below is null
     - users_total — Number of users, not counting service accounts
     - users_enabled — Number of enabled users
@@ -72,18 +74,20 @@ evidence_set:
     How do users sign in?
     - users_ldap_federated — Number of enabled users stored in a user federation provider such as LDAP
     - users_brokered — Number of enabled users linked to an external identity provider; null if any user's links could not be read
+    - brokered_users_with_local_password — Number of those who also hold a local password, so can sign in without the identity provider; null if any user's links or authenticators could not be read
     - users_with_second_factor — Number of enabled users with an OTP or WebAuthn authenticator registered in Keycloak; null if any user's authenticators could not be read
     - users_with_phishing_resistant_authenticator — Number of enabled users with a WebAuthn authenticator registered; null if any user's authenticators could not be read
-    - enabled_local_users_without_second_factor — Number of enabled users not linked to an external identity provider who have no OTP or WebAuthn authenticator; null if any user's links or authenticators could not be read
+    - enabled_local_users_without_second_factor — Number of enabled users who can sign in with a credential Keycloak checks (not linked to an external identity provider, or linked but still holding a local password) and have no OTP or WebAuthn authenticator; null if any user's links or authenticators could not be read
     - users_with_required_actions — Number of enabled users with a required action pending, such as UPDATE_PASSWORD or CONFIGURE_TOTP
 
     Who holds privileged roles?
     - privileged_realm_roles_checked — List of the realm roles set in privileged_roles, besides the realm-management admin roles
-    - privileged_users — Number of enabled users holding, directly, through a group or through a composite role, a realm-management admin role (realm-admin, a manage-* role, impersonation or create-client) or a role in privileged_realm_roles_checked; null if any user's roles could not be read
-    - privileged_local_users_without_second_factor — Number of those not linked to an external identity provider who have no OTP or WebAuthn authenticator; null if any of their roles, links or authenticators could not be read
-    - privileged_brokered_users — Number of privileged users linked to an external identity provider, whose second factor is not visible here
+    - privileged_users — Number of enabled users holding, directly, through a group or through a composite role, a realm-management admin role (realm-admin, a manage-* role including manage-organizations, impersonation or create-client) or a role in privileged_realm_roles_checked; null if any user's roles could not be read
+    - privileged_local_users_without_second_factor — Number of those who can sign in with a credential Keycloak checks (as enabled_local_users_without_second_factor) and have no OTP or WebAuthn authenticator; null if any of their roles, links or authenticators could not be read
+    - privileged_brokered_users — Number of privileged users linked to an external identity provider; for those without a local password, the second factor is not visible here
 
     Are accounts in use?
     - inactive_days — Days without a stored sign-in after which an enabled account is inactive
-    - sign_in_history_covers_window — True if successful sign-ins (LOGIN) are stored and kept for at least inactive_days, so recency can be judged; false if they are not stored or expire sooner; null if the event settings or the sign-ins could not be read
-    - enabled_users_inactive — Number of enabled users created before the window with no stored sign-in in it; null unless sign_in_history_covers_window is true
+    - sign_in_history_covers_window — True if successful sign-ins (LOGIN) are stored, kept for at least inactive_days, and at least one stored event is older than the window, so the history reaches back across it; false if they are not stored or expire sooner; null if no stored event is older than the window (storage may have started or been cleared inside it), or the event settings or sign-ins could not be read
+    - enabled_users_age_unknown — Number of enabled users with no creation time recorded, whose inactivity is left unknown
+    - enabled_users_inactive — Number of enabled users created before the window with no stored sign-in in it; null unless sign_in_history_covers_window is true and every enabled user's creation time is known

@@ -43,9 +43,13 @@ schemas and the `paramify` CLI — not the internal code.
 - **`keycloak_users_and_roles` fetcher.** Lists every user in a Keycloak realm, GET only with view-users, view-clients
   and view-events: enabled state, required actions, LDAP federation and linked identity providers, OTP and WebAuthn
   authenticators, groups, and effective realm and admin roles through groups and composites. Counts privileged users
-  (realm-management admin roles plus any realm roles set in `privileged_roles`), local users without a second factor,
-  and enabled accounts with no stored sign-in in `inactive_days` (default 90), judged only when sign-ins are kept that
-  long. Email addresses, names, attributes and credential data are never copied.
+  (realm-management admin roles, `manage-organizations` included, plus any realm roles set in `privileged_roles`), users
+  who can sign in with a Keycloak-checked credential (local, or brokered but still holding a local password) without a
+  second factor, and enabled accounts with no stored sign-in in `inactive_days` (default 90). Inactivity is judged only
+  when sign-ins are kept that long and a stored event predates the window, and stays null for an account with no
+  creation time. Service accounts are left out by their client link, not their username. The realm is named in the
+  summary, and the master realm is refused as `bad_config`. Email addresses, names, attributes and credential data are
+  never copied.
 - **`keycloak_admin_events` fetcher.** Reads the sign-in and admin events Keycloak has stored over a window (default 7
   days), GET only with view-events: successful, failed and blocked sign-ins counted apart, brute-force lockouts, users
   created and disabled, password resets, role grants and other privileged changes, and how recently events arrived,
