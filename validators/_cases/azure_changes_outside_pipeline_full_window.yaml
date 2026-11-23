@@ -1,0 +1,39 @@
+validator: azure_changes_outside_pipeline_full_window
+cases:
+  - name: full_window_with_changes
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"change_lookback_days":14,"changes_read":40,"changes_checked":3,"origins":["direct","manual_deployment"]}}}'
+
+  - name: keys_in_another_order_pretty_printed
+    expect: PASS
+    artifact: "{\n  \"metadata\": {\"exit_code\": 0},\n  \"payload\": {\n    \"summary\": {\n      \"origins\": [\n        \"manual_deployment\",\n        \"direct\"\n      ],\n      \"changes_read\": 40,\n      \"change_lookback_days\": 14\n    }\n  }\n}"
+
+  - name: narrowed_window
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"change_lookback_days":1,"changes_read":40,"origins":["direct","manual_deployment"]}}}'
+
+  - name: nothing_read
+    expect: FAIL
+    note: An environments setting that picks no target reads no change and leaves the window null.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"change_lookback_days":null,"changes_read":0,"origins":["direct","manual_deployment"]}}}'
+
+  - name: empty_read_over_full_window
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"change_lookback_days":14,"changes_read":0,"origins":["direct","manual_deployment"]}}}'
+
+  - name: manual_deployments_not_checked
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"change_lookback_days":14,"changes_read":40,"origins":["direct"]}}}'
+
+  - name: direct_edits_not_checked
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"change_lookback_days":14,"changes_read":40,"origins":["manual_deployment"]}}}'
+
+  - name: origin_keys_elsewhere_do_not_stand_in_for_origins
+    expect: FAIL
+    note: Each result's singular "origin" key and the by-origin counts are not the summary's "origins" list.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":[{"origin":"direct"},{"origin":"manual_deployment"}],"summary":{"change_lookback_days":14,"changes_read":40,"changes_needing_record_by_origin":{"direct":1,"manual_deployment":1},"origins":[]}}}'
+
+  - name: window_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"lookback_days":14,"changes_read":40,"origins":["direct","manual_deployment"]}}}'

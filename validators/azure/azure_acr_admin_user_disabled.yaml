@@ -1,0 +1,23 @@
+key: azure_acr_admin_user_disabled
+name: 'Azure Container Registry: Admin Account Disabled on Every Registry'
+type: AUTOMATED
+role: configuration
+source: community
+statement: >
+  No in-scope container registry has the shared admin account enabled (admin_user_enabled_registries
+  is 0), so pulls and pushes go through Entra ID identities that can be traced. Fails when no
+  registry is in scope, the registry list was not read, or the counts appear other than exactly
+  once. Does not check whether the collection run succeeded.
+
+regex: '"admin_user_enabled_registries":\s*(?<admin_user_enabled_registries>\d+)(?:(?!"admin_user_enabled_registries")[\s\S])*?"in_scope_registries":\s*(?<in_scope_registries>[1-9]\d*)'
+rules_summary: MATCH_COUNT EQUALS 1; MATCH_GROUP[1] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "1" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # admin_user_enabled_registries
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-ACR-CONFIG

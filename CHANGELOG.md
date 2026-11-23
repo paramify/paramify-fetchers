@@ -18,6 +18,16 @@ schemas and the `paramify` CLI — not the internal code.
   query is always limited to those projects, even when `jql` names others. A name that matches no visible project
   fails as `bad_config`, and an unreadable project list collects nothing site-wide. Priorities stay site-wide. Off by
   default.
+- **`github_non_user_credentials` 0.3.0: limit to collected repositories.** A new `scope_to_repositories` setting
+  keeps apps, fine-grained tokens and organization Actions secrets only when they can reach a collected repository or
+  their reach is unknown, and marks each kept row with `reaches_collected_repositories`. Apps installed on selected
+  repositories stay as unknown, since GitHub shows that list only to the app itself, unless the organization's
+  confirmation is named in `apps_confirmed_reaching` or `apps_confirmed_not_reaching`; those apps carry
+  `reach_source: organization_confirmation` and are named in the metadata. Left-out and unknown counts are recorded.
+  Organization secret rows now carry `visibility`. Off by default.
+- **`github_workflow_runs` 0.3.0: scheduled-run actors.** Scheduled runs no longer name a user as `actor`, since GitHub
+  credits them to whoever last changed the schedule; `triggering_actor` is kept only on a re-run. A new
+  `include_actors` setting (default true) removes both fields from every run. The summary adds `runs_scheduled`.
 - **Plainer TUI wording.**
   - Results read as sentences instead of key=value: "Uploaded 3 files, 1 already there.", not
     `uploaded=3 duplicates=1 errors=0`.
@@ -63,6 +73,8 @@ schemas and the `paramify` CLI — not the internal code.
   - An upload now changes the frequency on an existing evidence set (`PATCH /evidence/{id}`) when one was chosen, and
     the upload confirm shows it: `~ EVD-IAM-MFA: frequency every 3 days → daily`. A fetcher's default never changes an
     existing set, and a key that can't edit sets skips the change, says so, and still uploads.
+  - The stack, owner, frequency and env buttons widen to fit a new value straight away. They used to keep their old
+    width and show `owner: t` until the window was resized.
 
 - **Validator results and a local test in the TUI (Validators tab).**
   - Each validator shows PASS or FAIL from its latest result in Paramify, and the Paramify tab's validators cell
@@ -73,6 +85,8 @@ schemas and the `paramify` CLI — not the internal code.
     regex it proposes is tested on the same files before it is shown, and `w` writes a passing one to the
     validator's YAML after a confirm. Without Claude Code the key says so; `c` copies the same report to paste
     anywhere. `PARAMIFY_ASK_CLAUDE=0` turns Ask Claude off.
+  - After `w` the window names the command that sends the new regex: `paramify validators sync -m MANIFEST --update`.
+    The Paramify tab's sync skips validators Paramify already has, so it doesn't send it.
 
 - **Choose the validators each fetcher tracks (TUI Validators tab, beta).** The tab lists the manifest's fetchers
   and, for each, every registry validator for its evidence set in a Paramify section and a community section.

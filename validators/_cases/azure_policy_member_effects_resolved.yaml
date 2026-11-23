@@ -1,0 +1,23 @@
+validator: azure_policy_member_effects_resolved
+cases:
+  - name: every_member_resolved
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"member_policy_effect_counts":{"append":2,"audit":212,"auditIfNotExists":341,"deny":3,"deployIfNotExists":23,"disabled":9,"modify":6,"unresolved":0},"unresolved_effect_assignments":0}}}'
+
+  - name: partially_resolved_initiative
+    expect: FAIL
+    note: the assignment-level rollup reads 0 because the initiative's other members resolved
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"member_policy_effect_counts":{"audit":31,"deployIfNotExists":0,"unresolved":3},"unresolved_effect_assignments":0}}}'
+
+  - name: ten_unresolved_is_not_zero
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"member_policy_effect_counts":{"audit":31,"unresolved":10},"unresolved_effect_assignments":0}}}'
+
+  - name: no_assignments_nothing_to_read
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"member_policy_effect_counts":{},"total_policy_assignments":0,"unresolved_effect_assignments":0}}}'
+
+  - name: unresolved_outside_the_counts_map_does_not_satisfy_it
+    expect: FAIL
+    note: the per-assignment effect_counts carry "unresolved" too; only the summary map counts
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"policy_assignments":[{"policy_effects":{"effect_counts":{"audit":1,"unresolved":0}}}]},"summary":{"member_effect_counts":{"audit":31,"unresolved":3}}}}'

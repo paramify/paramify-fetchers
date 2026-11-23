@@ -1,0 +1,25 @@
+key: azure_velero_no_unresolved_restore_errors
+name: 'Azure Velero: No Current Restore Errors'
+type: AUTOMATED
+role: configuration
+source: community
+statement: >
+  No restore with errors is current: every one has a later restore that completed without errors
+  (restores_with_errors_unresolved is 0). A restore with errors and no readable date is never treated
+  as resolved. Resolved failures and deliberate failure tests (names matching
+  deliberate_failure_tests) stay in the totals, so history is kept without failing this check. A
+  restore without errors does not show the recovered application works. Does not check whether the
+  collection run succeeded.
+
+regex: '"restores_with_errors_unresolved":\s*(?<restores_with_errors_unresolved>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # restores_with_errors_unresolved
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-VELERO-BACKUPS

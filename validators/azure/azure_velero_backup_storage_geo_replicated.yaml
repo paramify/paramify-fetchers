@@ -1,0 +1,25 @@
+key: azure_velero_backup_storage_geo_replicated
+name: 'Azure Velero: Backup Storage Accounts Are Geo-Replicated'
+type: AUTOMATED
+role: configuration
+source: community
+statement: >
+  Every Velero backup storage location (at least one) is in a geo-replicated storage account (GRS,
+  RA-GRS, GZRS or RA-GZRS), so what Velero writes there (Kubernetes resource backups and backup
+  metadata, and file-system backup data if used) has a copy in the paired region. Does not cover
+  volume snapshots taken by the Azure disk snapshotter: those are
+  managed disk snapshots outside the storage account, and this check does not show them copied
+  off-site. Does not check whether the collection run succeeded.
+
+regex: '"backup_locations":\s*(?<backup_locations>[1-9]\d*)[\s\S]*?"backup_locations_geo_replicated":\s*(?<backup_locations_geo_replicated>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS MATCH_GROUP[2]
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # backup_locations
+    criteria: EQUALS
+    value: { type: MATCH_GROUP, groupNumber: 2 }            # backup_locations_geo_replicated
+
+evidence_sets:
+  - EVD-AZURE-VELERO-BACKUPS
