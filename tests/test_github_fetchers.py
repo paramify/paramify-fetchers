@@ -295,7 +295,7 @@ def run_fetcher(name, monkeypatch, tmp_path, **env):
     for key, value in env.items():
         monkeypatch.setenv(key, value)
     code = gc.run(MODS[name].NAME, MODS[name].collect, getattr(MODS[name], "CONFIG", None),
-                  inventory=getattr(MODS[name], "INVENTORY", False))
+                  inventory=getattr(MODS[name], "INVENTORY", False), check=getattr(MODS[name], "check_settings", None))
     evidence = json.loads(next(tmp_path.glob(f"{MODS[name].NAME}_*.json")).read_text())
     status = json.loads((tmp_path / "status.json").read_text()) if (tmp_path / "status.json").exists() else None
     return code, evidence, status
@@ -1351,6 +1351,8 @@ def test_non_user_credential_verdicts(fake, monkeypatch, tmp_path):
     assert s["apps_with_write"] == ["ci-bot"] and s["apps_on_all_repositories"] == ["ci-bot"]
     assert s["fine_grained_tokens_without_expiry"] == 1 and s["fine_grained_tokens_unused"] == 1
     assert s["actions_secrets_total"] == 2 and s["actions_secrets_older_than_max"] == ["org:ORG_OLD"]
+    assert ev["metadata"]["actions_secrets_readable"] is True
+    assert "actions_secrets_unreadable_because" not in ev["metadata"]
     assert s["webhooks_insecure_ssl"] == 1 and s["webhooks_without_secret"] == 1
     assert "SHOULDNOTLEAK" not in json.dumps(ev)  # webhook URLs are reduced to their host
 
@@ -1364,6 +1366,45 @@ def test_a_missing_key_access_or_tls_setting_is_unknown_not_safe(fake, monkeypat
     s = ev["summary"]
     assert s["deploy_keys_access_unknown"] == ["app:mystery"] and "app:mystery" not in s["write_deploy_keys"]
     assert s["webhooks_tls_unknown"] >= 1
+
+
+def _secrets_denied(permission):
+    return (403, {"message": "Resource not accessible by personal access token"},
+            {"X-Accepted-GitHub-Permissions": permission})
+
+
+def test_missing_secrets_read_leaves_the_lists_null_and_keeps_the_rest(fake, monkeypatch, tmp_path):
+    routes = credential_routes()
+    routes[f"orgs/{ORG}/actions/secrets"] = _secrets_denied("organization_secrets=read")
+    routes[f"repos/{ORG}/app/actions/secrets"] = _secrets_denied("secrets=read")
+    routes[f"repos/{ORG}/site/actions/secrets"] = _secrets_denied("secrets=read")
+    fake(routes)
+    code, ev, status = run_fetcher("non_user_credentials", monkeypatch, tmp_path)
+    assert code == 0 and status is None
+    s = ev["summary"]
+    assert s["actions_secrets_total"] is None and s["actions_secrets_older_than_max"] is None
+    assert ev["organization_actions_secrets"] is None
+    by = {r["repository"]: r for r in ev["repositories"]}
+    assert by["app"]["collected"] is True and by["app"]["actions_secrets"] is None
+    assert by["site"]["collected"] is True and by["site"]["deploy_keys"][0]["title"] == "deploy-ro"
+    assert s["deploy_keys_total"] == 2 and s["webhooks_insecure_ssl"] == 1 and s["apps_installed"] == 2
+    assert ev["metadata"]["actions_secrets_readable"] is False
+    assert "no read access" in ev["metadata"]["actions_secrets_unreadable_because"]
+    assert ev["metadata"]["api_failures"] == []
+
+
+def test_a_secrets_error_that_is_not_a_missing_grant_still_fails(fake, monkeypatch, tmp_path):
+    routes = credential_routes()
+    routes[f"repos/{ORG}/app/actions/secrets"] = (
+        403, {"message": "Resource not accessible by personal access token"},
+        {"X-Accepted-GitHub-Permissions": "administration=read"})
+    fake(routes)
+    code, ev, status = run_fetcher("non_user_credentials", monkeypatch, tmp_path)
+    assert code == 1 and status["code"] == "not_authorized"
+    by = {r["repository"]: r for r in ev["repositories"]}
+    assert by["app"]["collected"] is False and by["site"]["collected"] is True
+    assert ev["summary"]["actions_secrets_total"] == 1  # the organization secret only; app was not collected
+    assert "actions_secrets_unreadable_because" not in ev["metadata"]
 
 
 def test_a_personal_token_never_asks_for_the_apps_only_token_list(fake, monkeypatch, tmp_path):
@@ -4196,9 +4237,11 @@ def test_unscoped_runs_carry_no_confirmation_fields(fake, monkeypatch, tmp_path)
       "GITHUB_APPS_CONFIRMED_NOT_REACHING": "reader"}, "both")])
 def test_conflicting_confirmations_are_bad_config(fake, monkeypatch, tmp_path, env, needle):
     f = fake(confirmed_app_routes())
-    code, _, status = run_fetcher("non_user_credentials", monkeypatch, tmp_path, **env)
-    assert code == 1 and status["code"] == "bad_config" and needle in status["error"]
-    assert not any(p.endswith("/installations") for p, _ in f.calls)
+    with pytest.raises(StopIteration):  # no evidence file: the run stops before collecting anything
+        run_fetcher("non_user_credentials", monkeypatch, tmp_path, **env)
+    status = json.loads((tmp_path / "status.json").read_text())
+    assert status["code"] == "bad_config" and needle in status["error"]
+    assert f.calls == []  # checked before the first API call, like a bad boolean value
 
 
 def test_confirmations_with_an_unread_app_list_stay_null(fake, monkeypatch, tmp_path):
@@ -4280,3 +4323,29 @@ def test_a_bad_value_for_a_new_option_is_bad_config(fake, monkeypatch, tmp_path,
     m = MODS[fetcher]
     assert gc.run(m.NAME, m.collect, m.CONFIG) == 1
     assert "bad_config" in (tmp_path / "status.json").read_text() and f.calls == []
+
+
+def test_scope_without_secrets_read_reads_no_secret_repository_lists(fake, monkeypatch, tmp_path):
+    routes = scoped_credential_routes()
+    routes[f"orgs/{ORG}/actions/secrets"] = _secrets_denied("organization_secrets=read")
+    routes[f"repos/{ORG}/app/actions/secrets"] = _secrets_denied("secrets=read")
+    routes[f"repos/{ORG}/site/actions/secrets"] = _secrets_denied("secrets=read")
+    f, code, ev, status = scoped_credentials(fake, monkeypatch, tmp_path, routes)
+    m, s = ev["metadata"], ev["summary"]
+    assert code == 0 and status is None and m["api_failures"] == []
+    # The organization secrets were not read, so nothing about them is scoped, counted or looked up.
+    assert ev["organization_actions_secrets"] is None and m["organization_secrets_left_out"] is None
+    assert s["organization_secrets_reach_unknown"] is None
+    assert not any("/actions/secrets/" in p for p, _ in f.calls)
+    assert s["actions_secrets_total"] is None and s["actions_secrets_older_than_max"] is None
+    assert m["actions_secrets_readable"] is False and "no read access" in m["actions_secrets_unreadable_because"]
+    # Apps and tokens are scoped as before.
+    assert m["fine_grained_tokens_left_out"] == 2 and s["apps_reach_unknown"] == ["reader"]
+
+
+def test_scoped_secret_totals_count_only_the_secrets_in_scope(fake, monkeypatch, tmp_path):
+    _, code, ev, _ = scoped_credentials(fake, monkeypatch, tmp_path)
+    s, m = ev["summary"], ev["metadata"]
+    # Three organization secrets reach the collected repositories (PICKED_OUT does not) plus app's own one.
+    assert code == 0 and s["actions_secrets_total"] == 4 and m["organization_secrets_left_out"] == 1
+    assert "org:PICKED_OUT" not in s["actions_secrets_older_than_max"] and m["actions_secrets_readable"] is True
