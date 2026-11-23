@@ -224,7 +224,7 @@ def test_check_release_names_a_line_for_a_fetcher_that_did_not_change():
 def test_check_release_names_a_line_with_another_version():
     doc = _doc(rows=[_row("Row")], fetchers=[_line("demo_alpha", "0.6.9")])
     assert rn.check_release(doc, {"demo_alpha": "0.7.0"}, [], "0.6.0-beta") == [
-        "demo_alpha has a line but did not change since v0.6.0-beta"]
+        "demo_alpha line says 0.6.9 but the fetcher is 0.7.0"]
 
 
 def test_check_release_names_a_fetcher_with_two_lines():
@@ -236,7 +236,7 @@ def test_check_release_names_a_fetcher_with_two_lines():
 def test_check_release_names_the_wrong_version():
     doc = _doc(version="0.6.1-beta", rows=[{"tag": "breaking", "title": "x"}])
     assert rn.check_release(doc, {}, [], "0.6.0-beta") == [
-        "expected 0.7.0-beta (breaking rows → minor), found 0.6.1-beta"]
+        "expected 0.7.0-beta or later (breaking rows → minor), found 0.6.1-beta"]
 
 
 def test_check_release_accepts_a_dropped_prerelease_suffix():
@@ -247,7 +247,31 @@ def test_check_release_accepts_a_dropped_prerelease_suffix():
 def test_check_release_explains_an_added_fetcher():
     doc = _doc(version="0.6.1-beta")
     msgs = rn.check_release(doc, {}, ["demo_new"], "0.6.0-beta")
-    assert msgs == ["expected 0.7.0-beta (added fetchers → minor), found 0.6.1-beta"]
+    assert msgs == ["expected 0.7.0-beta or later (added fetchers → minor), found 0.6.1-beta"]
+
+
+@pytest.mark.parametrize("forced", ["1.0.0", "1.0.0-beta", "0.8.0-beta", "0.7.1", "0.7.0-rc"])
+def test_check_release_accepts_a_version_forced_above_the_expected_one(forced):
+    doc = _doc(version=forced, rows=[{"tag": "new", "title": "x"}])
+    assert rn.check_release(doc, {}, [], "0.6.0-beta") == []
+
+
+def test_check_release_accepts_forcing_1_0_0_from_a_beta():
+    doc = _doc(version="1.0.0", rows=[{"tag": "fix", "title": "x"}])
+    assert rn.check_release(doc, {}, [], "0.7.0-beta") == []
+
+
+@pytest.mark.parametrize("found", ["0.6.9", "0.6.1", "0.6.0-beta"])
+def test_check_release_refuses_a_version_below_the_expected_one(found):
+    doc = _doc(version=found, rows=[{"tag": "new", "title": "x"}])
+    assert rn.check_release(doc, {}, [], "0.6.0-beta") == [
+        f"expected 0.7.0-beta or later (new rows → minor), found {found}"]
+
+
+def test_check_release_names_a_version_that_is_not_one():
+    doc = _doc(version="next", rows=[{"tag": "new", "title": "x"}])
+    assert rn.check_release(doc, {}, [], "0.6.0-beta") == [
+        "expected 0.7.0-beta or later (new rows → minor), found next"]
 
 
 def test_draft_note_from_a_lead_without_a_version_or_colon():

@@ -22,7 +22,7 @@ RELEASE_REMINDER=1 (the Thursday run: also remind when a PR is still open).
 commit in a temporary worktree and pushes it straight to origin's release/next,
 so it never touches the checkout or any local branch; a rebuild reads
 origin/release/next. `--no-push` is a dry run: it builds the commit, leaves it
-unreferenced, prints its sha, the pull request and the DM, and sends nothing.
+unreferenced, prints its sha, the pull request and the Slack message, and sends nothing.
 """
 
 from __future__ import annotations
@@ -235,7 +235,7 @@ class GitHub:
 
 
 def notify(text: str, url: str) -> None:
-    """Send a DM through the Slack workflow webhook, or print it when there is none. Never raises."""
+    """Post through the Slack workflow webhook, or print the message when there is none. Never raises."""
     hook = os.environ.get("SLACK_RELEASE_WEBHOOK")
     if not hook:
         print(f"slack: {text} {url}")
@@ -350,6 +350,12 @@ def draft(root: Path, *, base: str, today: str, gh: GitHub, notify: Notify = not
     base_sha = git(root, "rev-parse", f"{base}^{{commit}}").strip()
     remote_sha = _rev(root, f"refs/remotes/origin/{BRANCH}")
     send: Notify = notify if push else (lambda text, url: print(f"Would notify: {text} {url}"))
+    merged = _pending_release(root, base_sha)
+    if merged is not None:
+        # A rebuild now would take the same version, mark every line again and
+        # add a second CHANGELOG heading for it.
+        _refuse(send, f"v{merged[1].get('version')} is merged but not tagged; "
+                      f"run publish on its merge commit (see {GUIDE})")
 
     tag = last_tag(root, base_sha)
     prev = _version_of(tag)
@@ -374,8 +380,8 @@ def draft(root: Path, *, base: str, today: str, gh: GitHub, notify: Notify = not
     if version is None:
         version = release_notes.next_version(prev, release_notes.required_bump(doc, added, _major(prev)))
         kept = str(previous["version"]) if previous else ""
-        if kept and _base_version(kept) == _base_version(version):
-            version = kept  # a suffix dropped by hand stays dropped
+        if kept and release_notes.at_least(kept, version):
+            version = kept  # a version forced higher or a suffix dropped by hand stays
     doc["version"] = version
 
     if pr and previous is not None and built_on == base_sha and _same(doc, previous):
@@ -417,10 +423,6 @@ def draft(root: Path, *, base: str, today: str, gh: GitHub, notify: Notify = not
 
 def _major(version: str) -> int:
     return int(version.split(".", 1)[0])
-
-
-def _base_version(version: str) -> str:
-    return version.split("-", 1)[0]
 
 
 # --------------------------------------------------------------------------- #
@@ -514,7 +516,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     pb = sub.add_parser("publish", help="tag the reviewed commit and create the GitHub Release")
     pb.add_argument("--head-sha", required=True, help="the release branch's last commit")
     pb.add_argument("--merge-sha", required=True, help="the commit the merge made on main")
-    nf = sub.add_parser("notify-failure", help="DM that the release job failed")
+    nf = sub.add_parser("notify-failure", help="post that the release job failed")
     nf.add_argument("--url", required=True, help="the workflow run")
     args = p.parse_args(argv)
 

@@ -881,6 +881,19 @@ def test_a_breaking_change_and_its_fix_wrap_instead_of_being_cut():
     assert all(len(ln) <= 60 and ln == ln.rstrip() for ln in lines)
 
 
+def test_breaking_names_the_release_each_row_came_from():
+    from framework import update_view as view
+    rows = [{"touches": True, "why": "everyone", "manifests": [], "title": "Python 3.11 or later",
+             "fix": None, "release": "0.8.0-beta"},
+            {"touches": True, "why": "custom", "manifests": [], "title": "Custom fetchers need a kind",
+             "fix": None, "release": None},
+            {"touches": False, "why": None, "manifests": [], "title": "Not mine", "fix": None, "release": "0.7.0-beta"}]
+    text = _render(view.breaking(rows), 100)
+    assert "everyone · 0.8.0-beta" in text
+    assert "your own fetchers · unreleased" in text
+    assert "Not mine" not in text
+
+
 def test_other_rows_are_still_one_row():
     from framework import update_view as view
     rows = [{"title": "A highlight", "detail": "word " * 40}]

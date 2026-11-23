@@ -13,10 +13,10 @@ from __future__ import annotations
 
 import datetime
 import re
-from typing import Any, Callable, Collection, Dict, List, Optional, Sequence
+from typing import Any, Callable, Collection, Dict, List, Optional, Sequence, Tuple
 
 import yaml
-from packaging.version import Version
+from packaging.version import InvalidVersion, Version
 
 from framework import update
 
@@ -129,6 +129,21 @@ def next_version(prev: str, bump: str) -> str:
     else:
         raise ValueError(f"unknown bump: {bump}")
     return f"{major}.{minor}.{patch}{suffix}"
+
+
+def _release_numbers(version: str) -> Optional[Tuple[int, ...]]:
+    try:
+        numbers = Version(version).release
+    except InvalidVersion:
+        return None
+    return numbers + (0,) * (3 - len(numbers))
+
+
+def at_least(version: str, floor: str) -> bool:
+    """Whether `version` is `floor` or later, by X.Y.Z only: for a floor of
+    0.7.0-beta, 0.7.0, 0.7.0-rc and 1.0.0 pass, 0.6.9 and "next" do not."""
+    found, least = _release_numbers(version), _release_numbers(floor)
+    return found is not None and least is not None and found >= least
 
 
 def _bullets(body: str) -> List[str]:
@@ -292,9 +307,10 @@ def check_release(doc: dict, changed: Dict[str, str], added: Collection[str], pr
     """What to fix in a release file before it ships; an empty list means ready.
 
     Each message names the fetcher or version to fix: a changed fetcher with no
-    line, a line for a fetcher that did not change (or at another version), a
-    fetcher with more than one line, and a version that is not the one the rows
-    call for. A version without the previous release's pre-release suffix passes.
+    line, a line for a fetcher that did not change, a line at another version
+    than the fetcher's, a fetcher with more than one line, and a version below
+    the one the rows call for. A higher version passes (a person can force one),
+    and so does one without the previous release's pre-release suffix.
     """
     problems: List[str] = []
     lines: Dict[str, List[dict]] = {}
@@ -306,12 +322,15 @@ def check_release(doc: dict, changed: Dict[str, str], added: Collection[str], pr
     for name in sorted(lines):
         if len(lines[name]) > 1:
             problems.append(f"{name} has {len(lines[name])} fetcher lines; keep one")
-        if name not in changed or all(line["version"] != changed[name] for line in lines[name]):
+        if name not in changed:
             problems.append(f"{name} has a line but did not change since v{prev_version}")
+        elif all(line["version"] != changed[name] for line in lines[name]):
+            says = ", ".join(sorted({str(line["version"]) for line in lines[name]}))
+            problems.append(f"{name} line says {says} but the fetcher is {changed[name]}")
     major = Version(prev_version).major
     bump = required_bump(doc, added, major)
     expected = next_version(prev_version, bump)
     found = str(doc.get("version"))
-    if found not in (expected, str(Version(expected).base_version)):
-        problems.append(f"expected {expected} ({_bump_reason(doc, added, major, bump)}), found {found}")
+    if not at_least(found, expected):
+        problems.append(f"expected {expected} or later ({_bump_reason(doc, added, major, bump)}), found {found}")
     return problems
