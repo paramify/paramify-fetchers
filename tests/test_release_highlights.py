@@ -11,14 +11,13 @@ from __future__ import annotations
 
 import fnmatch
 import json
-import re
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, List
 
 import pytest
 import yaml
 
-from framework import update
+from framework import release_notes, update
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 FILES = sorted((REPO_ROOT / update.HIGHLIGHTS_DIR).glob("*.yaml"))
@@ -26,23 +25,7 @@ UNRELEASED = REPO_ROOT / update.HIGHLIGHTS_DIR / "unreleased.yaml"
 RELEASE_FILES = [p for p in FILES if p != UNRELEASED]
 
 
-def _changelog_sections() -> Dict[str, Dict]:
-    """{version: {"date": ..., "Breaking": <top-level bullets>, ...}} from CHANGELOG.md."""
-    out: Dict[str, Dict] = {}
-    cur = sub = None
-    for line in (REPO_ROOT / "CHANGELOG.md").read_text().splitlines():
-        m = re.match(r"^## \[([^\]]+)\](?:\s*-\s*(\S+))?\s*$", line)
-        if m:
-            cur, sub = out.setdefault(m[1], {"date": m[2]}), None
-        elif cur is not None and line.startswith("### "):
-            sub = line[4:].strip()
-            cur.setdefault(sub, 0)
-        elif cur is not None and sub and line.startswith("- "):
-            cur[sub] += 1
-    return out
-
-
-CHANGELOG = _changelog_sections()
+CHANGELOG = release_notes.changelog_sections((REPO_ROOT / "CHANGELOG.md").read_text())
 
 
 SCHEMA = json.loads((REPO_ROOT / "framework/schemas/release_highlights_schema.json").read_text())

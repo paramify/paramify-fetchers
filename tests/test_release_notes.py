@@ -1,0 +1,243 @@
+"""Pure release logic: versions, CHANGELOG cut, note drafting, rebuild and check."""
+
+from __future__ import annotations
+
+import pytest
+import yaml
+
+from framework import release_notes as rn
+
+LINK = "https://github.com/paramify/paramify-fetchers/compare"
+CHANGELOG = f"""# Changelog
+
+## [Unreleased]
+
+### Added
+
+- **`demo_alpha` 0.7.0: reads more rows.**
+
+## [0.6.0-beta] - 2026-10-23
+
+### Breaking
+
+- **Python 3.11 is the minimum.**
+
+[Unreleased]: {LINK}/v0.6.0-beta...HEAD
+[0.6.0-beta]: {LINK}/v0.5.1-beta...v0.6.0-beta
+"""
+
+
+def test_changelog_sections_counts_bullets_and_keeps_bodies():
+    s = rn.changelog_sections(CHANGELOG)
+    assert s["0.6.0-beta"]["date"] == "2026-10-23"
+    assert s["0.6.0-beta"]["Breaking"] == 1
+    assert s["Unreleased"]["date"] is None
+    assert "demo_alpha" in s["Unreleased"]["body"]
+    assert "## [" not in s["Unreleased"]["body"]
+    assert "compare" not in s["0.6.0-beta"]["body"]
+
+
+def test_cut_changelog_moves_the_heading_and_the_links():
+    out = rn.cut_changelog(CHANGELOG, "0.7.0-beta", "2026-11-27")
+    assert "## [Unreleased]\n\n## [0.7.0-beta] - 2026-11-27\n" in out
+    assert f"[Unreleased]: {LINK}/v0.7.0-beta...HEAD\n" \
+           f"[0.7.0-beta]: {LINK}/v0.6.0-beta...v0.7.0-beta\n" \
+           f"[0.6.0-beta]: {LINK}/v0.5.1-beta...v0.6.0-beta" in out
+    assert out.count("## [Unreleased]") == 1
+
+
+@pytest.mark.parametrize("text", [
+    CHANGELOG.replace("## [Unreleased]", "## [Next]"),
+    CHANGELOG.replace(f"[Unreleased]: {LINK}/v0.6.0-beta...HEAD\n", ""),
+])
+def test_cut_changelog_refuses_a_file_without_unreleased(text):
+    with pytest.raises(ValueError):
+        rn.cut_changelog(text, "0.7.0-beta", "2026-11-27")
+
+
+def test_set_pyproject_version_strips_the_suffix():
+    text = '[build-system]\nrequires = []\n\n[project]\nname = "x"\nversion = "0.6.0"\n\n[tool.x]\nversion = "9"\n'
+    out = rn.set_pyproject_version(text, "0.7.0-beta")
+    assert 'version = "0.7.0"\n' in out
+    assert 'version = "9"' in out
+    assert out.count("0.6.0") == 0
+
+
+def _notes(*tags):
+    return {"highlights": [{"tag": t, "title": "x"} for t in tags]}
+
+
+@pytest.mark.parametrize("notes, added, major, want", [
+    (_notes("breaking"), [], 0, "minor"),
+    (_notes("breaking"), [], 1, "major"),
+    (_notes(), ["demo_new"], 0, "minor"),
+    (_notes(), ["demo_new"], 2, "minor"),
+    (_notes("new"), [], 0, "minor"),
+    (_notes("fetcher"), [], 0, "minor"),
+    (_notes("cli"), [], 3, "minor"),
+    (_notes("tui"), [], 0, "minor"),
+    (_notes("fix"), [], 0, "patch"),
+    (_notes(), [], 0, "patch"),
+    ({"highlights": []}, [], 1, "patch"),
+])
+def test_required_bump(notes, added, major, want):
+    assert rn.required_bump(notes, added, major) == want
+
+
+@pytest.mark.parametrize("prev, bump, want", [
+    ("0.6.0-beta", "minor", "0.7.0-beta"),
+    ("0.7.0-beta", "patch", "0.7.1-beta"),
+    ("1.2.3", "major", "2.0.0"),
+    ("0.9.0-beta", "minor", "0.10.0-beta"),
+    ("0.6.3-beta", "major", "1.0.0-beta"),
+])
+def test_next_version(prev, bump, want):
+    assert rn.next_version(prev, bump) == want
+
+
+TWO = ("- **`aws_inspector_ecr_findings` and `aws_inspector_ecr_report` 0.3.0: image counts and an opt-in.**\n"
+       "  Longer text here.\n")
+
+
+def test_draft_note_from_a_lead_naming_two_fetchers():
+    for name in ("aws_inspector_ecr_findings", "aws_inspector_ecr_report"):
+        assert rn.draft_note(name, TWO, []) == "image counts and an opt-in"
+
+
+def test_draft_note_for_a_new_fetcher_without_a_version():
+    body = "- **`snowflake_roles`: roles and grants.** Details.\n"
+    assert rn.draft_note("snowflake_roles", body, []) == "roles and grants"
+
+
+def test_draft_note_reads_a_lead_wrapped_over_two_lines():
+    body = "- **`demo_alpha` 0.7.0: reads more\n  rows.** Details.\n"
+    assert rn.draft_note("demo_alpha", body, []) == "reads more rows"
+
+
+def test_draft_note_ignores_nested_bullets_and_other_fetchers():
+    body = "- **`demo_beta` 0.1.0: beta.**\n  - **`demo_alpha`: nested.**\n"
+    assert rn.draft_note("demo_alpha", body, ["demo_alpha: from commit"]) == "from commit"
+
+
+def test_draft_note_falls_back_to_the_commit_subject():
+    assert rn.draft_note("demo_alpha", "", ["chore: bump", "demo_alpha 0.7.0: reads more rows"]) == "reads more rows"
+
+
+def test_draft_note_falls_back_to_a_todo():
+    assert rn.draft_note("demo_alpha", "", ["chore: bump"]) == "TODO: say what changed for the user"
+
+
+def test_draft_note_cuts_a_long_note_at_a_word():
+    body = "- **`demo_alpha` 0.7.0: " + " ".join(["word"] * 40) + ".**\n"
+    note = rn.draft_note("demo_alpha", body, [])
+    assert note.endswith("…")
+    assert len(note) <= 110
+    assert not note[:-1].endswith(" ")
+    assert set(note[:-1].split()) == {"word"}
+
+
+def _row(title, **kw):
+    return {"tag": "new", "title": title, **kw}
+
+
+def test_first_draft_marks_everything():
+    doc = rn.draft_release("0.7.0-beta", "2026-11-27", [_row("Row")],
+                           {"demo_b": "0.2.0", "demo_a": "0.7.0"}, lambda n: f"note {n}")
+    assert list(doc) == ["version", "date", "highlights", "fetchers"]
+    assert doc["highlights"] == [_row("Row", draft=True)]
+    assert doc["fetchers"] == [
+        {"name": "demo_a", "version": "0.7.0", "note": "note demo_a", "draft": True},
+        {"name": "demo_b", "version": "0.2.0", "note": "note demo_b", "draft": True},
+    ]
+
+
+def test_rebuild_keeps_edits_and_deletions_and_marks_only_whats_new():
+    previous = {
+        "highlights": [_row("Kept row")],
+        "fetchers": [
+            {"name": "demo_alpha", "version": "0.7.0", "note": "Edited by hand"},
+            {"name": "demo_gone", "version": "0.1.0", "note": "Not changed any more"},
+        ],
+    }
+    doc = rn.draft_release("0.7.0-beta", "2026-11-27", [_row("Kept row"), _row("Beta row")],
+                           {"demo_alpha": "0.7.0", "demo_gamma": "0.2.0"}, lambda n: f"note {n}",
+                           previous=previous, rows_since_base=[_row("Fresh row")])
+    assert [h["title"] for h in doc["highlights"]] == ["Kept row", "Fresh row"]
+    assert [bool(h.get("draft")) for h in doc["highlights"]] == [False, True]
+    by = {f["name"]: f for f in doc["fetchers"]}
+    assert set(by) == {"demo_alpha", "demo_gamma"}
+    assert by["demo_alpha"] == {"name": "demo_alpha", "version": "0.7.0", "note": "Edited by hand"}
+    assert by["demo_gamma"] == {"name": "demo_gamma", "version": "0.2.0", "note": "note demo_gamma", "draft": True}
+    assert "draft" not in previous["highlights"][0]
+
+
+def test_rebuild_remarks_a_line_whose_fetcher_moved_again():
+    previous = {"highlights": [],
+                "fetchers": [{"name": "demo_alpha", "version": "0.7.0", "note": "Edited by hand"}]}
+    doc = rn.draft_release("0.7.0-beta", "2026-11-27", [], {"demo_alpha": "0.7.1"}, lambda n: "new",
+                           previous=previous)
+    assert doc["fetchers"] == [{"name": "demo_alpha", "version": "0.7.1", "note": "Edited by hand", "draft": True}]
+    assert previous["fetchers"][0]["version"] == "0.7.0"
+
+
+def test_dump_release_round_trips_with_the_header():
+    doc = rn.draft_release("0.7.0-beta", "2026-11-27", [_row("Row", detail="Why: it works")],
+                           {"demo_a": "0.7.0"}, lambda n: "reads more")
+    text = rn.dump_release(doc)
+    assert text.startswith("# What `paramify update` shows for v0.7.0-beta.")
+    assert "[0.7.0-beta] section" in text
+    assert "releases/README.md" in text
+    assert text.index("version:") < text.index("date:") < text.index("highlights:") < text.index("fetchers:")
+    assert yaml.safe_load(text) == doc
+
+
+def _doc(version="0.7.0-beta", rows=(), fetchers=()):
+    return {"version": version, "date": "2026-11-27", "highlights": list(rows), "fetchers": list(fetchers)}
+
+
+def _line(name, version, note="Reads more"):
+    return {"name": name, "version": version, "note": note}
+
+
+def test_check_release_accepts_a_clean_doc():
+    doc = _doc(rows=[_row("Row")], fetchers=[_line("demo_alpha", "0.7.0")])
+    assert rn.check_release(doc, {"demo_alpha": "0.7.0"}, [], "0.6.0-beta") == []
+
+
+def test_check_release_names_a_fetcher_without_a_line():
+    msgs = rn.check_release(_doc(rows=[_row("Row")]), {"demo_alpha": "0.7.0"}, [], "0.6.0-beta")
+    assert msgs == ["demo_alpha 0.7.0 has no fetcher line"]
+
+
+def test_check_release_names_a_line_for_a_fetcher_that_did_not_change():
+    doc = _doc(rows=[_row("Row")], fetchers=[_line("demo_beta", "0.2.0")])
+    assert rn.check_release(doc, {}, [], "0.6.0-beta") == ["demo_beta has a line but did not change since v0.6.0-beta"]
+
+
+def test_check_release_names_a_line_with_another_version():
+    doc = _doc(rows=[_row("Row")], fetchers=[_line("demo_alpha", "0.6.9")])
+    assert rn.check_release(doc, {"demo_alpha": "0.7.0"}, [], "0.6.0-beta") == [
+        "demo_alpha has a line but did not change since v0.6.0-beta"]
+
+
+def test_check_release_names_a_fetcher_with_two_lines():
+    doc = _doc(rows=[_row("Row")], fetchers=[_line("demo_alpha", "0.7.0"), _line("demo_alpha", "0.7.0", "Again")])
+    assert rn.check_release(doc, {"demo_alpha": "0.7.0"}, [], "0.6.0-beta") == [
+        "demo_alpha has 2 fetcher lines; keep one"]
+
+
+def test_check_release_names_the_wrong_version():
+    doc = _doc(version="0.6.1-beta", rows=[{"tag": "breaking", "title": "x"}])
+    assert rn.check_release(doc, {}, [], "0.6.0-beta") == [
+        "expected 0.7.0-beta (breaking rows → minor), found 0.6.1-beta"]
+
+
+def test_check_release_accepts_a_dropped_prerelease_suffix():
+    doc = _doc(version="0.7.0", rows=[{"tag": "breaking", "title": "x"}])
+    assert rn.check_release(doc, {}, [], "0.6.0-beta") == []
+
+
+def test_check_release_explains_an_added_fetcher():
+    doc = _doc(version="0.6.1-beta")
+    msgs = rn.check_release(doc, {}, ["demo_new"], "0.6.0-beta")
+    assert msgs == ["expected 0.7.0-beta (added fetchers → minor), found 0.6.1-beta"]
