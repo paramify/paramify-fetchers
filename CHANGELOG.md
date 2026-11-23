@@ -57,6 +57,8 @@ schemas and the `paramify` CLI — not the internal code.
   - An upload now changes the frequency on an existing evidence set (`PATCH /evidence/{id}`) when one was chosen, and
     the upload confirm shows it: `~ EVD-IAM-MFA: frequency every 3 days → daily`. A fetcher's default never changes an
     existing set, and a key that can't edit sets skips the change, says so, and still uploads.
+  - The stack, owner, frequency and env buttons widen to fit a new value straight away. They used to keep their old
+    width and show `owner: t` until the window was resized.
 
 - **Validator results and a local test in the TUI (Validators tab).**
   - Each validator shows PASS or FAIL from its latest result in Paramify, and the Paramify tab's validators cell
@@ -67,6 +69,8 @@ schemas and the `paramify` CLI — not the internal code.
     regex it proposes is tested on the same files before it is shown, and `w` writes a passing one to the
     validator's YAML after a confirm. Without Claude Code the key says so; `c` copies the same report to paste
     anywhere. `PARAMIFY_ASK_CLAUDE=0` turns Ask Claude off.
+  - After `w` the window names the command that sends the new regex: `paramify validators sync -m MANIFEST --update`.
+    The Paramify tab's sync skips validators Paramify already has, so it doesn't send it.
 
 - **Choose the validators each fetcher tracks (TUI Validators tab, beta).** The tab lists the manifest's fetchers
   and, for each, every registry validator for its evidence set in a Paramify section and a community section.

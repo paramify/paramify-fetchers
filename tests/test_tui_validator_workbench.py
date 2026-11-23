@@ -323,6 +323,47 @@ def test_ask_claude_shows_what_it_sends_then_a_tested_fix_and_w_writes_it(tmp_pa
 
 
 @needs_node
+@pytest.mark.parametrize("tracked", [True, False])
+def test_after_w_it_names_the_command_that_sends_the_new_regex(tmp_path, monkeypatch, run_tui, tracked):
+    """The Paramify tab's sync (5, v) skips a validator Paramify already has, so
+    it never sends a changed regex. The window and the notice after w name the
+    command that does, and say to track the validator first when the manifest
+    doesn't."""
+    manifest, registry = make_workspace(tmp_path)
+    if not tracked:
+        m = api.read_manifest(manifest)
+        m["run"]["fetchers"][0]["validators"] = ["all_users_enrolled"]
+        api.dump_manifest(m, manifest, REPO_ROOT)
+    stub(monkeypatch, registry)
+    seen = {}
+
+    async def body(app, pilot):
+        app.ask_claude_confirmed = True
+        modal = await open_validator(app, pilot, 2)
+        await pilot.press("a")
+        await _settle(app, pilot)
+        seen["claude"] = " ".join(_text(modal.query_one("#vm-claude", Static).content).split())
+        await pilot.press("w")
+        await pilot.pause()
+        await pilot.press("y")
+        await _settle(app, pilot)
+        seen["notices"] = [str(n.message) for n in app._notifications]
+
+    run_tui(body, manifest)
+    command = f"paramify validators sync -m {manifest} --update"
+    assert command in seen["claude"]
+    assert "--update also overwrites edits made in Paramify to the other validators this manifest tracks." \
+        in seen["claude"]
+    saved = next(n for n in seen["notices"] if n.startswith("Saved "))
+    assert saved.endswith(command)
+    assert "Sync validators on the Paramify tab" not in saved
+    if tracked:
+        assert "The Paramify tab (5) skips validators Paramify already has. Send it with:" in saved
+    else:
+        assert "This manifest doesn't track it, so press space to track it." in saved
+
+
+@needs_node
 def test_a_proposal_that_still_fails_is_not_offered(tmp_path, monkeypatch, run_tui):
     manifest, registry = make_workspace(tmp_path)
     stub(monkeypatch, registry, answer='Why: guess.\nRegex: `"nope":\\s*(?<x>true)`')
