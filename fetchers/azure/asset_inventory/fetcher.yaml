@@ -1,0 +1,82 @@
+name: azure_asset_inventory
+version: 0.1.0
+description: >-
+  Lists every resource in an Azure subscription from Resource Graph, one record each, keyed by its lowercase resource ID for a Paramify inventory pipeline.
+category: azure
+
+kind: inventory
+pipeline:
+  type: inventory
+  id_scheme: azure-resource-id
+
+supports_targets: true
+
+runtime:
+  type: python
+  entry: fetcher.py
+  timeout: 900
+
+output:
+  type: json
+  path: azure_asset_inventory.json
+  aggregation: per_target
+
+config_schema:
+  resource_exclusions:
+    type: patterns
+    prefixes: [rg, location, id]
+    bare: false
+    required: false
+    env: AZURE_RESOURCE_EXCLUSIONS
+    description: >
+      Resources outside the authorization boundary, to leave out of the
+      inventory, as case-insensitive glob patterns listed in the manifest, each
+      with a prefix: rg:<resource group> (read from the resource id),
+      location:<region> (the region's name without spaces, such as eastus2; a
+      resource with no location never matches one) or id:<resource id> (also
+      matches that resource's child resources). * matches any run of characters
+      and ? one character. A matching resource gets no record and is listed under
+      results.excluded with the pattern. A pattern without one of these prefixes
+      fails the run. Set it once under platforms.azure.config for every Azure
+      fetcher that has this field, so this inventory and
+      azure_defender_vulnerability_report leave out the same resources.
+      Each item is a pattern, or a pattern with a reason. Empty: every resource is in scope.
+
+target_schema:
+  subscription_id:
+    type: string
+    required: false
+    env: AZURE_SUBSCRIPTION_ID
+    description: >
+      Azure subscription id to collect from. Optional: omit to use the first
+      enabled subscription the ambient credential can see; set one target per
+      subscription to fan out.
+  environment:
+    type: string
+    required: false
+    env: AZURE_ENVIRONMENT
+    description: >
+      Deployment environment label (e.g. prod / preprod) written into the
+      payload metadata. Optional: set per target for multi-subscription runs.
+
+secrets: []          # DefaultAzureCredential only; no handed-over secret (see _categories/azure.yaml)
+
+ksis:
+  - KSI-PIY-GIV      # Generating inventories: a complete, automatically generated resource inventory
+
+evidence_set:
+  reference_id: EVD-AZURE-ASSET-INVENTORY
+  name: Azure Asset Inventory
+  instructions: |
+    Script: azure/asset_inventory/fetcher.py
+
+    Access: Reader on the subscription; Resource Graph returns only the resources the caller can read, so an empty inventory can mean no Reader.
+
+    Commands Executed:
+    - subscriptions.list() — picks a subscription when none is set
+    - Resource Graph Resources (every page) — every resource with its type, location, resource group, tags, SKU, kind and provisioning state; the same query as azure_resource_inventory
+
+    Output: azure_asset_inventory_<subscription>.json — one record per resource under payload.data, keyed by unique_asset_identifier, the Azure resource ID in lowercase (the same value as the Asset ID column of azure_defender_vulnerability_report), with asset_type (the resource type, such as microsoft.compute/virtualmachines), resource_id (the ID as Azure returned it), name, location, resource_group, subscription_id, kind, sku_name, sku_tier, provisioning_state and tags; resources a resource_exclusions pattern matches get no record; a run that could not read every page writes no records, and the uploader does not send it.
+  description: >-
+    Every resource in the Azure subscription that Resource Graph lists, as one
+    inventory record each for an Inventory pipeline.

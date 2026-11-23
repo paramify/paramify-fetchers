@@ -330,7 +330,7 @@ python tools/gen_ksi_mapping.py
 
 *Controls:* `cm-2.2`, `cm-7.5`, `cm-8`, `cm-8.1`, `cm-12`, `cm-12.1`, `cp-2.8`
 
-*20 fetchers:* [`aws_config_inventory`](../fetchers/aws/config_inventory), [`aws_detect_new_aws_resource`](../fetchers/aws/detect_new_aws_resource), [`aws_resource_inventory`](../fetchers/aws/resource_inventory), [`azure_entra_service_principals`](../fetchers/azure/entra_service_principals), [`azure_resource_inventory`](../fetchers/azure/resource_inventory), [`azure_sql_managed_instance_configuration`](../fetchers/azure/sql_managed_instance_configuration), [`azure_storage_encryption_status`](../fetchers/azure/storage_encryption_status), [`crowdstrike_hosts`](../fetchers/crowdstrike/hosts), [`datadog_agent_hosts`](../fetchers/datadog/agent_hosts), [`datadog_apm_services`](../fetchers/datadog/apm_services), [`datadog_containers`](../fetchers/datadog/containers), [`github_repository_inventory`](../fetchers/github/repository_inventory), [`gitlab_project_summary`](../fetchers/gitlab/project_summary), [`k8s_eks_pod_inventory`](../fetchers/k8s/eks_pod_inventory), [`rippling_devices`](../fetchers/rippling/devices), [`sentinelone_agents`](../fetchers/sentinelone/agents), [`sentinelone_xdr_assets`](../fetchers/sentinelone/xdr_assets), [`sophos_endpoint_inventory`](../fetchers/sophos/endpoint_inventory), [`wiz_inventory`](../fetchers/wiz/inventory), [`wiz_scan_coverage`](../fetchers/wiz/scan_coverage)
+*21 fetchers:* [`aws_config_inventory`](../fetchers/aws/config_inventory), [`aws_detect_new_aws_resource`](../fetchers/aws/detect_new_aws_resource), [`aws_resource_inventory`](../fetchers/aws/resource_inventory), [`azure_asset_inventory`](../fetchers/azure/asset_inventory), [`azure_entra_service_principals`](../fetchers/azure/entra_service_principals), [`azure_resource_inventory`](../fetchers/azure/resource_inventory), [`azure_sql_managed_instance_configuration`](../fetchers/azure/sql_managed_instance_configuration), [`azure_storage_encryption_status`](../fetchers/azure/storage_encryption_status), [`crowdstrike_hosts`](../fetchers/crowdstrike/hosts), [`datadog_agent_hosts`](../fetchers/datadog/agent_hosts), [`datadog_apm_services`](../fetchers/datadog/apm_services), [`datadog_containers`](../fetchers/datadog/containers), [`github_repository_inventory`](../fetchers/github/repository_inventory), [`gitlab_project_summary`](../fetchers/gitlab/project_summary), [`k8s_eks_pod_inventory`](../fetchers/k8s/eks_pod_inventory), [`rippling_devices`](../fetchers/rippling/devices), [`sentinelone_agents`](../fetchers/sentinelone/agents), [`sentinelone_xdr_assets`](../fetchers/sentinelone/xdr_assets), [`sophos_endpoint_inventory`](../fetchers/sophos/endpoint_inventory), [`wiz_inventory`](../fetchers/wiz/inventory), [`wiz_scan_coverage`](../fetchers/wiz/scan_coverage)
 
 #### `KSI-PIY-RES` — Reviewing Executive Support
 
@@ -418,7 +418,7 @@ python tools/gen_ksi_mapping.py
 
 ## By fetcher
 
-334 of 350 fetchers carry a mapping.
+335 of 352 fetchers carry a mapping.
 
 ### aws  (83)
 
@@ -526,6 +526,7 @@ python tools/gen_ksi_mapping.py
 | [`azure_app_service_configuration`](../fetchers/azure/app_service_configuration) | `KSI-CNA-DFP`, `KSI-CNA-MAT`, `KSI-CNA-RNT`, `KSI-CNA-ULN`, `KSI-IAM-SNU`, `KSI-MLA-LET`, `KSI-SVC-ASM`, `KSI-SVC-EIS`, `KSI-SVC-PRR`, `KSI-SVC-SIN`, `KSI-SVC-VCM` |
 | [`azure_app_service_deployments`](../fetchers/azure/app_service_deployments) | `KSI-CMT-RMV` |
 | [`azure_app_service_plans`](../fetchers/azure/app_service_plans) | `KSI-CNA-OFA` |
+| [`azure_asset_inventory`](../fetchers/azure/asset_inventory) | `KSI-PIY-GIV` |
 | [`azure_backup_recovery_status`](../fetchers/azure/backup_recovery_status) | `KSI-RPL-ABO`, `KSI-RPL-RRO`, `KSI-RPL-TRC` |
 | [`azure_backup_vault_protection`](../fetchers/azure/backup_vault_protection) | `KSI-CNA-OFA`, `KSI-RPL-ABO` |
 | [`azure_bastion_configuration`](../fetchers/azure/bastion_configuration) | `KSI-CNA-MAT`, `KSI-CNA-RNT`, `KSI-MLA-LET` |
@@ -881,4 +882,4 @@ python tools/gen_ksi_mapping.py
 
 ### Unmapped
 
-[`aws_discovery_beta`](../fetchers/aws/discovery_beta), [`aws_inspector_ecr_report`](../fetchers/aws/inspector_ecr_report), [`demo_hello`](../fetchers/demo/hello), [`demo_policy_check`](../comparators/demo/policy_check), [`knowbe4_discovery_beta`](../fetchers/knowbe4/discovery_beta), [`qualys_stig_compliance_report`](../fetchers/qualys/stig_compliance_report), [`qualys_vmdr_vulnerability_findings`](../fetchers/qualys/vmdr_vulnerability_findings), [`servicenow_cases`](../fetchers/servicenow/cases), [`servicenow_changes`](../fetchers/servicenow/changes), [`sophos_endpoint_check_in`](../fetchers/sophos/endpoint_check_in), [`web_page_text`](../fetchers/web/page_text), [`web_vulnerability_disclosure`](../fetchers/web/vulnerability_disclosure), [`wiz_issues_report`](../fetchers/wiz/issues_report), [`wiz_stig_compliance_report`](../fetchers/wiz/stig_compliance_report), [`wiz_vulnerability_findings`](../fetchers/wiz/vulnerability_findings), [`zendesk_help_center_section`](../fetchers/zendesk/help_center_section) — deliberately carry no mapping.
+[`aws_discovery_beta`](../fetchers/aws/discovery_beta), [`aws_inspector_ecr_report`](../fetchers/aws/inspector_ecr_report), [`azure_defender_vulnerability_report`](../fetchers/azure/defender_vulnerability_report), [`demo_hello`](../fetchers/demo/hello), [`demo_policy_check`](../comparators/demo/policy_check), [`knowbe4_discovery_beta`](../fetchers/knowbe4/discovery_beta), [`qualys_stig_compliance_report`](../fetchers/qualys/stig_compliance_report), [`qualys_vmdr_vulnerability_findings`](../fetchers/qualys/vmdr_vulnerability_findings), [`servicenow_cases`](../fetchers/servicenow/cases), [`servicenow_changes`](../fetchers/servicenow/changes), [`sophos_endpoint_check_in`](../fetchers/sophos/endpoint_check_in), [`web_page_text`](../fetchers/web/page_text), [`web_vulnerability_disclosure`](../fetchers/web/vulnerability_disclosure), [`wiz_issues_report`](../fetchers/wiz/issues_report), [`wiz_stig_compliance_report`](../fetchers/wiz/stig_compliance_report), [`wiz_vulnerability_findings`](../fetchers/wiz/vulnerability_findings), [`zendesk_help_center_section`](../fetchers/zendesk/help_center_section) — deliberately carry no mapping.

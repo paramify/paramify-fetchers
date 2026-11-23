@@ -1,0 +1,49 @@
+{
+  "_comment": "Synthetic Resource Graph rows in the shape INVENTORY_QUERY projects (azure_resource_inventory). Resource Graph lowercases type and resourceGroup but keeps the id's casing, so the ids are mixed case on purpose.",
+  "rows": [
+    {
+      "id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/RG-App/providers/Microsoft.ContainerRegistry/registries/acrContoso",
+      "name": "acrContoso",
+      "type": "microsoft.containerregistry/registries",
+      "location": "eastus",
+      "resourceGroup": "rg-app",
+      "tags": {"env": "prod"},
+      "sku": {"name": "Premium", "tier": "Premium"},
+      "kind": "",
+      "provisioningState": "Succeeded"
+    },
+    {
+      "id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/RG-App/providers/Microsoft.Compute/virtualMachines/vm-Runner",
+      "name": "vm-Runner",
+      "type": "microsoft.compute/virtualmachines",
+      "location": "eastus",
+      "resourceGroup": "rg-app",
+      "tags": null,
+      "sku": null,
+      "kind": "",
+      "provisioningState": "Succeeded"
+    },
+    {
+      "id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-onprem/providers/Microsoft.HybridCompute/machines/host-01",
+      "name": "host-01",
+      "type": "microsoft.hybridcompute/machines",
+      "location": "westus2",
+      "resourceGroup": "rg-onprem",
+      "tags": {},
+      "sku": null,
+      "kind": "",
+      "provisioningState": "Succeeded"
+    },
+    {
+      "id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-legacy/providers/Microsoft.Storage/storageAccounts/salegacy",
+      "name": "salegacy",
+      "type": "microsoft.storage/storageaccounts",
+      "location": "eastus2",
+      "resourceGroup": "rg-legacy",
+      "tags": {"owner": "platform"},
+      "sku": {"name": "Standard_LRS", "tier": "Standard"},
+      "kind": "StorageV2",
+      "provisioningState": "Succeeded"
+    }
+  ]
+}
