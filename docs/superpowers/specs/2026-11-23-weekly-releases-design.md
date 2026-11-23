@@ -320,6 +320,10 @@ which version it expects; Tate renames the file and fixes the heading, or reruns
 
 ### 6. Notifications
 
+Update 2026-11-23 (Tate): the messages go to the Slack channel
+`#paramify-fetchers-repo` instead of a DM; the Workflow Builder step is
+"send a message to a channel". The payload is the same.
+
 Both workflows send a Slack DM to Tate. A plain Slack incoming webhook posts
 only to a channel, so the DM goes through a **Slack Workflow Builder workflow
 with a webhook trigger** whose one step messages Tate. Its URL is the repo

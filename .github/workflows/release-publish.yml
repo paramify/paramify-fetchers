@@ -67,9 +67,9 @@ jobs:
           python tools/release.py publish
           --head-sha ${{ github.event.pull_request.head.sha }}
           --merge-sha ${{ github.event.pull_request.merge_commit_sha }}
-      # Plain curl, so the DM still goes out when an earlier step (the App token,
+      # Plain curl, so the Slack message still goes out when an earlier step (the App token,
       # Python) is what failed.
-      - name: DM that the job failed
+      - name: Post that the job failed
         if: failure()
         env:
           SLACK_RELEASE_WEBHOOK: ${{ secrets.SLACK_RELEASE_WEBHOOK }}

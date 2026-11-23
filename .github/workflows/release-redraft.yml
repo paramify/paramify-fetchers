@@ -35,9 +35,9 @@ jobs:
           n=$(gh pr list --repo "${{ github.repository }}" --head release/next --state open \
             --json isCrossRepository --jq 'map(select(.isCrossRepository | not)) | length')
           echo "count=$n" >> "$GITHUB_OUTPUT"
-      # Plain curl, so the DM still goes out when an earlier step (the App token,
+      # Plain curl, so the Slack message still goes out when an earlier step (the App token,
       # Python) is what failed.
-      - name: DM that the job failed
+      - name: Post that the job failed
         if: failure()
         env:
           SLACK_RELEASE_WEBHOOK: ${{ secrets.SLACK_RELEASE_WEBHOOK }}
@@ -93,9 +93,9 @@ jobs:
           SLACK_RELEASE_WEBHOOK: ${{ secrets.SLACK_RELEASE_WEBHOOK }}
           RELEASE_REVIEWER: 21tmccauley
         run: python tools/release.py draft
-      # Plain curl, so the DM still goes out when an earlier step (the App token,
+      # Plain curl, so the Slack message still goes out when an earlier step (the App token,
       # Python) is what failed.
-      - name: DM that the job failed
+      - name: Post that the job failed
         if: failure()
         env:
           SLACK_RELEASE_WEBHOOK: ${{ secrets.SLACK_RELEASE_WEBHOOK }}

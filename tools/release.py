@@ -22,7 +22,7 @@ RELEASE_REMINDER=1 (the Thursday run: also remind when a PR is still open).
 commit in a temporary worktree and pushes it straight to origin's release/next,
 so it never touches the checkout or any local branch; a rebuild reads
 origin/release/next. `--no-push` is a dry run: it builds the commit, leaves it
-unreferenced, prints its sha, the pull request and the DM, and sends nothing.
+unreferenced, prints its sha, the pull request and the Slack message, and sends nothing.
 """
 
 from __future__ import annotations
@@ -235,7 +235,7 @@ class GitHub:
 
 
 def notify(text: str, url: str) -> None:
-    """Send a DM through the Slack workflow webhook, or print it when there is none. Never raises."""
+    """Post through the Slack workflow webhook, or print the message when there is none. Never raises."""
     hook = os.environ.get("SLACK_RELEASE_WEBHOOK")
     if not hook:
         print(f"slack: {text} {url}")
@@ -516,7 +516,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     pb = sub.add_parser("publish", help="tag the reviewed commit and create the GitHub Release")
     pb.add_argument("--head-sha", required=True, help="the release branch's last commit")
     pb.add_argument("--merge-sha", required=True, help="the commit the merge made on main")
-    nf = sub.add_parser("notify-failure", help="DM that the release job failed")
+    nf = sub.add_parser("notify-failure", help="post that the release job failed")
     nf.add_argument("--url", required=True, help="the workflow run")
     args = p.parse_args(argv)
 
