@@ -885,7 +885,80 @@ def test_other_rows_are_still_one_row():
     from framework import update_view as view
     rows = [{"title": "A highlight", "detail": "word " * 40}]
     text = _render(view.whats_new(rows), 60)
-    assert len(text.splitlines()) == 3 and "…" in text
+    assert len(text.splitlines()) == 4 and "…" in text  # New, the group heading, the row, its detail
+
+
+def _hl(title, release):
+    return {"title": title, "detail": None, "release": release}
+
+
+def test_whats_new_groups_rows_under_their_release():
+    from framework import update_view as view
+    rows = [_hl("Eight A", "0.8.0-beta"), _hl("Eight B", "0.8.0-beta"), _hl("Seven A", "0.7.0-beta")]
+    releases = [{"version": "0.8.0-beta", "date": "2026-12-03"}, {"version": "0.7.0-beta", "date": None}]
+    text = _render(view.whats_new(rows, releases), 100)
+    assert text.index("0.8.0-beta · Dec 3") < text.index("Eight A") < text.index("Eight B") < text.index("0.7.0-beta")
+    assert text.index("0.7.0-beta") < text.index("Seven A")
+    assert "0.7.0-beta ·" not in text  # no date, no dot
+
+
+def test_whats_new_on_main_heads_rows_unreleased():
+    from framework import update_view as view
+    text = _render(view.whats_new([_hl("Fresh", "unreleased")], []), 100)
+    lines = [ln.strip() for ln in text.splitlines()]
+    assert lines.index("unreleased") < lines.index("+ Fresh")
+    both = _render(view.whats_new([_hl("Old", "0.8.0-beta"), _hl("Fresh", "unreleased")],
+                                  [{"version": "0.8.0-beta", "date": None}]), 100)
+    assert both.index("unreleased") < both.index("Fresh") < both.index("0.8.0-beta") < both.index("Old")
+
+
+def _yours(**over):
+    row = {"name": "demo_beta", "change": "changed", "manifests": ["m"], "from": "0.6.0", "to": "0.8.0",
+           "reason": "a commit reason", "more": 0, "notes": []}
+    row.update(over)
+    return {"yours": [row], "others": [], "added": [], "removed": []}
+
+
+def test_your_fetchers_lists_every_release_note_newest_first():
+    from framework import update_view as view
+    notes = [{"release": "0.8.0-beta", "version": "0.8.0", "note": "newest words"},
+             {"release": "0.7.0-beta", "version": "0.7.0", "note": "older words"}]
+    text = _render(view.your_fetchers(_yours(notes=notes), 3, []), 100)
+    lines = text.splitlines()
+    first = next(i for i, ln in enumerate(lines) if "0.8.0-beta" in ln)
+    assert lines[first].startswith("    0.8.0-beta") and lines[first].rstrip().endswith("newest words")
+    assert "0.7.0-beta" in lines[first + 1] and lines[first + 1].rstrip().endswith("older words")
+    assert "a commit reason" not in text
+
+
+def test_your_fetchers_caps_notes_at_three_and_counts_the_rest():
+    from framework import update_view as view
+    notes = [{"release": f"0.{n}.0-beta", "version": f"0.{n}.0", "note": f"n{n}"} for n in (9, 8, 7, 6, 5)]
+    text = _render(view.your_fetchers(_yours(notes=notes), 3, []), 100)
+    assert "n7" in text and "n6" not in text and "+2 earlier" in text
+
+
+def test_your_fetchers_without_notes_keeps_the_commit_reason():
+    from framework import update_view as view
+    lines = _render(view.your_fetchers(_yours(), 3, []), 100).splitlines()
+    assert len(lines) == 2 and "a commit reason" in lines[1] and "earlier" not in lines[1]
+
+
+def test_fetcher_note_shows_the_newest_note_and_counts_earlier():
+    from framework import update_view as view
+    notes = [{"release": "0.8.0-beta", "version": "0.8.0", "note": "newest"},
+             {"release": "0.7.0-beta", "version": "0.7.0", "note": "older"}]
+    assert view.fetcher_note(_yours(notes=notes)["yours"][0], []).plain == "0.8.0-beta  newest  +1 earlier"
+    assert view.fetcher_note(_yours(notes=notes[:1])["yours"][0], []).plain == "0.8.0-beta  newest"
+
+
+def test_header_counts_releases_only_when_more_than_one():
+    from framework import update_view as view
+    plan = {"direction": "forward", "current": {"label": "v0.6.0-beta"},
+            "target": {"label": "v0.8.0-beta", "channel": "tag"}}
+    for n, tail in ((2, "412 commits, 41 days, 2 releases"), (1, "412 commits, 41 days"), (0, "412 commits, 41 days")):
+        plan["span"] = {"commits": 412, "days": 41, "releases": n}
+        assert view.header(plan).plain.endswith(tail)
 
 
 def test_piped_output_uses_the_full_width_cap():

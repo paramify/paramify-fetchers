@@ -18,6 +18,12 @@ schemas and the `paramify` CLI — not the internal code.
   query is always limited to those projects, even when `jql` names others. A name that matches no visible project
   fails as `bad_config`, and an unreadable project list collects nothing site-wide. Priorities stay site-wide. Off by
   default.
+- **`paramify update` shows what changed by release.** The New section groups its highlights under the release that
+  shipped them, with the release date. Changes that are not in a release yet come first, under "unreleased". Each of
+  your fetchers shows its release notes, newest first, instead of a commit reason. The header counts the releases the
+  update crosses. The TUI update screen shows the newest note per fetcher, and the New list now holds up to ten
+  highlights.
+
 - **The TUI's validator sync (Paramify tab, `v`) now pairs and updates validators that already exist.** Before, it
   created missing validators and paired only those, and told you to pair the rest in Paramify yourself. The preview
   now lists three things and does them all on one yes:

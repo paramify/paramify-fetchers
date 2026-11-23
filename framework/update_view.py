@@ -11,6 +11,7 @@ instead of spinning.
 
 from __future__ import annotations
 
+import datetime
 import fnmatch
 from contextlib import contextmanager
 from typing import Any, Iterator, List, Optional, Sequence, Tuple
@@ -23,6 +24,7 @@ from rich.text import Text
 
 WIDTH = 100           # nothing prints wider than this, however wide the terminal
 LEADER_TO = 28        # step labels pad out to this column with dots
+MAX_NOTES = 3         # release notes listed under one fetcher before "+N earlier"
 NAME_MAX = 44         # the fetcher-name column grows to the longest name, up to this
 MARKS = {"ok": ("✓", "green"), "fail": ("✗", "red"), "warn": ("!", "yellow"), "skip": ("–", "dim")}
 
@@ -146,7 +148,10 @@ def header(plan: dict) -> Text:
     else:
         parts = [(cur["label"], ""), ("  ━━▶  ", "dim"), (tgt["label"], "bold cyan")]
     if span.get("commits"):
-        parts.append((f"   ·  {plural(span['commits'], 'commit')}, {plural(span['days'], 'day')}", "dim"))
+        counts = f"{plural(span['commits'], 'commit')}, {plural(span['days'], 'day')}"
+        if span.get("releases", 0) > 1:
+            counts += f", {span['releases']} releases"
+        parts.append((f"   ·  {counts}", "dim"))
     elif plan["direction"] == "back":
         parts.append(("   ·  older than what you run", "yellow"))
     return line(*parts)
@@ -172,12 +177,18 @@ def broken_patterns(breaking: Sequence[dict]) -> List[str]:
 
 
 def fetcher_note(row: dict, broken: Sequence[str]) -> Text:
-    """What changed in one of your fetchers: a breaking mark, the reason a
-    commit gives, and how many other commits touched it."""
+    """What changed in one of your fetchers: a breaking mark, then the newest
+    release note (and how many earlier ones there are), or, with no notes, the
+    reason a commit gives and how many other commits touched it."""
     note = Text()
     if any(fnmatch.fnmatchcase(row["name"], p) for p in broken):
         note.append("⚠ breaking  ", style="yellow")
-    if row["reason"]:
+    notes = row.get("notes") or []
+    if notes:
+        note.append(f"{notes[0]['release']}  {notes[0]['note']}")
+        if len(notes) > 1:
+            note.append(f"  +{len(notes) - 1} earlier", style="dim")
+    elif row["reason"]:
         note.append(row["reason"])
         if row["more"]:
             note.append(f"  +{row['more']} more", style="dim")
@@ -197,8 +208,19 @@ def your_fetchers(changes: dict, used: int, breaking: Sequence[dict]) -> List[Te
     for row in yours:
         color = "red" if row["change"] == "removed" else "cyan"
         text = line(("● ", color), (row["name"].ljust(name_to) + "  ", ""), (versions(row).ljust(15) + " ", "dim"))
-        text.append_text(fetcher_note(row, broken))
-        out.append(text)
+        notes = row.get("notes") or []
+        if notes:
+            # CLI: every release's note on its own line, so none is hidden behind the newest.
+            if any(fnmatch.fnmatchcase(row["name"], p) for p in broken):
+                text.append("⚠ breaking", style="yellow")
+            out.append(text)
+            for n in notes[:MAX_NOTES]:
+                out.append(line((n["release"] + "  ", "dim"), (n["note"], ""), indent=4))
+            if len(notes) > MAX_NOTES:
+                out.append(line((f"+{len(notes) - MAX_NOTES} earlier", "dim"), indent=4))
+        else:
+            text.append_text(fetcher_note(row, broken))
+            out.append(text)
     return out
 
 
@@ -218,14 +240,33 @@ def breaking(rows: Sequence[dict]) -> List[RenderableType]:
     return out
 
 
-def whats_new(rows: Sequence[dict]) -> List[Text]:
+def _release_heading(version: str, releases: Sequence[dict]) -> str:
+    if version == "unreleased":
+        return version
+    date = next((r.get("date") for r in releases if r["version"] == version), None)
+    if not date:
+        return version
+    day = datetime.date.fromisoformat(date)
+    return f"{version} · {day.strftime('%b')} {day.day}"
+
+
+def whats_new(rows: Sequence[dict], releases: Sequence[dict] = ()) -> List[Text]:
+    """New highlights, grouped under the release that shipped them: unreleased
+    first, then newest release first (`releases` is already newest first)."""
     if not rows:
         return []
-    out = [_heading("New")]
+    groups: dict = {}
     for h in rows:
-        out.append(line(("+ ", "green"), (h["title"], "")))
-        if h.get("detail"):
-            out.append(line((h["detail"], "dim"), indent=4))
+        groups.setdefault(h.get("release") or "unreleased", []).append(h)
+    order = [v for v in ["unreleased"] + [r["version"] for r in releases] if v in groups]
+    order += [v for v in groups if v not in order]
+    out = [_heading("New")]
+    for version in order:
+        out.append(line((_release_heading(version, releases), "dim")))
+        for h in groups[version]:
+            out.append(line(("+ ", "green"), (h["title"], "")))
+            if h.get("detail"):
+                out.append(line((h["detail"], "dim"), indent=4))
     return out
 
 
