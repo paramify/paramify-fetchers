@@ -13,18 +13,20 @@ on:
         required: false
         default: ""
 
-concurrency:
-  group: release
-  cancel-in-progress: false
-
 permissions:
   contents: read
 
 jobs:
   draft:
+    concurrency:
+      group: release
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      # The App needs Workflows read and write too: a rebuild force-pushes release/next
+      # from an old main to a new one, and GitHub refuses that push if main changed
+      # .github/workflows in between.
       - uses: actions/create-github-app-token@v2
         id: app-token
         with:
@@ -64,11 +66,16 @@ jobs:
           else
             python tools/release.py draft
           fi
+      # Plain curl, so the DM still goes out when an earlier step (the App token,
+      # Python) is what failed.
       - name: DM that the job failed
         if: failure()
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
           SLACK_RELEASE_WEBHOOK: ${{ secrets.SLACK_RELEASE_WEBHOOK }}
-          RELEASE_REVIEWER: 21tmccauley
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: python tools/release.py notify-failure --url "$RUN_URL"
+        run: |
+          if [ -n "$SLACK_RELEASE_WEBHOOK" ]; then
+            curl -sS -X POST -H 'Content-Type: application/json' \
+              -d "{\"text\":\"The weekly release job failed.\",\"url\":\"$RUN_URL\"}" \
+              "$SLACK_RELEASE_WEBHOOK" || true
+          fi

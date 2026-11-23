@@ -77,9 +77,10 @@ must not start with `TODO`.
 
 ## When a release comes out
 
-A workflow drafts the release file each week and opens a pull request. Every
-row and fetcher line in it has a draft mark. Read each one, rewrite or delete
-it, and remove the mark. Follow [the releasing guide](../docs/releasing_guide.md).
+A workflow drafts the release file each week and opens a pull request. In the
+first draft, every row and fetcher line has a draft mark. After a rebuild,
+only the new text has one. Read each marked line, rewrite or delete it, and
+remove the mark. Follow [the releasing guide](../docs/releasing_guide.md).
 
 Rows that a user already saw on `main` are not shown again after a release.
 Update compares rows by tag and title.
@@ -92,5 +93,6 @@ every fetcher name or glob matches a real fetcher. For a release file it also
 checks that the version has a CHANGELOG section and that a release with
 Breaking entries has at least as many breaking rows. It also checks that no
 file has a draft mark, that no fetcher note starts with `TODO`, and that each
-`fetchers` line names a real fetcher. For `unreleased.yaml` it checks that there are at least as many breaking rows as
-Breaking entries in `[Unreleased]`.
+`fetchers` line names a real fetcher. For `unreleased.yaml` it checks that
+there are at least as many breaking rows as Breaking entries in
+`[Unreleased]`.

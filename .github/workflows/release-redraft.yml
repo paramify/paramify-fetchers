@@ -7,18 +7,60 @@ on:
   push:
     branches: [main]
 
-concurrency:
-  group: release
-  cancel-in-progress: false
-
 permissions:
   contents: read
 
 jobs:
-  redraft:
+  # No concurrency here: a no-op run must never replace a pending rebuild.
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      count: ${{ steps.open.outputs.count }}
+    steps:
+      # The App needs Workflows read and write too: a rebuild force-pushes release/next
+      # from an old main to a new one, and GitHub refuses that push if main changed
+      # .github/workflows in between.
+      - uses: actions/create-github-app-token@v2
+        id: app-token
+        with:
+          app-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+      # Pull requests from forks are not release PRs.
+      - name: is a release PR open
+        id: open
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          n=$(gh pr list --repo "${{ github.repository }}" --head release/next --state open \
+            --json isCrossRepository --jq 'map(select(.isCrossRepository | not)) | length')
+          echo "count=$n" >> "$GITHUB_OUTPUT"
+      # Plain curl, so the DM still goes out when an earlier step (the App token,
+      # Python) is what failed.
+      - name: DM that the job failed
+        if: failure()
+        env:
+          SLACK_RELEASE_WEBHOOK: ${{ secrets.SLACK_RELEASE_WEBHOOK }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [ -n "$SLACK_RELEASE_WEBHOOK" ]; then
+            curl -sS -X POST -H 'Content-Type: application/json' \
+              -d "{\"text\":\"The weekly release job failed.\",\"url\":\"$RUN_URL\"}" \
+              "$SLACK_RELEASE_WEBHOOK" || true
+          fi
+
+  draft:
+    needs: gate
+    if: needs.gate.outputs.count != '0'
+    concurrency:
+      group: release
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      # The App needs Workflows read and write too: a rebuild force-pushes release/next
+      # from an old main to a new one, and GitHub refuses that push if main changed
+      # .github/workflows in between.
       - uses: actions/create-github-app-token@v2
         id: app-token
         with:
@@ -45,25 +87,22 @@ jobs:
           id=$(gh api "/users/${SLUG}[bot]" --jq .id)
           git config user.name "${SLUG}[bot]"
           git config user.email "${id}+${SLUG}[bot]@users.noreply.github.com"
-      - name: is a release PR open
-        id: open
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-        run: |
-          n=$(gh pr list --head release/next --state open --json number --jq length)
-          echo "count=$n" >> "$GITHUB_OUTPUT"
       - name: rebuild the release
-        if: steps.open.outputs.count != '0'
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           SLACK_RELEASE_WEBHOOK: ${{ secrets.SLACK_RELEASE_WEBHOOK }}
           RELEASE_REVIEWER: 21tmccauley
         run: python tools/release.py draft
+      # Plain curl, so the DM still goes out when an earlier step (the App token,
+      # Python) is what failed.
       - name: DM that the job failed
         if: failure()
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
           SLACK_RELEASE_WEBHOOK: ${{ secrets.SLACK_RELEASE_WEBHOOK }}
-          RELEASE_REVIEWER: 21tmccauley
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: python tools/release.py notify-failure --url "$RUN_URL"
+        run: |
+          if [ -n "$SLACK_RELEASE_WEBHOOK" ]; then
+            curl -sS -X POST -H 'Content-Type: application/json' \
+              -d "{\"text\":\"The weekly release job failed.\",\"url\":\"$RUN_URL\"}" \
+              "$SLACK_RELEASE_WEBHOOK" || true
+          fi

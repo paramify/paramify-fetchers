@@ -18,20 +18,22 @@ things:
   assignee and the reviewer.
 - It sends you a Slack direct message (DM) with a link to the PR.
 
-The PR holds three changes:
+The PR holds four changes:
 
 - `CHANGELOG.md`: the `[Unreleased]` section becomes the new version.
 - `pyproject.toml`: the new version number.
 - `releases/<version>.yaml`: the highlights that `paramify update` shows to
   users. The workflow drafts this file from `releases/unreleased.yaml`, the
   CHANGELOG and the git history.
+- `releases/unreleased.yaml`: reset to an empty list, because its rows moved
+  to the release file.
 
 If nothing changed since the last release, no PR opens. If the PR is still
 open on the next Thursday, you get a reminder DM.
 
-The `release-check` check and pytest fail on the new PR. This is correct. The
-draft text has `draft: true` marks, and a mark means that a person has not
-yet read the text.
+Pytest fails on the new PR. This is correct. The draft text has `draft: true`
+marks, and a test fails while any mark remains. A mark means that a person has
+not yet read the text.
 
 ## 2. What to do in the PR
 
@@ -101,8 +103,9 @@ to the repository.
 | `python tools/release.py publish --head-sha SHA --merge-sha SHA` | Tags the reviewed commit and creates the GitHub Release. |
 | `python tools/release.py notify-failure --url URL` | Sends the failure DM. |
 
-`draft` never touches your local branches or your checkout. It fetches
-`origin`, builds the commit in a temporary worktree, and pushes it to
+`draft` never touches your local branches or your checkout. It runs
+`git fetch --prune --tags origin`, which updates your remote-tracking branches
+and your tags. Then it builds the commit in a temporary worktree, and pushes it to
 `release/next` on `origin`.
 
 `--no-push` builds the commit and leaves it with no branch. It prints the
@@ -133,7 +136,10 @@ Each workflow sends a failure DM with a link to its run.
 1. **GitHub App.** In the `paramify` organization, create the App
    `paramify-fetchers-release`. Install it on this repository only. Give it
    these permissions: Contents read and write, Pull requests read and write,
-   Metadata read. Create a private key for it.
+   Metadata read, Workflows read and write. A rebuild pushes `release/next` from
+   an old `main` to a new one, and GitHub refuses that push without the
+   Workflows permission if `main` changed `.github/workflows` in between.
+   Create a private key for it.
 2. **Repository secrets.** Add `RELEASE_APP_ID` (the App ID) and
    `RELEASE_APP_PRIVATE_KEY` (the whole key file).
 3. **Slack workflow.** In Slack Workflow Builder, create a workflow with a
@@ -155,9 +161,15 @@ what to do.
 **A `release/next` branch exists but has no open PR.** The workflow treats it
 as a new draft. The next run replaces the branch.
 
-**`publish` refuses to tag.** The tree on `main` differs from the reviewed
-commit, or a draft mark remains. Fix the cause in a PR to `main`. Then run
-`publish` by hand with the head sha and the merge sha of the release PR.
+**`publish` says a draft mark remains.** Remove the marks in an ordinary PR to
+`main`. Then run `python tools/release.py publish --head-sha SHA --merge-sha SHA`
+with the merge commit of that PR as both `SHA` values.
+
+**`publish` says the tree on `main` differs.** The release PR was merged
+(squashed) before a rebuild finished, so `main` holds a different commit than
+the one you reviewed. Find the commit on `main` that holds the reviewed
+`releases/<version>.yaml`. Run `publish` with that commit as both `--head-sha`
+and `--merge-sha`. It tags the commit and creates the GitHub Release.
 
 **The push to `release/next` is refused.** Someone pushed to the branch while
 the workflow ran. Run `release-draft` again.
