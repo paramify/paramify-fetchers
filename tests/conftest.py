@@ -620,11 +620,27 @@ def _github_fake():
     return module
 
 
+@functools.cache
+def _falcon_fake():
+    spec = importlib.util.spec_from_file_location("falcon_fake", Path(__file__).with_name("falcon_fake.py"))
+    module = importlib.util.module_from_spec(spec)
+    sys.modules.setdefault("falcon_fake", module)
+    spec.loader.exec_module(module)
+    return module
+
+
 @pytest.fixture
 def github_report_fake(monkeypatch, tmp_path):
     """tests/github_fake.py as the organization a GitHub alert report reads: `.run(name, routes, **env)` runs
     fetchers/github/<name>/fetcher.py against it and returns the exit code, CSV rows, status and calls."""
     return _github_fake().harness(monkeypatch, tmp_path)
+
+
+@pytest.fixture
+def falcon_fake(monkeypatch, tmp_path):
+    """tests/falcon_fake.py as the Falcon API the shared CrowdStrike client reaches, with the
+    env a CrowdStrike fetcher run needs. Register a handler per path with `.route(path, fn)`."""
+    return _falcon_fake().install(monkeypatch, tmp_path)
 
 
 @pytest.fixture

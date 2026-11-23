@@ -92,5 +92,5 @@ inventory.
 The tests use synthetic fixtures and a fake Falcon API. They make no network calls.
 
 ```bash
-pytest fetchers/crowdstrike/host_inventory/tests
+pytest tests/test_crowdstrike_host_inventory.py
 ```

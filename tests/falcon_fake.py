@@ -1,14 +1,16 @@
-"""Test support for the per-fetcher tests under fetchers/crowdstrike/*/tests/.
+"""An in-process fake of the Falcon API for the CrowdStrike pipeline fetchers' tests.
 
-`falcon` is an offline stand-in for the Falcon API at the HTTP layer: it replaces
+`FakeFalcon` is an offline stand-in for the Falcon API at the HTTP layer: it replaces
 `requests.post` (the token exchange) and `requests.request` (every API call), so
 the shared client's real retry, pagination and failure tracking run unchanged.
 A test registers a handler per path; each handler gets the query params and the
-JSON body and returns (status, body). The fixture also carries the helpers a
-test needs (envelope, load_fetcher, load_fixture, status), because pytest's
-importlib mode does not make this module importable by name.
+JSON body and returns (status, body). The fake also carries the helpers a test
+needs (envelope, load_fetcher, load_fixture, status), so a test reaches all of
+it through the `falcon_fake` fixture in tests/conftest.py, which also patches
+`requests` and sets the env a run needs.
 
-Run: pytest fetchers/crowdstrike/host_inventory/tests fetchers/crowdstrike/spotlight_vulnerability_report/tests
+Used by tests/test_crowdstrike_host_inventory.py and
+tests/test_crowdstrike_spotlight_vulnerability_report.py.
 """
 
 from __future__ import annotations
@@ -19,10 +21,8 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
-import pytest
-
-CATEGORY = Path(__file__).resolve().parent
-REPO_ROOT = CATEGORY.parents[1]
+REPO_ROOT = Path(__file__).resolve().parent.parent
+CATEGORY = REPO_ROOT / "fetchers" / "crowdstrike"
 BASE_URL = "http://falcon.test"
 
 Handler = Callable[[Dict[str, Any], Optional[Dict[str, Any]]], Tuple[int, Dict[str, Any]]]
@@ -100,9 +100,8 @@ class FakeFalcon:
         return json.loads(path.read_text()) if path.exists() else {}
 
 
-@pytest.fixture
-def falcon(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> FakeFalcon:
-    """The fake Falcon API, the env a run needs, and no sleeping between retries."""
+def install(monkeypatch: Any, tmp_path: Path) -> FakeFalcon:
+    """Route the shared Falcon client to a new FakeFalcon, set the env a run needs, and skip retry sleeps."""
     fake = FakeFalcon(tmp_path)
     monkeypatch.syspath_prepend(str(CATEGORY / "_shared"))
     import falcon_client  # type: ignore

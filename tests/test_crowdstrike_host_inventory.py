@@ -6,29 +6,29 @@ nothing, a rejected credential) must write `data: []` with
 `records_included: false` and exit non-zero. framework.inventory.check() is the
 verdict the uploader acts on.
 
-The fake Falcon API is the `falcon` fixture in fetchers/crowdstrike/conftest.py.
+The fake Falcon API is the `falcon_fake` fixture (tests/conftest.py, tests/falcon_fake.py).
+The fixtures are synthetic and live in fetchers/crowdstrike/host_inventory/tests/fixtures/.
 """
 
 from __future__ import annotations
 
 import ast
 import json
-import sys
 from pathlib import Path
 from typing import Any, Dict, List
 
 import pytest
 
-REPO_ROOT = Path(__file__).resolve().parents[4]
-sys.path.insert(0, str(REPO_ROOT))
+from framework import inventory
 
-from framework import inventory  # noqa: E402
+REPO_ROOT = Path(__file__).resolve().parent.parent
+FETCHER_DIR = REPO_ROOT / "fetchers" / "crowdstrike" / "host_inventory"
 
 SCROLL = "/devices/queries/devices-scroll/v1"
 ENTITIES = "/devices/entities/devices/v2"
 
 
-def _serve(falcon, devices: List[Dict[str, Any]], page_size: int = 3) -> None:
+def _serve(falcon_fake, devices: List[Dict[str, Any]], page_size: int = 3) -> None:
     """Scroll in pages of `page_size` IDs, then resolve IDs to the given devices."""
     ids = [d["device_id"] for d in devices]
 
@@ -36,20 +36,20 @@ def _serve(falcon, devices: List[Dict[str, Any]], page_size: int = 3) -> None:
         start = int(params.get("offset") or 0)
         nxt = start + page_size
         token = str(nxt) if nxt < len(ids) else ""
-        return 200, falcon.envelope(ids[start:nxt], {"offset": token, "total": len(ids)})
+        return 200, falcon_fake.envelope(ids[start:nxt], {"offset": token, "total": len(ids)})
 
     def entities(_params, body):
         wanted = set(body["ids"])
-        return 200, falcon.envelope([d for d in devices if d["device_id"] in wanted])
+        return 200, falcon_fake.envelope([d for d in devices if d["device_id"] in wanted])
 
-    falcon.route(SCROLL, scroll)
-    falcon.route(ENTITIES, entities)
+    falcon_fake.route(SCROLL, scroll)
+    falcon_fake.route(ENTITIES, entities)
 
 
-def _run(falcon) -> tuple[int, Dict[str, Any]]:
-    mod = falcon.load_fetcher("host_inventory")
+def _run(falcon_fake) -> tuple[int, Dict[str, Any]]:
+    mod = falcon_fake.load_fetcher("host_inventory")
     code = mod.main()
-    payload = json.loads((falcon.output_dir / mod.OUTPUT_FILE).read_text())
+    payload = json.loads((falcon_fake.output_dir / mod.OUTPUT_FILE).read_text())
     return code, payload
 
 
@@ -62,15 +62,15 @@ def _assert_withheld(code: int, payload: Dict[str, Any]) -> None:
 
 
 @pytest.fixture
-def devices(falcon) -> List[Dict[str, Any]]:
-    return falcon.load_fixture("host_inventory", "devices.json")
+def devices(falcon_fake) -> List[Dict[str, Any]]:
+    return falcon_fake.load_fixture("host_inventory", "devices.json")
 
 
-def test_clean_run_is_a_complete_inventory(falcon, devices) -> None:
-    _serve(falcon, devices)
-    code, payload = _run(falcon)
+def test_clean_run_is_a_complete_inventory(falcon_fake, devices) -> None:
+    _serve(falcon_fake, devices)
+    code, payload = _run(falcon_fake)
 
-    assert code == 0, falcon.status()
+    assert code == 0, falcon_fake.status()
     assert payload["records_included"] is True
     assert inventory.payload_problems(payload) == []
     assert inventory.check(payload, code)["complete"] is True
@@ -95,96 +95,96 @@ def test_clean_run_is_a_complete_inventory(falcon, devices) -> None:
     assert laptop["cloud_instance_id"] is None and laptop["tags"] is None
 
     # Both pages were read, and IDs were resolved in one batch of five.
-    scroll_calls = [c for c in falcon.calls if c[1] == SCROLL]
+    scroll_calls = [c for c in falcon_fake.calls if c[1] == SCROLL]
     assert [c[2].get("offset") for c in scroll_calls] == [None, "3"]
-    entity_calls = [c for c in falcon.calls if c[1] == ENTITIES]
+    entity_calls = [c for c in falcon_fake.calls if c[1] == ENTITIES]
     assert len(entity_calls) == 1 and len(entity_calls[0][3]["ids"]) == 5
 
 
-def test_a_failed_second_page_withholds_every_record(falcon, devices) -> None:
-    _serve(falcon, devices)
-    serve_page = falcon.routes[SCROLL]
+def test_a_failed_second_page_withholds_every_record(falcon_fake, devices) -> None:
+    _serve(falcon_fake, devices)
+    serve_page = falcon_fake.routes[SCROLL]
 
     def scroll(params, body):
         if params.get("offset"):
-            return 400, falcon.envelope([], errors=[{"code": 400, "message": "invalid offset"}])
+            return 400, falcon_fake.envelope([], errors=[{"code": 400, "message": "invalid offset"}])
         return serve_page(params, body)
 
-    falcon.route(SCROLL, scroll)
-    code, payload = _run(falcon)
+    falcon_fake.route(SCROLL, scroll)
+    code, payload = _run(falcon_fake)
 
     _assert_withheld(code, payload)
-    assert falcon.status()["code"] == "partial_failure"
+    assert falcon_fake.status()["code"] == "partial_failure"
     assert payload["api_failures"][0]["status_code"] == 400
 
 
-def test_a_failed_entity_batch_withholds_every_record(falcon, devices) -> None:
-    _serve(falcon, devices)
-    falcon.route(ENTITIES, lambda _p, _b: (500, falcon.envelope([], errors=[{"code": 500, "message": "boom"}])))
-    code, payload = _run(falcon)
+def test_a_failed_entity_batch_withholds_every_record(falcon_fake, devices) -> None:
+    _serve(falcon_fake, devices)
+    falcon_fake.route(ENTITIES, lambda _p, _b: (500, falcon_fake.envelope([], errors=[{"code": 500, "message": "boom"}])))
+    code, payload = _run(falcon_fake)
     _assert_withheld(code, payload)
 
 
-def test_a_partial_200_withholds_every_record(falcon, devices) -> None:
+def test_a_partial_200_withholds_every_record(falcon_fake, devices) -> None:
     """Falcon reports some IDs not found as HTTP 200 with errors[]."""
-    _serve(falcon, devices)
+    _serve(falcon_fake, devices)
 
     def entities(_params, body):
         found = [d for d in devices if d["device_id"] in set(body["ids"])][:-1]
-        return 200, falcon.envelope(found, errors=[{"code": 404, "message": "device not found"}])
+        return 200, falcon_fake.envelope(found, errors=[{"code": 404, "message": "device not found"}])
 
-    falcon.route(ENTITIES, entities)
-    code, payload = _run(falcon)
+    falcon_fake.route(ENTITIES, entities)
+    code, payload = _run(falcon_fake)
     _assert_withheld(code, payload)
 
 
-def test_an_id_that_resolves_to_nothing_withholds_every_record(falcon, devices) -> None:
+def test_an_id_that_resolves_to_nothing_withholds_every_record(falcon_fake, devices) -> None:
     """A host dropped between the query and the lookup, with no error in the body."""
-    _serve(falcon, devices)
-    falcon.route(ENTITIES, lambda _p, body: (200, falcon.envelope(
+    _serve(falcon_fake, devices)
+    falcon_fake.route(ENTITIES, lambda _p, body: (200, falcon_fake.envelope(
         [d for d in devices if d["device_id"] in set(body["ids"])][1:])))
-    code, payload = _run(falcon)
+    code, payload = _run(falcon_fake)
     _assert_withheld(code, payload)
     assert "came back with no host record" in payload["error"]
 
 
-def test_a_host_without_a_device_id_withholds_every_record(falcon, devices) -> None:
-    _serve(falcon, devices)
+def test_a_host_without_a_device_id_withholds_every_record(falcon_fake, devices) -> None:
+    _serve(falcon_fake, devices)
     broken = [dict(d) for d in devices]
     broken[2]["device_id"] = ""
-    falcon.route(ENTITIES, lambda _p, _b: (200, falcon.envelope(broken)))
-    code, payload = _run(falcon)
+    falcon_fake.route(ENTITIES, lambda _p, _b: (200, falcon_fake.envelope(broken)))
+    code, payload = _run(falcon_fake)
     _assert_withheld(code, payload)
     assert "without a device_id" in payload["error"]
 
 
-def test_a_rejected_credential_withholds_every_record(falcon, devices) -> None:
-    _serve(falcon, devices)
-    falcon.token_status = 401
-    code, payload = _run(falcon)
+def test_a_rejected_credential_withholds_every_record(falcon_fake, devices) -> None:
+    _serve(falcon_fake, devices)
+    falcon_fake.token_status = 401
+    code, payload = _run(falcon_fake)
     _assert_withheld(code, payload)
-    assert falcon.status()["code"] == "auth_failed"
+    assert falcon_fake.status()["code"] == "auth_failed"
 
 
-def test_a_forbidden_scope_is_reported_as_not_authorized(falcon, devices) -> None:
-    _serve(falcon, devices)
-    falcon.route(SCROLL, lambda _p, _b: (403, falcon.envelope([], errors=[{"code": 403, "message": "access denied"}])))
-    code, payload = _run(falcon)
+def test_a_forbidden_scope_is_reported_as_not_authorized(falcon_fake, devices) -> None:
+    _serve(falcon_fake, devices)
+    falcon_fake.route(SCROLL, lambda _p, _b: (403, falcon_fake.envelope([], errors=[{"code": 403, "message": "access denied"}])))
+    code, payload = _run(falcon_fake)
     _assert_withheld(code, payload)
-    assert falcon.status()["code"] == "not_authorized"
+    assert falcon_fake.status()["code"] == "not_authorized"
 
 
-def test_an_empty_estate_is_not_sent(falcon) -> None:
-    _serve(falcon, [])
-    code, payload = _run(falcon)
+def test_an_empty_estate_is_not_sent(falcon_fake) -> None:
+    _serve(falcon_fake, [])
+    code, payload = _run(falcon_fake)
     assert code == 0
     assert payload["data"] == [] and payload["records_included"] is True
     assert inventory.check(payload, code)["complete"] is False
 
 
-def test_the_id_is_written_in_lowercase(falcon, devices) -> None:
+def test_the_id_is_written_in_lowercase(falcon_fake, devices) -> None:
     """The Spotlight report writes aid through the same host_id(), so the two always match."""
-    mod = falcon.load_fetcher("host_inventory")
+    mod = falcon_fake.load_fetcher("host_inventory")
     device = dict(devices[0], device_id="  3F1C9A7E5B2D4C6E8A0B1C2D3E4F5A61 ")
     assert mod.record(device)["unique_asset_identifier"] == devices[0]["device_id"]
 
@@ -201,7 +201,7 @@ def _models() -> Dict[str, Any]:
 
 
 def test_every_device_field_read_is_in_the_vendor_model() -> None:
-    source = (Path(__file__).resolve().parents[1] / "fetcher.py").read_text()
+    source = (FETCHER_DIR / "fetcher.py").read_text()
     read = {
         node.args[0].value
         for node in ast.walk(ast.parse(source))
@@ -214,7 +214,7 @@ def test_every_device_field_read_is_in_the_vendor_model() -> None:
     assert not unknown, f"fields absent from DeviceapiDeviceSwagger: {unknown}"
 
 
-def test_fixture_conforms_to_the_vendor_model(falcon, devices) -> None:
+def test_fixture_conforms_to_the_vendor_model(falcon_fake, devices) -> None:
     import importlib.util
 
     spec = importlib.util.spec_from_file_location("cs_schema_for_inventory", REPO_ROOT / "tools" / "crowdstrike_schema.py")
