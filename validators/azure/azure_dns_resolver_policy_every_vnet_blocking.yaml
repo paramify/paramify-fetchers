@@ -3,18 +3,19 @@ name: 'Azure DNS Security Policy: Every Virtual Network Has a Blocking Policy'
 type: AUTOMATED
 role: configuration
 statement: >
-  Every in-scope virtual network is linked to a DNS security policy with at least one enabled
-  Block rule (virtual_networks_without_blocking_policy is 0). Fails while any policy's links or
-  rules are unread. A Block rule shows queries for its listed domains are refused by configuration,
+  Every in-scope virtual network has a successfully provisioned link to a DNS security policy with
+  an enabled Block rule that takes effect, one no enabled Allow rule of higher priority can reach
+  (virtual_networks_without_blocking_policy is 0). Fails while the policy list or any policy's
+  links or rules are unread, and while a linked policy's Block rules might be overridden. A Block rule shows queries for its listed domains are refused by configuration,
   not that the lists are current or that any query was blocked. Does not check whether the
   collection run succeeded.
 
 regex: '"virtual_networks_without_blocking_policy":\s*(?<virtual_networks_without_blocking_policy>\d+)'
-rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0
+rules_summary: MATCH_COUNT EQUALS 1; MATCH_GROUP[1] EQUALS 0
 validation_rules:
   - regexOperation: { type: MATCH_COUNT }
-    criteria: NOT_EQUALS
-    value: { type: CUSTOM_TEXT, customText: "0" }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "1" }
   - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # virtual_networks_without_blocking_policy
     criteria: EQUALS
     value: { type: CUSTOM_TEXT, customText: "0" }
