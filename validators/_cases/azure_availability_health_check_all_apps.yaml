@@ -1,0 +1,139 @@
+validator: azure_availability_health_check_all_apps
+cases:
+  - name: every_app_has_health_check
+    expect: PASS
+    artifact: '{"metadata":{"evidence_set":{"reference_id":"EVD-AZURE-SERVICE-AVAILABILITY"},"exit_code":0,"status":"success"},"payload":{"metadata":{"api_failures":[],"partial_failure":false,"subscription_id":"00000000-0000-0000-0000-000000000000","subscription_source":"target"},"results":{"resources":[{"health_check":{"enabled":true,"path":"/healthz"},"id":"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-app/providers/Microsoft.Web/sites/app-example","kind":"app","location":"eastus","name":"app-example","resource_health":{"current_state":"Available","current_summary":"Running normally."},"summary":{"longest_outage_hours":0.5,"meets_recovery_time_objective":true,"outages":1}}],"settings":{"lookback_days":30,"recovery_time_objective_hours":4.0,"window_end":"2026-10-31T00:00:00Z","window_start":"2026-10-01T00:00:00Z"}},"summary":{"all_apps_have_health_check":true,"all_resources_meet_recovery_time_objective":true,"app_services":4,"apps_health_check_healthy_last_hour":4,"apps_health_check_unhealthy_last_hour":0,"apps_health_check_unknown":0,"apps_health_check_without_recent_data":0,"apps_stopped":0,"apps_with_health_check":4,"apps_with_unhealthy_hours":0,"apps_without_health_check":0,"customer_initiated_unavailable_windows":0,"excluded_apps":0,"excluded_front_door_profiles":0,"excluded_sql_managed_instances":0,"front_door_longest_origin_probe_failure_hours":0,"front_door_origin_probe_failure_windows":0,"front_door_profiles":1,"front_door_profiles_failing_origin_probes_now":0,"function_apps":1,"health_check_metric_unread":0,"in_scope_apps":4,"in_scope_front_door_profiles":1,"in_scope_sql_managed_instances":1,"longest_degraded_hours":0,"longest_outage_hours":0.5,"longest_unknown_hours":0,"lookback_days":30,"lowest_availability_percentage":99.9,"ongoing_outages":0,"outages_in_window":1,"recovery_time_objective_hours":4.0,"regions":["eastus","global","westus2"],"resource_exclusion_patterns":[],"resource_exclusion_patterns_unmatched":[],"resource_health_by_status":{"read":6},"resource_health_read":6,"resource_health_registration":"registered","resource_health_unknown":0,"resources":6,"resources_availability_unknown_now":0,"resources_available_now":5,"resources_degraded_now":0,"resources_meeting_recovery_time_objective":5,"resources_missing_recovery_time_objective":0,"resources_recovery_time_objective_unknown":0,"resources_unavailable_now":0,"resources_with_outage_in_window":1,"resources_with_partial_history":0,"resources_with_unknown_hours":0,"resources_without_availability":0,"service_impacting_events":1,"sql_managed_instances":1,"web_apps":3,"windows_not_listed":0}},"schema_version":"1.0"}'
+
+  - name: every_app_has_health_check_pretty
+    expect: PASS
+    artifact: |
+      {
+        "metadata": {
+          "evidence_set": {
+            "reference_id": "EVD-AZURE-SERVICE-AVAILABILITY"
+          },
+          "exit_code": 0,
+          "status": "success"
+        },
+        "payload": {
+          "metadata": {
+            "api_failures": [],
+            "partial_failure": false,
+            "subscription_id": "00000000-0000-0000-0000-000000000000",
+            "subscription_source": "target"
+          },
+          "results": {
+            "resources": [
+              {
+                "health_check": {
+                  "enabled": true,
+                  "path": "/healthz"
+                },
+                "id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-app/providers/Microsoft.Web/sites/app-example",
+                "kind": "app",
+                "location": "eastus",
+                "name": "app-example",
+                "resource_health": {
+                  "current_state": "Available",
+                  "current_summary": "Running normally."
+                },
+                "summary": {
+                  "longest_outage_hours": 0.5,
+                  "meets_recovery_time_objective": true,
+                  "outages": 1
+                }
+              }
+            ],
+            "settings": {
+              "lookback_days": 30,
+              "recovery_time_objective_hours": 4.0,
+              "window_end": "2026-10-31T00:00:00Z",
+              "window_start": "2026-10-01T00:00:00Z"
+            }
+          },
+          "summary": {
+            "all_apps_have_health_check": true,
+            "all_resources_meet_recovery_time_objective": true,
+            "app_services": 4,
+            "apps_health_check_healthy_last_hour": 4,
+            "apps_health_check_unhealthy_last_hour": 0,
+            "apps_health_check_unknown": 0,
+            "apps_health_check_without_recent_data": 0,
+            "apps_stopped": 0,
+            "apps_with_health_check": 4,
+            "apps_with_unhealthy_hours": 0,
+            "apps_without_health_check": 0,
+            "customer_initiated_unavailable_windows": 0,
+            "excluded_apps": 0,
+            "excluded_front_door_profiles": 0,
+            "excluded_sql_managed_instances": 0,
+            "front_door_longest_origin_probe_failure_hours": 0,
+            "front_door_origin_probe_failure_windows": 0,
+            "front_door_profiles": 1,
+            "front_door_profiles_failing_origin_probes_now": 0,
+            "function_apps": 1,
+            "health_check_metric_unread": 0,
+            "in_scope_apps": 4,
+            "in_scope_front_door_profiles": 1,
+            "in_scope_sql_managed_instances": 1,
+            "longest_degraded_hours": 0,
+            "longest_outage_hours": 0.5,
+            "longest_unknown_hours": 0,
+            "lookback_days": 30,
+            "lowest_availability_percentage": 99.9,
+            "ongoing_outages": 0,
+            "outages_in_window": 1,
+            "recovery_time_objective_hours": 4.0,
+            "regions": [
+              "eastus",
+              "global",
+              "westus2"
+            ],
+            "resource_exclusion_patterns": [],
+            "resource_exclusion_patterns_unmatched": [],
+            "resource_health_by_status": {
+              "read": 6
+            },
+            "resource_health_read": 6,
+            "resource_health_registration": "registered",
+            "resource_health_unknown": 0,
+            "resources": 6,
+            "resources_availability_unknown_now": 0,
+            "resources_available_now": 5,
+            "resources_degraded_now": 0,
+            "resources_meeting_recovery_time_objective": 5,
+            "resources_missing_recovery_time_objective": 0,
+            "resources_recovery_time_objective_unknown": 0,
+            "resources_unavailable_now": 0,
+            "resources_with_outage_in_window": 1,
+            "resources_with_partial_history": 0,
+            "resources_with_unknown_hours": 0,
+            "resources_without_availability": 0,
+            "service_impacting_events": 1,
+            "sql_managed_instances": 1,
+            "web_apps": 3,
+            "windows_not_listed": 0
+          }
+        },
+        "schema_version": "1.0"
+      }
+
+  - name: app_without_health_check
+    expect: FAIL
+    artifact: '{"metadata":{"evidence_set":{"reference_id":"EVD-AZURE-SERVICE-AVAILABILITY"},"exit_code":0,"status":"success"},"payload":{"metadata":{"api_failures":[],"partial_failure":false,"subscription_id":"00000000-0000-0000-0000-000000000000","subscription_source":"target"},"results":{"resources":[{"health_check":{"enabled":true,"path":"/healthz"},"id":"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-app/providers/Microsoft.Web/sites/app-example","kind":"app","location":"eastus","name":"app-example","resource_health":{"current_state":"Available","current_summary":"Running normally."},"summary":{"longest_outage_hours":0.5,"meets_recovery_time_objective":true,"outages":1}}],"settings":{"lookback_days":30,"recovery_time_objective_hours":4.0,"window_end":"2026-10-31T00:00:00Z","window_start":"2026-10-01T00:00:00Z"}},"summary":{"all_apps_have_health_check":false,"all_resources_meet_recovery_time_objective":true,"app_services":4,"apps_health_check_healthy_last_hour":4,"apps_health_check_unhealthy_last_hour":0,"apps_health_check_unknown":0,"apps_health_check_without_recent_data":0,"apps_stopped":0,"apps_with_health_check":3,"apps_with_unhealthy_hours":0,"apps_without_health_check":1,"customer_initiated_unavailable_windows":0,"excluded_apps":0,"excluded_front_door_profiles":0,"excluded_sql_managed_instances":0,"front_door_longest_origin_probe_failure_hours":0,"front_door_origin_probe_failure_windows":0,"front_door_profiles":1,"front_door_profiles_failing_origin_probes_now":0,"function_apps":1,"health_check_metric_unread":0,"in_scope_apps":4,"in_scope_front_door_profiles":1,"in_scope_sql_managed_instances":1,"longest_degraded_hours":0,"longest_outage_hours":0.5,"longest_unknown_hours":0,"lookback_days":30,"lowest_availability_percentage":99.9,"ongoing_outages":0,"outages_in_window":1,"recovery_time_objective_hours":4.0,"regions":["eastus","global","westus2"],"resource_exclusion_patterns":[],"resource_exclusion_patterns_unmatched":[],"resource_health_by_status":{"read":6},"resource_health_read":6,"resource_health_registration":"registered","resource_health_unknown":0,"resources":6,"resources_availability_unknown_now":0,"resources_available_now":5,"resources_degraded_now":0,"resources_meeting_recovery_time_objective":5,"resources_missing_recovery_time_objective":0,"resources_recovery_time_objective_unknown":0,"resources_unavailable_now":0,"resources_with_outage_in_window":1,"resources_with_partial_history":0,"resources_with_unknown_hours":0,"resources_without_availability":0,"service_impacting_events":1,"sql_managed_instances":1,"web_apps":3,"windows_not_listed":0}},"schema_version":"1.0"}'
+
+  - name: app_configuration_unread
+    expect: FAIL
+    artifact: '{"metadata":{"evidence_set":{"reference_id":"EVD-AZURE-SERVICE-AVAILABILITY"},"exit_code":0,"status":"success"},"payload":{"metadata":{"api_failures":[],"partial_failure":false,"subscription_id":"00000000-0000-0000-0000-000000000000","subscription_source":"target"},"results":{"resources":[{"health_check":{"enabled":true,"path":"/healthz"},"id":"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-app/providers/Microsoft.Web/sites/app-example","kind":"app","location":"eastus","name":"app-example","resource_health":{"current_state":"Available","current_summary":"Running normally."},"summary":{"longest_outage_hours":0.5,"meets_recovery_time_objective":true,"outages":1}}],"settings":{"lookback_days":30,"recovery_time_objective_hours":4.0,"window_end":"2026-10-31T00:00:00Z","window_start":"2026-10-01T00:00:00Z"}},"summary":{"all_apps_have_health_check":null,"all_resources_meet_recovery_time_objective":true,"app_services":4,"apps_health_check_healthy_last_hour":4,"apps_health_check_unhealthy_last_hour":0,"apps_health_check_unknown":1,"apps_health_check_without_recent_data":0,"apps_stopped":0,"apps_with_health_check":3,"apps_with_unhealthy_hours":0,"apps_without_health_check":0,"customer_initiated_unavailable_windows":0,"excluded_apps":0,"excluded_front_door_profiles":0,"excluded_sql_managed_instances":0,"front_door_longest_origin_probe_failure_hours":0,"front_door_origin_probe_failure_windows":0,"front_door_profiles":1,"front_door_profiles_failing_origin_probes_now":0,"function_apps":1,"health_check_metric_unread":0,"in_scope_apps":4,"in_scope_front_door_profiles":1,"in_scope_sql_managed_instances":1,"longest_degraded_hours":0,"longest_outage_hours":0.5,"longest_unknown_hours":0,"lookback_days":30,"lowest_availability_percentage":99.9,"ongoing_outages":0,"outages_in_window":1,"recovery_time_objective_hours":4.0,"regions":["eastus","global","westus2"],"resource_exclusion_patterns":[],"resource_exclusion_patterns_unmatched":[],"resource_health_by_status":{"read":6},"resource_health_read":6,"resource_health_registration":"registered","resource_health_unknown":0,"resources":6,"resources_availability_unknown_now":0,"resources_available_now":5,"resources_degraded_now":0,"resources_meeting_recovery_time_objective":5,"resources_missing_recovery_time_objective":0,"resources_recovery_time_objective_unknown":0,"resources_unavailable_now":0,"resources_with_outage_in_window":1,"resources_with_partial_history":0,"resources_with_unknown_hours":0,"resources_without_availability":0,"service_impacting_events":1,"sql_managed_instances":1,"web_apps":3,"windows_not_listed":0}},"schema_version":"1.0"}'
+
+  - name: no_apps
+    expect: FAIL
+    artifact: '{"metadata":{"evidence_set":{"reference_id":"EVD-AZURE-SERVICE-AVAILABILITY"},"exit_code":0,"status":"success"},"payload":{"metadata":{"api_failures":[],"partial_failure":false,"subscription_id":"00000000-0000-0000-0000-000000000000","subscription_source":"target"},"results":{"resources":[{"health_check":{"enabled":true,"path":"/healthz"},"id":"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-app/providers/Microsoft.Web/sites/app-example","kind":"app","location":"eastus","name":"app-example","resource_health":{"current_state":"Available","current_summary":"Running normally."},"summary":{"longest_outage_hours":0.5,"meets_recovery_time_objective":true,"outages":1}}],"settings":{"lookback_days":30,"recovery_time_objective_hours":4.0,"window_end":"2026-10-31T00:00:00Z","window_start":"2026-10-01T00:00:00Z"}},"summary":{"all_apps_have_health_check":null,"all_resources_meet_recovery_time_objective":true,"app_services":0,"apps_health_check_healthy_last_hour":4,"apps_health_check_unhealthy_last_hour":0,"apps_health_check_unknown":0,"apps_health_check_without_recent_data":0,"apps_stopped":0,"apps_with_health_check":0,"apps_with_unhealthy_hours":0,"apps_without_health_check":0,"customer_initiated_unavailable_windows":0,"excluded_apps":0,"excluded_front_door_profiles":0,"excluded_sql_managed_instances":0,"front_door_longest_origin_probe_failure_hours":0,"front_door_origin_probe_failure_windows":0,"front_door_profiles":1,"front_door_profiles_failing_origin_probes_now":0,"function_apps":0,"health_check_metric_unread":0,"in_scope_apps":0,"in_scope_front_door_profiles":1,"in_scope_sql_managed_instances":1,"longest_degraded_hours":0,"longest_outage_hours":0.5,"longest_unknown_hours":0,"lookback_days":30,"lowest_availability_percentage":99.9,"ongoing_outages":0,"outages_in_window":1,"recovery_time_objective_hours":4.0,"regions":["eastus","global","westus2"],"resource_exclusion_patterns":[],"resource_exclusion_patterns_unmatched":[],"resource_health_by_status":{"read":6},"resource_health_read":6,"resource_health_registration":"registered","resource_health_unknown":0,"resources":2,"resources_availability_unknown_now":0,"resources_available_now":5,"resources_degraded_now":0,"resources_meeting_recovery_time_objective":5,"resources_missing_recovery_time_objective":0,"resources_recovery_time_objective_unknown":0,"resources_unavailable_now":0,"resources_with_outage_in_window":1,"resources_with_partial_history":0,"resources_with_unknown_hours":0,"resources_without_availability":0,"service_impacting_events":1,"sql_managed_instances":1,"web_apps":0,"windows_not_listed":0}},"schema_version":"1.0"}'
+
+  - name: partial_failure
+    expect: FAIL
+    artifact: '{"metadata":{"evidence_set":{"reference_id":"EVD-AZURE-SERVICE-AVAILABILITY"},"exit_code":1,"status":"failed"},"payload":{"metadata":{"api_failures":[{"message":"example failure","operation":"example.read"}],"partial_failure":true,"subscription_id":"00000000-0000-0000-0000-000000000000","subscription_source":"target"},"results":{"resources":[{"health_check":{"enabled":true,"path":"/healthz"},"id":"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-app/providers/Microsoft.Web/sites/app-example","kind":"app","location":"eastus","name":"app-example","resource_health":{"current_state":"Available","current_summary":"Running normally."},"summary":{"longest_outage_hours":0.5,"meets_recovery_time_objective":true,"outages":1}}],"settings":{"lookback_days":30,"recovery_time_objective_hours":4.0,"window_end":"2026-10-31T00:00:00Z","window_start":"2026-10-01T00:00:00Z"}},"summary":{"all_apps_have_health_check":true,"all_resources_meet_recovery_time_objective":true,"app_services":4,"apps_health_check_healthy_last_hour":4,"apps_health_check_unhealthy_last_hour":0,"apps_health_check_unknown":0,"apps_health_check_without_recent_data":0,"apps_stopped":0,"apps_with_health_check":4,"apps_with_unhealthy_hours":0,"apps_without_health_check":0,"customer_initiated_unavailable_windows":0,"excluded_apps":0,"excluded_front_door_profiles":0,"excluded_sql_managed_instances":0,"front_door_longest_origin_probe_failure_hours":0,"front_door_origin_probe_failure_windows":0,"front_door_profiles":1,"front_door_profiles_failing_origin_probes_now":0,"function_apps":1,"health_check_metric_unread":0,"in_scope_apps":4,"in_scope_front_door_profiles":1,"in_scope_sql_managed_instances":1,"longest_degraded_hours":0,"longest_outage_hours":0.5,"longest_unknown_hours":0,"lookback_days":30,"lowest_availability_percentage":99.9,"ongoing_outages":0,"outages_in_window":1,"recovery_time_objective_hours":4.0,"regions":["eastus","global","westus2"],"resource_exclusion_patterns":[],"resource_exclusion_patterns_unmatched":[],"resource_health_by_status":{"read":6},"resource_health_read":6,"resource_health_registration":"registered","resource_health_unknown":0,"resources":6,"resources_availability_unknown_now":0,"resources_available_now":5,"resources_degraded_now":0,"resources_meeting_recovery_time_objective":5,"resources_missing_recovery_time_objective":0,"resources_recovery_time_objective_unknown":0,"resources_unavailable_now":0,"resources_with_outage_in_window":1,"resources_with_partial_history":0,"resources_with_unknown_hours":0,"resources_without_availability":0,"service_impacting_events":1,"sql_managed_instances":1,"web_apps":3,"windows_not_listed":0}},"schema_version":"1.0"}'
+
+  - name: verdict_key_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"evidence_set":{"reference_id":"EVD-AZURE-SERVICE-AVAILABILITY"},"exit_code":0,"status":"success"},"payload":{"metadata":{"api_failures":[],"partial_failure":false,"subscription_id":"00000000-0000-0000-0000-000000000000","subscription_source":"target"},"results":{"resources":[{"health_check":{"enabled":true,"path":"/healthz"},"id":"/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-app/providers/Microsoft.Web/sites/app-example","kind":"app","location":"eastus","name":"app-example","resource_health":{"current_state":"Available","current_summary":"Running normally."},"summary":{"longest_outage_hours":0.5,"meets_recovery_time_objective":true,"outages":1}}],"settings":{"lookback_days":30,"recovery_time_objective_hours":4.0,"window_end":"2026-10-31T00:00:00Z","window_start":"2026-10-01T00:00:00Z"}},"summary":{"all_apps_health_checked":true,"all_resources_meet_recovery_time_objective":true,"app_services":4,"apps_health_check_healthy_last_hour":4,"apps_health_check_unhealthy_last_hour":0,"apps_health_check_unknown":0,"apps_health_check_without_recent_data":0,"apps_stopped":0,"apps_with_health_check":4,"apps_with_unhealthy_hours":0,"apps_without_health_check":0,"customer_initiated_unavailable_windows":0,"excluded_apps":0,"excluded_front_door_profiles":0,"excluded_sql_managed_instances":0,"front_door_longest_origin_probe_failure_hours":0,"front_door_origin_probe_failure_windows":0,"front_door_profiles":1,"front_door_profiles_failing_origin_probes_now":0,"function_apps":1,"health_check_metric_unread":0,"in_scope_apps":4,"in_scope_front_door_profiles":1,"in_scope_sql_managed_instances":1,"longest_degraded_hours":0,"longest_outage_hours":0.5,"longest_unknown_hours":0,"lookback_days":30,"lowest_availability_percentage":99.9,"ongoing_outages":0,"outages_in_window":1,"recovery_time_objective_hours":4.0,"regions":["eastus","global","westus2"],"resource_exclusion_patterns":[],"resource_exclusion_patterns_unmatched":[],"resource_health_by_status":{"read":6},"resource_health_read":6,"resource_health_registration":"registered","resource_health_unknown":0,"resources":6,"resources_availability_unknown_now":0,"resources_available_now":5,"resources_degraded_now":0,"resources_meeting_recovery_time_objective":5,"resources_missing_recovery_time_objective":0,"resources_recovery_time_objective_unknown":0,"resources_unavailable_now":0,"resources_with_outage_in_window":1,"resources_with_partial_history":0,"resources_with_unknown_hours":0,"resources_without_availability":0,"service_impacting_events":1,"sql_managed_instances":1,"web_apps":3,"windows_not_listed":0}},"schema_version":"1.0"}'

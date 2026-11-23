@@ -1,0 +1,25 @@
+key: azure_defender_compliance_assessments_graded
+name: Defender Regulatory Compliance Assessments Graded
+type: AUTOMATED
+role: configuration
+source: community
+statement: >
+  Defender for Cloud graded at least one regulatory compliance assessment Passed or Failed
+  (assessments_by_state), so the controls of the subscription's compliance standards were measured
+  against its resources, not only listed. Counts assessments under every standard the subscription
+  is graded against. Does not judge the results: it passes whether the graded assessments pass or
+  fail, and sets no pass-rate threshold. Skipped and Unsupported assessments do not count. Whether
+  the Microsoft cloud security benchmark itself is graded is a separate check. Does not check whether
+  the collection run succeeded.
+
+# Each control in results carries its own assessments_by_state; any match there means
+# the same as the summary's, which adds them all up.
+regex: '"assessments_by_state":\s*\{[^}]*?"(?:Passed|Failed)":\s*[1-9]'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-DEFENDER-REG-COMPLIANCE

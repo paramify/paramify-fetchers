@@ -1,0 +1,25 @@
+validator: azure_ai_hub_datastores_identity_based
+cases:
+  - name: compliant
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"datastores_credentials_unknown":0,"datastores_with_stored_credentials":0,"total_workspaces":2,"workspaces_datastores_unknown":0,"workspaces_identity_based_datastore_access":2}}}'
+
+  - name: datastores_credentials_unknown_nonzero
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"datastores_credentials_unknown":1,"datastores_with_stored_credentials":0,"total_workspaces":2,"workspaces_datastores_unknown":0,"workspaces_identity_based_datastore_access":2}}}'
+
+  - name: datastores_with_stored_credentials_nonzero
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"datastores_credentials_unknown":0,"datastores_with_stored_credentials":1,"total_workspaces":2,"workspaces_datastores_unknown":0,"workspaces_identity_based_datastore_access":2}}}'
+
+  - name: workspaces_datastores_unknown_nonzero
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"datastores_credentials_unknown":0,"datastores_with_stored_credentials":0,"total_workspaces":2,"workspaces_datastores_unknown":1,"workspaces_identity_based_datastore_access":2}}}'
+
+  - name: workspaces_identity_based_datastore_access_short
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"datastores_credentials_unknown":0,"datastores_with_stored_credentials":0,"total_workspaces":2,"workspaces_datastores_unknown":0,"workspaces_identity_based_datastore_access":1}}}'
+
+  - name: datastores_credentials_unknown_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"datastores_credentials_unknown_renamed":0,"datastores_with_stored_credentials":0,"total_workspaces":2,"workspaces_datastores_unknown":0,"workspaces_identity_based_datastore_access":2}}}'

@@ -1,0 +1,22 @@
+key: azure_velero_clean_restore_within_interval
+name: 'Azure Velero: Clean Restore Within the Restore-Test Interval'
+type: AUTOMATED
+role: configuration
+source: community
+statement: >
+  The newest Velero restore that completed without errors is no older than restore_test_interval_days.
+  Also fails while no interval is configured or restores are unread (see 'Restore-Test Interval Is
+  Configured' and 'Restore Records Read' for the cause), so an undecided or unread value is never
+  reported as a pass. A restore without errors does not show the recovered application works, and does
+  not prove the recovery time objective; that needs a timed recovery walkthrough. Does not check
+  whether the collection run succeeded.
+
+regex: '"clean_restore_within_interval":\s*true\b'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-VELERO-BACKUPS
