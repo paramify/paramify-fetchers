@@ -60,6 +60,9 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`github_code_scanning_report` 0.1.0: open code scanning alerts as a vulnerability report.** The same shape for
+  the open code scanning alerts on each default branch, with rule, tool, location and security severity columns.
+
 - **`github_dependabot_report` 0.1.0: open Dependabot alerts as a vulnerability report.** An issue report that writes
   every open Dependabot alert in the organization as one CSV row, with the repository's inventory identifier in an
   `Asset ID` column (`pipeline: vulnerability`, `id_scheme: github-repository-url`), so findings link to

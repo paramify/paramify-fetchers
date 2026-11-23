@@ -77,8 +77,7 @@ that they use, so one YAML anchor can supply it
 
 ```yaml
 - use: github_dependabot_report
-  targets:
-    - *acme
+  targets: [*github_target]
 ```
 
 Then select the assessment and run:

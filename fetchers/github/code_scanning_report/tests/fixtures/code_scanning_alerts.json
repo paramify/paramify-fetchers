@@ -1,0 +1,59 @@
+[
+  {
+    "number": 4,
+    "state": "open",
+    "created_at": "2026-09-20T12:00:00Z",
+    "updated_at": "2026-10-01T09:00:00Z",
+    "html_url": "https://github.test/acme/api/security/code-scanning/4",
+    "rule": {
+      "id": "py/sql-injection",
+      "name": "py/sql-injection",
+      "severity": "error",
+      "security_severity_level": "high",
+      "description": "SQL query built from user-controlled sources",
+      "tags": ["security", "external/cwe/cwe-089"]
+    },
+    "tool": {"name": "CodeQL", "guid": null, "version": "2.19.0"},
+    "most_recent_instance": {
+      "ref": "refs/heads/main",
+      "analysis_key": ".github/workflows/codeql.yml:analyze",
+      "state": "open",
+      "commit_sha": "0123456789abcdef0123456789abcdef01234567",
+      "message": {"text": "This SQL query depends on a user-provided value."},
+      "location": {"path": "app/db.py", "start_line": 42, "end_line": 42, "start_column": 9, "end_column": 30}
+    }
+  },
+  {
+    "number": 9,
+    "state": "open",
+    "created_at": "2026-10-05T12:00:00Z",
+    "updated_at": "2026-10-05T12:00:00Z",
+    "html_url": "https://github.test/acme/api/security/code-scanning/9",
+    "rule": {
+      "id": "py/unused-import",
+      "name": "py/unused-import",
+      "severity": "note",
+      "security_severity_level": null,
+      "description": "Unused import",
+      "tags": ["maintainability"]
+    },
+    "tool": {"name": "CodeQL", "version": "2.19.0"},
+    "most_recent_instance": {
+      "ref": "refs/heads/main",
+      "commit_sha": "0123456789abcdef0123456789abcdef01234567",
+      "message": {"text": "Import of 'os' is not used."},
+      "location": {"path": "app/util.py", "start_line": 1, "end_line": 1}
+    }
+  },
+  {
+    "number": 3,
+    "state": "dismissed",
+    "dismissed_reason": "false positive",
+    "created_at": "2026-08-01T12:00:00Z",
+    "updated_at": "2026-08-02T12:00:00Z",
+    "html_url": "https://github.test/acme/api/security/code-scanning/3",
+    "rule": {"id": "py/path-injection", "severity": "error", "security_severity_level": "high", "description": "Dismissed"},
+    "tool": {"name": "CodeQL"},
+    "most_recent_instance": {"ref": "refs/heads/main", "location": {"path": "app/files.py"}}
+  }
+]
