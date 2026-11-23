@@ -12,6 +12,11 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **`paramify issues upload` waits on every assessment's job at once.** Reports for every assessment are sent and their
+  processing jobs queued first, then all the jobs are polled together. A run that sends to several assessments waits as
+  long as its slowest job instead of the sum of them, and the next assessment's reports no longer wait on the previous
+  job. Each job's outcome is still written to `_intake_log.json` as soon as it settles, and `--wait-timeout` still
+  applies to each job. Job status lines now follow all the upload lines instead of each assessment's own.
 - **`aws_inspector_ecr_findings` and `aws_inspector_ecr_report` 0.3.0: image counts and an opt-in for an empty scope.**
   - The evidence summary adds `repository_image_count`, every image in the selected repositories before tag,
     push-date and usage filters, next to `image_count`, the images that match them. Both are logged. No new API calls.

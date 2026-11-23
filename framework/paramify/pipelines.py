@@ -235,19 +235,73 @@ def wait_for_job(
     deciding what happens to someone else's job. A read that fails after the
     client's own retries raises PipelineError.
     """
+    job, timed_out, error = wait_for_jobs(
+        pipelines, [job_id], timeout=timeout,
+        on_status=None if on_status is None else (lambda _id, job: on_status(job)),
+    )[job_id]
+    if error is not None:
+        raise error
+    assert job is not None  # only a failed read leaves no job, and that raised
+    return job, timed_out
+
+
+def wait_for_jobs(
+    pipelines: Pipelines,
+    job_ids: List[str],
+    *,
+    timeout: float = DEFAULT_WAIT_TIMEOUT,
+    on_status: Optional[Callable[[str, Dict[str, Any]], None]] = None,
+    on_done: Optional[Callable[[str, Optional[Dict[str, Any]], bool, Optional[PipelineError]], None]] = None,
+) -> Dict[str, Tuple[Optional[Dict[str, Any]], bool, Optional[PipelineError]]]:
+    """Poll several jobs at once until each finishes, is blocked, or `timeout` passes.
+
+    The same rules as wait_for_job, applied to every job in one poll loop: each
+    round reads every unfinished job, then sleeps once. Waiting on N jobs takes
+    as long as the slowest, not their sum. `timeout` applies to each job, counted
+    from the start of the wait.
+
+    Returns {job_id: (last job seen, timed_out, error)}. A read that fails after
+    the client's own retries ends the wait for that job only: it is reported as
+    (None, False, the PipelineError) and the other jobs keep being polled.
+    `on_status(job_id, job)` fires when a job's status changes; `on_done(job_id,
+    job, timed_out, error)` fires as each job leaves the wait, in the order they
+    leave it, so a caller can record each outcome as soon as it is known.
+    """
     deadline = pipelines.now() + timeout
     delay = _POLL_FIRST
-    last_status = None
-    while True:
-        job = pipelines.get_job(job_id)
-        status = job.get("status")
-        if status != last_status:
-            last_status = status
-            if on_status is not None:
-                on_status(job)
-        if status in TERMINAL or is_blocked(job):
-            return job, False
+    pending = list(dict.fromkeys(job_ids))
+    last_status: Dict[str, Any] = {}
+    last_job: Dict[str, Dict[str, Any]] = {}
+    results: Dict[str, Tuple[Optional[Dict[str, Any]], bool, Optional[PipelineError]]] = {}
+
+    def finish(job_id, job, timed_out, error) -> None:
+        results[job_id] = (job, timed_out, error)
+        if on_done is not None:
+            on_done(job_id, job, timed_out, error)
+
+    while pending:
+        for job_id in list(pending):
+            try:
+                job = pipelines.get_job(job_id)
+            except PipelineError as e:
+                pending.remove(job_id)
+                finish(job_id, None, False, e)
+                continue
+            last_job[job_id] = job
+            status = job.get("status")
+            if status != last_status.get(job_id):
+                last_status[job_id] = status
+                if on_status is not None:
+                    on_status(job_id, job)
+            if status in TERMINAL or is_blocked(job):
+                pending.remove(job_id)
+                finish(job_id, job, False, None)
+        if not pending:
+            break
         if pipelines.now() + delay > deadline:
-            return job, True
+            for job_id in pending:
+                finish(job_id, last_job[job_id], True, None)
+            break
         pipelines.sleep(delay)
         delay = min(delay * _POLL_BACKOFF, _POLL_MAX)
+    return results

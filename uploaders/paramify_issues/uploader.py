@@ -26,8 +26,9 @@ The unit of work is one assessment per run, not one file:
    process call is `PROCESS_CLOSE` only when the assessment's `close_cycle` is
    `after_run` AND every target bound to it in this run succeeded and uploaded.
    Otherwise it is `PROCESS`, and the summary says why the close was skipped.
-4. **Wait.** Poll the job until it completes, fails, or is blocked behind a
-   failed job, and report its counts. A job that did not complete fails the run.
+4. **Wait.** After every assessment is sent and queued, poll all the jobs
+   together until each completes, fails, or is blocked behind a failed job, and
+   report its counts. A job that did not complete fails the run.
 
 Two behaviors are forced by the endpoint, as before:
 
@@ -86,7 +87,7 @@ from framework.paramify.pipelines import (  # noqa: E402
     Pipelines,
     is_blocked,
     job_summary,
-    wait_for_job,
+    wait_for_jobs,
 )
 
 logger = logging.getLogger("paramify_issues_uploader")
@@ -509,6 +510,10 @@ def upload_run(
     assessments: List[Dict] = []
     uploaded = skipped_dup = skipped_failed = errors = jobs_failed = 0
     halted: Optional[str] = None
+    # Jobs to wait on once every assessment's reports are sent and processing is
+    # queued: (assessment id, logged job state). Waiting inline would make each
+    # assessment wait for the one before it, though their jobs run independently.
+    to_wait: List[Tuple[str, dict]] = []
 
     def add_result(result: Dict) -> None:
         results.append(result)
@@ -748,15 +753,15 @@ def upload_run(
                 _emit(on_event, {"event": "process_skipped", "assessment_id": aid,
                                  "reason": "nothing new to process"})
                 continue
-            if last.get("status") not in TERMINAL and wait and pipelines:
-                last = _wait_and_record(pipelines, aid, last, wait_timeout, on_event)
-                save_log()
-            else:
-                _emit(on_event, {"event": "process_skipped", "assessment_id": aid,
-                                 "reason": f"already queued as job {last.get('job_id')} "
-                                           f"({last.get('status')})"})
             entry["operation"] = last.get("operation")
             entry["job"] = last
+            if last.get("status") not in TERMINAL and wait and pipelines:
+                # Counted once the wait settles it, with the jobs queued below.
+                to_wait.append((aid, last))
+                continue
+            _emit(on_event, {"event": "process_skipped", "assessment_id": aid,
+                             "reason": f"already queued as job {last.get('job_id')} "
+                                       f"({last.get('status')})"})
             still_running = (
                 not wait and last.get("status") not in TERMINAL and not is_blocked(last)
             )
@@ -803,12 +808,19 @@ def upload_run(
                          "cycle_name": job_state.get("cycle_name"),
                          "newer_cycles": job_state.get("newer_cycles", 0)})
 
+        entry["job"] = job_state
         if wait:
-            job_state = _wait_and_record(pipelines, aid, job_state, wait_timeout, on_event)
+            to_wait.append((aid, job_state))
+
+    # Also after a halt: the jobs already queued are this run's outcome.
+    if to_wait:
+        def recorded(aid: str, job_state: dict) -> None:
+            nonlocal jobs_failed
             if job_state.get("status") != JOB_COMPLETED:
                 jobs_failed += 1
             save_log()
-        entry["job"] = job_state
+
+        _wait_and_record(pipelines, to_wait, wait_timeout, on_event, recorded)
 
     summary = {
         "run_dir": str(run_dir),
@@ -837,33 +849,40 @@ def upload_run(
 
 
 def _wait_and_record(
-    pipelines: Pipelines, aid: str, job_state: dict, timeout: float,
+    pipelines: Pipelines, waits: List[Tuple[str, dict]], timeout: float,
     on_event: Optional[Callable[[dict], None]],
-) -> dict:
-    """Wait on one job and fold its outcome into the logged job state (in place)."""
-    def on_status(job: Dict) -> None:
-        _emit(on_event, {"event": "job_status", "assessment_id": aid,
+    on_recorded: Callable[[str, dict], None],
+) -> None:
+    """Wait on every job at once and fold each outcome into its logged job state
+    (in place). `on_recorded(aid, job_state)` runs as each job settles, so its
+    outcome is saved before the slower jobs finish."""
+    by_job = {job_state["job_id"]: (aid, job_state) for aid, job_state in waits}
+
+    def on_status(job_id: str, job: Dict) -> None:
+        _emit(on_event, {"event": "job_status", "assessment_id": by_job[job_id][0],
                          "job_id": job.get("id"), "status": job.get("status")})
 
-    try:
-        job, timed_out = wait_for_job(
-            pipelines, job_state["job_id"], timeout=timeout, on_status=on_status
-        )
-    except PipelineError as e:
-        job_state["poll_error"] = str(e)[:300]
+    def on_done(job_id: str, job: Optional[Dict], timed_out: bool,
+                error: Optional[PipelineError]) -> None:
+        aid, job_state = by_job[job_id]
+        if error is not None:
+            job_state["poll_error"] = str(error)[:300]
+        else:
+            job_state.update(job_summary(job))
+            if timed_out:
+                job_state["timed_out"] = True
+            if job_state.get("status") != JOB_COMPLETED:
+                logger.error(
+                    "job %s on assessment %s ended %s%s", job_state.get("job_id"), aid,
+                    job_state.get("status"),
+                    f" (blocked by {job_state['blocked_by']})"
+                    if job_state.get("blocked_by") else "",
+                )
         _emit(on_event, {"event": "job_complete", "assessment_id": aid, **job_state})
-        return job_state
-    job_state.update(job_summary(job))
-    if timed_out:
-        job_state["timed_out"] = True
-    if job_state.get("status") != JOB_COMPLETED:
-        logger.error(
-            "job %s on assessment %s ended %s%s", job_state.get("job_id"), aid,
-            job_state.get("status"),
-            f" (blocked by {job_state['blocked_by']})" if job_state.get("blocked_by") else "",
-        )
-    _emit(on_event, {"event": "job_complete", "assessment_id": aid, **job_state})
-    return job_state
+        on_recorded(aid, job_state)
+
+    wait_for_jobs(pipelines, list(by_job), timeout=timeout,
+                  on_status=on_status, on_done=on_done)
 
 
 # --------------------------------------------------------------------------- #

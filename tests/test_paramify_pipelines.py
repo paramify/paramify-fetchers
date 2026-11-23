@@ -226,3 +226,74 @@ def test_issues_job_action_retries_and_refuses_an_unknown_action(workspace):
     assert session.sent[0]["path"] == "/pipeline-jobs/job-1/retry"
     with pytest.raises(ValueError, match="unknown job action"):
         api.issues_job_action(Path("."), "job-1", "explode")
+
+
+class _Polls:
+    """Just what wait_for_jobs uses: get_job and a fake clock. `by_job` maps a
+    job id to its successive poll results (a status, or an exception to raise),
+    last one repeated."""
+
+    def __init__(self, by_job):
+        self.by_job = {k: list(v) for k, v in by_job.items()}
+        self.polls = {}
+        self.clock = 0.0
+
+    def now(self):
+        return self.clock
+
+    def sleep(self, seconds):
+        self.clock += seconds
+
+    def get_job(self, job_id):
+        n = self.polls.get(job_id, 0)
+        self.polls[job_id] = n + 1
+        seq = self.by_job[job_id]
+        step = seq[min(n, len(seq) - 1)]
+        if isinstance(step, Exception):
+            raise step
+        return {"id": job_id, "status": step}
+
+
+def test_jobs_are_waited_on_together():
+    """One sleep per round for every job: the wait is the slowest job's, not the sum."""
+    p = _Polls({"a": ["RUNNING", "COMPLETED"], "b": ["RUNNING", "COMPLETED"]})
+    results = pl.wait_for_jobs(p, ["a", "b"], timeout=300)
+    assert {k: v[0]["status"] for k, v in results.items()} == {"a": "COMPLETED", "b": "COMPLETED"}
+    assert p.clock == pl._POLL_FIRST
+
+
+def test_each_job_is_reported_as_it_finishes():
+    p = _Polls({"slow": ["RUNNING", "RUNNING", "FAILED"], "fast": ["COMPLETED"]})
+    done = []
+    pl.wait_for_jobs(p, ["slow", "fast"], timeout=300,
+                     on_done=lambda job_id, job, timed_out, error: done.append(job_id))
+    assert done == ["fast", "slow"]
+    assert p.polls == {"slow": 3, "fast": 1}
+
+
+def test_a_failed_read_ends_only_that_jobs_wait():
+    p = _Polls({"bad": [pl.PipelineError("HTTP 500")], "good": ["RUNNING", "COMPLETED"]})
+    results = pl.wait_for_jobs(p, ["bad", "good"], timeout=300)
+    job, timed_out, error = results["bad"]
+    assert job is None and not timed_out and isinstance(error, pl.PipelineError)
+    assert results["good"][0]["status"] == "COMPLETED" and results["good"][2] is None
+
+
+def test_jobs_still_running_at_the_timeout_time_out_together():
+    p = _Polls({"a": ["RUNNING"], "b": ["COMPLETED"]})
+    results = pl.wait_for_jobs(p, ["a", "b"], timeout=60)
+    assert results["a"][0]["status"] == "RUNNING" and results["a"][1] is True
+    assert results["b"][1] is False
+
+
+def test_a_blocked_job_is_not_waited_on():
+    p = _Polls({"a": ["QUEUED"]})
+    p.get_job = (lambda job_id: {"id": job_id, "status": "QUEUED", "blockedByJobId": "x"})
+    results = pl.wait_for_jobs(p, ["a"], timeout=300)
+    assert results["a"][1] is False and p.clock == 0
+
+
+def test_wait_for_job_still_raises_a_failed_read():
+    p = _Polls({"a": [pl.PipelineError("HTTP 500")]})
+    with pytest.raises(pl.PipelineError):
+        pl.wait_for_job(p, "a", timeout=300)

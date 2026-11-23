@@ -61,9 +61,11 @@ the run's reports are bound to:
    assessment's `close_cycle` is `after_run` **and** every target bound to it in
    the run succeeded and uploaded. Otherwise it is `PROCESS`, and the output says
    why the close was skipped.
-4. **Wait.** The job is polled until it completes, fails, or is blocked behind a
-   failed job, and its counts are printed: issues created, updated, seen-closed,
-   auto-closed. A job that did not complete fails the command.
+4. **Wait.** Once every assessment's reports are sent and its job is queued, the
+   jobs are polled together until each completes, fails, or is blocked behind a
+   failed job, so the wait lasts as long as the slowest job rather than the sum.
+   Each job's counts are printed as it finishes: issues created, updated,
+   seen-closed, auto-closed. A job that did not complete fails the command.
 
 ## The close, and why it is not automatic
 
