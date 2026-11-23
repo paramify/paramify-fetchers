@@ -38,10 +38,13 @@ not yet read the text.
 ## 2. What to do in the PR
 
 1. Open `releases/<version>.yaml` in the PR.
-2. Read each row and each fetcher line that has `draft: true`. Rewrite it, or
-   delete it. Write for the person who runs the tool: what they get, or what
-   they must do. See [the releases README](../releases/README.md).
-3. Remove `draft: true` from each line that you keep.
+2. Read each row and each fetcher line that has `draft: true`. Rewrite its
+   text. Write for the person who runs the tool: what they get, or what they
+   must do. See [the releases README](../releases/README.md).
+   - You can delete a row in `highlights`.
+   - Do not delete a fetcher line. `release-check` fails without it, and a
+     rebuild adds it again. Edit its `note`.
+3. Remove `draft: true` from each row and line that you keep.
 4. Keep every `breaking` row. A test fails if a CHANGELOG Breaking entry has
    no breaking row.
 5. Wait for CI to pass. Then merge the PR.
@@ -66,6 +69,10 @@ the last build arrives with `draft: true`. A fetcher line keeps its note when
 the fetcher changed again, but gets the new version and a new mark. A line for
 a fetcher that no longer changed is dropped.
 
+A version that you set with `draft --version` stays when it is the version
+that the changes call for, or later. If the changes call for a later
+version, the rebuild uses that version.
+
 Rows that a user already saw on `main` are not shown again after a release.
 `paramify update` compares rows by tag and title, so a row that was in
 `unreleased.yaml` when the user last updated is not new to them.
@@ -79,8 +86,13 @@ one line that names the fetcher or version to fix:
 |---|---|
 | `NAME VERSION has no fetcher line` | Add a `fetchers` line with `name`, `version` and `note`. |
 | `NAME has N fetcher lines; keep one` | Delete the extra lines. |
-| `NAME has a line but did not change since vX` | Delete the line, or set its `version` to the new version of the fetcher. |
-| `expected X (reason), found Y` | Set `version` to X. The reason says why the bump is that size. |
+| `NAME has a line but did not change since vX` | Delete the line. |
+| `NAME line says X but the fetcher is Y` | Set the `version` of the line to Y. |
+| `expected X or later (reason), found Y` | Rebuild the release. Run the `release-draft` workflow by hand with an empty `version`, or run `python tools/release.py draft --version X`. The reason says why the bump is that size. |
+
+Do not only change `version` in the file. The version is also in the file
+name, the CHANGELOG heading and links, and `pyproject.toml`. A rebuild
+starts from your edited release file and changes all of them.
 
 Draft marks and missing breaking rows fail pytest, not `release-check`. See
 [the releases README](../releases/README.md).
@@ -122,7 +134,7 @@ message.
 
 | Workflow | When it runs | What it does |
 |---|---|---|
-| `release-draft` | Thursday 15:00 UTC, or by hand | Runs `draft`. The by-hand run has an optional `version` input. |
+| `release-draft` | Thursday 15:00 UTC, or by hand | Runs `draft`. The by-hand run has an optional `version` input: the version that the changes call for, or later. |
 | `release-redraft` | Each push to `main` | Runs `draft` only if a release PR is open. |
 | `release-publish` | A merged PR from `release/next` | Runs `publish`. |
 

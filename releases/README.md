@@ -22,7 +22,8 @@ A pull request that adds an entry under `### Breaking` in the CHANGELOG's
 ```yaml
 version: unreleased
 highlights:
-  # What is new. Tags: new, fetcher, cli, tui, improved, security, fix, deprecated.
+  # What is new. Tags for a minor release: new, fetcher, cli, tui (and breaking).
+  # Tags for a patch release: improved, fix, security, deprecated.
   - tag: fetcher
     title: A Snowflake category with six fetchers     # one line, 72 chars max
     detail: Warehouses, roles, grants and query history  # optional, dimmed
@@ -37,6 +38,14 @@ highlights:
 
 Write for the person running the tool: what they get, or what they must do.
 Leave out how it was built.
+
+The tags set the size of the next release:
+
+| The release has | The bump |
+|---|---|
+| a `new`, `fetcher`, `cli` or `tui` row, or a fetcher that is new | minor |
+| a `breaking` row | minor while the version is 0.x, major from 1.0 |
+| only `improved`, `fix`, `security` or `deprecated` rows, or no rows | patch |
 
 ## Who a breaking row touches
 
@@ -79,8 +88,12 @@ must not start with `TODO`.
 
 A workflow drafts the release file each week and opens a pull request. In the
 first draft, every row and fetcher line has a draft mark. After a rebuild,
-only the new text has one. Read each marked line, rewrite or delete it, and
-remove the mark. Follow [the releasing guide](../docs/releasing_guide.md).
+only the new text has one. Read each marked row and line, and rewrite its
+text. Then remove the mark.
+
+You can delete a row. Do not delete a fetcher line: the release check fails
+without it, and a rebuild adds it again. Edit its `note`. Follow
+[the releasing guide](../docs/releasing_guide.md).
 
 Rows that a user already saw on `main` are not shown again after a release.
 Update compares rows by tag and title.
