@@ -356,10 +356,10 @@ paramify status manifests/acme.yaml
 |---|---|
 | evidence set | `ok` when the set exists. `create` when the first scripts sync makes it. |
 | script | The state that `paramify scripts sync --dry-run` reports: `ok`, `update`, `create`, `drift` or `error`. |
-| validators | The registry validators that Paramify pairs with the set, out of all of them. `none` when the registry has none for the set. |
+| validators | The validators that Paramify pairs with the set, out of the validators that the entry tracks ([choosing validators](run_manifest_guide.md#choose-the-validators-each-fetcher-tracks)). `none` when the entry tracks none for the set. |
 | capabilities | The solution capabilities that hold a pair from this set. |
 | artifacts | The artifacts on the set. |
-| ready | The set exists, its script is in sync, it has each registry validator, and it has an artifact. |
+| ready | The set exists, its script is in sync, it has each validator that the entry tracks, and it has an artifact. |
 
 A line under the table counts each column across the fetchers. Scan-report
 fetchers go to an assessment, not to an evidence set, so the table leaves them out.

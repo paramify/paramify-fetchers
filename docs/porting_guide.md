@@ -262,7 +262,7 @@ Next, [upload the run](cli_guide.md#collect-then-upload) and
 | `ModuleNotFoundError` in the smoke test | Fix the imports: put the `_shared/` directory on `sys.path`, as the commented-out line in the template's `fetcher.py` does. |
 | `Missing required env var`, or a `KeyError` naming one | The env var name in `fetcher.yaml` or your test command doesn't match the script. Re-check [step 2](#2-list-the-env-vars-it-reads). |
 | The smoke test exits 0 with empty data | The script catches the failure and reports success, as the example's source did. Exit 1 with `report_failure` ([step 5](#5-write-the-entry-script)). |
-| `Secret reference ${env:…} could not be resolved` | The runner reads secrets from its own environment, not from `.env`. Export them in the shell you run from. |
+| `Secret reference ${env:…} could not be resolved` | The variable has no value. The runner reads its own environment, then fills unset variables from the `.env` at the repo root. Export the variable, or give it a value in that `.env`. |
 | A failed run's `metadata.error` reads "Evidence saved to …" | Nothing reported the reason, so the runner used the end of stderr. Call `report_failure` after the saved line. |
 
 **More detail:** [checking against the contract](fetcher_contract_guide.md) ·

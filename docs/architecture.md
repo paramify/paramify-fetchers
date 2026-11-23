@@ -118,7 +118,7 @@ uploaders/
 examples/                       # sample run manifests
 tests/                          # framework test suite (pytest)
 example_manifest.yaml           # worked reference manifest
-run_and_upload.sh               # example collect→upload glue
+run_and_upload.sh               # example collect→upload glue (containers use deploy/run-and-upload.sh)
 docs/                           # guides and reference pages
 ```
 

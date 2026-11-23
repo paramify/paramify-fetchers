@@ -13,7 +13,8 @@ from a stand-in for Wiz.
 [an assessment](https://support.paramify.com/hc/en-us/articles/46555296641555-Create-an-Assessment-in-Paramify)
 per scanner, with its [scan intake mapped](https://support.paramify.com/hc/en-us/articles/41294208918291-Manage-Vulnerability-and-Configuration-Scans) ·
 [an API key](../uploaders/paramify_evidence/README.md#paramify-api-key) that
-also has the **Pipelines** and **Pipeline Jobs** permissions
+also has the pipeline permissions: **View Pipelines**, **Queue Pipeline
+Processing**, **View Pipeline Jobs** and **Retry and Cancel Pipeline Jobs**
 
 ---
 

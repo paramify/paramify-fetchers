@@ -102,7 +102,7 @@ Inventory`. The uploader cannot see the pipeline itself, so check Inventory.
    - `-f manifest.yaml` reads the runs from that manifest's `run.output_dir`.
    - `-o DIR` / `--output-dir DIR` finds the newest run in `DIR` instead.
    - `--json` prints the same settings as data.
-   - In the TUI, press `P` on the **Manifest** tab to open the same sheet.
+   - In the TUI, select the entry in the manifest list on the **Fetchers** tab and press `P` to open the same sheet.
 4. Run `paramify validate`, then `paramify upload --plan`.
 
 <details><summary>Copy the commands</summary>
