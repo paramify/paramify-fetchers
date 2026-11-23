@@ -89,7 +89,7 @@ def test_demo_manifest_end_to_end(demo_workspace, no_network, monkeypatch, tui_s
 
             # Fetchers: find demo_hello in the catalog and add it with a; the edit is saved.
             page = await _tab(pilot, "1", FetchersPage)
-            assert "press a on a fetcher to add it" in _text(page.query_one("#manifest-empty-hint"))
+            assert "Press a on a fetcher to add it." in _text(page.query_one("#manifest-empty-hint"))
             await pilot.press("slash", *"demo_hello", "escape")
             await pilot.pause()
             tree = page.query_one("#catalog-tree")
@@ -102,7 +102,8 @@ def test_demo_manifest_end_to_end(demo_workspace, no_network, monkeypatch, tui_s
             await pilot.pause()
             assert str(tree.cursor_node.label) == "[x] demo_hello"
             assert [row[0] for row in _rows(page.query_one("#manifest-entries", DataTable))] == ["demo_hello"]
-            assert _text(page.query_one("#manifest-issues")) == "✓ manifest is runnable"
+            # Ready to run; the line may go on to name an upload-only variable (the upload token).
+            assert _text(page.query_one("#manifest-issues")).startswith("✓ ready to run")
             shipped = yaml.safe_load((REPO_ROOT / "examples" / "demo.yaml").read_text())
             assert yaml.safe_load(manifest.read_text())["run"] == shipped["run"]
 
@@ -110,8 +111,8 @@ def test_demo_manifest_end_to_end(demo_workspace, no_network, monkeypatch, tui_s
             run = await _tab(pilot, "2", RunPage)
             await pilot.press("ctrl+r")
             banner = run.query_one("#run-banner")
-            await _until(pilot, lambda: "run complete" in _text(banner), "the run")
-            assert _text(banner).startswith("✓ run complete — ok=True")
+            await _until(pilot, lambda: "Run complete." in _text(banner), "the run")
+            assert _text(banner).startswith("✓ Run complete.")
             [status] = _rows(run.query_one("#run-status", DataTable))
             assert status[:3] == ["demo_hello", "single", "OK"]
             assert _text(run.query_one("#run-summary")).endswith("✓ 1   ✗ 0   ⊘ 0")
@@ -132,9 +133,9 @@ def test_demo_manifest_end_to_end(demo_workspace, no_network, monkeypatch, tui_s
             await pilot.press("escape")
 
             # Paramify: with no token the page says why, and the syncs and upload stay off.
-            page = await _tab(pilot, "4", ParamifyPage)
+            page = await _tab(pilot, "5", ParamifyPage)
             summary = page.query_one("#pf-summary")
-            await _until(pilot, lambda: "No Paramify API token found" in _text(summary), "the status read")
+            await _until(pilot, lambda: "No Paramify API token" in _text(summary), "the status read")
             [row] = _rows(page.query_one("#pf-grid", DataTable))
             assert row[0] == "demo_hello"
             assert not any(page.check_action(a, ()) for a in ("sync_scripts", "sync_validators", "upload_run"))
@@ -163,15 +164,15 @@ def test_demo_manifest_end_to_end(demo_workspace, no_network, monkeypatch, tui_s
             await pilot.press("u")
             await _until(pilot, lambda: isinstance(app.screen, ConfirmModal), "the upload confirm")
             confirm = _text(app.screen.query_one("#modal-title"))
-            assert "1 deliver" in confirm  # the plan's totals line
-            assert confirm.endswith("Upload 1 evidence file(s) to https://app.paramify.com/api/v0?")
+            assert "demo_hello: 1 file to EVD-DEMO-HELLO" in confirm  # the plan's delivery line
+            assert confirm.endswith("Upload 1 file to app.paramify.com?")
             await pilot.press("y")
             activity = page.query_one("#pf-activity")
             log = page.query_one("#pf-log", RichLog)
-            await _until(pilot, lambda: "upload complete" in _text(activity), "the upload dry-run")
+            await _until(pilot, lambda: "Dry run: nothing uploaded" in _text(activity), "the upload dry-run")
             assert "(dry-run)" in _log(log)
-            assert "[SKIP] demo_hello.json  would_upload  set=EVD-DEMO-HELLO" in _log(log)
-            assert _text(activity) == "evidence upload complete — uploaded=0 duplicates=0 errors=0"
+            assert "[SKIP] demo_hello.json  would_upload  → EVD-DEMO-HELLO" in _log(log)
+            assert _text(activity) == "Dry run: nothing uploaded."
             assert not (run_dir / "upload_log.json").exists()
 
     asyncio.run(asyncio.wait_for(drive(), 120))
@@ -226,8 +227,8 @@ def test_demo_stack_owner_run_and_batch_plan_end_to_end(demo_workspace, no_netwo
             run = await _tab(pilot, "2", RunPage)
             await pilot.press("ctrl+r")
             banner = run.query_one("#run-banner")
-            await _until(pilot, lambda: "run complete" in _text(banner), "the run")
-            assert _text(banner).startswith("✓ run complete — ok=True")
+            await _until(pilot, lambda: "Run complete." in _text(banner), "the run")
+            assert _text(banner).startswith("✓ Run complete.")
             [run_dir] = (root / "evidence").glob("run-*")
             recorded = json.loads((run_dir / "_run_metadata.json").read_text())["paramify"]
             assert recorded == {"demo_hello": {"use": "demo_hello", "stack": "st-1", "stack_name": "Prod",
@@ -240,7 +241,7 @@ def test_demo_stack_owner_run_and_batch_plan_end_to_end(demo_workspace, no_netwo
 
             for read in ("list_evidence_sets", "list_capabilities", "scripts_sync"):
                 monkeypatch.setattr(api, read, offline)
-            page = await _tab(pilot, "4", ParamifyPage)
+            page = await _tab(pilot, "5", ParamifyPage)
             await _until(pilot, lambda: page.check_action("upload_run", ()), "the token to show")
             real_upload = api.upload_run
             # The TUI has no dry-run switch: force it, so the confirm's yes sends nothing.
@@ -249,19 +250,19 @@ def test_demo_stack_owner_run_and_batch_plan_end_to_end(demo_workspace, no_netwo
             await _until(pilot, lambda: isinstance(app.screen, ConfirmModal), "the upload confirm")
             plan = str(app.screen._message).splitlines()
             assert not [line for line in plan if line.startswith("!")]  # the run matches the manifest
-            assert plan[plan.index("delivery") + 1:] == [
-                "  deliver demo_hello: deliver 1 file to AR-2 (stack Prod, channel CH-2): new batch (approved on submit)",
-                "1 deliver · 0 noop · 0 refuse · 1 tag",
+            assert plan == [
+                "demo_hello: 1 file to AR-2 (stack Prod, channel CH-2): new batch (approved on submit)",
+                "Also tags 1 evidence set.",
                 "",
-                "Upload 1 evidence file(s) to https://api.example.test?",
+                "Upload 1 file to api.example.test?",
             ]
             await pilot.press("y")
             activity = page.query_one("#pf-activity")
             log = page.query_one("#pf-log", RichLog)
-            await _until(pilot, lambda: "upload complete" in _text(activity), "the upload dry-run")
+            await _until(pilot, lambda: "Dry run: nothing uploaded" in _text(activity), "the upload dry-run")
             assert "(dry-run)" in _log(log)
-            assert "[SKIP] demo_hello.json  would_upload  set=EVD-DEMO-HELLO" in _log(log)
-            assert _text(activity) == "evidence upload complete — uploaded=0 duplicates=0 errors=0"
+            assert "[SKIP] demo_hello.json  would_upload  → EVD-DEMO-HELLO" in _log(log)
+            assert _text(activity) == "Dry run: nothing uploaded."
             assert not (run_dir / "upload_log.json").exists()
             assert [c for c in fake.calls if c[0] != "GET"] == []
 

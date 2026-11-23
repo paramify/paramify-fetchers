@@ -13,7 +13,9 @@ from rich.text import Text
 from textual.message import Message
 
 from framework import api
+from framework.sync.providers.evidence_sets import FREQUENCY
 from framework.tui import palette
+from framework.tui.words import plural
 
 
 class UploadEvent(Message):
@@ -102,7 +104,7 @@ def upload_event_lines(ev: dict, noun: str) -> list[Text]:
     etype = ev.get("event")
     if etype == "upload_start":
         mode = " (dry-run)" if ev.get("dry_run") else ""
-        return [Text(f"upload {ev.get('files', 0)} {noun}(s) from {ev.get('run_dir', '')}{mode}", style="bold")]
+        return [Text(f"Uploading {plural(ev.get('files', 0), noun)} from {ev.get('run_dir', '')}{mode}", style="bold")]
     if etype == "delivery_file":
         n = ev.get("n")
         progress = f"{n}/{ev.get('of')} " if n is not None else ""
@@ -119,31 +121,38 @@ def upload_event_lines(ev: dict, noun: str) -> list[Text]:
         else:
             icon, style = "FAIL", palette.FAIL
         if ev.get("reference_id"):
-            ref = f"  set={ev.get('reference_id')}"
+            ref = f"  → {ev.get('reference_id')}"
         elif ev.get("assessment_id"):
-            ref = f"  assessment={ev.get('assessment_id')}"
+            ref = f"  → assessment {ev.get('assessment_id')}"
         else:
             ref = ""
         if ev.get("channel"):
-            ref += f"  channel={ev.get('channel')}"
+            ref += f" (channel {ev.get('channel')})"
         reason = ev.get("reason") or ev.get("error")
         suffix = f"  {reason}" if reason else ""
         return [Text(f"  [{icon}] {ev.get('file', '?')}  {outcome}{ref}{suffix}", style=style)]
+    if etype == "action_end" and str(ev.get("action_id", "")).startswith(f"{FREQUENCY}/") and ev.get("message"):
+        # A frequency change that didn't happen: the CLI lists it after the upload too.
+        if ev.get("status") == "noop":
+            return [Text(f"  [WARN] {ev['message']}", style=palette.WARN)]
+        if ev.get("status") in ("failed", "refused"):
+            return [Text(f"  [FAIL] {ev['message']}", style=palette.FAIL)]
+        return []
     if etype == "process_plan" and ev.get("operation"):
         return [Text(
-            f"  [DRY] would {ev['operation']} {ev.get('artifacts', 0)} artifact(s)"
-            f"  assessment={ev.get('assessment_id')}", style=palette.WARN,
+            f"  [DRY] would {ev['operation']} {plural(ev.get('artifacts', 0), 'file')}"
+            f" on assessment {ev.get('assessment_id')}", style=palette.WARN,
         )]
     if etype == "job_queued":
         why = f"  {ev['close_skipped']}" if ev.get("close_skipped") else ""
         lines = [Text(
             f"  [OK] queued {ev.get('operation')} job {ev.get('job_id')}"
-            f"  assessment={ev.get('assessment_id')}{why}", style=palette.OK,
+            f" on assessment {ev.get('assessment_id')}{why}", style=palette.OK,
         )]
         if ev.get("newer_cycles"):
             lines.append(Text(
                 f"  [WARN] landed on cycle {ev.get('cycle_name')!r}, the oldest open "
-                f"cycle; {ev['newer_cycles']} newer cycle(s) show nothing until it is "
+                f"cycle; {plural(ev['newer_cycles'], 'newer cycle')} show nothing until it's "
                 f"closed", style=palette.WARN,
             ))
         return lines
@@ -151,10 +160,24 @@ def upload_event_lines(ev: dict, noun: str) -> list[Text]:
         return [job_text(ev)]
     if etype == "process_skipped":
         return [Text(
-            f"  [SKIP] nothing new to process  assessment={ev.get('assessment_id')}"
+            f"  [SKIP] nothing new to process on assessment {ev.get('assessment_id')}"
             f"  {ev.get('reason', '')}", style=palette.WARN,
         )]
     return []
+
+
+def upload_summary(ev: dict, noun: str = "file") -> str:
+    """An upload_complete event as one sentence: "Uploaded 3 files, 1 already there."."""
+    parts = ["Dry run: nothing uploaded" if ev.get("dry_run") else f"Uploaded {plural(ev.get('uploaded', 0), noun)}"]
+    if ev.get("skipped_duplicate"):
+        parts.append(f"{ev['skipped_duplicate']} already there")
+    if ev.get("errors"):
+        parts.append(plural(ev["errors"], "error"))
+    if ev.get("dropped"):
+        parts.append(f"{ev['dropped']} dropped")
+    if ev.get("jobs_failed"):
+        parts.append(f"{plural(ev['jobs_failed'], 'job')} failed")
+    return ", ".join(parts) + "."
 
 
 def pipeline_wait_lines(entries: dict) -> list[Text]:
