@@ -4,9 +4,10 @@ type: AUTOMATED
 role: configuration
 statement: >
   No expected log source's newest line is older than the adopted maximum age, and every source
-  was seen in the search window (sources_stale is 0). Fails while no maximum age is set, while any
-  source's queries failed, or when the count appears other than exactly once. Does not check
-  whether the collection run succeeded.
+  was seen in the search window (sources_stale is 0). Sources marked quiet are judged through
+  their heartbeat, which is itself an expected source and counted here. The exact age is compared
+  before rounding. Fails while no maximum age is set, while any source's queries failed, or when
+  the count appears other than exactly once. Does not check whether the collection run succeeded.
 
 regex: '"sources_stale":\s*(?<sources_stale>\d+)'
 rules_summary: MATCH_COUNT EQUALS 1; MATCH_GROUP[1] EQUALS 0
