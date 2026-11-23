@@ -16,7 +16,8 @@ things:
 
 - It opens a PR from `release/next` named `Release vX.Y.Z`. You are the
   assignee and the reviewer.
-- It sends you a Slack direct message (DM) with a link to the PR.
+- It posts a message with a link to the PR in the Slack channel
+  `#paramify-fetchers-repo`.
 
 The PR holds four changes:
 
@@ -29,7 +30,7 @@ The PR holds four changes:
   to the release file.
 
 If nothing changed since the last release, no PR opens. If the PR is still
-open on the next Thursday, you get a reminder DM.
+open on the next Thursday, the channel gets a reminder.
 
 Pytest fails on the new PR. This is correct. The draft text has `draft: true`
 marks, and a test fails while any mark remains. A mark means that a person has
@@ -59,7 +60,7 @@ while the release PR is open, and the rebuild replaces the CHANGELOG and
 `pyproject.toml` changes.
 
 When you merge, the `release-publish` workflow creates the tag `vX.Y.Z` and
-the GitHub Release. You get a DM when it is out.
+the GitHub Release. The channel gets a message when it is out.
 
 ### What a rebuild keeps
 
@@ -113,7 +114,7 @@ to the repository.
 | `python tools/release.py draft --no-push` | A dry run. It sends nothing. |
 | `python tools/release.py check --ref REF` | Lists what to fix in the release file at `REF`. |
 | `python tools/release.py publish --head-sha SHA --merge-sha SHA` | Tags the reviewed commit and creates the GitHub Release. |
-| `python tools/release.py notify-failure --url URL` | Sends the failure DM. |
+| `python tools/release.py notify-failure --url URL` | Posts the failure message. |
 
 `draft` never touches your local branches or your checkout. It runs
 `git fetch --prune --tags origin`, which updates your remote-tracking branches
@@ -127,8 +128,8 @@ about two weeks.
 
 Set `RELEASE_REMINDER=1` to remind when a PR is still open. Set
 `RELEASE_REVIEWER` to change who reviews (the default is `21tmccauley`). Set
-`SLACK_RELEASE_WEBHOOK` to send the DM. Without it, the command prints the
-message.
+`SLACK_RELEASE_WEBHOOK` to post the message. Without it, the command prints
+the message.
 
 ## 5. The three workflows
 
@@ -146,7 +147,7 @@ run `publish`.
 
 All three use the GitHub App token, not `GITHUB_TOKEN`. A PR that
 `GITHUB_TOKEN` opens does not start CI, and `ci-ok` would never report.
-Each workflow sends a failure DM with a link to its run.
+Each workflow posts a failure message with a link to its run.
 
 ## 6. One-time setup
 
@@ -161,7 +162,8 @@ Each workflow sends a failure DM with a link to its run.
    `RELEASE_APP_PRIVATE_KEY` (the whole key file).
 3. **Slack workflow.** In Slack Workflow Builder, create a workflow with a
    webhook trigger. Give the trigger the variables `text` and `url`. Add one
-   step that sends a DM to the release owner with `text` and `url`. Publish
+   step that sends a message to the channel `#paramify-fetchers-repo` with
+   `text` and `url`. Publish
    the workflow. Add its webhook URL as the repository secret
    `SLACK_RELEASE_WEBHOOK`.
 4. **Ruleset.** The `protect-main` ruleset already requires `ci-ok`. You do
@@ -172,7 +174,7 @@ Each workflow sends a failure DM with a link to its run.
 **No PR arrived on Thursday.** Nothing changed since the last release. Look at
 the run of `release-draft` in the Actions tab.
 
-**The failure DM arrived.** Open the run link. The last line of the log says
+**The failure message arrived.** Open the run link. The last line of the log says
 what to do.
 
 **A `release/next` branch exists but has no open PR.** The workflow treats it
