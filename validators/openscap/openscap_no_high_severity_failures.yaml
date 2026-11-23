@@ -10,7 +10,7 @@ statement: >
   once. Medium, low and unknown-severity failures are not judged here. Does not check whether the
   collection run succeeded.
 
-regex: '"rules_failed_by_severity":\s*\{[^{}]*?"high":\s*(?<high>\d+)[\s\S]*?"targets_scanned":\s*(?<targets_scanned>[1-9]\d*)'
+regex: '"rules_failed_by_severity":\s*\{[^{}]*?"high":\s*(?<high>\d+)(?:(?!"rules_failed_by_severity")[\s\S])*?"targets_scanned":\s*(?<targets_scanned>[1-9]\d*)'
 rules_summary: MATCH_COUNT EQUALS 1; MATCH_GROUP[1] EQUALS 0
 validation_rules:
   - regexOperation: { type: MATCH_COUNT }

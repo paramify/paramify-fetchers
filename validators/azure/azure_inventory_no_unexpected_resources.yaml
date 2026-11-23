@@ -13,7 +13,7 @@ statement: >
   is excluded, or the counts appear other than exactly once. Does not show that each resource is
   configured correctly. Does not check whether the collection run succeeded.
 
-regex: '"total_resources":\s*(?<total_resources>[1-9]\d*)[\s\S]*?"unexpected_resources":\s*(?<unexpected_resources>\d+)'
+regex: '"total_resources":\s*(?<total_resources>[1-9]\d*)(?:(?!"total_resources")[\s\S])*?"unexpected_resources":\s*(?<unexpected_resources>\d+)'
 rules_summary: MATCH_COUNT EQUALS 1; MATCH_GROUP[2] EQUALS 0
 validation_rules:
   - regexOperation: { type: MATCH_COUNT }
