@@ -52,26 +52,41 @@ touches the clone being updated:
 So scope a row whenever you can. An unscoped row stops every scheduled update
 until someone reads it.
 
+## Fetcher lines
+
+A release file can also have a `fetchers` list. It has one line for each
+fetcher that changed in the release. Do not write these lines in a pull
+request. The person who cuts the release drafts them.
+
+```yaml
+fetchers:
+  - name: okta_mfa_status
+    version: 0.7.0
+    note: Reads factors for every user, not only the first page
+```
+
+Each line needs `name`, `version` and `note`. The `note` has one line of 110
+characters or fewer.
+
+## Draft marks
+
+A row or a fetcher line can have `draft: true`. The mark means a person has
+not yet checked the text. A test fails if any file in `releases/` keeps a
+draft mark. Remove the mark when you have checked the text. A fetcher note
+must not start with `TODO`.
+
 ## When you cut a release
 
-([releasing guide, step 2](../docs/releasing_guide.md#2-update-the-changelog-and-version))
-
-1. `git mv releases/unreleased.yaml releases/<version>.yaml`
-2. Set `version` to the release and, if you like, `date`.
-3. Trim the non-breaking rows to the three to five that matter most. Keep
-   every breaking row.
-4. Start a new `releases/unreleased.yaml` with `version: unreleased` and
-   `highlights: []`.
-
-Rows a user has already seen on `main` are not shown again after the rename,
-because update compares rows by tag and title, not by file.
+Follow [the releasing guide](../docs/releasing_guide.md).
 
 ## What the tests check
 
 `tests/test_release_highlights.py` checks every file against
 [the schema](../framework/schemas/release_highlights_schema.json) and that
 every fetcher name or glob matches a real fetcher. For a release file it also
-checks that the version has a CHANGELOG section, that a release with Breaking
-entries has breaking rows, and that there are three to five other rows. For
+checks that the version has a CHANGELOG section and that a release with
+Breaking entries has at least as many breaking rows. It also checks that no
+file has a draft mark, that no fetcher note starts with `TODO`, and that each
+`fetchers` line names a real fetcher. For
 `unreleased.yaml` it checks that there are at least as many breaking rows as
 Breaking entries in `[Unreleased]`.
