@@ -6,7 +6,8 @@
 #
 # Set these to change the defaults, e.g. `curl ... | PARAMIFY_REF=v0.6.0-beta bash`:
 #   PARAMIFY_DIR       where to clone                        (~/paramify-fetchers)
-#   PARAMIFY_REF       branch or release tag to clone        (main)
+#   PARAMIFY_REF       branch or release tag to clone        (the newest release;
+#                                                          'main' follows main)
 #   PARAMIFY_EXTRAS    pip extras, e.g. all,azure; '' = CLI  (all)
 #   PARAMIFY_REPO_URL  repo to clone                         (the GitHub repo)
 #
@@ -42,7 +43,9 @@ main() {
     die "Python 3.11 or later is required, and none is on your PATH." "$(hint python)"
   fi
 
-  # The clone.
+  # The clone. Without PARAMIFY_REF, take the newest release, or the default
+  # branch when the repo has none.
+  if [ -z "$ref" ] && [ ! -e "$dir" ]; then ref="$(newest_release "$repo")"; fi
   if [ -d "$dir/.git" ] && [ -d "$dir/framework" ]; then
     ok "Using the existing clone at $(tilde "$dir")"
   elif [ -e "$dir" ]; then
@@ -122,6 +125,32 @@ main() {
   [ -z "$new_terminal" ] || printf '    %s\n' "$(dim "# open a new terminal first, so PATH is updated")"
   printf '    %s\n' "$(bold "cd $(tilde "$dir")")"
   printf '    %s\n\n' "$(bold "$cmd run examples/demo.yaml")"
+}
+
+# The oldest release `paramify update` can pin. An earlier tag is not a release
+# to install, so the installer ignores it.
+FIRST_RELEASE=v0.7.0-beta
+
+# Prints the newest vX.Y.Z[-pre] tag of the repo at $1 that is FIRST_RELEASE or
+# later, or nothing (also when the repo can't be reached: the clone reports that).
+newest_release() {
+  local tag core pre first_core first_pre
+  first_core="${FIRST_RELEASE#v}"; first_pre="${first_core#*-}"; first_core="${first_core%%-*}"
+  # Newest first; with the suffix rule a pre-release sorts below its release.
+  while read -r tag; do
+    [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]] || continue
+    core="${tag#v}"; pre=""
+    case "$core" in *-*) pre="${core#*-}"; core="${core%%-*}" ;; esac
+    if [ "$core" = "$first_core" ]; then
+      # Same x.y.z as the first release: a final release or a later pre-release.
+      [ -z "$pre" ] || [[ "$pre" > "$first_pre" || "$pre" = "$first_pre" ]] || return 0
+    elif [ "$(printf '%s\n%s\n' "$core" "$first_core" | sort -t. -k1,1n -k2,2n -k3,3n | head -n 1)" = "$core" ]; then
+      return 0  # older than the first release, and every later tag is older still
+    fi
+    printf '%s\n' "$tag"
+    return 0
+  done < <(git -c versionsort.suffix=- ls-remote --tags --refs --sort=-v:refname "$1" 'v*' 2>/dev/null | sed 's|.*refs/tags/||')
+  return 0
 }
 
 install_deps() {
@@ -289,4 +318,4 @@ tilde() {
   esac
 }
 
-main "$@"
+[ "${PARAMIFY_INSTALL_SOURCE_ONLY:-}" = 1 ] || main "$@"
