@@ -47,19 +47,26 @@ class Response:
 class Loki:
     """A fake requests.Session answering GETs as Loki would for STATE; `broken` maps a (path, selector) to a status."""
 
-    def __init__(self, state=None, broken=None):
+    def __init__(self, state=None, broken=None, malformed=None):
         self.state, self.broken, self.calls = state or STATE, broken or {}, []
+        self.malformed, self.params = malformed or {}, []
 
     def get(self, url, params=None, timeout=None, allow_redirects=None, headers=None):
         path = url.split("://", 1)[1].split("/", 1)[1]
         path = "/" + path
+        self.params.append(("/" + path.lstrip("/"), dict(params)))
         selector = params.get("match[]") or params["query"]
         if path.endswith("/query"):
-            selector = selector[len("sum(count_over_time("):selector.rindex("[")]
+            selector = selector[len("sum(count_over_time("):selector.rindex("[")].strip()
+        if path.endswith("/series") and selector not in self.state:
+            # The series API gets only the stream selector of a filtered source.
+            selector = next(k for k in self.state if k.startswith(selector))
         self.calls.append((path, selector, dict(headers or {})))
         if (path, selector) in self.broken:
             status = self.broken[(path, selector)]
             return Response(200, fixture("query_error.json")) if status == "query_error" else Response(status, {"message": "boom"})
+        if (path, selector) in self.malformed:
+            return Response(200, self.malformed[(path, selector)])
         lines, age, streams = self.state[selector]
         if path.endswith("/query"):
             body = fixture("query_vector.json") if lines else fixture("query_vector_empty.json")
@@ -82,7 +89,7 @@ def run(monkeypatch, tmp_path):
         settings = {"LOKI_BASE_URL": "http://loki.example.test/", "LOKI_EXPECTED_SOURCES": SOURCES}
         settings.update(env)
         for key in ("LOKI_BASE_URL", "LOKI_EXPECTED_SOURCES", "LOKI_TENANT_ID", "LOKI_TOKEN", "LOKI_WINDOW_MINUTES",
-                    "LOKI_SEARCH_HOURS", "LOKI_MAX_AGE_MINUTES"):
+                    "LOKI_SEARCH_HOURS", "LOKI_MAX_AGE_MINUTES", "LOKI_QUIET_SOURCES"):
             monkeypatch.delenv(key, raising=False)
         for key, value in settings.items():
             if value is not None:
@@ -93,7 +100,7 @@ def run(monkeypatch, tmp_path):
         monkeypatch.setattr(fx.time, "sleep", lambda s: None)
         monkeypatch.setattr(fx.requests, "Session", lambda: session)
         real_collect = fx.collect
-        monkeypatch.setattr(fx, "collect", lambda *a, **k: real_collect(*a, now=NOW))
+        monkeypatch.setattr(fx, "collect", lambda *a, **k: real_collect(*a, **{**k, "now": NOW}))
         code = fx.main()
         status = tmp_path / "status.json"
         return code, json.loads((tmp_path / "loki_log_ingestion.json").read_text()), session, \
@@ -162,7 +169,7 @@ def test_window_setting_reaches_the_count_query(monkeypatch):
 
     client = fx.LokiClient("http://loki.example.test", session=Recorder())
     fx.collect(client, [{"name": "falco", "selector": '{namespace="falco"}'}], 15, 6, None, now=NOW)
-    assert seen[0]["query"] == 'sum(count_over_time({namespace="falco"}[15m]))'
+    assert seen[0]["query"] == 'sum(count_over_time({namespace="falco"} [15m]))'
     assert int(seen[1]["start"]) == NOW_NS - 6 * 3600 * 10**9 and seen[1]["limit"] == "1" and seen[1]["direction"] == "backward"
 
 
@@ -206,5 +213,104 @@ def test_bad_settings_fail_as_bad_config(run, env):
 
 def test_parse_sources():
     sources, invalid = fx.parse_sources(' a={x="1"} ;; b = {y=~"2|3"} ; bad ; c={z="4"} | json')
-    assert sources == [{"name": "a", "selector": '{x="1"}'}, {"name": "b", "selector": '{y=~"2|3"}'}]
+    assert [(x["name"], x["selector"]) for x in sources] == [("a", '{x="1"}'), ("b", '{y=~"2|3"}')]
     assert invalid == ["bad", 'c={z="4"} | json']
+
+
+# --- malformed responses: the read failed, so the result stays unknown ---
+
+@pytest.mark.parametrize("path,body", [
+    ("/loki/api/v1/query", {"status": "success", "data": {"resultType": "matrix", "result": []}}),
+    ("/loki/api/v1/query", {"status": "success", "data": {"resultType": "vector", "result": [{"metric": {}}]}}),
+    ("/loki/api/v1/query", {"status": "success", "data": {"resultType": "vector", "result": [{"value": [1, "x"]}]}}),
+    ("/loki/api/v1/query_range", {"status": "success", "data": {"resultType": "streams", "result": [{"stream": {}}]}}),
+    ("/loki/api/v1/query_range", {"status": "success", "data": {"resultType": "streams",
+                                                                "result": [{"values": [["not-a-time", "x"]]}]}}),
+    ("/loki/api/v1/query_range", {"status": "success"}),
+    ("/loki/api/v1/series", {"status": "success", "data": {"labels": []}}),
+    ("/loki/api/v1/query", ["success"]),
+])
+def test_a_malformed_response_is_a_failed_read_not_zero(run, path, body):
+    session = Loki(malformed={(path, '{namespace="falco"}'): body})
+    code, ev, _, status = run(session=session)
+    s = ev["summary"]
+    assert code == 1 and status["code"] == "partial_failure" and s["sources_unread"] == 1
+    assert (s["all_expected_sources_ingesting"], s["sources_not_ingesting"]) == (None, None)
+    assert ev["metadata"]["api_failures"][0]["type"] == "MalformedResponse"
+    falco = next(r for r in ev["results"]["sources"] if r["name"] == "falco")
+    assert falco["read"] is False
+
+
+def test_a_well_formed_empty_response_means_no_lines(run):
+    # keycloak's fake answers are a valid empty vector, empty streams and no series: read, and 0.
+    code, ev, _, _ = run()
+    keycloak = next(r for r in ev["results"]["sources"] if r["name"] == "keycloak")
+    assert code == 0 and (keycloak["read"], keycloak["lines_in_window"], keycloak["streams_in_window"]) == (True, 0, 0)
+    assert keycloak["seen_in_search_window"] is False
+
+
+# --- the exact age is judged, not the rounded one ---
+
+def test_the_exact_age_is_compared_before_rounding():
+    src = {"name": "a", "selector": '{a="b"}'}
+    rec = fx.source_record(src, 1, True, NOW_NS - int(60.04 * 60 * 10**9), 1, NOW, 60)
+    assert (rec["minutes_since_newest"], rec["stale"]) == (60.0, True)
+    assert fx.source_record(src, 1, True, NOW_NS - 60 * 60 * 10**9, 1, NOW, 60)["stale"] is False
+
+
+# --- quiet sources and heartbeats ---
+
+QUIET_SOURCES = ('pods={namespace=~".+", container!=""}; falco={namespace="falco"}; '
+                 'falco_heartbeat={namespace="falco"} |= "Falco metrics"')
+QUIET_STATE = {'{namespace=~".+", container!=""}': (18342, 30, 3), '{namespace="falco"}': (0, 3 * 3600, 0),
+               '{namespace="falco"} |= "Falco metrics"': (12, 240, 3)}
+
+
+def test_a_quiet_source_is_judged_by_its_heartbeat(run, assert_summary_documented):
+    code, ev, session, _ = run(session=Loki(state=QUIET_STATE), LOKI_EXPECTED_SOURCES=QUIET_SOURCES,
+                               LOKI_QUIET_SOURCES="falco:falco_heartbeat", LOKI_MAX_AGE_MINUTES="15")
+    s = ev["summary"]
+    # Falco has been silent for three hours, but its heartbeat arrived four minutes ago: the path is live.
+    assert code == 0 and (s["quiet_sources"], s["quiet_sources_without_heartbeat"], s["quiet_sources_heartbeat_not_live"]) == (
+        ["falco"], [], [])
+    assert (s["sources_not_ingesting"], s["sources_stale"], s["all_expected_sources_ingesting"]) == (0, 0, True)
+    falco = next(r for r in ev["results"]["sources"] if r["name"] == "falco")
+    assert (falco["quiet"], falco["heartbeat"], falco["collection_path_live"], falco["ingesting"]) == (
+        True, "falco_heartbeat", True, False)
+    # Line filters reach the count and newest-line queries; the series call gets only the stream selector.
+    queries = [(p, params) for p, params in session.params]
+    assert any(p.endswith("/query_range") and params["query"] == '{namespace="falco"} |= "Falco metrics"' for p, params in queries)
+    assert all(params["match[]"] in ('{namespace=~".+", container!=""}', '{namespace="falco"}')
+               for p, params in queries if p.endswith("/series"))
+    assert_summary_documented("loki/log_ingestion", s)
+
+
+def test_a_silent_heartbeat_fails_its_quiet_source(run):
+    state = dict(QUIET_STATE)
+    state['{namespace="falco"} |= "Falco metrics"'] = (0, 7200, 0)
+    code, ev, _, _ = run(session=Loki(state=state), LOKI_EXPECTED_SOURCES=QUIET_SOURCES,
+                         LOKI_QUIET_SOURCES="falco:falco_heartbeat", LOKI_MAX_AGE_MINUTES="15")
+    s = ev["summary"]
+    assert code == 0 and (s["quiet_sources_heartbeat_not_live"], s["all_expected_sources_ingesting"]) == (["falco"], False)
+    assert s["sources_not_ingesting_names"] == ["falco_heartbeat"]
+
+
+def test_a_quiet_source_without_a_heartbeat_leaves_the_verdict_unknown(run, assert_summary_documented):
+    code, ev, _, _ = run(session=Loki(state=QUIET_STATE), LOKI_EXPECTED_SOURCES=QUIET_SOURCES, LOKI_QUIET_SOURCES="falco")
+    s = ev["summary"]
+    assert code == 0 and (s["quiet_sources_without_heartbeat"], s["all_expected_sources_ingesting"]) == (["falco"], None)
+    falco = next(r for r in ev["results"]["sources"] if r["name"] == "falco")
+    assert falco["collection_path_live"] is None
+    assert_summary_documented("loki/log_ingestion", s)
+
+
+@pytest.mark.parametrize("quiet", ["nosuch", "falco:nosuch", "falco:falco", "falco:falco_heartbeat,falco_heartbeat:pods"])
+def test_bad_quiet_settings_fail_as_bad_config(run, quiet):
+    code, _, _, status = run(session=Loki(state=QUIET_STATE), LOKI_EXPECTED_SOURCES=QUIET_SOURCES, LOKI_QUIET_SOURCES=quiet)
+    assert code == 1 and status["code"] == "bad_config"
+
+
+def test_only_line_filters_may_follow_a_selector():
+    sources, invalid = fx.parse_sources('a={x="1"} |= "ok"; b={x="2"} | json; c={x="}"} !~ `debug`')
+    assert [s["name"] for s in sources] == ["a", "c"] and invalid == ['b={x="2"} | json']
+    assert sources[1]["stream_selector"] == '{x="}"}'
