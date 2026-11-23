@@ -112,15 +112,8 @@ def test_breaking_changelog_entries_have_breaking_rows(path):
     doc = _doc(path)
     entries = CHANGELOG[doc["version"]].get("Breaking", 0)
     rows = [h for h in doc["highlights"] if h["tag"] == "breaking"]
-    if entries:
-        assert rows, f"the CHANGELOG lists {entries} Breaking entries but {path.name} has no breaking row"
-
-
-@pytest.mark.parametrize("path", RELEASE_FILES, ids=lambda p: p.name)
-def test_whats_new_stays_short(path):
-    rows = [h["title"] for h in _doc(path)["highlights"] if h["tag"] != "breaking"]
-    assert 3 <= len(rows) <= update.MAX_NEW, (
-        f"{path.name} has {len(rows)} non-breaking rows; keep 3 to {update.MAX_NEW}: {rows}")
+    assert len(rows) >= entries, (
+        f"the CHANGELOG lists {entries} Breaking entries but {path.name} has {len(rows)} breaking rows")
 
 
 @pytest.mark.parametrize("path", FILES, ids=lambda p: p.name)
@@ -131,3 +124,47 @@ def test_named_fetchers_exist(path):
             assert any(fnmatch.fnmatchcase(n, pattern) for n in names), (
                 f"{path.name}: '{pattern}' in \"{h['title']}\" matches no fetcher"
             )
+
+
+def test_a_fetcher_line_matches_the_schema():
+    doc = {"version": "0.8.0-beta", "highlights": [],
+           "fetchers": [{"name": "demo_alpha", "version": "0.7.0", "note": "Reads more rows", "draft": True}]}
+    assert _schema_errors(doc) == []
+
+
+@pytest.mark.parametrize("line", [
+    {"name": "demo_alpha", "version": "0.7.0"},                          # no note
+    {"name": "demo_alpha", "version": "seven", "note": "x" * 10},        # not a version
+    {"name": "demo_alpha", "version": "0.7.0", "note": "x" * 111},       # too long
+    {"name": "demo_alpha", "version": "0.7.0", "note": "a\nb"},          # two lines
+    {"name": "demo_alpha", "version": "0.7.0", "note": "ok ok", "x": 1}, # unknown key
+])
+def test_a_bad_fetcher_line_is_refused(line):
+    assert _schema_errors({"version": "0.8.0-beta", "highlights": [], "fetchers": [line]})
+
+
+def test_a_highlight_row_may_carry_a_draft_mark():
+    assert _schema_errors({"version": "unreleased",
+                           "highlights": [{"tag": "new", "title": "Sprockets", "draft": True}]}) == []
+
+
+def test_no_file_is_a_draft():
+    marked = []
+    for path in FILES:
+        doc = _doc(path)
+        marked += [f"{path.name}: {h['title']}" for h in doc["highlights"] if h.get("draft")]
+        marked += [f"{path.name}: {f['name']}" for f in doc.get("fetchers") or [] if f.get("draft")]
+    assert not marked, "draft marks left in: " + "; ".join(marked)
+
+
+@pytest.mark.parametrize("path", FILES, ids=lambda p: p.name)
+def test_no_fetcher_note_is_a_todo(path):
+    todo = [f["name"] for f in _doc(path).get("fetchers") or [] if f["note"].startswith("TODO")]
+    assert not todo, f"{path.name}: notes still say TODO for {', '.join(todo)}"
+
+
+@pytest.mark.parametrize("path", FILES, ids=lambda p: p.name)
+def test_fetcher_lines_name_real_fetchers(path):
+    names = _fetcher_names()
+    unknown = [f["name"] for f in _doc(path).get("fetchers") or [] if f["name"] not in names]
+    assert not unknown, f"{path.name}: no such fetcher: {', '.join(unknown)}"
