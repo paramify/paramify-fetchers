@@ -363,10 +363,12 @@ def changelog_url(root: Path, target: "Target") -> str:
     return f"{repo_web_url(root)}/blob/{at}/CHANGELOG.md"
 
 
-def _highlight_files(root: Path, ref: str) -> Dict[str, List[dict]]:
-    """{version: rows} for every readable releases/*.yaml at `ref`.
+def release_files(root: Path, ref: str) -> Dict[str, dict]:
+    """{version: {"date", "highlights", "fetchers"}} for every readable
+    releases/*.yaml at `ref`.
 
-    Read loosely on purpose: a row needs only a tag and a title. The schema is
+    Read loosely on purpose: a highlight row needs only a tag and a title, a
+    fetcher line only a name, version and note (all strings). The schema is
     enforced where the files are written (tests/test_release_highlights.py),
     not here, because a newer release may add a field this code doesn't know,
     and dropping its file would hide its breaking rows from an older clone. A
@@ -376,17 +378,68 @@ def _highlight_files(root: Path, ref: str) -> Dict[str, List[dict]]:
         listing = git(root, "ls-tree", "--name-only", ref, f"{HIGHLIGHTS_DIR}/").splitlines()
     except UpdateError:
         return {}
-    out: Dict[str, List[dict]] = {}
+    out: Dict[str, dict] = {}
     for path, text in read_at(root, ref, [p for p in listing if p.endswith(".yaml")]).items():
         try:
             doc = yaml.safe_load(text or "")
         except yaml.YAMLError:
             continue
         rows = doc.get("highlights") if isinstance(doc, dict) else None
-        if isinstance(rows, list):
-            out[Path(path).stem] = [h for h in rows if isinstance(h, dict)
-                                    and isinstance(h.get("tag"), str) and isinstance(h.get("title"), str)]
+        if not isinstance(rows, list):
+            continue
+        lines = doc.get("fetchers")
+        date = doc.get("date")
+        out[Path(path).stem] = {
+            "date": str(date) if date else None,
+            "highlights": [h for h in rows if isinstance(h, dict)
+                           and isinstance(h.get("tag"), str) and isinstance(h.get("title"), str)],
+            "fetchers": [f for f in lines if isinstance(f, dict)
+                         and all(isinstance(f.get(k), str) for k in ("name", "version", "note"))]
+            if isinstance(lines, list) else [],
+        }
     return out
+
+
+def _highlight_files(root: Path, ref: str) -> Dict[str, List[dict]]:
+    """{version: rows}: the highlight rows of `release_files`."""
+    return {v: d["highlights"] for v, d in release_files(root, ref).items()}
+
+
+def _contained_tags(root: Path, ref: str) -> set:
+    try:
+        return set(git(root, "tag", "--merged", ref, "-l", "v*").split())
+    except UpdateError:
+        return set()
+
+
+def fetcher_notes(root: Path, head: str, target: str) -> Dict[str, List[dict]]:
+    """{fetcher: [{release, version, note}]} for the releases `target` has and
+    `head` doesn't, newest release first. Unreleased files are never read: a
+    note is only shown once its release is cut."""
+    contained = _contained_tags(root, head)
+    files = release_files(root, target)
+    crossed = [r for r in (parse_release(f"v{v}") for v in files if v != UNRELEASED) if r and r.tag not in contained]
+    out: Dict[str, List[dict]] = {}
+    for r in sorted(crossed, key=lambda r: r.key, reverse=True):
+        for line in files[r.version]["fetchers"]:
+            out.setdefault(line["name"], []).append(
+                {"release": r.version, "version": line["version"], "note": line["note"]})
+    return out
+
+
+def crossed_releases(root: Path, head: str, target: str) -> List[dict]:
+    """[{version, date}] for the release tags in `target` and not in `head`,
+    newest first. The date is the release file's, else the CHANGELOG heading's
+    at `target`, else None."""
+    found = (parse_release(t) for t in _contained_tags(root, target) - _contained_tags(root, head))
+    crossed = sorted((r for r in found if r), key=lambda r: r.key, reverse=True)
+    if not crossed:
+        return []
+    files = release_files(root, target)
+    changelog = read_at(root, target, ["CHANGELOG.md"])["CHANGELOG.md"] or ""
+    headings = {m["v"]: m["d"] for m in re.finditer(r"^## \[(?P<v>[^\]]+)\][^\n]*?(?P<d>\d{4}-\d{2}-\d{2})", changelog, re.M)}
+    return [{"version": r.version, "date": (files.get(r.version) or {}).get("date") or headings.get(r.version)}
+            for r in crossed]
 
 
 def curated_rows(root: Path, head: str, target: str) -> List[dict]:
@@ -401,10 +454,7 @@ def curated_rows(root: Path, head: str, target: str) -> List[dict]:
     have = {(h["tag"], h["title"]) for rows in _highlight_files(root, head).values() for h in rows}
     files = _highlight_files(root, target)
 
-    try:
-        contained = set(git(root, "tag", "--merged", head, "-l", "v*").split())
-    except UpdateError:
-        contained = set()
+    contained = _contained_tags(root, head)
     released = [r for r in (parse_release(f"v{v}") for v in files if v != UNRELEASED) if r and r.tag not in contained]
     order = [UNRELEASED] * (UNRELEASED in files) + [r.version for r in sorted(released, key=lambda r: r.key, reverse=True)]
     out: List[dict] = []
@@ -701,15 +751,17 @@ def fetcher_changes(root: Path, tree: Path, target_ref: str, manifests: Sequence
 
 def span(root: Path, head: str, target_ref: str) -> dict:
     """How far the target is ahead: commits, and whole days between the two
-    commit dates. Zeros when the target is not ahead."""
+    commit dates, and how many release tags it adds. Zeros when the target is
+    not ahead."""
     try:
         commits = int(git(root, "rev-list", "--count", f"{head}..{target_ref}").strip())
         if not commits:
-            return {"commits": 0, "days": 0}
+            return {"commits": 0, "days": 0, "releases": 0}
         old, new = (int(git(root, "log", "-1", "--format=%ct", r).strip()) for r in (head, target_ref))
     except (UpdateError, ValueError):
-        return {"commits": 0, "days": 0}
-    return {"commits": commits, "days": max(0, (new - old) // 86400)}
+        return {"commits": 0, "days": 0, "releases": 0}
+    return {"commits": commits, "days": max(0, (new - old) // 86400),
+            "releases": len(crossed_releases(root, head, target_ref))}
 
 
 def breaking_for(rows: Sequence[dict], manifests: Sequence[dict], has_local_fetchers: bool) -> List[dict]:
@@ -778,7 +830,7 @@ def check_target(root: Path, target: Target, manifests: Sequence[dict], python: 
 # The plan: what an update would do, for the CLI to draw and the TUI to show
 # --------------------------------------------------------------------------- #
 
-MAX_NEW = 5  # non-breaking highlights a plan carries; the rest are counted
+MAX_NEW = 10  # non-breaking highlights a plan carries; the rest are counted
 
 
 def try_fetch(root: Path) -> Tuple[bool, Optional[str]]:
@@ -833,6 +885,9 @@ def assess(root: Path, located: dict, python: str = sys.executable) -> dict:
     target = Target(**located["target"])
     manifests = located["manifests"]
     check = check_target(root, target, manifests, python)
+    notes = fetcher_notes(root, "HEAD", target.sha)
+    for row in check["fetchers"]["yours"]:
+        row["notes"] = notes.get(row["name"], [])
     rows = located["rows"]
     breaking = breaking_for(rows, manifests, check["has_local_fetchers"])
     new = [r for r in rows if r["tag"] != "breaking"]
@@ -846,6 +901,7 @@ def assess(root: Path, located: dict, python: str = sys.executable) -> dict:
         "check": check,
         "fetchers": check["fetchers"],
         "breaking": breaking,
+        "releases": crossed_releases(root, "HEAD", target.sha),
         "highlights": new[:MAX_NEW],
         "hidden_highlights": max(0, len(new) - MAX_NEW),
         "tries": [h["try"] for h in new if h.get("try")],

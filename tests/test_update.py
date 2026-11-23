@@ -295,7 +295,7 @@ def test_which_breaking_rows_touch_this_clone():
 def test_span_counts_commits_and_days(main_repo):
     up.fetch(main_repo)
     assert up.span(main_repo, "HEAD", "origin/main")["commits"] == 1
-    assert up.span(main_repo, "origin/main", "HEAD") == {"commits": 0, "days": 0}
+    assert up.span(main_repo, "origin/main", "HEAD") == {"commits": 0, "days": 0, "releases": 0}
 
 
 def test_curated_rows_are_those_the_target_adds(repo):
@@ -1015,3 +1015,84 @@ def test_rollback_json_names_its_target_like_an_update(main_repo, stubs):
     result, doc = _run("--rollback", "--yes", "--json")
     assert result.exit_code == 0, result.stdout
     assert set(doc["target"]) >= {"sha", "branch", "label"} and doc["target"]["label"].startswith("main @ ")
+
+
+# --------------------------------------------------------------------------- #
+# Fetcher notes and release dates
+# --------------------------------------------------------------------------- #
+
+def _notes_file(version: str, date: str, fetcher_version: str, note: str) -> str:
+    return (f"version: {version}\ndate: {date}\nhighlights: []\nfetchers:\n"
+            f"  - {{name: demo_alpha, version: {fetcher_version}, note: \"{note}\"}}\n")
+
+
+@pytest.fixture
+def notes_repo(repo, tmp_path):
+    """The clone at v0.1.0-beta, whose origin also has v0.4.0-beta and v0.5.0-beta:
+    each bumps demo_alpha, carries a release file with a note for it, and has a date."""
+    upstream = tmp_path / "upstream"
+    for n in (4, 5):
+        v = f"0.{n}.0-beta"
+        _commit(upstream, {
+            "fetchers/demo/alpha/fetcher.yaml": f"name: demo_alpha\nversion: 0.{n}.0\n",
+            f"releases/{v}.yaml": _notes_file(v, f"2026-0{n}-01", f"0.{n}.0", f"alpha note 0.{n}.0"),
+        }, f"v0.{n}")
+        _git(upstream, "tag", f"v{v}")
+    _git(repo, "fetch", "-q", "--tags")
+    return repo
+
+
+def test_old_loader_still_sees_breaking_rows_in_a_file_with_fetchers(repo, tmp_path):
+    upstream = tmp_path / "upstream"
+    _commit(upstream, {"releases/0.9.0-beta.yaml": (
+        "version: 0.9.0-beta\ndate: 2026-09-01\n"
+        "highlights:\n  - {tag: breaking, title: Big change, fix: do it, draft: true}\n"
+        "fetchers:\n  - {name: demo_alpha, version: 0.9.0, note: hi, draft: true}\n")}, "notes")
+    _git(upstream, "tag", "v0.9.0-beta")
+    _git(repo, "fetch", "-q", "--tags")
+    rows = up._highlight_files(repo, "v0.9.0-beta")["0.9.0-beta"]
+    assert [r["title"] for r in rows] == ["Big change"]
+
+
+def test_fetcher_notes_from_every_release_crossed_newest_first(notes_repo):
+    notes = up.fetcher_notes(notes_repo, "v0.3.0-beta", "v0.5.0-beta")
+    assert [n["release"] for n in notes["demo_alpha"]] == ["0.5.0-beta", "0.4.0-beta"]
+    assert notes["demo_alpha"][0] == {"release": "0.5.0-beta", "version": "0.5.0", "note": "alpha note 0.5.0"}
+
+
+def test_fetcher_notes_skip_releases_head_contains(notes_repo):
+    notes = up.fetcher_notes(notes_repo, "v0.4.0-beta", "v0.5.0-beta")
+    assert [n["release"] for n in notes["demo_alpha"]] == ["0.5.0-beta"]
+
+
+def test_fetcher_notes_ignore_unreleased(notes_repo, tmp_path):
+    upstream = tmp_path / "upstream"
+    _commit(upstream, {"releases/unreleased.yaml": (
+        "version: unreleased\nhighlights: []\nfetchers:\n  - {name: demo_beta, version: 1.0.0, note: soon}\n")}, "wip")
+    assert up.fetcher_notes(notes_repo, "v0.3.0-beta", "origin/main").get("demo_beta") is None
+
+
+def test_crossed_releases_with_dates_newest_first(notes_repo):
+    assert up.crossed_releases(notes_repo, "v0.1.0-beta", "v0.5.0-beta") == [
+        {"version": "0.5.0-beta", "date": "2026-05-01"},
+        {"version": "0.4.0-beta", "date": "2026-04-01"},
+        {"version": "0.3.0-beta", "date": "2026-03-01"},
+        {"version": "0.2.0-beta", "date": "2026-02-01"},  # no release file: the CHANGELOG heading
+    ]
+    assert up.span(notes_repo, "v0.3.0-beta", "v0.5.0-beta")["releases"] == 2
+    assert up.span(notes_repo, "v0.5.0-beta", "v0.3.0-beta")["releases"] == 0
+
+
+def test_assess_puts_notes_on_your_fetchers(notes_repo, stubs):
+    plan = up.plan(notes_repo)
+    alpha = next(r for r in plan["fetchers"]["yours"] if r["name"] == "demo_alpha")
+    assert [n["release"] for n in alpha["notes"]] == ["0.5.0-beta", "0.4.0-beta"]
+    assert [r["version"] for r in plan["releases"]][:2] == ["0.5.0-beta", "0.4.0-beta"]
+    json.dumps(up.public(plan))
+
+
+def test_assess_on_main_has_no_notes(main_repo, stubs):
+    plan = up.plan(main_repo)
+    assert plan["releases"] == []
+    assert all(r["notes"] == [] for r in plan["fetchers"]["yours"])
+    assert any(r.get("reason") for r in plan["fetchers"]["yours"])
