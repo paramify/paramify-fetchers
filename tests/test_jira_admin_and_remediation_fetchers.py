@@ -2347,6 +2347,7 @@ def test_projects_filter_limits_every_project_section(run):
     assert sent == [m["jql"]]
     assert (m["projects_filter"], m["issue_types_scope"], m["statuses_scope"], m["priorities_scope"]) == (
         ["change control board"], "projects", "projects", "site")
+    assert m["projects_selected"] == ["CCB"]
     assert "Product App" not in json.dumps(out) and "In Review" not in json.dumps(out)
 
 
@@ -2382,6 +2383,8 @@ def test_an_unread_project_list_collects_nothing_site_wide(run):
     assert out["projects"] == [] and out["issues"] == [] and out["issue_types"] == [] and out["statuses"] == []
     assert not any(p in ("/rest/api/3/search/jql", "/rest/api/3/issuetype") for _, p, _, _ in calls)
     assert any(f["operation"] == "JIRA_PROJECTS" for f in out["metadata"]["api_failures"])
+    # No query ran, so the unscoped one is not shown as if it had, and nothing is reported as selected.
+    assert out["metadata"]["jql"] is None and out["metadata"]["projects_selected"] is None
 
 
 def test_a_failed_project_status_read_is_partial(run):
@@ -2397,3 +2400,29 @@ def test_scoped_jql_handles_order_by_and_bare_conditions():
     assert mod._scoped_jql(["1"], "ORDER BY created") == "project in (1) ORDER BY created"
     assert mod._scoped_jql(["1"], "status = Done") == "project in (1) AND (status = Done)"
     assert mod._scoped_jql(["1", "2"], "a = b order by c") == "project in (1, 2) AND (a = b) order by c"
+
+
+def test_scoped_jql_ignores_order_by_inside_a_quoted_string():
+    mod = load("site_inventory")
+    q = mod._scoped_jql
+    assert q(["10"], 'summary ~ "order by" AND updated >= -30d ORDER BY created') == (
+        'project in (10) AND (summary ~ "order by" AND updated >= -30d) ORDER BY created')
+    assert q(["10"], "summary ~ 'order by me'") == "project in (10) AND (summary ~ 'order by me')"
+    assert q(["10"], 'summary ~ "say \\"order by\\" twice" order by key') == (
+        'project in (10) AND (summary ~ "say \\"order by\\" twice") order by key')
+    assert q(["10"], 'text ~ "order by"') == 'project in (10) AND (text ~ "order by")'
+
+
+def test_a_projects_value_is_a_key_first_and_a_name_only_when_no_key_matches():
+    mod = load("site_inventory")
+    raw = [{"id": "1", "key": "OPS", "name": "Operations"}, {"id": "2", "key": "X", "name": "OPS"},
+           {"id": "3", "key": "CCB", "name": "Change Control Board"}]
+    matched, unmatched = mod._match_projects(raw, ["ops"])
+    assert [p["id"] for p in matched] == ["1"] and unmatched == []  # the project named OPS is not pulled in
+    matched, unmatched = mod._match_projects(raw, ["Change Control Board", "x", "nope"])
+    assert sorted(p["id"] for p in matched) == ["2", "3"] and unmatched == ["nope"]
+
+
+def test_without_projects_filter_nothing_is_reported_as_selected(run):
+    code, out, _, _ = run("site_inventory", _inventory_router([]))
+    assert code == 0 and out["metadata"]["projects_selected"] is None

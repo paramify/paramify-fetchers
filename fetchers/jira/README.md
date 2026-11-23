@@ -290,7 +290,9 @@ site-wide `/status`), and service desks are those of the named projects.
 Priorities stay site-wide (`metadata.priorities_scope: site`). The issue query
 becomes `project in (<ids>) AND (<jql or lookback>)`, so a `jql` that names
 other projects can narrow the result but never widen it; `metadata.jql` is the
-query that ran. A name that matches no project the account can see fails the
+query that ran (null when the run stopped before any query). A value is matched
+as a project key first and as a name only when it is no project's key, and
+`metadata.projects_selected` lists the keys that were matched. A name that matches no project the account can see fails the
 run as `bad_config` before any issue is read, and if the project list cannot be
 read in full nothing else is collected.
 
