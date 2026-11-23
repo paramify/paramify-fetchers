@@ -21,7 +21,7 @@ jobs:
       # The App needs Workflows read and write too: a rebuild force-pushes release/next
       # from an old main to a new one, and GitHub refuses that push if main changed
       # .github/workflows in between.
-      - uses: actions/create-github-app-token@v2
+      - uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
         id: app-token
         with:
           app-id: ${{ secrets.RELEASE_APP_ID }}
@@ -61,7 +61,7 @@ jobs:
       # The App needs Workflows read and write too: a rebuild force-pushes release/next
       # from an old main to a new one, and GitHub refuses that push if main changed
       # .github/workflows in between.
-      - uses: actions/create-github-app-token@v2
+      - uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
         id: app-token
         with:
           app-id: ${{ secrets.RELEASE_APP_ID }}
@@ -69,11 +69,11 @@ jobs:
       # The App token, not GITHUB_TOKEN, so the pushes and the release PR start
       # CI. ci-ok must report on the release PR. fetch-depth 0 with the default
       # refspec brings every tag and origin/release/next, which the push lease needs.
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           token: ${{ steps.app-token.outputs.token }}
           fetch-depth: 0
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
           cache: pip
