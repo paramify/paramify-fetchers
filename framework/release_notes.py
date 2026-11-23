@@ -11,6 +11,7 @@ or line marked `draft: true` is one a person has not reviewed yet.
 
 from __future__ import annotations
 
+import datetime
 import re
 from typing import Any, Callable, Collection, Dict, List, Optional, Sequence
 
@@ -229,6 +230,8 @@ def dump_release(doc: dict) -> str:
     )
     ordered: Dict[str, Any] = {k: doc[k] for k in ("version", "date", "highlights", "fetchers") if k in doc}
     ordered.update({k: v for k, v in doc.items() if k not in ordered})
+    if isinstance(ordered.get("date"), str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", ordered["date"]):
+        ordered["date"] = datetime.date.fromisoformat(ordered["date"])  # written unquoted, as shipped files are
     body = yaml.safe_dump(ordered, sort_keys=False, allow_unicode=True, width=10_000, default_flow_style=False)
     return header + body
 

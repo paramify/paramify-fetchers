@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import datetime
+
 import pytest
 import yaml
 
@@ -188,7 +190,12 @@ def test_dump_release_round_trips_with_the_header():
     assert "[0.7.0-beta] section" in text
     assert "releases/README.md" in text
     assert text.index("version:") < text.index("date:") < text.index("highlights:") < text.index("fetchers:")
-    assert yaml.safe_load(text) == doc
+    assert yaml.safe_load(text) == {**doc, "date": datetime.date(2026, 11, 27)}
+
+
+def test_dump_release_writes_the_date_unquoted_like_the_shipped_files():
+    text = rn.dump_release(rn.draft_release("0.7.0-beta", "2026-11-27", [], {}, lambda n: ""))
+    assert "\ndate: 2026-11-27\n" in text
 
 
 def _doc(version="0.7.0-beta", rows=(), fetchers=()):
