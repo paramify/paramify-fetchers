@@ -19,13 +19,18 @@ concurrency:
   group: coverage-chart-${{ github.ref }}
   cancel-in-progress: true
 
+# Read-only by default. Only the chart job below gets write access, because it
+# commits and pushes the regenerated SVGs. OpenSSF Scorecard's Token-Permissions
+# check fails a top-level write grant.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   chart:
     name: regenerate (git history -> SVG)
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v7
         with:
