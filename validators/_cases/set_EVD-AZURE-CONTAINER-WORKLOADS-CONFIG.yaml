@@ -1,0 +1,9 @@
+evidence_set: EVD-AZURE-CONTAINER-WORKLOADS-CONFIG
+cases:
+  - name: compliant
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"container_apps_allow_insecure":0,"container_apps_auth_unknown":0,"container_apps_internet_facing_without_auth":0,"container_apps_without_ip_restrictions":0,"container_groups_logs_exported":2,"container_groups_logs_unknown":0,"container_groups_public_ip":0,"container_groups_registries_password_based":0,"environments_audit_logs_exported":2,"environments_audit_logs_unknown":0,"total_container_groups":2,"total_environments":2,"workloads_registries_password_based":0,"workloads_with_secrets_stored_in_app":0}}}'
+
+  - name: failed_collection
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":1},"payload":{"results":{},"summary":{"container_apps_allow_insecure":0,"container_apps_auth_unknown":0,"container_apps_internet_facing_without_auth":0,"container_apps_without_ip_restrictions":0,"container_groups_logs_exported":2,"container_groups_logs_unknown":0,"container_groups_public_ip":0,"container_groups_registries_password_based":0,"environments_audit_logs_exported":2,"environments_audit_logs_unknown":0,"total_container_groups":2,"total_environments":2,"workloads_registries_password_based":0,"workloads_with_secrets_stored_in_app":0}}}'

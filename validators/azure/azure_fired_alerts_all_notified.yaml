@@ -1,0 +1,25 @@
+key: azure_fired_alerts_all_notified
+name: 'Azure Fired Alerts: Every Fired Alert Ran an Action Group'
+type: AUTOMATED
+role: configuration
+source: community
+statement: >
+  Every alert fired in the window has an action group run in its history (alerts_with_notifications
+  equals alerts_fired), so no alert fired without notifying anyone. An alert whose rule has no action
+  group, or whose notifications a processing rule suppressed, fails it. Fails while any alert's
+  history is unread. A window with no fired alerts passes and says nothing about delivery. Shows the
+  notification was sent, not that a person received or read it. Does not check whether the
+  collection run succeeded.
+
+regex: '"alerts_fired":\s*(?<alerts_fired>\d+)[\s\S]*?"alerts_with_notifications":\s*(?<alerts_with_notifications>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS MATCH_GROUP[2]
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # alerts_fired
+    criteria: EQUALS
+    value: { type: MATCH_GROUP, groupNumber: 2 }            # alerts_with_notifications
+
+evidence_sets:
+  - EVD-AZURE-MONITOR-FIRED-ALERTS

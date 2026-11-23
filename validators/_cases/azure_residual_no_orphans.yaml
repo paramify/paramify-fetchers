@@ -1,0 +1,50 @@
+validator: azure_residual_no_orphans
+cases:
+  - name: no_orphans
+    expect: PASS
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"metadata": {"partial_failure": false}, "summary": {"deleted_principal_assignments": 0, "orphaned_resources": 0, "orphans_by_kind": {}, "principal_check": "complete", "role_assignments_checked": 40, "total_orphans": 0}}}'
+
+  - name: no_orphans_pretty
+    expect: PASS
+    artifact: |
+      {
+        "metadata": {
+          "exit_code": 0,
+          "status": "success"
+        },
+        "payload": {
+          "metadata": {
+            "partial_failure": false
+          },
+          "summary": {
+            "deleted_principal_assignments": 0,
+            "orphaned_resources": 0,
+            "orphans_by_kind": {},
+            "principal_check": "complete",
+            "role_assignments_checked": 40,
+            "total_orphans": 0
+          }
+        }
+      }
+
+  - name: unattached_disk
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"metadata": {"partial_failure": false}, "summary": {"deleted_principal_assignments": 0, "orphaned_resources": 1, "orphans_by_kind": {"unattached_disk": 1}, "principal_check": "complete", "role_assignments_checked": 40, "total_orphans": 1}}}'
+
+  - name: deleted_principal_assignment
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"metadata": {"partial_failure": false}, "summary": {"deleted_principal_assignments": 1, "orphaned_resources": 0, "orphans_by_kind": {"deleted_principal_assignment": 1}, "principal_check": "complete", "role_assignments_checked": 40, "total_orphans": 1}}}'
+
+  - name: principal_lookup_not_run
+    expect: FAIL
+    note: >
+      Assignments to deleted principals are uncounted, not zero.
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"metadata": {"partial_failure": false}, "summary": {"deleted_principal_assignments": 0, "orphaned_resources": 0, "orphans_by_kind": {}, "principal_check": "not_run", "role_assignments_checked": 40, "total_orphans": 0}}}'
+
+  - name: partial_failure
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"metadata": {"partial_failure": true}, "summary": {"deleted_principal_assignments": 0, "orphaned_resources": 0, "orphans_by_kind": {}, "principal_check": "complete", "role_assignments_checked": 40, "total_orphans": 0}}}'
+
+  - name: total_renamed
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"metadata": {"partial_failure": false}, "summary": {"deleted_principal_assignments": 0, "orphaned_resources": 0, "orphans_by_kind": {}, "orphans_total": 0, "principal_check": "complete", "role_assignments_checked": 40}}}'

@@ -1,0 +1,21 @@
+key: azure_flexible_server_backups_retention_known
+name: 'Azure PostgreSQL and MySQL Backups: Every Server''s Retention Is Known'
+type: AUTOMATED
+role: integrity
+source: community
+statement: >
+  Azure returned a backup retention for every backup server (servers_retention_unknown is 0), so no
+  server is left out of the retention check. Does not check whether the collection run succeeded.
+
+regex: '"servers_retention_unknown":\s*(?<servers_retention_unknown>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # servers_retention_unknown
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-FLEXIBLE-SERVER-BACKUPS

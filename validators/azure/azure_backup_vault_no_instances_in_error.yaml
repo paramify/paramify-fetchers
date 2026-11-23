@@ -1,0 +1,22 @@
+key: azure_backup_vault_no_instances_in_error
+name: 'Azure Backup Vaults: No Backup Instance Is in Error'
+type: AUTOMATED
+role: configuration
+source: community
+statement: >
+  No backup instance is in ProtectionError or ConfiguringProtectionFailed or carries a protection
+  error (backup_instances_in_error is 0). Fails if the count appears other than exactly once, such
+  as when a vault's instance list was not read. Does not check whether the collection run succeeded.
+
+regex: '"backup_instances_in_error":\s*(?<backup_instances_in_error>\d+)'
+rules_summary: MATCH_COUNT EQUALS 1; MATCH_GROUP[1] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "1" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # backup_instances_in_error
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-BACKUP-VAULT-PROTECTION

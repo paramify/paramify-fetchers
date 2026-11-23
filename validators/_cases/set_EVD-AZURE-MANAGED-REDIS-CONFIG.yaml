@@ -1,0 +1,13 @@
+evidence_set: EVD-AZURE-MANAGED-REDIS-CONFIG
+cases:
+  - name: compliant
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"redis_clusters":[{"databases":[{"client_protocol":"Encrypted","geo_replication_group":"grp1","geo_replication_linked_databases":["db-a","db-b"]}],"high_availability":"Enabled","redundancy_mode":"ZR"},{"databases":[{"client_protocol":"Encrypted","geo_replication_group":"grp1","geo_replication_linked_databases":["db-a","db-b"]}],"high_availability":"Enabled","redundancy_mode":"ZR"}]},"summary":{"databases_unread_clusters":0,"private_only_clusters":2,"tls_only_clusters":2,"total_clusters":2}}}'
+
+  - name: failed_collection
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":1},"payload":{"results":{"redis_clusters":[{"databases":[{"client_protocol":"Encrypted","geo_replication_group":"grp1","geo_replication_linked_databases":["db-a","db-b"]}],"high_availability":"Enabled","redundancy_mode":"ZR"},{"databases":[{"client_protocol":"Encrypted","geo_replication_group":"grp1","geo_replication_linked_databases":["db-a","db-b"]}],"high_availability":"Enabled","redundancy_mode":"ZR"}]},"summary":{"databases_unread_clusters":0,"private_only_clusters":2,"tls_only_clusters":2,"total_clusters":2}}}'
+
+  - name: client_protocol_renamed_upstream
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"redis_clusters":[{"databases":[{"clientProtocol":"Encrypted","geo_replication_group":"grp1","geo_replication_linked_databases":["db-a","db-b"]}],"high_availability":"Enabled","redundancy_mode":"ZR"},{"databases":[{"clientProtocol":"Encrypted","geo_replication_group":"grp1","geo_replication_linked_databases":["db-a","db-b"]}],"high_availability":"Enabled","redundancy_mode":"ZR"}]},"summary":{"databases_unread_clusters":0,"private_only_clusters":2,"tls_only_clusters":2,"total_clusters":2}}}'

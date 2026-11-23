@@ -1,0 +1,22 @@
+key: azure_flexible_server_backups_automatic_within_window
+name: 'Azure PostgreSQL and MySQL Backups: Every Server Has a Recent Automatic Backup'
+type: AUTOMATED
+role: configuration
+source: community
+statement: >
+  Every backup server's newest completed automatic backup finished within backup_window_hours (26
+  hours by default). Manual, on-demand backups do not count, so they cannot hide broken automation.
+  Does not check whether the collection run succeeded.
+
+regex: '"backup_servers":\s*(?<backup_servers>[1-9]\d*)[\s\S]*?"servers_with_automatic_backup_within_window":\s*(?<servers_backed_up>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS MATCH_GROUP[2]
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # backup_servers
+    criteria: EQUALS
+    value: { type: MATCH_GROUP, groupNumber: 2 }            # servers_with_automatic_backup_within_window
+
+evidence_sets:
+  - EVD-AZURE-FLEXIBLE-SERVER-BACKUPS
