@@ -63,6 +63,19 @@ def _target_summary(target: dict) -> str:
 # The owner picker's "remove the owner" choice; no username can be empty.
 _NO_OWNER = "\0none"
 
+
+class _ValueButton(Button):
+    """A settings-row button that shows a value, and takes the width of a new one.
+
+    Textual's Button repaints when its label changes but does not lay itself out
+    again, so a `width: auto` button kept the width of the label it was first
+    laid out with: "—" became "t" for tate.mccauley until the window was resized.
+    """
+
+    def watch_label(self) -> None:
+        self.refresh(layout=True)
+
+
 class ManifestPanel(ButtonRowNav, Vertical):
     """The manifest editor: settings row, entries table, and (with detail=True)
     the selected entry's detail beside the table.
@@ -127,13 +140,13 @@ class ManifestPanel(ButtonRowNav, Vertical):
 
     def _settings_buttons(self) -> ComposeResult:
         yield Static("stack:", classes="inline-label after-button")
-        yield Button("—", id="manifest-stack")
+        yield _ValueButton("—", id="manifest-stack")
         yield Static("owner:", classes="inline-label after-button")
-        yield Button("—", id="manifest-owner")
+        yield _ValueButton("—", id="manifest-owner")
         yield Static("frequency:", classes="inline-label after-button")
-        yield Button("—", id="manifest-schedule")
+        yield _ValueButton("—", id="manifest-schedule")
         yield Static("env:", classes="inline-label after-button")
-        yield Button("—", id="manifest-env")
+        yield _ValueButton("—", id="manifest-env")
         yield Button("Save", id="btn-save")
 
     def on_mount(self) -> None:
