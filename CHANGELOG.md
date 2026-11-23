@@ -2007,6 +2007,10 @@ schemas and the `paramify` CLI — not the internal code.
   query is always limited to those projects, even when `jql` names others. A name that matches no visible project
   fails as `bad_config`, and an unreadable project list collects nothing site-wide. Priorities stay site-wide. Off by
   default.
+- **The installer gives the newest release, not `main`.** `install.sh` clones the
+  newest `vX.Y.Z` tag from v0.7.0-beta on. If the repo has no such tag, it clones
+  `main` as before. `PARAMIFY_REF=main` or `paramify update --to main` follows `main`.
+
 - **`paramify update` shows what changed by release.** The New section groups its highlights under the release that
   shipped them, with the release date. Changes that are not in a release yet come first, under "unreleased". Each of
   your fetchers shows its release notes, newest first, instead of a commit reason. The header counts the releases the

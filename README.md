@@ -127,10 +127,12 @@ curl -fsSL https://raw.githubusercontent.com/paramify/paramify-fetchers/main/ins
 
 You need git and Python 3.11 or later. If you have [uv](https://docs.astral.sh/uv/) but no Python, the [install script](install.sh) uses uv to get one. The script:
 
-1. Clones the repo to `~/paramify-fetchers`.
+1. Clones the newest weekly release of the repo to `~/paramify-fetchers`. If the repo has no release yet, it clones `main`.
 2. Installs the CLI and the TUI into a virtualenv at `.venv` inside the clone, with uv if you have it.
 3. Links `paramify` into `~/.local/bin`, and asks before adding that folder to your shell profile.
 4. Offers to open the TUI.
+
+To follow `main` instead, run `paramify update --to main` in the clone. Or install with `PARAMIFY_REF=main`.
 
 Running it again reinstalls into the same clone without changing its code. Without a terminal (CI or another script), it asks nothing and only prints what to do.
 
@@ -147,7 +149,7 @@ Set these environment variables for `bash`:
 | Variable | Default | Sets |
 |---|---|---|
 | `PARAMIFY_DIR` | `~/paramify-fetchers` | Where to clone |
-| `PARAMIFY_REF` | `main` | The branch or release tag to clone |
+| `PARAMIFY_REF` | the newest release | The branch or release tag to clone. Use `main` to follow `main`. |
 | `PARAMIFY_EXTRAS` | `all` | The pip extras, such as `all,azure`. Leave it empty for the headless CLI only. |
 | `PARAMIFY_REPO_URL` | this repo | The repo to clone, such as your fork |
 

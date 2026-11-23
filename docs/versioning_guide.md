@@ -8,8 +8,8 @@ There are two ways to run, and update follows whichever your clone is on:
 
 | You run | `paramify update` moves you to |
 |---|---|
-| `main` (what `git clone` gives you) | the newest `main`, by fast-forward |
-| A pinned release, such as `v0.7.0-beta` | the newest release |
+| `main` (`paramify update --to main`) | the newest `main`, by fast-forward |
+| A release (what the installer gives you), such as `v0.7.0-beta` | the newest release |
 
 **You need:** [a clone installed from source](../README.md#install). Private
 copy? [Merge each release](private_mirror_guide.md#3-merge-each-paramify-release)
