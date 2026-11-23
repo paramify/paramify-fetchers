@@ -18,12 +18,17 @@ CHANGELOG cut, note drafting, rebuild and check rules) are pure functions in
 Environment: SLACK_RELEASE_WEBHOOK (a Slack workflow webhook; without it the
 message is printed), RELEASE_REVIEWER (default 21tmccauley) and
 RELEASE_REMINDER=1 (the Thursday run: also remind when a PR is still open).
-`draft` fetches `origin` first when the clone has that remote.
+`draft` fetches `origin` first when the clone has that remote. It builds the
+branch in a temporary worktree, so the checkout is not touched, and it refuses
+to run over uncommitted changes to tracked files or local release/next commits
+that are not pushed. `--no-push` is a dry run: it builds the local branch and
+prints the pull request and the DM instead of sending them.
 """
 
 from __future__ import annotations
 
 import argparse
+import http.client
 import json
 import os
 import subprocess
@@ -39,7 +44,14 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
 from framework import release_notes  # noqa: E402
-from framework.update import UpdateError, git, parse_release, read_at, repo_web_url  # noqa: E402
+from framework.update import (  # noqa: E402
+    UpdateError,
+    git,
+    parse_release,
+    read_at,
+    repo_web_url,
+    temp_worktree,
+)
 
 BRANCH = "release/next"
 CHANGELOG = "CHANGELOG.md"
@@ -113,9 +125,24 @@ def _subjects_by_name(root: Path, tag: str, ref: str, names: Set[str]) -> Dict[s
     return out
 
 
-def _rows(text: Optional[str]) -> List[dict]:
-    doc = yaml.safe_load(text or "") or {}
+def _load(text: Optional[str], where: str) -> object:
+    try:
+        return yaml.safe_load(text or "")
+    except yaml.YAMLError as e:
+        first = str(e).strip().splitlines()[0] if str(e).strip() else "parse error"
+        raise ReleaseError(f"{where} is not valid YAML ({first}); fix it and run again") from None
+
+
+def _rows(text: Optional[str], where: str) -> List[dict]:
+    doc = _load(text, where) or {}
     return list(doc.get("highlights") or []) if isinstance(doc, dict) else []
+
+
+def _rev(root: Path, ref: str) -> Optional[str]:
+    try:
+        return git(root, "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}").strip()
+    except UpdateError:
+        return None
 
 
 def _pending_release(root: Path, ref: str) -> Optional[Tuple[str, dict]]:
@@ -127,7 +154,7 @@ def _pending_release(root: Path, ref: str) -> Optional[Tuple[str, dict]]:
     tags = set(git(root, "tag", "-l", "v*").split())
     pending = []
     for path, text in read_at(root, ref, paths).items():
-        doc = yaml.safe_load(text or "") or {}
+        doc = _load(text, f"{path} at {ref[:12]}") or {}
         if isinstance(doc, dict) and f"v{doc.get('version')}" not in tags:
             pending.append((path, doc))
     if len(pending) > 1:
@@ -149,17 +176,34 @@ def _key(row: dict) -> Tuple[object, object]:
     return row.get("tag"), row.get("title")
 
 
-def _on_branch(root: Path, rows: List[dict]) -> Tuple[Optional[dict], List[dict]]:
-    """(release file on origin/release/next, rows at base that arrived since that draft)."""
+def _on_branch(root: Path, rows: List[dict]) -> Tuple[Optional[dict], List[dict], Optional[str]]:
+    """(release file on origin/release/next, rows at base that arrived since that draft, its Release-Base)."""
     ref = f"origin/{BRANCH}"
     found = _pending_release(root, ref)
     if found is None:
-        return None, []
+        return None, [], None
     previous = found[1]
     base = _release_base(root, ref)
-    seen_rows = _rows(read_at(root, base, [UNRELEASED])[UNRELEASED]) if base else previous.get("highlights") or []
+    if base:
+        seen_rows = _rows(read_at(root, base, [UNRELEASED])[UNRELEASED], f"{UNRELEASED} at {base[:12]}")
+    else:
+        seen_rows = previous.get("highlights") or []
     seen = {_key(r) for r in seen_rows}
-    return previous, [r for r in rows if _key(r) not in seen]
+    return previous, [r for r in rows if _key(r) not in seen], base
+
+
+def _refuse_local_work(root: Path, base_sha: str, remote_sha: Optional[str]) -> None:
+    """Stop before a draft could hide or lose work in this clone."""
+    if git(root, "status", "--porcelain", "--untracked-files=no").strip():
+        raise ReleaseError("the checkout has uncommitted changes; commit or stash them, then run draft again")
+    if _rev(root, f"refs/heads/{BRANCH}") is None:
+        return
+    log = git(root, "log", "--format=%x00%(trailers:key=Release-Base,valueonly)", f"refs/heads/{BRANCH}",
+              "--not", base_sha, *([remote_sha] if remote_sha else []))
+    mine = sum(1 for trailer in log.split("\0")[1:] if not trailer.strip())  # draft commits are rebuilt anyway
+    if mine:
+        raise ReleaseError(f"local {BRANCH} has {_plural(mine, 'commit')} that origin/{BRANCH} lacks; push them, "
+                           f"or drop them with: git branch -f {BRANCH} origin/{BRANCH}")
 
 
 # --------------------------------------------------------------------------- #
@@ -177,14 +221,17 @@ class GitHub:
             proc = subprocess.run(["gh", *args], cwd=self.root, capture_output=True, text=True, timeout=120)
         except FileNotFoundError:
             raise ReleaseError("gh is not installed or not on PATH") from None
+        except subprocess.TimeoutExpired:
+            raise ReleaseError(f"gh {args[0]} {args[1]} took longer than 120s; run it again") from None
         if proc.returncode != 0:
             msg = (proc.stderr or proc.stdout).strip().splitlines()
             raise ReleaseError(f"gh {args[0]} {args[1]} failed: {msg[-1] if msg else proc.returncode}")
         return proc.stdout
 
     def open_release_pr(self) -> Optional[dict]:
-        out = self._gh("pr", "list", "--head", BRANCH, "--state", "open", "--json", "number,url,title,body")
-        prs = json.loads(out or "[]")
+        out = self._gh("pr", "list", "--head", BRANCH, "--state", "open",
+                       "--json", "number,url,title,body,isCrossRepository")
+        prs = [pr for pr in json.loads(out or "[]") if not pr.get("isCrossRepository")]  # a fork's release/next
         return prs[0] if prs else None
 
     def create_pr(self, title: str, body: str, reviewer: str) -> str:
@@ -212,7 +259,7 @@ def notify(text: str, url: str) -> None:
     try:
         with urllib.request.urlopen(req, timeout=10):
             pass
-    except (OSError, ValueError) as e:
+    except (OSError, ValueError, http.client.HTTPException) as e:
         print(f"slack: could not send ({e}): {text} {url}")
 
 
@@ -271,28 +318,77 @@ def _header(text: Optional[str]) -> str:
     return "".join(lines)
 
 
+def _build(root: Path, base_sha: str, files: Dict[str, Optional[str]], doc: dict, today: str) -> str:
+    """Commit the release on top of base in a temporary worktree; returns the commit."""
+    version = doc["version"]
+    try:
+        changelog = release_notes.cut_changelog(files[CHANGELOG] or "", version, today)
+        pyproject = release_notes.set_pyproject_version(files[PYPROJECT] or "", version)
+    except ValueError as e:
+        raise ReleaseError(f"{e}; fix it on main and run draft again") from None
+    with temp_worktree(root, base_sha) as tree:
+        (tree / CHANGELOG).write_text(changelog)
+        (tree / PYPROJECT).write_text(pyproject)
+        git(tree, "rm", "-q", UNRELEASED)
+        (tree / "releases" / f"{version}.yaml").write_text(release_notes.dump_release(doc))
+        (tree / UNRELEASED).write_text(_header(files[UNRELEASED]) + "version: unreleased\nhighlights: []\n")
+        git(tree, "add", CHANGELOG, PYPROJECT, "releases/")
+        git(tree, "commit", "-q", "-m", f"chore(release): v{version}", "-m", f"Release-Base: {base_sha}")
+        return git(tree, "rev-parse", "HEAD").strip()
+
+
+def _point_branch(root: Path, sha: str) -> None:
+    """Move local release/next to `sha`; a checkout on it (clean, as checked) moves too."""
+    if git(root, "branch", "--show-current").strip() == BRANCH:
+        git(root, "reset", "--quiet", "--keep", sha)
+    else:
+        git(root, "branch", "--quiet", "--force", BRANCH, sha)
+
+
+def _same(doc: dict, previous: dict) -> bool:
+    def core(d: dict) -> tuple:
+        return str(d.get("version")), d.get("highlights") or [], d.get("fetchers") or []
+    return core(doc) == core(previous)
+
+
+def _norm(text: Optional[str]) -> str:
+    return (text or "").replace("\r\n", "\n").strip()
+
+
 def draft(root: Path, *, base: str, today: str, gh: GitHub, notify: Notify = notify, push: bool = True,
           version: Optional[str] = None, reviewer: str = REVIEWER, reminder: bool = False) -> str:
-    """Build or rebuild release/next and its PR. Returns "nothing", "opened" or "rebuilt"."""
+    """Build or rebuild release/next and its PR.
+
+    Returns "nothing", "opened", "rebuilt", or "unchanged" (an open PR whose
+    branch already matches main: no commit, push or PR edit).
+    """
+    if version is not None and parse_release(f"v{version}") is None:
+        raise ReleaseError(f"--version {version} is not a version; write it as 0.7.0-beta or 0.7.0, with no v")
     if "origin" in git(root, "remote").split():
-        git(root, "fetch", "--quiet", "--tags", "origin")
+        git(root, "fetch", "--quiet", "--prune", "--tags", "origin")
     base_sha = git(root, "rev-parse", f"{base}^{{commit}}").strip()
+    remote_sha = _rev(root, f"refs/remotes/origin/{BRANCH}")
+    _refuse_local_work(root, base_sha, remote_sha)
+    send: Notify = notify if push else (lambda text, url: print(f"Would notify: {text} {url}"))
+
     tag = last_tag(root, base_sha)
     prev = _version_of(tag)
     changed, added = changed_fetchers(root, tag, base_sha)
     files = read_at(root, base_sha, [CHANGELOG, PYPROJECT, UNRELEASED])
-    rows = _rows(files[UNRELEASED])
+    rows = _rows(files[UNRELEASED], f"{UNRELEASED} at {base}")
     if not rows and not changed:
         return "nothing"
 
     pr = gh.open_release_pr()
-    previous, since = _on_branch(root, rows) if pr else (None, [])
+    previous, since, built_on = _on_branch(root, rows) if pr and remote_sha else (None, [], None)
 
     sections = release_notes.changelog_sections(files[CHANGELOG] or "")
     body = sections.get("Unreleased", {}).get("body", "")
+    fetchers = _fetchers_at(root, base_sha)
     subjects = _subjects_by_name(root, tag, base_sha, set(changed))
     doc = release_notes.draft_release(
-        "", today, rows, changed, lambda n: release_notes.draft_note(n, body, subjects.get(n, [])),
+        "", today, rows, changed,
+        lambda n: release_notes.draft_note(n, body, subjects.get(n, []), dir_name=fetchers[n][0].rsplit("/", 1)[1]),
         previous=previous, rows_since_base=since,
     )
     if version is None:
@@ -302,36 +398,38 @@ def draft(root: Path, *, base: str, today: str, gh: GitHub, notify: Notify = not
             version = kept  # a suffix dropped by hand stays dropped
     doc["version"] = version
 
-    git(root, "switch", "-q", "-C", BRANCH, base_sha)
-    try:
-        changelog = release_notes.cut_changelog(files[CHANGELOG] or "", version, today)
-        pyproject = release_notes.set_pyproject_version(files[PYPROJECT] or "", version)
-    except ValueError as e:
-        raise ReleaseError(f"{e}; fix it on main and run draft again") from None
-    (root / CHANGELOG).write_text(changelog)
-    (root / PYPROJECT).write_text(pyproject)
-    git(root, "rm", "-q", UNRELEASED)
-    (root / "releases" / f"{version}.yaml").write_text(release_notes.dump_release(doc))
-    (root / UNRELEASED).write_text(_header(files[UNRELEASED]) + "version: unreleased\nhighlights: []\n")
-    git(root, "add", CHANGELOG, PYPROJECT, "releases/")
-    git(root, "commit", "-q", "-m", f"chore(release): v{version}", "-m", f"Release-Base: {base_sha}")
+    if pr and previous is not None and built_on == base_sha and _same(doc, previous):
+        if reminder:
+            send(f"v{version} is still waiting for you.", pr["url"])
+        return "unchanged"
+
+    _point_branch(root, _build(root, base_sha, files, doc, today))
     if push:
-        git(root, "push", "--quiet", "--force-with-lease", "origin", BRANCH)
+        git(root, "push", "--quiet", f"--force-with-lease=refs/heads/{BRANCH}:{remote_sha or ''}",
+            "origin", f"refs/heads/{BRANCH}:refs/heads/{BRANCH}")
 
     title, pr_body = f"Release v{version}", _pr_body(root, doc, base_sha)
     if pr is None:
-        url = gh.create_pr(title, pr_body, reviewer)
-        notify(f"v{version} is ready to review: {_to_read(doc)}.", url)
+        if push:
+            url = gh.create_pr(title, pr_body, reviewer)
+        else:
+            url = "(no pull request yet)"
+            print(f"Would open pull request: {title}, for {reviewer}\n\n{pr_body}")
+        send(f"v{version} is ready to review: {_to_read(doc)}.", url)
         return "opened"
     url = pr["url"]
-    gh.edit_pr(int(pr["number"]), title, pr_body)
+    if (_norm(pr.get("title")), _norm(pr.get("body"))) != (title, _norm(pr_body)):
+        if push:
+            gh.edit_pr(int(pr["number"]), title, pr_body)
+        else:
+            print(f"Would edit pull request #{pr['number']}: {title}\n\n{pr_body}")
     old = str(previous["version"]) if previous else version
     if old != version:
-        notify(f"v{old} is now v{version}: {_to_read(doc)}.", url)
+        send(f"v{old} is now v{version}: {_to_read(doc)}.", url)
     elif sum(_marks(doc)) > sum(_marks(previous)):
-        notify(f"v{version} has more to read: {_to_read(doc)}.", url)
+        send(f"v{version} has more to read: {_to_read(doc)}.", url)
     if reminder:
-        notify(f"v{version} is still waiting for you.", url)
+        send(f"v{version} is still waiting for you.", url)
     return "rebuilt"
 
 
@@ -378,6 +476,10 @@ def _refuse(notify: Notify, text: str) -> NoReturn:
 
 
 def _is_ancestor(root: Path, a: str, b: str) -> bool:
+    """Whether `a` is an ancestor of `b`; both must be in the clone."""
+    for label, sha in (("head sha", a), ("merge sha", b)):
+        if _rev(root, sha) is None:
+            raise ReleaseError(f"{label} {sha} is not in this clone; fetch it (git fetch origin) and run publish again")
     try:
         git(root, "merge-base", "--is-ancestor", a, b)
     except UpdateError:
@@ -387,9 +489,16 @@ def _is_ancestor(root: Path, a: str, b: str) -> bool:
 
 def publish(root: Path, *, head_sha: str, merge_sha: str, gh: GitHub, notify: Notify = notify) -> str:
     """Tag the commit that was reviewed, push the tag, create the GitHub Release. Returns the tag."""
-    found = _pending_release(root, merge_sha)
+    if _is_ancestor(root, head_sha, merge_sha):
+        target = head_sha  # a merge commit: the branch tip is on main
+    elif git(root, "rev-parse", f"{merge_sha}^{{tree}}") == git(root, "rev-parse", f"{head_sha}^{{tree}}"):
+        target = merge_sha  # a squash or rebase with exactly the reviewed content
+    else:
+        _refuse(notify, f"Not published: the tree of {merge_sha[:12]} on main differs from the reviewed "
+                        f"{head_sha[:12]}; tag the right commit by hand ({GUIDE}).")
+    found = _pending_release(root, target)
     if found is None:
-        _refuse(notify, f"Not published: {merge_sha[:12]} has no release file without a tag; "
+        _refuse(notify, f"Not published: {target[:12]} has no release file without a tag; "
                         "merge a release/next pull request first.")
     path, doc = found
     version = str(doc["version"])
@@ -397,13 +506,6 @@ def publish(root: Path, *, head_sha: str, merge_sha: str, gh: GitHub, notify: No
     if marks:
         _refuse(notify, f"v{version} not published: {path} still has {_plural(marks, 'draft mark')}; "
                         "remove them in a pull request to main, then run publish on that merge.")
-    if _is_ancestor(root, head_sha, merge_sha):
-        target = head_sha
-    elif git(root, "rev-parse", f"{merge_sha}^{{tree}}") == git(root, "rev-parse", f"{head_sha}^{{tree}}"):
-        target = merge_sha
-    else:
-        _refuse(notify, f"v{version} not published: the tree of {merge_sha[:12]} on main differs from the "
-                        f"reviewed {head_sha[:12]}; tag the right commit by hand ({GUIDE}).")
     tag = f"v{version}"
     git(root, "tag", "-a", tag, "-m", tag, target)
     git(root, "push", "--quiet", "origin", tag)
@@ -442,7 +544,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                            version=args.version, reviewer=os.environ.get("RELEASE_REVIEWER") or REVIEWER,
                            reminder=os.environ.get("RELEASE_REMINDER") == "1")
             print("Nothing to release: no highlights rows and no fetcher changes." if result == "nothing"
-                  else f"release/next {result}.")
+                  else f"{BRANCH} {result}.")
         elif args.cmd == "check":
             problems = check(root, args.ref)
             for line in problems:
