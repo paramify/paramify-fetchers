@@ -17,7 +17,8 @@ name: CI
 #   tui       — the terminal UI on the lowest textual 8 with the oldest Python and
 #               the latest textual 8 with the deployed Python: pilot tests, SVG
 #               snapshots, the end-to-end demo flow, a 160x50 layout check, and a
-#               real pty launch. The only job that runs the TUI suite.
+#               real pty launch. The only job that runs the TUI suite. Each
+#               textual row runs as three shards.
 #   lint      — the framework's own code passes ruff + mypy
 #   secrets   — no credentials in the tree or its full git history
 #   ci-ok     — passes only if every job above passed or was skipped by `changes`.
@@ -76,21 +77,34 @@ jobs:
       # minor can render differently. --deselect, not --ignore: an ignore does
       # not drop a file named on the command line, and a skip would trip
       # --fail-on-skip.
+      #
+      # Each textual row runs as TUI_SHARDS jobs, each with every Nth test
+      # (--shard in tests/conftest.py). Whole, the suite took 7 to 8.5 minutes on
+      # latest and set the wall time of the workflow: no test is slow, there are
+      # just 360 app starts for 4 cores.
       - name: matrices for the scope
         id: matrix
         env:
           SCOPE: ${{ steps.plan.outputs.scope }}
+          TUI_SHARDS: 3
         run: |
           set -euo pipefail
-          lowest='{"textual":"lowest","python-version":"3.11","pin":"textual==8.0.0","pytest-args":"--deselect tests/test_tui_snapshots.py"}'
-          latest='{"textual":"latest","python-version":"3.14","pin":"textual>=8,<9","pytest-args":""}'
+          lowest='"textual":"lowest","python-version":"3.11","pin":"textual==8.0.0","pytest-args":"--deselect tests/test_tui_snapshots.py"'
+          latest='"textual":"latest","python-version":"3.14","pin":"textual>=8,<9","pytest-args":""'
           if [ "$SCOPE" = fetchers ]; then
             echo 'pythons=["3.11","3.14"]' >> "$GITHUB_OUTPUT"
-            echo "tui=[$latest]" >> "$GITHUB_OUTPUT"
+            textuals=("$latest")
           else
             echo 'pythons=["3.11","3.12","3.13","3.14","3.15"]' >> "$GITHUB_OUTPUT"
-            echo "tui=[$lowest,$latest]" >> "$GITHUB_OUTPUT"
+            textuals=("$lowest" "$latest")
           fi
+          rows=()
+          for row in "${textuals[@]}"; do
+            for i in $(seq 1 "$TUI_SHARDS"); do
+              rows+=("{$row,\"shard\":\"$i\",\"shards\":\"$TUI_SHARDS\"}")
+            done
+          done
+          (IFS=,; echo "tui=[${rows[*]}]") >> "$GITHUB_OUTPUT"
           cat "$GITHUB_OUTPUT"
 
   lint:
@@ -278,7 +292,7 @@ jobs:
         run: python tools/cli_goldens.py
 
   tui:
-    name: tui (textual ${{ matrix.textual }}, py ${{ matrix.python-version }})
+    name: tui (textual ${{ matrix.textual }}, py ${{ matrix.python-version }}, ${{ matrix.shard }}/${{ matrix.shards }})
     needs: changes
     runs-on: ubuntu-latest
     # A wedged app or pty would otherwise hold the runner for the 6h default.
@@ -288,7 +302,7 @@ jobs:
       matrix:
         # Both textual rows, or only `latest` for a fetcher-only pull request: the
         # TUI boots against the real catalog, so a fetcher can still break it.
-        # The rows are in the `changes` job.
+        # Each row is split into shards. The rows are in the `changes` job.
         include: ${{ fromJSON(needs.changes.outputs.tui) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -308,10 +322,12 @@ jobs:
       # check and the pty launch.
       # --fail-on-skip (tests/conftest.py) fails the job if any of them skipped.
       # `-n auto` as in the `test` job: serial, this step took 8 to 11 minutes and
-      # set the wall time of the whole workflow.
+      # set the wall time of the whole workflow. --shard keeps a snapshot module
+      # whole in one shard, and reports the other shards' tests as deselected.
       - name: pytest (TUI)
         run: >-
           pytest -q -rsx -n auto --fail-on-skip --snapshot-report snapshot_report.html
+          --shard ${{ matrix.shard }}/${{ matrix.shards }}
           ${{ matrix.pytest-args }}
           tests/test_tui_*.py tests/test_manifest_autosave.py tests/test_target_editor.py
       # Side-by-side SVG diff of every mismatched snapshot. Refresh after an
@@ -320,7 +336,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: snapshot-report-textual-${{ matrix.textual }}
+          name: snapshot-report-textual-${{ matrix.textual }}-shard-${{ matrix.shard }}
           path: snapshot_report.html
           if-no-files-found: ignore
 
