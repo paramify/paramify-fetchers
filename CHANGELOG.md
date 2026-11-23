@@ -12,6 +12,12 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **`jira_site_inventory` 0.2.0: limit to named projects.** A new `projects` setting (`JIRA_PROJECTS`, project keys or
+  exact names) limits projects, issue types, statuses, service desks and issues to the named projects; the others are
+  only counted in `metadata.projects_left_out`. Statuses then come from each project's own status list. The issue
+  query is always limited to those projects, even when `jql` names others. A name that matches no visible project
+  fails as `bad_config`, and an unreadable project list collects nothing site-wide. Priorities stay site-wide. Off by
+  default.
 - **The TUI's validator sync (Paramify tab, `v`) now pairs and updates validators that already exist.** Before, it
   created missing validators and paired only those, and told you to pair the rest in Paramify yourself. The preview
   now lists three things and does them all on one yes:
