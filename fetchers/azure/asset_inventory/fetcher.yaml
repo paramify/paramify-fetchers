@@ -5,6 +5,7 @@ description: >-
 category: azure
 
 kind: inventory
+status: beta
 pipeline:
   type: inventory
   id_scheme: azure-resource-id
