@@ -24,6 +24,7 @@ organization, each with its own token and API host.
 | `github_repository_inventory` | **Inventory** (`kind: inventory`): one record per repository with visibility, state, security features and custom property values; all or nothing | PIY-GIV |
 | `github_dependabot_report` | **Issue report** (`kind: issue_report`): every open Dependabot alert as one CSV row, linked to the inventory by `Asset ID`; all or nothing ([alert reports](#alert-reports)) | none |
 | `github_code_scanning_report` | **Issue report**: every open code scanning alert on each default branch as one CSV row, linked to the inventory by `Asset ID`; all or nothing ([alert reports](#alert-reports)) | none |
+| `github_secret_scanning_report` | **Issue report**: every open secret scanning alert as one CSV row (metadata only, never the secret), linked to the inventory by `Asset ID`; all or nothing ([alert reports](#alert-reports)) | none |
 | `github_actions_security` | Allowed actions and SHA pinning policy, the workflow token's default, fork PR approval, self-hosted runners and runner groups, OIDC subject claims, and what each workflow file does (unpinned actions, permissions blocks, privileged triggers checking out PR code, untrusted input in scripts, OIDC) | SCR-MIT, CMT-VTD, IAM-SNU, CNA-MAT |
 | `github_release_integrity` | Build provenance on each release asset (by digest), immutable releases, release tags locked by tag rulesets | SVC-VRI, SCR-MIT |
 | `github_deployment_controls` | Environments' reviewers, self-review, wait timers, branch policies and admin bypass; production deployments in a window with commit, creator, whether Actions made them and who approved them | CMT-RMV, CMT-VTD, CMT-LMC |
@@ -74,7 +75,7 @@ a missing grant is reported as e.g. `(needs: administration=read)`.
 | Commit statuses (repository) | `statuses` | pull_request_checks |
 | Dependabot alerts (repository) | `vulnerability_alerts` | dependabot_alerts, dependabot_report |
 | Code scanning alerts (repository) | `security_events` | code_scanning_alerts, code_scanning_report |
-| Secret scanning alerts (repository) | `secret_scanning_alerts` | secret_scanning |
+| Secret scanning alerts (repository) | `secret_scanning_alerts` | secret_scanning, secret_scanning_report |
 | Secrets (repository) | `secrets` | optional. `non_user_credentials` lists Actions secret names and ages only with this grant. Without it the fetcher still runs: those lists are `null` and metadata says why. The API never returns secret values |
 | Webhooks (repository) | `repository_hooks` | non_user_credentials |
 | Administration (organization) | `organization_administration` | org_security_settings, non_user_credentials (installations), actions_security (Actions policy, OIDC subject template), release_integrity (immutable releases), audit_log |
@@ -157,8 +158,8 @@ rulesets appear in `bypass_actors_unreadable` rather than as bypass-free.
 
 ## Alert reports
 
-The alert reports are issue reports (`kind: issue_report`): `github_dependabot_report`
-and `github_code_scanning_report`.
+The alert reports are issue reports (`kind: issue_report`): `github_dependabot_report`,
+`github_code_scanning_report` and `github_secret_scanning_report`.
 Each one writes the open alerts of one kind to a CSV file for a Paramify
 vulnerability assessment, one row for each alert. Each report reads the same
 target, the same repositories and the same token as the evidence fetchers. It

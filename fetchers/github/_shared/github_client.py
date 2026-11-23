@@ -668,6 +668,30 @@ def workflow_file_texts(client: GitHubClient, org: str, repos: List[dict]) -> Op
     return out
 
 
+# GitHub returns generic (non-provider) secret alerts only for the types secret_type names, and has no "all types"
+# value: a type GitHub adds later is not requested.
+GENERIC_SECRET_TYPES = ",".join(("ec_private_key", "generic_private_key", "http_basic_authentication_header",
+                                 "http_bearer_authentication_header", "mongodb_connection_string", "mysql_connection_url",
+                                 "openssh_private_key", "pgp_private_key", "postgres_connection_string",
+                                 "rsa_private_key", "password"))
+
+
+def secret_scanning_alerts(client: GitHubClient, base: str,
+                           params: Optional[dict] = None) -> Tuple[Optional[str], Optional[List[dict]]]:
+    """(state, alerts) for one repository (`repos/{org}/{name}`) as in paginate(), always with hide_secret.
+
+    Without secret_type GitHub returns provider patterns only, so the generic types are asked for in a second walk
+    and the two are merged by alert number.
+    """
+    query = {**(params or {}), "hide_secret": "true"}
+    state, alerts = client.paginate(f"{base}/secret-scanning/alerts", query)
+    if state is None:
+        state, generic = client.paginate(f"{base}/secret-scanning/alerts",
+                                         {**query, "secret_type": GENERIC_SECRET_TYPES})
+        alerts = list({a.get("number"): a for a in (alerts or []) + (generic or [])}.values())
+    return state, alerts
+
+
 def newest_since(client: GitHubClient, path: str, key: str, since: float, cap: int, what: str,
                  env: str) -> Optional[List[dict]]:
     """Items of a newest-first list created since `since`. None on failure or when more than `cap` are in the window.

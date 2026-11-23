@@ -60,6 +60,11 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`github_secret_scanning_report` 0.1.0: open secret scanning alerts as a vulnerability report.** The same shape
+  for open secret scanning alerts, metadata only: type, validity, first location path, state and dates. Alerts are
+  requested with `hide_secret`, and only named fields are copied, so the secret value never reaches the report.
+  `github_secret_scanning` now reads its alerts through the same shared function.
+
 - **`github_code_scanning_report` 0.1.0: open code scanning alerts as a vulnerability report.** The same shape for
   the open code scanning alerts on each default branch, with rule, tool, location and security severity columns.
 

@@ -124,7 +124,7 @@ in the same change.
 
 | Scheme | ID format | Fetchers |
 |---|---|---|
-| `github-repository-url` | The repository's REST URL, built from its numeric id. The alert reports carry the same value in their `Asset ID` column | `github_repository_inventory`, `github_dependabot_report`, `github_code_scanning_report` |
+| `github-repository-url` | The repository's REST URL, built from its numeric id. The alert reports carry the same value in their `Asset ID` column | `github_repository_inventory`, `github_dependabot_report`, `github_code_scanning_report`, `github_secret_scanning_report` |
 | `sophos-endpoint-id` | The Sophos Central endpoint id | `sophos_endpoint_inventory` |
 | `aws-arn` | The resource's ARN. A Config resource type with no ARN gets `aws-config:<partition>:<account>:<region>:<type>:<resource id>` instead, which matches no other fetcher | `aws_config_inventory` |
 | `azure-resource-id` | The Azure resource id | no fetcher yet |

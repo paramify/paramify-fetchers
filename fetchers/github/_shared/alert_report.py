@@ -103,7 +103,7 @@ def run_report(name: str, kind: str, list_alerts: ListAlerts, row: Callable[[dic
     dest = Path(os.environ.get("EVIDENCE_DIR", "./evidence")) / f"{name}_{file_suffix(target)}.csv"
     try:
         write_csv(dest, COMMON_COLUMNS + columns, rows)
-    except OSError as exc:
+    except (OSError, ValueError) as exc:  # ValueError: a row with a column outside `columns`
         report_failure(f"could not write the report: {exc}", "internal_error")
         return 1
     logger.info("Report saved to %s (%d open alerts in %d repositories)", dest, len(rows), len(repos or []))
