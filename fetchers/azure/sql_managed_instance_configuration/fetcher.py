@@ -617,17 +617,15 @@ def classify_databases(client, collector: Collector, instance: dict) -> list[dic
 
 
 def collect(subscription_id, cred, collector: Collector, exclusions: ResourceExclusions | None = None,
-            excluded: list | None = None) -> tuple[list[dict], str | None]:
-    """Instances the exclusions take out are appended to `excluded` and get none of the per-instance reads."""
+            excluded: list | None = None) -> tuple[list[dict] | None, str | None]:
+    """Instances the exclusions take out are appended to `excluded` and get none of the per-instance reads; None when
+    the instance list couldn't be read."""
     client = sql_client(subscription_id, cred, collector)
-    if client is None:
+    instances = None if client is None else list_instances(client, collector, project_instance, unread=None)
+    if instances is None:
         if exclusions is not None:
             exclusions.mark_unread()
-        return [], None
-    failures = len(collector.failures)
-    instances = list_instances(client, collector, project_instance)
-    if exclusions is not None and len(collector.failures) > failures:
-        exclusions.mark_unread()
+        return None, None
     if exclusions and excluded is not None:
         instances, out = exclusions.split(instances, "managed_instance")
         excluded += sorted(out, key=lambda e: e["id"] or "")
@@ -705,7 +703,7 @@ def main() -> int:
     subscription_id = sub["subscription_id"]
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
-    instances: list[dict] = []
+    instances: list[dict] | None = None
     excluded: list[dict] = []
     exclusions = ResourceExclusions.from_env()
     maintenance_registration = None
@@ -730,7 +728,9 @@ def main() -> int:
             ),
         )
 
-    if not (subscription_id and cred is not None):
+    listed = instances is not None
+    instances = instances or []
+    if not listed:
         exclusions.mark_unread()
     exclusions.record_invalid(collector)
     exclusions.warn_unmatched(logger)
@@ -748,7 +748,7 @@ def main() -> int:
         summary={
             **summarize(instances),
             "provider_registration_status": registration,
-            **exclusions.summary(excluded, ("managed_instance",), {"managed_instances": len(instances)}),
+            **exclusions.summary(excluded, ("managed_instance",), {"managed_instances": len(instances) if listed else None}),
         },
     )
 
