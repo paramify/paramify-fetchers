@@ -374,8 +374,8 @@ def draft(root: Path, *, base: str, today: str, gh: GitHub, notify: Notify = not
     if version is None:
         version = release_notes.next_version(prev, release_notes.required_bump(doc, added, _major(prev)))
         kept = str(previous["version"]) if previous else ""
-        if kept and _base_version(kept) == _base_version(version):
-            version = kept  # a suffix dropped by hand stays dropped
+        if kept and release_notes.at_least(kept, version):
+            version = kept  # a version forced higher or a suffix dropped by hand stays
     doc["version"] = version
 
     if pr and previous is not None and built_on == base_sha and _same(doc, previous):
@@ -417,10 +417,6 @@ def draft(root: Path, *, base: str, today: str, gh: GitHub, notify: Notify = not
 
 def _major(version: str) -> int:
     return int(version.split(".", 1)[0])
-
-
-def _base_version(version: str) -> str:
-    return version.split("-", 1)[0]
 
 
 # --------------------------------------------------------------------------- #

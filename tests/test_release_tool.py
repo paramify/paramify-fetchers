@@ -380,6 +380,23 @@ def test_rebuild_keeps_a_suffix_dropped_by_hand(clone, week, upstream):
     assert gh.calls[-1][:3] == ("edit_pr", 7, "Release v0.7.0")
 
 
+def test_rebuild_keeps_a_version_forced_higher_by_hand(clone, week, upstream):
+    gh, notes = FakeGitHub(), []
+    _draft(clone, gh, notes)
+
+    def force(doc):
+        doc["version"] = "1.0.0"
+        return {"releases/1.0.0.yaml": yaml.safe_dump(doc, sort_keys=False)}
+    _on_branch_edit(clone, "0.7.0-beta", force)
+    _commit(upstream, {"docs/other.md": "main moved\n"}, "docs: other")
+
+    assert _draft(clone, gh, notes) == "rebuilt"
+    assert _release_file(clone, "1.0.0")["version"] == "1.0.0"
+    assert not _exists(clone, "releases/0.7.0-beta.yaml")
+    assert gh.calls[-1][:3] == ("edit_pr", 7, "Release v1.0.0")
+    assert release.check(clone, "origin/release/next") == []
+
+
 def test_rebuild_that_changes_the_version_renames_the_file_and_retitles_the_pr(clone, upstream):
     _commit(upstream, {"fetchers/demo/alpha/fetcher.yaml": _fetcher("demo_alpha", "0.1.1")}, "demo_alpha: fix")
     gh, notes = FakeGitHub(), []
