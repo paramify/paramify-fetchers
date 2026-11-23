@@ -342,6 +342,7 @@ class Manifest:
     entries: List[ManifestEntry]
     platforms: Dict[str, PlatformConfig] = field(default_factory=dict)
     paramify: Dict[str, Any] = field(default_factory=dict)
+    parallel_categories: bool = False
 
 
 @dataclass

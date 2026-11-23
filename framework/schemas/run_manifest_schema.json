@@ -16,6 +16,10 @@
           "type": "string",
           "description": "Base directory for outputs. Runner creates a per-run subdir like run-<timestamp> inside this."
         },
+        "parallel_categories": {
+          "type": "boolean",
+          "description": "Run entries of different categories at the same time (default false: every entry one after another). Entries of one category still run one after another, in manifest order, and comparators run last. Results, envelopes, events and _run_metadata.json keep manifest order."
+        },
         "platforms": {
           "type": "object",
           "description": "Per-category (platform) config and auth, inherited by every fetcher in that category. Keyed by category name (e.g. 'aws', 'rippling').",

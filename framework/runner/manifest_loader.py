@@ -61,7 +61,8 @@ def parse_manifest(data: dict) -> Manifest:
         ))
 
     return Manifest(output_dir=output_dir, entries=entries, platforms=platforms,
-                    paramify=run.get("paramify") or {})
+                    paramify=run.get("paramify") or {},
+                    parallel_categories=bool(run.get("parallel_categories")))
 
 
 def entry_keys(entries: Sequence[ManifestEntry]) -> List[str]:

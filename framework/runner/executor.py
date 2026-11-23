@@ -640,19 +640,33 @@ def _kill_process_group(proc: subprocess.Popen) -> None:
 
 
 class _Running:
-    """The fetcher processes one concurrent fan-out has running, so an interrupt can stop them all.
+    """The fetcher processes a concurrent fan-out (or a whole run) has running, so an interrupt can stop them all.
 
-    stop() kills every one and marks the fan-out stopped; a process added after
+    stop() kills every one and marks the group stopped; a process added after
     that is killed at once, which covers a worker that started its fetcher
     while the interrupt was being handled.
+
+    A group can have a `parent` (the run's group, when entries of different
+    categories run at once): every process is registered with both, so stopping
+    the run reaches a fan-out's processes, while stopping a fan-out leaves its
+    siblings in other categories running.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, parent: Optional["_Running"] = None) -> None:
         self._lock = threading.Lock()
         self._procs: Set[subprocess.Popen] = set()
         self._stopped = False
+        self._parent = parent
+
+    @property
+    def stopped(self) -> bool:
+        with self._lock:
+            stopped = self._stopped
+        return stopped or (self._parent is not None and self._parent.stopped)
 
     def add(self, proc: subprocess.Popen) -> None:
+        if self._parent is not None:
+            self._parent.add(proc)
         with self._lock:
             self._procs.add(proc)
             stopped = self._stopped
@@ -660,6 +674,8 @@ class _Running:
             _kill_process_group(proc)
 
     def discard(self, proc: subprocess.Popen) -> None:
+        if self._parent is not None:
+            self._parent.discard(proc)
         with self._lock:
             self._procs.discard(proc)
 
@@ -935,6 +951,7 @@ def run_entry(
     inputs_index: Optional[dict] = None,
     secret_vars: FrozenSet[str] = frozenset(),
     entry_key: Optional[str] = None,
+    running: Optional[_Running] = None,
 ) -> List[InvocationResult]:
     """Run one manifest entry: single invocation, or one per target for fanout.
 
@@ -960,6 +977,9 @@ def run_entry(
 
     `entry.concurrency` above 1 runs up to that many targets at once (see
     _run_concurrently). Results are in target order either way.
+
+    `running` registers every fetcher process this entry starts, so a caller
+    running entries on other threads can stop them all on an interrupt.
     """
     output_dir.mkdir(parents=True, exist_ok=True)
     inv_dir = invocation_dir(fetcher, output_dir)
@@ -976,7 +996,8 @@ def run_entry(
                          secrets_seen, notes, merged=merged)
         _emit_notes(notes, on_note)
         return [_invoke(fetcher, env, None, inv_dir, on_line, secrets_seen, output_dir,
-                        inputs_index, entry_key=entry_key, patterns_meta=patterns_meta)]
+                        inputs_index, entry_key=entry_key, patterns_meta=patterns_meta,
+                        running=running)]
 
     if not entry.targets:
         # No targets[] given. If every target field is optional, run once with the
@@ -993,7 +1014,7 @@ def run_entry(
                          secrets_seen, notes, merged=merged)
         _emit_notes(notes, on_note)
         return [_invoke(fetcher, env, None, inv_dir, on_line, secrets_seen, output_dir,
-                        entry_key=entry_key, patterns_meta=patterns_meta)]
+                        entry_key=entry_key, patterns_meta=patterns_meta, running=running)]
 
     def setup(target: TargetInstance, env_dir: Path):
         """The env and seen secrets for one target, or the failed result if it cannot be set up."""
@@ -1015,7 +1036,7 @@ def run_entry(
 
     if entry.concurrency > 1 and len(entry.targets) > 1:
         return _run_concurrently(fetcher, entry, output_dir, inv_dir, setup, on_line,
-                                 entry_key, patterns_meta)
+                                 entry_key, patterns_meta, running)
 
     results = []
     for target in entry.targets:
@@ -1024,7 +1045,7 @@ def run_entry(
             results.append(env)
             continue
         results.append(_invoke(fetcher, env, target, inv_dir, on_line, secrets_seen, output_dir,
-                               entry_key=entry_key, patterns_meta=patterns_meta))
+                               entry_key=entry_key, patterns_meta=patterns_meta, running=running))
     return results
 
 
@@ -1054,7 +1075,7 @@ def _target_label(target: TargetInstance) -> str:
 
 
 def _run_concurrently(fetcher, entry, output_dir, inv_dir, setup, on_line,
-                      entry_key, patterns_meta) -> List[InvocationResult]:
+                      entry_key, patterns_meta, parent: Optional[_Running] = None) -> List[InvocationResult]:
     """Run an entry's targets up to entry.concurrency at a time.
 
     Every target is set up first, in target order and on this thread, so notes
@@ -1083,7 +1104,7 @@ def _run_concurrently(fetcher, entry, output_dir, inv_dir, setup, on_line,
                 on_line(f"[{label}] {line}")
         return forward
 
-    running = _Running()
+    running = _Running(parent)
 
     def work(target, env, secrets_seen, stage):
         return _invoke(fetcher, env, target, stage, line_sink(target), secrets_seen, stage,
@@ -1177,3 +1198,56 @@ def _merge_dir(src: Path, dest: Path, name: str) -> List[str]:
         else:
             conflicts.append(child_name)
     return conflicts
+
+
+def entry_staging_dir(run_dir: Path, index: int) -> Path:
+    """A fresh staging dir for one entry that runs alongside entries of other categories.
+
+    It mirrors the run dir (issue-reports/ and discovery/ subdirs included), so
+    run_entry can be pointed at it unchanged; merge_staged_entry moves its files
+    into the run dir afterwards. The name starts with a dot, like a fan-out's
+    staging dir, so nothing that reads the run dir mistakes it for evidence.
+    """
+    stage = run_dir / f"{_STAGING_PREFIX}entry-{index}-{secrets.token_hex(4)}"
+    stage.mkdir(parents=True)
+    return stage
+
+
+def merge_staged_entry(results: List[InvocationResult], stage: Path, run_dir: Path) -> None:
+    """Move what one staged entry wrote into the run dir, in result order, then remove the stage.
+
+    Called in manifest order, so the run dir ends as a serial run leaves it: a
+    file name an earlier entry already wrote is replaced, and the invocation
+    that wrote it fails for overwriting it (see _fail_for_clobber); a directory
+    is merged into; a file and a directory of one name keep the earlier one and
+    fail the invocation. Outputs are already named relative to the run dir.
+    """
+    try:
+        for result in results:
+            overwritten, conflicts = [], []
+            for name in result.outputs:
+                src, dest = stage / name, run_dir / name
+                if not src.exists() and not src.is_symlink():
+                    continue
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                if not dest.exists() and not dest.is_symlink():
+                    os.replace(src, dest)
+                elif src.is_dir() and not src.is_symlink() and dest.is_dir() and not dest.is_symlink():
+                    conflicts.extend(_merge_dir(src, dest, name))
+                elif dest.is_file() and not src.is_dir():
+                    os.replace(src, dest)
+                    overwritten.append(name)
+                else:
+                    conflicts.append(name)
+            if not overwritten and not conflicts:
+                continue
+            # A name this run already had is not one of the invocation's outputs, as in a serial run.
+            result.outputs = [n for n in result.outputs if n not in overwritten and n not in conflicts]
+            clobber = _clobber_reason(overwritten, [])
+            if conflicts:
+                both = (f"wrote {', '.join(conflicts)}, which an earlier entry or target wrote in this run "
+                        f"as a different kind of file; kept the earlier one")
+                clobber = f"{clobber}; {both}" if clobber else both
+            _fail_for_clobber(result, list(result.overwritten or []) + overwritten, clobber)
+    finally:
+        shutil.rmtree(stage, ignore_errors=True)

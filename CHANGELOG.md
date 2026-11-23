@@ -28,6 +28,11 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`run.parallel_categories` runs the entries of different categories at once.** Entries of one category still
+  run one after another, in manifest order, and comparators run last. Output lines, events, envelopes and
+  `_run_metadata.json` keep manifest order, and a file name two entries share still fails the later entry, so the run
+  reads as a serial one. Default `false`; `paramify validate` notes the setting when the manifest has only one
+  category.
 - **One-line install.** `curl -fsSL https://raw.githubusercontent.com/paramify/paramify-fetchers/main/install.sh |
   bash` clones the repo to `~/paramify-fetchers`, installs the CLI and TUI into the clone's `.venv`, and links
   `paramify` into `~/.local/bin`. In a terminal it shows a spinner and elapsed time for each step, offers to add
