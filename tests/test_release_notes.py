@@ -248,3 +248,42 @@ def test_check_release_explains_an_added_fetcher():
     doc = _doc(version="0.6.1-beta")
     msgs = rn.check_release(doc, {}, ["demo_new"], "0.6.0-beta")
     assert msgs == ["expected 0.7.0-beta (added fetchers → minor), found 0.6.1-beta"]
+
+
+def test_draft_note_from_a_lead_without_a_version_or_colon():
+    body = "- **`aws_organizations_scp` can record the SCPs that apply to each account.** More.\n"
+    assert rn.draft_note("aws_organizations_scp", body, []) == "can record the SCPs that apply to each account"
+
+
+def test_draft_note_drops_a_list_of_names_after_the_lead_name():
+    body = "- **`demo_a` and `demo_b` now page through results.**\n"
+    assert rn.draft_note("demo_b", body, []) == "now page through results"
+
+
+def test_draft_note_from_a_nested_list_bullet_with_a_version():
+    body = ("- **Azure fetchers.**\n"
+            "  - `azure_activity_log_alerts` 0.3.0: activity log alert rules and their action groups.\n")
+    assert rn.draft_note("azure_activity_log_alerts", body, []) == "activity log alert rules and their action groups"
+
+
+def test_draft_note_from_a_top_level_list_bullet_without_a_version():
+    assert rn.draft_note("demo_alpha", "- `demo_alpha`: reads more rows\n", []) == "reads more rows"
+
+
+def test_draft_note_from_a_commit_that_names_the_directory():
+    subjects = ["fix(azure): vague", "organizations_scp: walk the tree for inherited SCPs"]
+    assert rn.draft_note("aws_organizations_scp", "", subjects, dir_name="organizations_scp") \
+        == "walk the tree for inherited SCPs"
+    assert rn.draft_note("aws_organizations_scp", "", subjects) == "TODO: say what changed for the user"
+
+
+def test_draft_note_leaves_category_prefixes_unmatched():
+    subjects = ["fix(azure): tidy", "AI fetchers: add things"]
+    assert rn.draft_note("azure_x", "", subjects, dir_name="x") == "TODO: say what changed for the user"
+
+
+def test_draft_note_joins_a_wrapped_list_bullet_and_keeps_its_first_sentence():
+    body = ("- `demo_alpha` 0.3.0: hubs, projects and other\n"
+            "  Machine Learning workspaces. More detail.\n"
+            "- `demo_beta`: other\n")
+    assert rn.draft_note("demo_alpha", body, []) == "hubs, projects and other Machine Learning workspaces"

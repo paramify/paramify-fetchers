@@ -154,8 +154,31 @@ def _lead_note(name: str, body: str) -> Optional[str]:
         elif ": " in lead:
             rest = lead.split(": ", 1)[1]
         else:
-            continue
+            # "**`name` can record X.**": drop the leading names, "`a` and `b`", and keep the rest.
+            names = re.match(r"^`[^`]+`(?:(?:,\s*|\s+and\s+)`[^`]+`)*\s*", lead)
+            if not names or f"`{name}`" not in names[0]:
+                continue
+            rest = lead[names.end():]
         rest = rest.strip().rstrip(".").strip()
+        if rest:
+            return rest
+    return None
+
+
+def _list_note(name: str, body: str) -> Optional[str]:
+    """The text of a plain (not bold) list bullet, nested or not: "- `name` 0.3.0: text"."""
+    pattern = re.compile(rf"^\s*- `{re.escape(name)}`(?: \d+\.\d+\.\d+)?: (\S.*)$")
+    lines = body.splitlines()
+    for i, line in enumerate(lines):
+        m = pattern.match(line)
+        if not m:
+            continue
+        parts = [m[1].strip()]
+        for nxt in lines[i + 1:]:  # a wrapped bullet continues on indented lines
+            if not nxt.strip() or nxt.lstrip().startswith("- ") or not nxt.startswith(" "):
+                break
+            parts.append(nxt.strip())
+        rest = re.split(r"(?<=[.])\s", " ".join(parts), maxsplit=1)[0].rstrip(".").strip()
         if rest:
             return rest
     return None
@@ -170,14 +193,24 @@ def _shorten(text: str) -> str:
     return cut.rstrip(" ,;:.") + "…"
 
 
-def draft_note(name: str, changelog_body: str, subjects: Sequence[str]) -> str:
+def draft_note(
+    name: str, changelog_body: str, subjects: Sequence[str], dir_name: Optional[str] = None
+) -> str:
     """A first note for a fetcher line, for a person to edit.
 
     Takes the first of: the CHANGELOG bullet whose bold lead names the fetcher,
-    the newest commit subject `update.fetcher_reason` accepts, or a TODO. Cut to
-    fit the 110-character limit.
+    a plain list bullet "`name` 1.2.0: text" (nested or not), the newest commit
+    subject `update.fetcher_reason` accepts for the name, the same for
+    `dir_name` (the fetcher's directory, which commits often use instead of the
+    name), or a TODO. Cut to fit the 110-character limit.
     """
-    note = _lead_note(name, changelog_body) or update.fetcher_reason(name, subjects) or TODO_NOTE
+    note = (
+        _lead_note(name, changelog_body)
+        or _list_note(name, changelog_body)
+        or update.fetcher_reason(name, subjects)
+        or (update.fetcher_reason(dir_name, subjects) if dir_name and dir_name != name else None)
+        or TODO_NOTE
+    )
     return _shorten(note)
 
 
