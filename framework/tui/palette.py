@@ -76,6 +76,31 @@ def community_tag(source) -> Text:
     return text
 
 
+# How proven a fetcher is. Beta gets a yellow label wherever the fetcher is
+# named, the same places as the community label; stable, the default, has none.
+BETA_PILL = Style(color=WARN_TEXT, bgcolor=WARN_MUTED, bold=True)
+BETA_NOTE = "Beta: not yet run against a live system, or its output may still change. Check the evidence before you rely on it."
+
+
+def beta_tag(status) -> Text:
+    """' BETA ' for a beta fetcher, empty text otherwise."""
+    text = Text()
+    if status == "beta":
+        text.append(" BETA ", style=BETA_PILL)
+    return text
+
+
+def fetcher_tags(f) -> Text:
+    """The labels that follow a fetcher's name: COMMUNITY and BETA, each led by two
+    spaces, or empty text. ``f`` is a fetcher descriptor (a dict) or None."""
+    text = Text()
+    for tag in (community_tag((f or {}).get("source")), beta_tag((f or {}).get("status"))):
+        if tag.plain:
+            text.append("  ")
+            text.append_text(tag)
+    return text
+
+
 def pill(label: str, tone: str) -> Text:
     """A status pill for table cells. Unknown tones fall back to muted text so
     a new status word can never crash a repaint."""

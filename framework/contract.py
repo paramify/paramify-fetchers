@@ -223,6 +223,8 @@ class Fetcher:
     kind: str = "evidence"
     #: Who made it: "paramify" or "community" (absent in fetcher.yaml = paramify).
     source: str = "paramify"
+    #: How proven it is: "stable" or "beta" (absent in fetcher.yaml = stable).
+    status: str = "stable"
     issue_report: Optional["IssueReport"] = None
     #: The Paramify pipeline this fetcher's output feeds. Required of an inventory.
     pipeline: Optional["Pipeline"] = None

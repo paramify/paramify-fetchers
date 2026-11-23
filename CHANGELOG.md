@@ -60,6 +60,11 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`status: beta` in `fetcher.yaml` marks a fetcher that is not proven yet.** The field takes `stable` (the default)
+  or `beta`. A beta fetcher gets a BETA label after its name everywhere the TUI names it (catalog, manifest table,
+  both detail panes, with a note in the details) and `[beta]` on the first line of `paramify describe`.
+  `describe --json` and the catalog carry `status` for every fetcher.
+
 - **The TUI shows which environment variables a manifest is missing, and stops a run that would fail on them.**
   - The manifest settings row has an `env` button (`✓ all set` or `✗ 2 missing`), each fetcher's status names what it
     needs (`✗ needs OKTA_API_TOKEN`), and the line under the table splits what a run needs from what only an upload needs.

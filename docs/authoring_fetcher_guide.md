@@ -49,6 +49,9 @@ If you're writing it for your own workspace rather than for Paramify to ship,
 add `source: community`. The TUI then labels it COMMUNITY wherever it's listed,
 and its validators are opt-in
 ([choosing validators](run_manifest_guide.md#choose-the-validators-each-fetcher-tracks)).
+If the fetcher has not run against a live system yet, or its output can still
+change, add `status: beta`. The TUI and `paramify describe` then label it BETA.
+Remove the line when the fetcher is proven. Absent means `stable`.
 
 ```yaml
 name: okta_password_policy                # <category>_<short_name>, globally unique

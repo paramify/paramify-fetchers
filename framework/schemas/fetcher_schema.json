@@ -21,6 +21,12 @@
       "default": "paramify",
       "description": "Who made the fetcher. `community` fetchers are labelled COMMUNITY in the TUI. Absent = paramify."
     },
+    "status": {
+      "type": "string",
+      "enum": ["stable", "beta"],
+      "default": "stable",
+      "description": "How proven the fetcher is. `beta` means it has not run against a live system yet, or its output may still change; it is labelled BETA in the TUI and in `paramify describe`. Absent = stable."
+    },
 
     "runtime": {
       "type": "object",
