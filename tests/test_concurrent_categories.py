@@ -1,4 +1,4 @@
-"""`run.parallel_categories`: entries of different categories run at once.
+"""`run.concurrent_categories`: entries of up to that many categories run at once.
 
 Entries of one category still run one after another. Whatever the timing, a
 run comes out as a run in manifest order leaves it: the same events in the
@@ -69,10 +69,10 @@ def repo(tmp_path, monkeypatch):
     return tmp_path
 
 
-def _manifest(root: Path, uses, parallel=True) -> dict:
+def _manifest(root: Path, uses, concurrent=4) -> dict:
     run = {"output_dir": str(root / "out"), "fetchers": [{"use": u} for u in uses]}
-    if parallel is not None:
-        run["parallel_categories"] = parallel
+    if concurrent is not None:
+        run["concurrent_categories"] = concurrent
     return {"run": run}
 
 
@@ -103,11 +103,27 @@ def test_a_slow_category_does_not_hold_up_another(repo):
     assert t["after"]["start"] >= t["slow"]["end"]
 
 
+def test_no_more_categories_run_at_once_than_the_setting_allows(repo):
+    a = _fetcher(repo, "alpha", "a", pause=0.5)
+    b = _fetcher(repo, "beta", "b", pause=0.5)
+    c = _fetcher(repo, "gamma", "c", pause=0.0)
+
+    summary, events = _run(repo, _manifest(repo, [a, b, c], concurrent=2))
+
+    run_dir = Path(summary["run_dir"])
+    t = {n: _times(run_dir, f"{n}.json") for n in ("a", "b", "c")}
+    assert summary["ok"] is True
+    # The first two categories ran together; the third waited for a free slot.
+    assert t["b"]["start"] < t["a"]["end"]
+    assert t["c"]["start"] >= min(t["a"]["end"], t["b"]["end"])
+    assert [e["fetcher"] for e in events if e["event"] == "fetcher_result"] == [a, b, c]
+
+
 def test_without_the_setting_every_entry_runs_one_after_another(repo):
     slow = _fetcher(repo, "alpha", "slow", pause=0.3)
     fast = _fetcher(repo, "beta", "fast", pause=0.0)
 
-    summary, _ = _run(repo, _manifest(repo, [slow, fast], parallel=None))
+    summary, _ = _run(repo, _manifest(repo, [slow, fast], concurrent=None))
 
     run_dir = Path(summary["run_dir"])
     assert _times(run_dir, "fast.json")["start"] >= _times(run_dir, "slow.json")["end"]
@@ -128,7 +144,7 @@ def test_events_metadata_and_summary_keep_manifest_order(repo):
     last = _fetcher(repo, "alpha", "last", pause=0.0)
     uses = [slow, fast, "beta_ghost", needs, last]
 
-    serial, serial_events = _run(repo, _manifest(repo, uses, parallel=False))
+    serial, serial_events = _run(repo, _manifest(repo, uses, concurrent=1))
     parallel, parallel_events = _run(repo, _manifest(repo, uses))
 
     assert _shape(parallel_events) == _shape(serial_events)
@@ -191,28 +207,28 @@ def test_the_head_entry_streams_its_lines_live(repo):
         ("fetcher_start", slow), ("fetcher_result", slow), ("fetcher_start", fast), ("fetcher_result", fast)]
 
 
-@pytest.mark.parametrize("value, ok", [(True, True), (False, True), ("yes", False), (1, False)])
-def test_manifest_schema_takes_a_boolean(value, ok):
-    m = {"run": {"fetchers": [{"use": "demo_hello"}], "parallel_categories": value}}
+@pytest.mark.parametrize("value, ok", [(1, True), (3, True), (32, True), (0, False), (33, False), (True, False), ("2", False)])
+def test_manifest_schema_takes_a_count(value, ok):
+    m = {"run": {"fetchers": [{"use": "demo_hello"}], "concurrent_categories": value}}
 
     assert (manifest_loader.schema_errors(m, REPO_ROOT) == []) is ok
 
 
 def test_parse_manifest_reads_the_setting():
-    on = manifest_loader.parse_manifest({"run": {"fetchers": [], "parallel_categories": True}})
+    on = manifest_loader.parse_manifest({"run": {"fetchers": [], "concurrent_categories": 3}})
     off = manifest_loader.parse_manifest({"run": {"fetchers": []}})
 
-    assert (on.parallel_categories, off.parallel_categories) == (True, False)
+    assert (on.concurrent_categories, off.concurrent_categories) == (3, 1)
 
 
 def test_validate_notes_a_setting_with_one_category(tmp_path):
-    one = {"run": {"output_dir": str(tmp_path), "parallel_categories": True, "fetchers": [
+    one = {"run": {"output_dir": str(tmp_path), "concurrent_categories": 2, "fetchers": [
         {"use": "aws_acm_certificate_status"}, {"use": "aws_iam_password_policy"}]}}
-    two = {"run": {"output_dir": str(tmp_path), "parallel_categories": True, "fetchers": [
+    two = {"run": {"output_dir": str(tmp_path), "concurrent_categories": 2, "fetchers": [
         {"use": "aws_acm_certificate_status"}, {"use": "demo_hello"}]}}
 
-    assert "parallel_categories has no effect; every fetcher entry is in one category" in api.validate_notes(one, REPO_ROOT)
-    assert not any("parallel_categories" in n for n in api.validate_notes(two, REPO_ROOT))
+    assert "concurrent_categories 2 has no effect; every fetcher entry is in one category" in api.validate_notes(one, REPO_ROOT)
+    assert not any("concurrent_categories" in n for n in api.validate_notes(two, REPO_ROOT))
 
 
 def test_stopping_the_run_group_stops_a_fan_outs_processes():

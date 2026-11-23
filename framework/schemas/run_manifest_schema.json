@@ -16,9 +16,11 @@
           "type": "string",
           "description": "Base directory for outputs. Runner creates a per-run subdir like run-<timestamp> inside this."
         },
-        "parallel_categories": {
-          "type": "boolean",
-          "description": "Run entries of different categories at the same time (default false: every entry one after another). Entries of one category still run one after another, in manifest order, and comparators run last. Results, envelopes, events and _run_metadata.json keep manifest order."
+        "concurrent_categories": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 32,
+          "description": "How many categories' entries run at once (default 1: every entry one after another). Categories start in the order they first appear in the manifest. Entries of one category still run one after another, in manifest order, and comparators run last. Results, envelopes, events and _run_metadata.json keep manifest order."
         },
         "schedule": {
           "type": "object",

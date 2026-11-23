@@ -1275,7 +1275,7 @@ def validate_notes(manifest: dict, root: Path, fetchers=None, platforms=None) ->
         notes += unknown_config_keys(parsed, fetchers, platforms)
     notes += _duplicate_entry_notes(parsed, fetchers)
     notes += _unused_concurrency_notes(parsed, fetchers)
-    notes += _unused_parallel_categories_notes(parsed, fetchers)
+    notes += _unused_concurrent_categories_notes(parsed, fetchers)
     for entry, key in zip(parsed.entries, manifest_loader.entry_keys(parsed.entries)):
         f = fetchers.get(entry.use)
         if f is None or not f.is_pipeline:
@@ -1318,16 +1318,17 @@ def _unused_concurrency_notes(parsed, fetchers) -> List[str]:
     return notes
 
 
-def _unused_parallel_categories_notes(parsed, fetchers) -> List[str]:
-    """`run.parallel_categories` with fewer than two categories to run at once."""
-    if not parsed.parallel_categories:
+def _unused_concurrent_categories_notes(parsed, fetchers) -> List[str]:
+    """`run.concurrent_categories` with fewer than two categories to run at once."""
+    if parsed.concurrent_categories <= 1:
         return []
     categories = {fetchers[e.use].category for e in parsed.entries
                   if e.use in fetchers and not fetchers[e.use].is_comparator}
     if len(categories) >= 2:
         return []
-    return ["parallel_categories has no effect; every fetcher entry is in one category"
-            if categories else "parallel_categories has no effect; the manifest has no fetcher entries"]
+    n = parsed.concurrent_categories
+    return [f"concurrent_categories {n} has no effect; every fetcher entry is in one category"
+            if categories else f"concurrent_categories {n} has no effect; the manifest has no fetcher entries"]
 
 
 def validate(manifest: dict, root: Path, fetchers=None, platforms=None) -> List[str]:
@@ -1860,7 +1861,9 @@ def run(
             finish(entry, key, *execute(entry, key, run_dir, now))
 
     def run_by_category(batch) -> None:
-        """Run each category's entries one after another, and the categories at once.
+        """Run each category's entries one after another, and up to
+        run.concurrent_categories categories at once. Categories start in the
+        order they first appear in the manifest, each as a worker frees up.
 
         Each entry writes to its own staging dir. Its events are held until
         every entry before it in the manifest is done, then its files are moved
@@ -1892,8 +1895,21 @@ def run(
                 except BaseException as e:  # noqa: BLE001 — re-raised on the run's thread, in order
                     future.set_exception(e)
 
-        threads = [threading.Thread(target=lane, args=(indexes,), name=f"paramify-run-{category}", daemon=True)
-                   for category, indexes in lanes.items()]
+        # A worker never waits on the run's thread (held events are buffered, not
+        # blocked on), so capping the workers cannot deadlock the in-order merge.
+        queued = iter(list(lanes.values()))
+        take = threading.Lock()
+
+        def worker() -> None:
+            while True:
+                with take:
+                    indexes = next(queued, None)
+                if indexes is None:
+                    return
+                lane(indexes)
+
+        threads = [threading.Thread(target=worker, name=f"paramify-run-{n}", daemon=True)
+                   for n in range(min(parsed.concurrent_categories, len(lanes)))]
         try:
             for t in threads:
                 t.start()
@@ -1920,7 +1936,7 @@ def run(
             for stage in stages.values():
                 shutil.rmtree(stage, ignore_errors=True)
 
-    if parsed.parallel_categories:
+    if parsed.concurrent_categories > 1:
         def is_comparator(e) -> bool:
             return e.use in fetchers and fetchers[e.use].is_comparator
         # Comparators read what the fetchers wrote, so they still run last, in order.

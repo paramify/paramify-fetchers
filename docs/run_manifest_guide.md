@@ -96,12 +96,12 @@ directory, which is removed when the entry ends; look for the file in the run
 directory instead.
 
 Entries run one after another, even when they call different services. To run
-the entries of different categories at the same time, set `parallel_categories`
-under `run`:
+the entries of different categories at the same time, set `concurrent_categories`
+under `run` to how many categories may run at once:
 
 ```yaml
 run:
-  parallel_categories: true   # default false
+  concurrent_categories: 2   # default 1
   fetchers:
   - use: aws_guard_duty
   - use: aws_config_monitoring
@@ -110,7 +110,9 @@ run:
 
 Each category's entries still run one after another, in manifest order, since
 they share one service's rate limits; here the Qualys entry runs alongside the
-two AWS entries. Comparators run last, after every fetcher. The run comes out
+two AWS entries. With more categories than `concurrent_categories`, the rest
+wait for a free slot and start in the order they first appear in the manifest.
+Comparators run last, after every fetcher. The run comes out
 as a serial run leaves it: output lines, events, envelopes and
 `_run_metadata.json` keep manifest order, and a file name two entries share
 still fails the later entry. A later entry's output is printed once every entry
