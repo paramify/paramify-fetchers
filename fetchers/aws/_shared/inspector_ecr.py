@@ -27,6 +27,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "_lib"))
+from csv_cells import csv_safe
 from fetcher_status import report_failure
 from report_csv import csv_safe
 

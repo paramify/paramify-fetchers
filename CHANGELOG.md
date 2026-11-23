@@ -60,6 +60,17 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **CrowdStrike pipeline pair: `crowdstrike_host_inventory` and `crowdstrike_spotlight_vulnerability_report` 0.1.0.**
+  - `crowdstrike_host_inventory` (`kind: inventory`) lists every host that runs the Falcon sensor, one record each,
+    keyed by the Falcon host ID (`device_id`, lowercase). New ID scheme `crowdstrike-device-id`.
+  - `crowdstrike_spotlight_vulnerability_report` (`kind: issue_report`, VULNERABILITY) builds a CSV of every open
+    Spotlight finding, one row per vulnerability per host, keyed by the Spotlight vulnerability ID. It pages Spotlight to
+    the end of the cursor, or writes no file and exits non-zero. Its `Host ID` column (Spotlight `aid`) equals the
+    inventory's `unique_asset_identifier`: choose it as "inventory mapping" in the vulnerability preset. The
+    `pipeline:` block names it as `asset_id_field`.
+  - Both reuse the category's Falcon client. `csv_safe` moves from the Inspector collector to `fetchers/_lib/csv_cells.py`,
+    and the two CSV reports share it.
+
 - **`github_secret_scanning_report` 0.1.0: open secret scanning alerts as a vulnerability report.** The same shape
   for open secret scanning alerts, metadata only: type, validity, first location path, state and dates. Alerts are
   requested with `hide_secret`, and only named fields are copied, so the secret value never reaches the report.

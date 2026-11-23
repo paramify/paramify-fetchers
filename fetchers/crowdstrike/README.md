@@ -5,7 +5,15 @@ findings, detection alerts, prevention policy configuration, the Zero Trust
 Assessment audit report, FileVantage file integrity changes, and host firewall
 policies and rules from the Falcon OAuth2 REST API.
 
-All seven fetchers share one API client and one pair of secrets.
+Two more fetchers feed Paramify pipelines.
+[`crowdstrike_host_inventory`](host_inventory/README.md) lists every host for an
+inventory pipeline.
+[`crowdstrike_spotlight_vulnerability_report`](spotlight_vulnerability_report/README.md)
+builds a CSV of every open Spotlight finding for a vulnerability assessment. Its
+`Host ID` column equals the inventory's `unique_asset_identifier`, so Paramify
+can link each finding to an Inventory item.
+
+All nine fetchers share one API client and one pair of secrets.
 
 ## Environment variables
 
@@ -85,8 +93,8 @@ Read-only on all of them. Grant only the scopes for the fetchers you run.
 
 | Scope (READ) | Needed by |
 |---|---|
-| Hosts | `crowdstrike_hosts` |
-| Spotlight vulnerabilities | `crowdstrike_spotlight_vulnerabilities` |
+| Hosts | `crowdstrike_hosts`, `crowdstrike_host_inventory` |
+| Spotlight vulnerabilities | `crowdstrike_spotlight_vulnerabilities`, `crowdstrike_spotlight_vulnerability_report` |
 | Alerts | `crowdstrike_detections` |
 | Prevention policies | `crowdstrike_prevention_policies` |
 | Zero Trust Assessment | `crowdstrike_zero_trust_assessment` |
@@ -102,7 +110,7 @@ silently drift from the code.
 
 Scopes are set **when the client is created**; adding one later means editing the
 client and, in some tenants, reissuing the secret. Grant all of them up front if
-you expect to run all seven — a missing scope surfaces as a `403` at collection
+you expect to run all nine — a missing scope surfaces as a `403` at collection
 time, which on a time-boxed trial tenant is an expensive way to find out.
 
 `crowdstrike_firewall_policies` is the one fetcher that needs **two** scopes.
