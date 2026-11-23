@@ -59,6 +59,7 @@ from framework.sync.providers.delivery_routing import (
     PIPELINE_DIRECT,  # noqa: F401  (defined beside pipeline_refusal; re-exported here with the other copy)
     DirectRoute,
     Refusal,
+    ahead_in_line,
     attribute,
     delivered_before_batches,
     delivered_files,
@@ -94,6 +95,10 @@ DELIVERY_DIRECT = "delivery: direct"
 DIRECT = "DIRECT"  # the payload target of an entry sent direct
 _BATCH_TARGETS = ("ARTIFACT_REQUEST", "EVIDENCE")
 _FAILING = ("FAIL", "ERROR")
+# The statuses of the batches that hold up later ones in their line.
+_LINE_STATUSES = ("OPEN", "SUBMITTED", "REJECTED")
+# The batches ahead in the line that a warning names one by one.
+_LINE_NAMED = 3
 # How far along a batch is: a status read back never moves a batch backwards.
 _STATUS_RANK = {"OPEN": 0, "REJECTED": 0, "SUBMITTED": 1, "APPROVED": 2}
 # The longest createdAt window the artifacts read lists day by day; an older run reads without one.
@@ -135,6 +140,9 @@ class EntryObserved:
     before_batches: List[str] = field(default_factory=list)
     # This entry's artifacts on the set, from the read by file name (any run, any batch).
     found: List[Artifact] = field(default_factory=list)
+    # The set's batches that are not approved: open, submitted or rejected. Paramify
+    # approves a batch only after every earlier one in its line (see `ahead_in_line`).
+    queue: List[Batch] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -158,6 +166,8 @@ class _Delivered:
     dropped: List[Dict[str, str]] = field(default_factory=list)  # {name, reason}
     held: List[str] = field(default_factory=list)
     validators_failed: List[str] = field(default_factory=list)
+    # The batches ahead in the line that keep this SUBMITTED batch from approval.
+    waiting_behind: List[str] = field(default_factory=list)
     mode: Optional[str] = "batch"  # or "direct" (no batch, no submit), or None (never routed)
     pipeline_type: Optional[str] = None  # set for a pipeline entry
 
@@ -166,7 +176,7 @@ class _Delivered:
             "state": state, "batch_id": self.batch_id, "batch_reference": self.batch_reference,
             "status": self.status, "uploaded": list(self.uploaded), "already_present": list(self.already_present),
             "dropped": [dict(d) for d in self.dropped], "validators_failed": list(self.validators_failed),
-            "mode": self.mode,
+            "mode": self.mode, "waiting_behind": list(self.waiting_behind),
         }
         if self.pipeline_type:
             # Direct: no batch, so "approved" does not apply (None, not False).
@@ -184,7 +194,8 @@ class _Delivered:
         """
         if self.status == "APPROVED":
             return True
-        return self.status == "SUBMITTED" and self.approval == "SUBMISSION" and not self.validators_failed
+        return (self.status == "SUBMITTED" and self.approval == "SUBMISSION" and not self.validators_failed
+                and not self.waiting_behind)
 
     @property
     def name(self) -> str:
@@ -233,16 +244,39 @@ def _batch_target(
     return known, ar_id, f"late submission to {known.reference_id} (due {known.due_date.isoformat()})"
 
 
-def _open_warning(b: Batch, run_id: str, arts: List[Artifact], today: date) -> str:
+def _age(arts: List[Artifact], today: date) -> str:
     dates = []
     for a in arts:
         try:
             dates.append(date.fromisoformat(a.created_at[:10]))
         except ValueError:
             continue
-    if not dates:
-        return f"{b.reference_id} from run {run_id} is still open (age unknown)"
-    return f"{b.reference_id} from run {run_id} has been open {_count((today - min(dates)).days, 'day')}"
+    return f"open {_count((today - min(dates)).days, 'day')}" if dates else "age unknown"
+
+
+_UNTIL = {
+    "OPEN": "submitted and approved, or deleted",
+    "REJECTED": "resubmitted and approved, or deleted; a rejection does not release it",
+}
+
+
+def _line_warnings(ahead: List[Batch], line: str, earlier_runs: Dict[str, str],
+                   artifacts: Dict[str, List[Artifact]], today: date) -> List[str]:
+    """One warning per batch ahead in the line (an open one of this entry's earlier runs gives its run and age)."""
+    out = []
+    for b in ahead[:_LINE_NAMED]:
+        detail = b.status
+        if b.id in earlier_runs:
+            detail += f", from run {earlier_runs[b.id]}, {_age(artifacts.get(b.id) or [], today)}"
+        until = _UNTIL.get(b.status, "approved or deleted")
+        out.append(f"{b.reference_id} ({detail}) is ahead of this batch on {line}: "
+                   f"Paramify holds this batch until {b.reference_id} is {until}")
+    rest = ahead[_LINE_NAMED:]
+    if rest:
+        named = ", ".join(b.reference_id for b in rest[:10]) + (", …" if len(rest) > 10 else "")
+        out.append(f"{len(ahead)} batches are ahead of this batch on {line} and not approved; "
+                   f"{len(rest)} more: {named}")
+    return out
 
 
 def _count(n: int, noun: str) -> str:
@@ -457,11 +491,12 @@ class DeliveryProvider:
             if b.evidence_id == ev.id:
                 obs.batches.append(b)
                 obs.artifacts[b.id] = [a for a in found if a.batch_id == b.id]
-        # Other runs' open batches, for the warning: only on the chosen target.
-        if target is not None:
-            open_here = reader.batches(artifact_request_id=target.id, status="OPEN")
-        else:
-            open_here = [b for b in reader.batches(evidence_id=ev.id, status="OPEN") if b.artifact_request_id is None]
+        # The line: the set's batches that are not approved, one read per status, so
+        # reads stay flat as approved history grows.
+        obs.queue = [b for status in _LINE_STATUSES for b in reader.batches(evidence_id=ev.id, status=status)]
+        # Other runs' open batches on the chosen target, for attribution.
+        target_id = target.id if target is not None else None
+        open_here = [b for b in obs.queue if b.status == "OPEN" and b.artifact_request_id == target_id]
         for b in open_here:
             if b.id not in obs.artifacts:
                 obs.batches.append(b)
@@ -565,11 +600,13 @@ class DeliveryProvider:
                 target_warning = None
         if target_warning:
             warnings.append(target_warning)
-        warnings += [
-            _open_warning(b, rid, obs.artifacts.get(b.id) or [], today)
-            for b, rid in attribution.earlier_open
-            if b.artifact_request_id == route_ar
-        ]
+        line_channel = channel if channel is not None and ar_id is not None else None
+        ahead = [] if mine is not None and mine.status == "APPROVED" else ahead_in_line(
+            obs.queue + obs.batches, obs.requests, line_channel.id if line_channel else None, mine)
+        payload["ahead"] = [{"id": b.id, "reference_id": b.reference_id} for b in ahead]
+        warnings += _line_warnings(
+            ahead, f"channel {line_channel.reference_id}" if line_channel else "the evidence set",
+            {b.id: rid for b, rid in attribution.earlier_open}, obs.artifacts, today)
 
         if obs.evidence is None:
             payload["evidence_id"] = Ref(f"evidence_sets/{e.reference_id}", "id")
@@ -693,6 +730,8 @@ class DeliveryProvider:
         done = _Delivered(p.get("batch_id"), p.get("batch_reference"), p.get("status"),
                           already_present=list(p.get("before_batches") or []), mode=delivery_mode(p.get("target")),
                           pipeline_type=(p.get("pipeline") or {}).get("type"))
+        if done.status == "SUBMITTED":
+            done.waiting_behind = [b["reference_id"] for b in p.get("ahead") or []]
         if p.get("target") == DIRECT:
             # A direct no-op plans no files: each sendable file is on the set already.
             done.already_present = self._wanted(p)
@@ -786,11 +825,18 @@ class DeliveryProvider:
             run.batch_reference = run.batch_reference or submitted.reference_id or None
             run.approval = run.approval or submitted.when_to_approve
             read = True
+        if read and run.status == "SUBMITTED":
+            run.waiting_behind = self._still_ahead(p.get("ahead") or [], resources)
         if not read:
             run.status = None  # the submit took effect; what it led to is unknown
             parts.append("submitted; status could not be read back")
         elif run.status == "SUBMITTED" and run.validators_failed:
             parts.append(f"{run.name} SUBMITTED: held because validators failed: {', '.join(run.validators_failed)}")
+        elif run.status == "SUBMITTED" and run.waiting_behind:
+            refs = ", ".join(run.waiting_behind)
+            each = refs if len(run.waiting_behind) == 1 else "each"
+            parts.append(f"{run.name} SUBMITTED: waiting behind {refs}; it moves on once {each} is approved "
+                         "or deleted in Paramify" + ("; the pipeline runs after that" if run.pipeline_type else ""))
         elif run.status == "SUBMITTED" and run.approval == "SUBMISSION":
             # Paramify approves such a batch a moment after the submit answers; no one reviews it.
             parts.append(f"{run.name} SUBMITTED: approved on submission; not approved yet when read back"
@@ -881,9 +927,28 @@ class DeliveryProvider:
             self._emit(action_id, name, outcome, n, len(to_send), len(content), reason)
         return None
 
+    def _still_ahead(self, ahead: List[Dict[str, str]], resources: Any) -> List[str]:
+        """The batches the plan found ahead in the line that are still there and not approved.
+
+        One that cannot be read counts as still ahead; one that is gone (deleted) does not.
+        """
+        still = []
+        for b in ahead:
+            try:
+                if resources.batch(b["id"]).status == "APPROVED":
+                    continue
+            except ApiError as exc:
+                if exc.fatal:
+                    raise
+                if exc.kind is ErrorKind.MISSING:
+                    continue
+            still.append(b["reference_id"])
+        return still
+
     def _held(self, action_id: str, run: _Delivered, why: str) -> Outcome:
         """A temporary failure: the next upload of this run resumes (or creates) the batch."""
-        then = (f"{run.name} stays OPEN for the next upload to resume" if run.batch_id
+        then = (f"{run.name} stays OPEN for the next upload to resume; until then, Paramify holds every "
+                "later batch on its channel or evidence set behind it" if run.batch_id
                 else "no batch was recorded; the next upload tries again")
         return Outcome(action_id, "failed", run.result("held"), f"held: {why}; {then}")
 

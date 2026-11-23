@@ -318,7 +318,8 @@ The plan says how each new batch is approved, for example
 `new batch (approved on submit)`. A batch that an earlier upload made keeps its
 mode. Paramify approves a batch a moment after the submit answers, so the
 upload can report `SUBMITTED: approved on submission; not approved yet when
-read back`. The batch needs nothing more.
+read back`. The batch needs nothing more, unless an earlier batch holds the
+line. See [Batches wait in line](#batches-wait-in-line).
 
 A workspace whose API cannot set a batch's mode yet refuses it. The upload then
 creates the batch without it, so the batch takes the set's mode, and the entry
@@ -328,6 +329,33 @@ When you set `approval` and an existing set uses a different mode, the plan
 shows a note. When the upload must create a set, all the entries that send to
 it must have the same `approval`. If they do not, the upload refuses that set.
 Entries that send to an existing set can have different values.
+
+### Batches wait in line
+
+Paramify approves batches in order. A batch waits until Paramify approves every
+earlier batch on the same channel. When the evidence set has no channel, the
+line is the evidence set. While a batch waits, the API shows `SUBMITTED`, also
+when the mode is `SUBMISSION`. The app shows **Submission Pending**.
+
+An earlier batch holds the line when it is open, submitted or rejected. A
+rejected batch holds the line too. To release the line, do one of these steps
+in the app:
+
+- Approve the earlier batch. Resubmit a rejected batch before you approve it.
+- Delete the earlier batch. Its files stay on the evidence set, but not in a
+  batch. A new upload of the same run counts these files as sent. Collect again
+  to send new evidence.
+
+The plan gives a warning for each batch ahead of the new batch, for example
+`BCH-14 (SUBMITTED) is ahead of this batch on channel CHN-3: Paramify holds
+this batch until BCH-14 is approved or deleted`. After the submit, the upload
+reads these batches again. When the batch still waits, the upload reports
+`SUBMITTED: waiting behind BCH-14`. The entry then gives the batches in
+`waiting_behind`. A pipeline batch that waits is not approved. Its pipeline
+runs when the line is clear.
+
+A held batch stays open, so it holds the line too. Run the same upload again to
+send the held files and submit the batch.
 
 ### Held and dropped files
 
@@ -444,7 +472,8 @@ results, see [verify validators](suggest_validator_guide.md#5-verify-in-paramify
 | `no current or past artifact request on channel …` | This appears only with `no_request: refuse`. Create an artifact request on the channel in the app, or remove `no_request: refuse` from this entry to send it direct. |
 | `batches are off for this workspace (…); every entry is sent direct, as before batches` | This is a note, not an error. The workspace has no batches, so the upload sends every entry direct. |
 | An entry shows `held` | A temporary failure stopped the batch. Run the same upload again. |
-| `… was rejected in Paramify; collect again to send new evidence` | A person rejected this run's batch in the app. The upload does not send the same evidence again. Collect again: the new run makes a new batch. |
+| `… was rejected in Paramify, and later batches … wait behind it` | A person rejected this run's batch in the app. The rejected batch holds the line for later batches. Resubmit and approve it in the app, or delete it. Then collect again. See [Batches wait in line](#batches-wait-in-line). |
+| `SUBMITTED: waiting behind BCH-…` | An earlier batch on the same channel is not approved. Approve or delete that batch in the app. See [Batches wait in line](#batches-wait-in-line). |
 | A file shows `blocked by the production WAF` | Paramify's WAF refused the file (HTTP 403 with no request id). The upload sent the rest. Send the time of the upload and the file name to Paramify support, so they can find the rule in the WAF logs. |
 | Validators attach to `EVD-…`, not your remapped set | Validator sync uses the registry's reference IDs. Attach them on the set's **Validators** tab → **Manage Selection**. |
 | `No fetchers in the manifest …` from `scripts sync` | It found none in `manifest.yaml` at the repo root. Name your manifest, or pass `--all`. |

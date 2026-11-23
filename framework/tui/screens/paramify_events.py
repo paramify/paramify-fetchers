@@ -191,11 +191,16 @@ def pipeline_wait_lines(entries: dict) -> list[Text]:
         pipe = (entry or {}).get("pipeline") or {}
         if pipe.get("approved") is False:
             batch = entry.get("batch_reference") or entry.get("batch_id")
-            where = f" ({batch})" if batch else ""
-            lines.append(Text(
-                f"  [WAIT] {key}: waiting for approval{where}; the {pipe.get('type')} pipeline runs once someone approves the batch",
-                style=palette.WARN,
-            ))
+            behind = entry.get("waiting_behind") or []
+            if behind:
+                # Paramify approves a batch only after every earlier one on its channel.
+                ahead = ", ".join(behind)
+                text = (f"{batch or 'the batch'} is waiting behind {ahead}; the {pipe.get('type')} pipeline runs "
+                        f"once {ahead} {'is' if len(behind) == 1 else 'are'} approved or deleted in Paramify")
+            else:
+                where = f" ({batch})" if batch else ""
+                text = f"waiting for approval{where}; the {pipe.get('type')} pipeline runs once someone approves the batch"
+            lines.append(Text(f"  [WAIT] {key}: {text}", style=palette.WARN))
     return lines
 
 

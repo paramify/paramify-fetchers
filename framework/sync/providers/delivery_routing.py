@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import date
 from typing import Dict, List, Optional, Set, Tuple
@@ -262,10 +263,48 @@ def rejected(batch: Batch) -> Optional[Refusal]:
     """
     if batch.status != REJECTED:
         return None
+    ref = batch.reference_id
     return Refusal(
-        f"this run's batch {batch.reference_id} was rejected",
-        f"{batch.reference_id} was rejected in Paramify; collect again to send new evidence",
+        f"this run's batch {ref} was rejected",
+        f"{ref} was rejected in Paramify, and later batches on its channel or evidence set wait behind it: "
+        f"resubmit and approve it in Paramify, or delete it there (its files stay on the evidence set, "
+        f"outside any batch); then collect again to send new evidence",
     )
+
+
+def _ref_number(b: Batch) -> Optional[int]:
+    m = re.search(r"(\d+)$", b.reference_id)
+    return int(m.group(1)) if m else None
+
+
+def ahead_in_line(batches: List[Batch], requests: List[ArtifactRequest], channel_id: Optional[str],
+                  mine: Optional[Batch]) -> List[Batch]:
+    """The batches that Paramify approves before this entry's batch, oldest first.
+
+    Paramify approves a batch only after every earlier batch in its line is
+    approved: the line is its channel, or its evidence set when it has no
+    channel (Paramify 1.82; stage, 2026-11-23). A rejected batch stays in the
+    line; approving or deleting it releases the line. `channel_id` is this
+    batch's channel (None: no channel). `mine` None is a new batch, the newest.
+    A batch on a request that was not read counts as in the line, and so does
+    one whose reference has no number: the warning is the safe side.
+    """
+    channel_of = {r.id: r.channel_id for r in requests}
+    me = _ref_number(mine) if mine is not None else None
+    seen: Set[str] = set()
+    out: List[Batch] = []
+    for b in batches:
+        if b.id in seen or b.status == "APPROVED" or (mine is not None and b.id == mine.id):
+            continue
+        seen.add(b.id)
+        ar = b.artifact_request_id
+        if (ar is None and channel_id is not None) or (ar is not None and channel_of.get(ar, channel_id) != channel_id):
+            continue
+        n = _ref_number(b)
+        if mine is not None and n is not None and me is not None and n > me:
+            continue
+        out.append(b)
+    return sorted(out, key=lambda b: (_ref_number(b) is None, _ref_number(b) or 0))
 
 
 def stack_drift(entry: EntryDesired, stacks: List[Stack]) -> Optional[str]:

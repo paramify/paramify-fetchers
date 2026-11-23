@@ -432,8 +432,51 @@ class FakeParamify:
             return FakeResponse(409, text="Batch is not open")
         if batch["artifactCount"] == 0:
             return FakeResponse(409, text="Batch has no artifacts")
-        batch["status"] = "SUBMITTED" if batch["whenToApprove"] == "MANUAL" else "APPROVED"
+        batch["status"] = "SUBMITTED"
+        if batch["whenToApprove"] != "MANUAL" and not self._ahead(batch):
+            batch["status"] = "APPROVED"
         return FakeResponse(200, batch)
+
+    # ----- the line (Paramify 1.82) ----------------------------------------
+    # A batch is approved only after every earlier batch on its channel (or on
+    # its evidence set, with no channel) is approved. Until then it reads
+    # SUBMITTED, whatever its approval mode. Stage, 2026-11-23.
+    def _line(self, batch: Dict[str, Any]) -> Tuple[str, Optional[str]]:
+        request = next((r for r in self._requests if r["id"] == batch["artifactRequestId"]), None)
+        return batch["evidenceId"], request["channelId"] if request else None
+
+    def _ahead(self, batch: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """The earlier batches in this batch's line that are not approved yet."""
+        n = int(batch["referenceId"].split("-")[1])
+        return [b for b in self._batches if self._line(b) == self._line(batch)
+                and int(b["referenceId"].split("-")[1]) < n and b["status"] != "APPROVED"]
+
+    def _release(self) -> None:
+        """Approve each waiting batch with approval on submission whose line is clear, oldest first."""
+        for b in self._batches:
+            if b["status"] == "SUBMITTED" and b["whenToApprove"] != "MANUAL" and not self._ahead(b):
+                b["status"] = "APPROVED"
+
+    def _by_ref(self, reference_id: str) -> Dict[str, Any]:
+        return next(b for b in self._batches if b["referenceId"] == reference_id)
+
+    def approve(self, reference_id: str) -> None:
+        """A reviewer approves the batch in the app."""
+        self._by_ref(reference_id)["status"] = "APPROVED"
+        self._release()
+
+    def reject(self, reference_id: str) -> None:
+        """A reviewer rejects the batch in the app. It stays in the line."""
+        self._by_ref(reference_id)["status"] = "REJECTED"
+
+    def delete(self, reference_id: str) -> None:
+        """Delete Batch in the app: its artifacts stay on the set with no batch."""
+        b = self._by_ref(reference_id)
+        self._batches.remove(b)
+        for a in self._artifacts:
+            if a["batchId"] == b["id"]:
+                a["batchId"] = None
+        self._release()
 
 
 def reads_through(fake_get: Any) -> Any:

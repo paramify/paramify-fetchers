@@ -111,7 +111,8 @@ def test_full_run_creates_set_uploads_submits_and_reads_back_approved(tmp_path):
     assert r["uploaded"] == ["a.json", "b.json"] and r["already_present"] == [] and r["dropped"] == []
     assert r["validators_failed"] == [] and r["batch_id"] == "bt-1" and r["batch_reference"] == "BCH-1"
     assert set(r) == {"state", "batch_id", "batch_reference", "status", "uploaded", "already_present",
-                      "dropped", "validators_failed", "mode"}
+                      "dropped", "validators_failed", "mode", "waiting_behind"}
+    assert r["waiting_behind"] == []
     assert r["mode"] == "batch"
     json.dumps(r)
     assert batch_row(fake, "bt-1")["whenToApprove"] == "SUBMISSION"
@@ -968,3 +969,103 @@ def test_pipeline_entry_recorded_with_an_inherited_direct_says_how_to_fix_it(tmp
     assert action.verb == "refuse"
     assert action.fix == ("set no_request: evidence on this entry, or remove direct from run.paramify, "
                           "then run again")
+
+
+# ---- the line: Paramify approves a batch only after every earlier one -------
+
+def earlier_batch(h, ev, approval="MANUAL", submit=True):
+    """A batch someone else made on the set before this upload (BCH-1, BCH-2, …)."""
+    b = h.res.create_batch(evidence_id=ev.id, when_to_approve=approval)
+    h.res.upload_to_batch(b.id, "z.json", b"{}", {"note": "uploaded by hand"})
+    if submit:
+        h.res.submit_batch(b.id)
+    return b
+
+
+def test_line_a_batch_behind_an_unapproved_one_reads_back_waiting(tmp_path):
+    fake = FakeParamify()
+    ev = fake.add_evidence("EVD-X")
+    h = Harness(fake, two_files(tmp_path))
+    earlier_batch(h, ev)
+    d = h.run()["delivery/x"]
+    assert d.status == "applied", d.message
+    assert d.result["status"] == "SUBMITTED" and d.result["waiting_behind"] == ["BCH-1"]
+    assert "BCH-2 SUBMITTED: waiting behind BCH-1; it moves on once BCH-1 is approved or deleted in Paramify" \
+        in d.message
+    assert "approved on submission" not in d.message
+
+
+def test_line_re_checks_the_batches_ahead_after_the_submit(tmp_path):
+    fake = FakeParamify()
+    ev = fake.add_evidence("EVD-X")
+    h = Harness(fake, two_files(tmp_path))
+    earlier_batch(h, ev)
+    earlier_batch(h, ev)
+    plan = h.plan()
+    fake.approve("BCH-1")  # a reviewer acts between the plan and the apply
+    d = h.apply(plan)["delivery/x"]
+    assert d.result["status"] == "SUBMITTED" and d.result["waiting_behind"] == ["BCH-2"]
+    assert "waiting behind BCH-2; it moves on once BCH-2 is approved or deleted" in d.message
+
+
+def test_line_cleared_before_the_submit_is_approved_with_no_waiting(tmp_path):
+    fake = FakeParamify()
+    ev = fake.add_evidence("EVD-X")
+    h = Harness(fake, two_files(tmp_path))
+    earlier_batch(h, ev)
+    plan = h.plan()
+    fake.delete("BCH-1")
+    d = h.apply(plan)["delivery/x"]
+    assert d.result["status"] == "APPROVED" and d.result["waiting_behind"] == []
+
+
+def test_line_a_re_upload_while_still_waiting_is_a_noop_that_says_so(tmp_path):
+    fake = FakeParamify()
+    ev = fake.add_evidence("EVD-X")
+    h = Harness(fake, two_files(tmp_path))
+    earlier_batch(h, ev)
+    h.run()
+    again = Harness(fake, tmp_path).run()["delivery/x"]
+    assert again.status == "noop" and again.result["waiting_behind"] == ["BCH-1"]
+
+
+def test_line_once_the_reviewer_approves_the_batch_ahead_a_re_upload_is_a_clean_noop(tmp_path):
+    fake = FakeParamify()
+    ev = fake.add_evidence("EVD-X")
+    h = Harness(fake, two_files(tmp_path))
+    earlier_batch(h, ev)
+    h.run()
+    fake.approve("BCH-1")
+    again = Harness(fake, tmp_path).plan()
+    [a] = [x for x in again.actions if x.provider == "delivery"]
+    assert a.verb == "noop" and a.warnings == [] and a.payload["ahead"] == []
+    assert batch_row(fake, "bt-2")["status"] == "APPROVED"
+
+
+def test_line_a_rejected_batch_ahead_still_holds_this_one(tmp_path):
+    fake = FakeParamify()
+    ev = fake.add_evidence("EVD-X")
+    h = Harness(fake, two_files(tmp_path))
+    earlier_batch(h, ev)
+    fake.reject("BCH-1")
+    d = h.run()["delivery/x"]
+    assert d.result["status"] == "SUBMITTED" and d.result["waiting_behind"] == ["BCH-1"]
+
+
+def test_line_waiting_pipeline_batch_is_not_approved(tmp_path):
+    fake = FakeParamify()
+    ev = fake.add_evidence("EVD-X")
+    h = Harness(fake, inventory_run(tmp_path))
+    earlier_batch(h, ev)
+    d = h.run()["delivery/x"]
+    assert d.result["pipeline"] == {"type": "inventory", "approved": False}
+    assert "waiting behind BCH-1" in d.message and "the pipeline runs after that" in d.message
+
+
+def test_line_a_held_batch_says_it_holds_up_later_batches(tmp_path):
+    fake = FakeParamify()
+    fake.fail_upload("a.json", 503)
+    d = Harness(fake, two_files(tmp_path)).run()["delivery/x"]
+    assert d.result["state"] == "held"
+    assert "BCH-1 stays OPEN for the next upload to resume; until then, Paramify holds every later batch " \
+           "on its channel or evidence set behind it" in d.message
