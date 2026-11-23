@@ -397,6 +397,21 @@ def test_rebuild_keeps_a_version_forced_higher_by_hand(clone, week, upstream):
     assert release.check(clone, "origin/release/next") == []
 
 
+def test_draft_refuses_while_a_merged_release_has_no_tag(clone, week, upstream):
+    head = _reviewed_branch(clone)
+    _git(clone, "push", "-q", "--force", "origin", f"{head}:refs/heads/release/next")
+    _git(upstream, "merge", "-q", "--no-ff", "-m", "Merge release/next", "release/next")
+    main_before = _sha(upstream, "main")
+    _commit(upstream, {"fetchers/demo/gamma/fetcher.yaml": _fetcher("demo_gamma", "0.1.1")}, "demo_gamma: more")
+
+    gh, notes = FakeGitHub({"number": 8, "url": PR_URL, "title": "x", "body": "y"}), []
+    with pytest.raises(release.ReleaseError, match="v0.7.0-beta is merged but not tagged; run publish"):
+        _draft(clone, gh, notes)
+    assert gh.calls == [] and len(notes) == 1 and "v0.7.0-beta is merged but not tagged" in notes[0][0]
+    assert _sha(upstream, "release/next") == head  # the branch was not rebuilt
+    assert _git(clone, "show", f"{main_before}:releases/0.7.0-beta.yaml")  # the release file is on main
+
+
 def test_rebuild_that_changes_the_version_renames_the_file_and_retitles_the_pr(clone, upstream):
     _commit(upstream, {"fetchers/demo/alpha/fetcher.yaml": _fetcher("demo_alpha", "0.1.1")}, "demo_alpha: fix")
     gh, notes = FakeGitHub(), []

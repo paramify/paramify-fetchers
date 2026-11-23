@@ -350,6 +350,12 @@ def draft(root: Path, *, base: str, today: str, gh: GitHub, notify: Notify = not
     base_sha = git(root, "rev-parse", f"{base}^{{commit}}").strip()
     remote_sha = _rev(root, f"refs/remotes/origin/{BRANCH}")
     send: Notify = notify if push else (lambda text, url: print(f"Would notify: {text} {url}"))
+    merged = _pending_release(root, base_sha)
+    if merged is not None:
+        # A rebuild now would take the same version, mark every line again and
+        # add a second CHANGELOG heading for it.
+        _refuse(send, f"v{merged[1].get('version')} is merged but not tagged; "
+                      f"run publish on its merge commit (see {GUIDE})")
 
     tag = last_tag(root, base_sha)
     prev = _version_of(tag)
