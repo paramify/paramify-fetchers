@@ -176,12 +176,16 @@ def broken_patterns(breaking: Sequence[dict]) -> List[str]:
     return [p for b in breaking if b["touches"] for m in b["manifests"] for p in m["fetchers"]]
 
 
+def is_broken(row: dict, broken: Sequence[str]) -> bool:
+    return any(fnmatch.fnmatchcase(row["name"], p) for p in broken)
+
+
 def fetcher_note(row: dict, broken: Sequence[str]) -> Text:
     """What changed in one of your fetchers: a breaking mark, then the newest
     release note (and how many earlier ones there are), or, with no notes, the
     reason a commit gives and how many other commits touched it."""
     note = Text()
-    if any(fnmatch.fnmatchcase(row["name"], p) for p in broken):
+    if is_broken(row, broken):
         note.append("⚠ breaking  ", style="yellow")
     notes = row.get("notes") or []
     if notes:
@@ -211,7 +215,7 @@ def your_fetchers(changes: dict, used: int, breaking: Sequence[dict]) -> List[Te
         notes = row.get("notes") or []
         if notes:
             # CLI: every release's note on its own line, so none is hidden behind the newest.
-            if any(fnmatch.fnmatchcase(row["name"], p) for p in broken):
+            if is_broken(row, broken):
                 text.append("⚠ breaking", style="yellow")
             out.append(text)
             for n in notes[:MAX_NOTES]:
@@ -246,7 +250,10 @@ def _release_heading(version: str, releases: Sequence[dict]) -> str:
     date = next((r.get("date") for r in releases if r["version"] == version), None)
     if not date:
         return version
-    day = datetime.date.fromisoformat(date)
+    try:
+        day = datetime.date.fromisoformat(date)
+    except (TypeError, ValueError):
+        return version
     return f"{version} · {day.strftime('%b')} {day.day}"
 
 

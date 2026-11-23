@@ -961,6 +961,22 @@ def test_header_counts_releases_only_when_more_than_one():
         assert view.header(plan).plain.endswith(tail)
 
 
+@pytest.mark.parametrize("date", ["2026-12-03T10:00:00Z", "soon", "2026-13-45"])
+def test_a_malformed_release_date_falls_back_to_the_bare_version(date):
+    from framework import update_view as view
+    text = _render(view.whats_new([_hl("Row", "0.8.0-beta")], [{"version": "0.8.0-beta", "date": date}]), 100)
+    assert "0.8.0-beta" in text and "·" not in text and "Row" in text
+
+
+def test_a_long_note_on_a_breaking_fetcher_stays_within_100_columns():
+    from framework import update_view as view
+    notes = [{"release": "0.8.0-beta", "version": "0.8.0", "note": "word " * 30}]
+    row = _yours(notes=notes)
+    text = _render(view.your_fetchers(row, 3, [{"touches": True, "manifests": [{"fetchers": ["demo_*"]}]}]), 100)
+    assert "⚠ breaking" in text
+    assert all(len(ln) <= 100 for ln in text.splitlines())
+
+
 def test_piped_output_uses_the_full_width_cap():
     from framework import update_view as view
     console = view.make_console(file=io.StringIO())
@@ -1113,6 +1129,52 @@ def notes_repo(repo, tmp_path):
         _git(upstream, "tag", f"v{v}")
     _git(repo, "fetch", "-q", "--tags")
     return repo
+
+
+def test_span_counts_releases_from_tags_alone(notes_repo, monkeypatch):
+    doc = up.span(notes_repo, "v0.3.0-beta", "v0.5.0-beta")
+    assert doc["releases"] == len(up.crossed_releases(notes_repo, "v0.3.0-beta", "v0.5.0-beta")) == 2
+    monkeypatch.setattr(up, "release_files", lambda *a: pytest.fail("span must not read release files"))
+    assert up.span(notes_repo, "v0.3.0-beta", "v0.5.0-beta")["releases"] == 2
+
+
+def test_span_returns_zeros_when_the_tag_listing_fails(notes_repo, monkeypatch):
+    real = up.git
+
+    def flaky(root, *args, **kw):
+        if args[:1] == ("tag",):
+            raise up.UpdateError("tag failed")
+        return real(root, *args, **kw)
+
+    monkeypatch.setattr(up, "git", flaky)
+    assert up.span(notes_repo, "v0.3.0-beta", "v0.5.0-beta") == {"commits": 0, "days": 0, "releases": 0}
+
+
+@pytest.mark.parametrize("raw,want", [("2026-04-01", "2026-04-01"), ("soon", None),
+                                      ("2026-04-01T10:00:00Z", None), ("04/01/2026", None)])
+def test_release_file_dates_are_only_day_strings(repo, tmp_path, raw, want):
+    upstream = tmp_path / "upstream"
+    _commit(upstream, {"releases/0.4.0-beta.yaml": f"version: 0.4.0-beta\ndate: \"{raw}\"\nhighlights: []\n"}, "r")
+    _git(upstream, "tag", "v0.4.0-beta")
+    _git(repo, "fetch", "-q", "--tags")
+    assert up.crossed_releases(repo, "v0.3.0-beta", "v0.4.0-beta") == [{"version": "0.4.0-beta", "date": want}]
+
+
+def test_an_unquoted_yaml_date_is_a_day(repo, tmp_path):
+    upstream = tmp_path / "upstream"
+    _commit(upstream, {"releases/0.4.0-beta.yaml": "version: 0.4.0-beta\ndate: 2026-04-01\nhighlights: []\n"}, "r")
+    _git(upstream, "tag", "v0.4.0-beta")
+    _git(repo, "fetch", "-q", "--tags")
+    assert up.crossed_releases(repo, "v0.3.0-beta", "v0.4.0-beta")[0]["date"] == "2026-04-01"
+
+
+def test_a_bad_file_date_falls_through_to_the_changelog_heading(repo, tmp_path):
+    upstream = tmp_path / "upstream"
+    _commit(upstream, {"releases/0.4.0-beta.yaml": "version: 0.4.0-beta\ndate: soon\nhighlights: []\n",
+                       "CHANGELOG.md": "## [0.4.0-beta] - 2026-04-09\n"}, "r")
+    _git(upstream, "tag", "v0.4.0-beta")
+    _git(repo, "fetch", "-q", "--tags")
+    assert up.crossed_releases(repo, "v0.3.0-beta", "v0.4.0-beta")[0]["date"] == "2026-04-09"
 
 
 def test_old_loader_still_sees_breaking_rows_in_a_file_with_fetchers(repo, tmp_path):

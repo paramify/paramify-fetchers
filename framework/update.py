@@ -24,6 +24,7 @@ Three rules shape the code:
 
 from __future__ import annotations
 
+import datetime
 import fnmatch
 import importlib.util
 import json
@@ -363,6 +364,17 @@ def changelog_url(root: Path, target: "Target") -> str:
     return f"{repo_web_url(root)}/blob/{at}/CHANGELOG.md"
 
 
+def _day(value: Any) -> Optional[str]:
+    """A release-file date as YYYY-MM-DD, or None for anything else."""
+    if isinstance(value, datetime.datetime):
+        return None
+    if isinstance(value, datetime.date):
+        return value.isoformat()
+    if isinstance(value, str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+        return value
+    return None
+
+
 def release_files(root: Path, ref: str) -> Dict[str, dict]:
     """{version: {"date", "highlights", "fetchers"}} for every readable
     releases/*.yaml at `ref`.
@@ -390,7 +402,7 @@ def release_files(root: Path, ref: str) -> Dict[str, dict]:
         lines = doc.get("fetchers")
         date = doc.get("date")
         out[Path(path).stem] = {
-            "date": str(date) if date else None,
+            "date": _day(date),
             "highlights": [h for h in rows if isinstance(h, dict)
                            and isinstance(h.get("tag"), str) and isinstance(h.get("title"), str)],
             "fetchers": [f for f in lines if isinstance(f, dict)
@@ -758,10 +770,12 @@ def span(root: Path, head: str, target_ref: str) -> dict:
         if not commits:
             return {"commits": 0, "days": 0, "releases": 0}
         old, new = (int(git(root, "log", "-1", "--format=%ct", r).strip()) for r in (head, target_ref))
+        tags = set(git(root, "tag", "--merged", target_ref, "-l", "v*").split())
+        tags -= set(git(root, "tag", "--merged", head, "-l", "v*").split())
     except (UpdateError, ValueError):
         return {"commits": 0, "days": 0, "releases": 0}
     return {"commits": commits, "days": max(0, (new - old) // 86400),
-            "releases": len(crossed_releases(root, head, target_ref))}
+            "releases": sum(parse_release(t) is not None for t in tags)}
 
 
 def breaking_for(rows: Sequence[dict], manifests: Sequence[dict], has_local_fetchers: bool) -> List[dict]:
