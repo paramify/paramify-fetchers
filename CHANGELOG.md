@@ -12,6 +12,17 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **The TUI's validator sync (Paramify tab, `v`) now pairs and updates validators that already exist.** Before, it
+  created missing validators and paired only those, and told you to pair the rest in Paramify yourself. The preview
+  now lists three things and does them all on one yes:
+  - creates the missing validators and pairs them;
+  - pairs validators already in Paramify with the manifest's evidence sets they aren't paired with yet, and only
+    those sets, not every set the validator lists;
+  - updates validators whose content differs from your files, named in the confirm because it replaces edits made in
+    Paramify. One that matches is not sent. Paramify's default `disposition: PASS` and a trailing newline don't
+    count as a difference.
+  After `w` in the validator workbench, the hint points at `v` instead of `paramify validators sync --update`.
+  The CLI is unchanged, except that `--update` now skips a validator that already matches.
 - **`paramify issues upload` waits on every assessment's job at once.** Reports for every assessment are sent and their
   processing jobs queued first, then all the jobs are polled together. A run that sends to several assessments waits as
   long as its slowest job instead of the sum of them, and the next assessment's reports no longer wait on the previous
@@ -2936,6 +2947,18 @@ schemas and the `paramify` CLI — not the internal code.
     repo without it (`checkov_bicep` already declared it optional).
 
   No fetcher's output changes, so no fetcher version moves.
+
+- **More in-scope counts read null, not 0, when their list couldn't be read.** Each `in_scope_*` count, and the
+  `excluded_*` count beside it, now reads null when the list it counts wasn't read, and 0 only when it was read and is
+  empty; each list is judged on its own. `azure_alert_rules` 0.3.2, `azure_app_service_backups` 0.3.3,
+  `azure_app_service_configuration` 0.5.2, `azure_app_service_deployments` 0.3.2 (and its `boundary_excluded_*`
+  counts), `azure_app_service_plans` 0.3.2, `azure_key_vault_key_rotation` 0.6.2, `azure_log_analytics_workspaces`
+  0.3.2, `azure_policy_compliance` 0.5.2 (still 0 with Microsoft.PolicyInsights unregistered),
+  `azure_sql_managed_instance_configuration` 0.5.1 and `azure_vnet_egress_routing` 0.3.2. `scope_exclusions` gains
+  the same unread state, so `azure_dns_configuration` 0.6.2 (`in_scope_record_sets`, also null while one zone's
+  record sets are unread) and `azure_front_door_tls`, `azure_front_door_waf_coverage` 0.6.2 and
+  `azure_front_door_origins` 0.8.2 (host, route and other counts) read null when the profile list wasn't read, and
+  their `scope_exclusion_patterns_unmatched` is null then too.
 
 - **`paramify run` stops its running fetchers on Ctrl-C or SIGTERM.** Each fetcher runs in its own session, so before,
   an interrupted run left it running and writing into the run directory. The runner now kills the fetcher's process
