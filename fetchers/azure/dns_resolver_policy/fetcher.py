@@ -11,7 +11,7 @@ import logging
 import os
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from dotenv import load_dotenv
 
@@ -64,6 +64,9 @@ def rule_record(rule: Dict[str, Any], threat_intel_visible: bool) -> Dict[str, A
         "enabled": (props.get("dnsSecurityRuleState") or "Enabled") == "Enabled",
         "domain_list_ids": sorted(d.get("id") for d in props.get("dnsResolverDomainLists") or [] if d.get("id")),
         "managed_domain_lists": sorted(managed or []) if threat_intel_visible else None,
+        # Set for enabled Block rules only: whether a higher-priority Allow rule might override it.
+        "takes_effect": None,
+        "possibly_overridden_by": None,
     }
 
 
@@ -82,22 +85,85 @@ def logs_record(settings: Optional[List[Dict[str, Any]]]) -> Dict[str, Any]:
     return {"query_logs_exported": bool(exporting), "log_destinations": sorted(exporting)}
 
 
+def _domain(name: str) -> str:
+    name = name.strip().lower()
+    return name if name.endswith(".") else name + "."
+
+
+def _overlap(allow: Set[str], block: Set[str]) -> bool:
+    """Whether an Allow rule's domains reach any domain a Block rule's domains cover: the same domain, either one under
+    the other, or the root "." that matches everything."""
+    for a in allow:
+        for b in block:
+            if a == "." or b == "." or a == b or a.endswith("." + b) or b.endswith("." + a):
+                return True
+    return False
+
+
+def rule_domains(rule: Dict[str, Any], domains_by_list: Dict[str, Optional[List[str]]]) -> Optional[Set[str]]:
+    """Every domain a rule's lists hold; None when any list's domains can't be seen (a managed list such as threat
+    intelligence, a list not read, or a large list Azure returns without its domains)."""
+    if rule.get("managed_domain_lists"):
+        return None
+    found: Set[str] = set()
+    for list_id in rule["domain_list_ids"]:
+        domains = domains_by_list.get(arm_id_key(list_id))
+        if domains is None:
+            return None
+        found |= {_domain(d) for d in domains}
+    return found
+
+
+def block_effect(rule: Dict[str, Any], rules: List[Dict[str, Any]], domains_by_list: Dict[str, Optional[List[str]]],
+                 managed_unknown: bool) -> Tuple[Optional[bool], List[str]]:
+    """Whether an enabled Block rule takes effect: rules run in priority order (lowest number first) and the first match
+    wins, so an enabled Allow rule of higher priority whose domains reach this rule's overrides it there. (True, [])
+    when no higher-priority Allow can reach it; (None, names) when one might, or the order or domains can't be told."""
+    if rule["priority"] is None:
+        return None, []
+    allows = [r for r in rules if r["enabled"] and r["action"] == "Allow" and (r["priority"] is None or r["priority"] < rule["priority"])]
+    if not allows:
+        return True, []
+    block = None if managed_unknown or rule["managed_domain_lists"] else rule_domains(rule, domains_by_list)
+    reaching = []
+    for a in allows:
+        # Without the preview API an Allow rule's managed lists can't be seen, so what it allows is unknown.
+        allow = None if managed_unknown else rule_domains(a, domains_by_list)
+        if allow is None or block is None or a["priority"] is None or _overlap(allow, block):
+            reaching.append(a["name"])
+    return (None, sorted(reaching)) if reaching else (True, [])
+
+
 def policy_record(policy: Dict[str, Any], rules: Optional[List[Dict[str, Any]]], links: Optional[List[Dict[str, Any]]],
-                  settings: Optional[List[Dict[str, Any]]], threat_intel_visible: bool) -> Dict[str, Any]:
+                  settings: Optional[List[Dict[str, Any]]], threat_intel_visible: bool,
+                  domains_by_list: Optional[Dict[str, Optional[List[str]]]] = None) -> Dict[str, Any]:
     rs = [rule_record(r, threat_intel_visible) for r in rules] if rules is not None else None
+    domains_by_list = domains_by_list or {}
+    for r in rs or []:
+        if r["enabled"] and r["action"] == "Block":
+            r["takes_effect"], r["possibly_overridden_by"] = block_effect(r, rs, domains_by_list, not threat_intel_visible)
     blocking = [r for r in rs or [] if r["enabled"] and r["action"] == "Block"]
+    effective = [r for r in blocking if r["takes_effect"] is True]
+    threat_intel = [r for r in blocking if THREAT_INTEL in (r["managed_domain_lists"] or [])]
+    # Only links Azure finished provisioning count; one still creating, updating, deleting or failed covers nothing yet.
+    provisioned = [link for link in links or [] if ((link.get("properties") or {}).get("provisioningState") or "") == "Succeeded"]
+    not_provisioned = [link for link in links or [] if link not in provisioned]
+    vnet_of = lambda link: ((link.get("properties") or {}).get("virtualNetwork") or {}).get("id")  # noqa: E731
     return {
         "id": policy.get("id"),
         "name": policy.get("name"),
         "location": policy.get("location"),
         "resource_group": resource_group_from_id(policy.get("id")),
         "security_rules": sorted(rs, key=lambda r: (r["priority"] is None, r["priority"])) if rs is not None else None,
-        "blocks": bool(blocking) if rs is not None else None,
-        "blocks_threat_intel": (any(THREAT_INTEL in (r["managed_domain_lists"] or []) for r in blocking)
-                                if rs is not None and threat_intel_visible else None),
-        "linked_virtual_network_ids": sorted(
-            ((link.get("properties") or {}).get("virtualNetwork") or {}).get("id") for link in links
-            if ((link.get("properties") or {}).get("virtualNetwork") or {}).get("id")) if links is not None else None,
+        # True when an enabled Block rule takes effect; null when every Block rule might be overridden by a higher-
+        # priority Allow; false when there is no enabled Block rule.
+        "blocks": (True if effective else None if blocking else False) if rs is not None else None,
+        "blocks_threat_intel": ((True if any(r["takes_effect"] is True for r in threat_intel) else None if threat_intel
+                                 else False) if rs is not None and threat_intel_visible else None),
+        "linked_virtual_network_ids": sorted(vnet_of(link) for link in provisioned if vnet_of(link)) if links is not None else None,
+        "links_not_provisioned": sorted(
+            ({"virtual_network_id": vnet_of(link), "provisioning_state": (link.get("properties") or {}).get("provisioningState")}
+             for link in not_provisioned), key=lambda x: (x["virtual_network_id"] or "").lower()) if links is not None else None,
         **logs_record(settings),
     }
 
@@ -112,16 +178,17 @@ def _covered(linked: List[Dict[str, Any]], links_unknown: bool, field: str) -> O
     return False
 
 
-def vnet_record(vnet: Dict[str, Any], policies: List[Dict[str, Any]]) -> Dict[str, Any]:
+def vnet_record(vnet: Dict[str, Any], policies: Optional[List[Dict[str, Any]]]) -> Dict[str, Any]:
+    """A VNet and the policies linked to it. With the policy list unread (None), coverage is unknown, not false."""
     key = arm_id_key(vnet.get("id"))
-    linked = [p for p in policies if key in {arm_id_key(i) for i in p["linked_virtual_network_ids"] or []}]
-    unknown = any(p["linked_virtual_network_ids"] is None for p in policies)
+    linked = [p for p in policies or [] if key in {arm_id_key(i) for i in p["linked_virtual_network_ids"] or []}]
+    unknown = policies is None or any(p["linked_virtual_network_ids"] is None for p in policies)
     return {
         "id": vnet.get("id"),
         "name": vnet.get("name"),
         "location": vnet.get("location"),
         "resource_group": resource_group_from_id(vnet.get("id")),
-        "policy_ids": sorted(p["id"] for p in linked),
+        "policy_ids": sorted(p["id"] for p in linked) if policies is not None else None,
         "covered_by_blocking_policy": _covered(linked, unknown, "blocks"),
         "covered_by_threat_intel_block": _covered(linked, unknown, "blocks_threat_intel"),
     }
@@ -148,6 +215,10 @@ def summarize(policies: Optional[List[Dict[str, Any]]], vnets: Optional[List[Dic
         "enabled_rules_by_action": ({a: sum(1 for r in rules if r["enabled"] and r["action"] == a) for a in ("Allow", "Alert", "Block")}
                                     if rules_known else None),
         "policies_blocking": _count(ps, "blocks", True) if p_read else None,
+        "policies_block_possibly_overridden": (sum(1 for p in ps if p["security_rules"] is not None and p["blocks"] is None)
+                                               if rules_known else None),
+        "links_not_provisioned": (sum(len(p["links_not_provisioned"]) for p in ps)
+                                  if p_read and all(p["links_not_provisioned"] is not None for p in ps) else None),
         "policies_blocking_threat_intel": _count(ps, "blocks_threat_intel", True) if p_read and threat_intel_visible else None,
         "domain_lists": len(domain_lists) if domain_lists is not None else None,
         # Which networks they cover
@@ -181,6 +252,14 @@ def read_policies(client, subscription_id: str, collector: Collector) -> Tuple[O
 def collect(client, subscription_id: str, collector: Collector):
     policies, api = read_policies(client, subscription_id, collector)
     threat_intel_visible = (api == PREVIEW_API) if api else None
+    domain_lists = collector.guard(
+        "dnsResolverDomainLists.list",
+        lambda: list_all(client, f"/subscriptions/{subscription_id}/providers/Microsoft.Network/dnsResolverDomainLists",
+                         api or GA_API)["items"])
+    # Domains are read only to tell whether an Allow rule reaches a Block rule's domains; they are never copied.
+    domains_by_list = {arm_id_key(d.get("id")): ((d.get("properties") or {}).get("domains")
+                                                  if isinstance((d.get("properties") or {}).get("domains"), list) else None)
+                       for d in domain_lists or []}
     records: Optional[List[Dict[str, Any]]] = None
     if policies is not None:
         records = []
@@ -193,11 +272,7 @@ def collect(client, subscription_id: str, collector: Collector):
             settings = collector.guard(f"diagnosticSettings.list ({p.get('name')})",
                                        lambda: get_json(client, f"{pid}/providers/Microsoft.Insights/diagnosticSettings"
                                                                 f"?api-version={DIAGNOSTICS_API}").get("value") or [])
-            records.append(policy_record(p, rules, links, settings, bool(threat_intel_visible)))
-    domain_lists = collector.guard(
-        "dnsResolverDomainLists.list",
-        lambda: list_all(client, f"/subscriptions/{subscription_id}/providers/Microsoft.Network/dnsResolverDomainLists",
-                         api or GA_API)["items"])
+            records.append(policy_record(p, rules, links, settings, bool(threat_intel_visible), domains_by_list))
     vnets = collector.guard(
         "virtualNetworks.list_all",
         lambda: list_all(client, f"/subscriptions/{subscription_id}/providers/Microsoft.Network/virtualNetworks", VNET_API)["items"])
@@ -215,7 +290,7 @@ def domain_list_record(d: Dict[str, Any]) -> Dict[str, Any]:
 def build_scoped(policies, vnets, exclusions: ResourceExclusions):
     """Coverage is worked out against every policy; excluded policies and VNets then leave the lists and counts."""
     excluded: List[Dict[str, Any]] = []
-    vnet_records = [vnet_record(v, policies or []) for v in vnets] if vnets is not None else None
+    vnet_records = [vnet_record(v, policies) for v in vnets] if vnets is not None else None
     if policies is not None:
         policies, out = exclusions.split(policies, "dns_resolver_policy")
         excluded += out

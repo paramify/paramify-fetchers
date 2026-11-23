@@ -74,12 +74,12 @@ evidence_set:
     - providers.get("Microsoft.Network") — tells "networking not in use" from "nothing there"
     - GET /subscriptions/{id}/providers/Microsoft.Network/dnsResolverPolicies — the DNS security policies, with api-version 2025-10-01-preview, the only one that shows Azure's threat-intelligence list; where a cloud doesn't serve it, 2025-05-01
     - GET {policy}/dnsSecurityRules — each policy's rules: priority, action, state and domain lists
-    - GET {policy}/virtualNetworkLinks — the virtual networks each policy applies to
+    - GET {policy}/virtualNetworkLinks — the virtual networks each policy applies to; only links whose provisioningState is Succeeded count, and the rest are listed under links_not_provisioned
     - GET {policy}/providers/Microsoft.Insights/diagnosticSettings — whether the policy's DNS query logs are sent anywhere
-    - GET /subscriptions/{id}/providers/Microsoft.Network/dnsResolverDomainLists — the domain lists the rules use, counted, not copied
+    - GET /subscriptions/{id}/providers/Microsoft.Network/dnsResolverDomainLists — the domain lists the rules use, counted, not copied; their domains are compared only to tell whether a higher-priority Allow rule reaches a Block rule's domains
     - GET /subscriptions/{id}/providers/Microsoft.Network/virtualNetworks — every virtual network, to show those no policy covers
 
-    Output: azure_dns_resolver_policy_<subscription>.json — each policy with its rules, linked virtual networks and log destinations; each virtual network with the policies linked to it and whether one blocks; each domain list with its domain count; and the resources left out and why. A blocking rule shows queries for listed domains are refused by configuration, not that any were.
+    Output: azure_dns_resolver_policy_<subscription>.json — each policy with its rules, provisioned and unprovisioned virtual network links and log destinations; each virtual network with the policies linked to it and whether one blocks; each domain list with its domain count; and the resources left out and why. Rules run in priority order (lowest number first) and the first match wins, so each enabled Block rule shows takes_effect: true when no enabled Allow rule of higher priority can reach its domains, or null with possibly_overridden_by naming the Allow rules that might (one whose domains overlap, or whose or the Block rule's domains can't be seen, such as a managed threat-intelligence list). A policy blocks only through a Block rule that takes effect; with the policy list unread, each virtual network's coverage is null, not false. A blocking rule shows queries for listed domains are refused by configuration, not that any were.
 
     Summary fields:
 
@@ -91,13 +91,15 @@ evidence_set:
     - security_rules — Number of security rules across the in-scope policies; null if any policy's rules could not be read, as are the two fields below
     - security_rules_enabled — Number of those rules that are enabled
     - enabled_rules_by_action — Number of enabled rules for each action: Allow, Alert (log only) and Block
-    - policies_blocking — Number of in-scope policies with at least one enabled Block rule; null if any policy's rules could not be read
-    - policies_blocking_threat_intel — Number of in-scope policies with an enabled Block rule on Azure's threat-intelligence list; null unless threat_intel_visible is true
+    - policies_blocking — Number of in-scope policies with at least one enabled Block rule that takes effect (no higher-priority Allow rule can override it); null if any policy's rules could not be read, or any policy's only Block rules might be overridden
+    - policies_block_possibly_overridden — Number of in-scope policies whose enabled Block rules might all be overridden by a higher-priority Allow rule; null if any policy's rules could not be read
+    - policies_blocking_threat_intel — Number of in-scope policies with an enabled Block rule on Azure's threat-intelligence list that takes effect; null unless threat_intel_visible is true, or when any such rule might be overridden
     - domain_lists — Number of DNS domain lists in the subscription; null if they could not be read
 
     Which virtual networks do they cover?
-    - virtual_networks_linked_to_policy — Number of in-scope virtual networks linked to at least one policy; null if the virtual networks or any policy's links could not be read
-    - virtual_networks_without_blocking_policy — Number of in-scope virtual networks not linked to any policy with an enabled Block rule; null if any policy's links or rules could not be read
+    - virtual_networks_linked_to_policy — Number of in-scope virtual networks with a successfully provisioned link to at least one policy; null if the virtual networks, the policy list or any policy's links could not be read
+    - links_not_provisioned — Number of virtual network links across the in-scope policies whose provisioningState is not Succeeded (creating, updating, deleting or failed), which cover nothing; null if any policy's links could not be read
+    - virtual_networks_without_blocking_policy — Number of in-scope virtual networks not linked to any policy with an enabled Block rule that takes effect; null if the policy list or any policy's links or rules could not be read, or a linked policy's Block rules might be overridden
     - virtual_networks_without_threat_intel_block — Number of in-scope virtual networks not linked to any policy blocking Azure's threat-intelligence list; null unless threat_intel_visible is true
 
     Are DNS queries logged?

@@ -37,8 +37,9 @@ def rule(name, priority, action, lists=(), managed=None, state="Enabled"):
             "properties": props}
 
 
-def link(policy, vnet):
-    return {"id": f"{policy}/virtualNetworkLinks/{vnet.rsplit('/', 1)[1]}", "properties": {"virtualNetwork": {"id": vnet}}}
+def link(policy, vnet, state="Succeeded"):
+    return {"id": f"{policy}/virtualNetworkLinks/{vnet.rsplit('/', 1)[1]}",
+            "properties": {"virtualNetwork": {"id": vnet}, "provisioningState": state}}
 
 
 def policy(pid, location="eastus2"):
@@ -74,8 +75,9 @@ class HttpError(Exception):
 
 
 class Arm:
-    def __init__(self, preview_served=True, refused=()):
+    def __init__(self, preview_served=True, refused=(), overrides=None):
         self.preview_served, self.refused, self.calls = preview_served, set(refused), []
+        self.data = {**PREVIEW, **(overrides or {})}
 
     def list_all(self, client, path, api_version):
         self.calls.append((path, api_version))
@@ -83,7 +85,7 @@ class Arm:
             raise HttpError(400, "(InvalidApiVersionParameter) The api-version '2025-10-01-preview' is invalid.")
         if path in self.refused:
             raise HttpError(403, "(AuthorizationFailed) does not have authorization")
-        items = json.loads(json.dumps(PREVIEW[path]))
+        items = json.loads(json.dumps(self.data[path]))
         if api_version != fx.PREVIEW_API:
             for i in items:
                 (i.get("properties") or {}).pop("managedDomainLists", None)
@@ -183,3 +185,86 @@ def test_an_excluded_network_leaves_the_counts(run, monkeypatch):
     assert code == 0 and (s["excluded_virtual_networks"], s["in_scope_virtual_networks"]) == (1, 3)
     assert s["virtual_networks_without_blocking_policy"] == 1
     assert [e["name"] for e in ev["results"]["excluded"]] == ["vnet-isolated"]
+
+
+# --- Todd's review: unread policies, provisioned links, Allow overriding Block ---
+
+def test_an_unread_policy_list_leaves_each_network_unknown_not_uncovered(run):
+    code, ev, _ = run(refused={f"{SUB}/providers/Microsoft.Network/dnsResolverPolicies"})
+    assert code == 1
+    for v in ev["results"]["virtual_networks"]:
+        assert (v["covered_by_blocking_policy"], v["covered_by_threat_intel_block"], v["policy_ids"]) == (None, None, None)
+
+
+def test_only_provisioned_links_count(run, assert_summary_documented):
+    links = [link(CORE, VNETS["hub"]), link(CORE, VNETS["app"], state="Failed")]
+    code, ev, _ = run(overrides={f"{CORE}/virtualNetworkLinks": links})
+    s = ev["summary"]
+    vnets = {v["name"]: v for v in ev["results"]["virtual_networks"]}
+    assert code == 0 and vnets["vnet-app"]["covered_by_blocking_policy"] is False and vnets["vnet-app"]["policy_ids"] == []
+    assert (s["links_not_provisioned"], s["virtual_networks_linked_to_policy"], s["virtual_networks_without_blocking_policy"]) == (1, 2, 3)
+    core = next(p for p in ev["results"]["dns_resolver_policies"] if p["name"] == "policy-core")
+    assert core["links_not_provisioned"] == [{"virtual_network_id": VNETS["app"], "provisioning_state": "Failed"}]
+    assert_summary_documented("azure/dns_resolver_policy", s)
+
+
+def _core_rules(allow_priority, allow_lists=(LIST_ALLOW,), allow_domains=None):
+    lists = dict((d["id"], d) for d in json.loads(json.dumps(PREVIEW[f"{SUB}/providers/Microsoft.Network/dnsResolverDomainLists"])))
+    if allow_domains is not None:
+        lists[LIST_ALLOW]["properties"]["domains"] = allow_domains
+    return {f"{CORE}/dnsSecurityRules": [rule("block-threat-intel", 100, "Block", [LIST_BLOCK], ["AzureDnsThreatIntel"]),
+                                         rule("allow-internal", allow_priority, "Allow", list(allow_lists), [])],
+            f"{SUB}/providers/Microsoft.Network/dnsResolverDomainLists": list(lists.values())}
+
+
+def test_a_higher_priority_allow_that_reaches_the_block_makes_it_only_possible(run, assert_summary_documented):
+    # The Allow rule now runs first (priority 50) on every domain: it overrides the Block rule.
+    code, ev, _ = run(overrides=_core_rules(50, allow_domains=["."]))
+    s = ev["summary"]
+    core = next(p for p in ev["results"]["dns_resolver_policies"] if p["name"] == "policy-core")
+    block = next(r for r in core["security_rules"] if r["action"] == "Block")
+    assert code == 0 and (block["takes_effect"], block["possibly_overridden_by"]) == (None, ["allow-internal"])
+    assert (core["blocks"], core["blocks_threat_intel"]) == (None, None)
+    assert (s["policies_blocking"], s["policies_block_possibly_overridden"], s["virtual_networks_without_blocking_policy"]) == (
+        None, 1, None)
+    vnets = {v["name"]: v for v in ev["results"]["virtual_networks"]}
+    assert vnets["vnet-hub"]["covered_by_blocking_policy"] is None and vnets["vnet-isolated"]["covered_by_blocking_policy"] is False
+    assert_summary_documented("azure/dns_resolver_policy", s)
+
+
+def test_a_higher_priority_allow_whose_domains_are_unseen_also_makes_it_only_possible(run):
+    # internal-domains is a large list returned without its domains: what it allows can't be compared.
+    code, ev, _ = run(overrides=_core_rules(50))
+    core = next(p for p in ev["results"]["dns_resolver_policies"] if p["name"] == "policy-core")
+    assert code == 0 and core["blocks"] is None
+
+
+def test_a_threat_intel_block_with_an_earlier_allow_is_never_sure(run):
+    # The threat-intelligence list's domains aren't visible, so even a narrow earlier Allow might reach them.
+    code, ev, _ = run(overrides=_core_rules(50, allow_domains=["corp.example."]))
+    core = next(p for p in ev["results"]["dns_resolver_policies"] if p["name"] == "policy-core")
+    assert code == 0 and core["blocks_threat_intel"] is None
+
+
+def test_an_earlier_allow_on_unrelated_domains_leaves_a_custom_block_in_effect(run):
+    rules = {f"{CORE}/dnsSecurityRules": [rule("block-custom", 100, "Block", [LIST_BLOCK], []),
+                                          rule("allow-internal", 50, "Allow", [LIST_ALLOW], [])]}
+    lists = json.loads(json.dumps(PREVIEW[f"{SUB}/providers/Microsoft.Network/dnsResolverDomainLists"]))
+    lists[1]["properties"]["domains"] = ["corp.example.", "internal.example."]
+    rules[f"{SUB}/providers/Microsoft.Network/dnsResolverDomainLists"] = lists
+    code, ev, _ = run(overrides=rules)
+    core = next(p for p in ev["results"]["dns_resolver_policies"] if p["name"] == "policy-core")
+    block = next(r for r in core["security_rules"] if r["action"] == "Block")
+    assert code == 0 and (block["takes_effect"], core["blocks"]) == (True, True)
+    assert "corp.example." not in json.dumps(ev)
+    # An Allow on a parent of a blocked domain reaches it.
+    lists[1]["properties"]["domains"] = ["example."]
+    code, ev, _ = run(overrides=rules)
+    assert next(p for p in ev["results"]["dns_resolver_policies"] if p["name"] == "policy-core")["blocks"] is None
+
+
+def test_a_later_allow_never_overrides(run):
+    code, ev, _ = run()
+    core = next(p for p in ev["results"]["dns_resolver_policies"] if p["name"] == "policy-core")
+    block = next(r for r in core["security_rules"] if r["action"] == "Block")
+    assert code == 0 and (block["takes_effect"], block["possibly_overridden_by"], core["blocks"]) == (True, [], True)
