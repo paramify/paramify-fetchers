@@ -287,3 +287,18 @@ def test_draft_note_joins_a_wrapped_list_bullet_and_keeps_its_first_sentence():
             "  Machine Learning workspaces. More detail.\n"
             "- `demo_beta`: other\n")
     assert rn.draft_note("demo_alpha", body, []) == "hubs, projects and other Machine Learning workspaces"
+
+
+def test_draft_note_keeps_a_sentence_with_an_abbreviation_whole():
+    body = "- `demo_alpha`: uses the API, e.g. the v2 one, i.e. the newer one. Then more.\n"
+    assert rn.draft_note("demo_alpha", body, []) == "uses the API, e.g. the v2 one, i.e. the newer one"
+
+
+def test_draft_note_drops_names_joined_with_an_oxford_comma():
+    body = "- **`demo_a`, `demo_b`, and `demo_c` now page.**\n"
+    assert rn.draft_note("demo_a", body, []) == "now page"
+
+
+def test_draft_note_drops_a_version_without_a_colon():
+    assert rn.draft_note("demo_a", "- **`demo_a` 0.3.0 adds paging.**\n", []) == "adds paging"
+    assert rn.draft_note("demo_b", "- **`demo_a` 0.3.0 and `demo_b` 0.2.0 add paging.**\n", []) == "add paging"

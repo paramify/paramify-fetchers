@@ -27,6 +27,10 @@ MINOR_TAGS = frozenset({"new", "fetcher", "cli", "tui"})
 _HEADING = re.compile(r"^## \[([^\]]+)\](?:\s*-\s*(\S+))?\s*$")
 _LINK_DEF = re.compile(r"^\[[^\]]+\]: ")
 _UNRELEASED_LINK = re.compile(r"^\[Unreleased\]: (?P<base>.+)/compare/v(?P<prev>[^/]+?)\.\.\.HEAD\s*$", re.M)
+_VERSION = r"\d+\.\d+\.\d+"
+_LEAD_NAMES = re.compile(rf"^`[^`]+`(?:\s+{_VERSION})?(?:(?:,\s*(?:and\s+)?|\s+and\s+)`[^`]+`(?:\s+{_VERSION})?)*\s*")
+# A sentence ends at ". " before a capital or a `name`, but not after e.g., i.e., etc. or vs.
+_SENTENCE_END = re.compile(r"(?<=\.)(?<!e\.g\.)(?<!i\.e\.)(?<!etc\.)(?<!vs\.)\s+(?=[A-Z`])")
 
 
 def changelog_sections(text: str) -> Dict[str, dict]:
@@ -154,8 +158,9 @@ def _lead_note(name: str, body: str) -> Optional[str]:
         elif ": " in lead:
             rest = lead.split(": ", 1)[1]
         else:
-            # "**`name` can record X.**": drop the leading names, "`a` and `b`", and keep the rest.
-            names = re.match(r"^`[^`]+`(?:(?:,\s*|\s+and\s+)`[^`]+`)*\s*", lead)
+            # "**`name` can record X.**": drop the leading names ("`a` and `b`", "`a`, `b`, and `c`",
+            # each with an optional version) and keep the rest.
+            names = _LEAD_NAMES.match(lead)
             if not names or f"`{name}`" not in names[0]:
                 continue
             rest = lead[names.end():]
@@ -178,7 +183,7 @@ def _list_note(name: str, body: str) -> Optional[str]:
             if not nxt.strip() or nxt.lstrip().startswith("- ") or not nxt.startswith(" "):
                 break
             parts.append(nxt.strip())
-        rest = re.split(r"(?<=[.])\s", " ".join(parts), maxsplit=1)[0].rstrip(".").strip()
+        rest = _SENTENCE_END.split(" ".join(parts), maxsplit=1)[0].rstrip(".").strip()
         if rest:
             return rest
     return None

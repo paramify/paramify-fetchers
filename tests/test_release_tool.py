@@ -275,6 +275,34 @@ def test_draft_refuses_unpushed_commits_on_local_release_next(clone, week, upstr
     assert _sha(clone, "release/next") == mine and len(gh.calls) == 1
 
 
+def test_draft_refuses_an_amended_draft_commit_that_is_not_pushed(clone, week, upstream):
+    gh = FakeGitHub()
+    _draft(clone, gh, [])
+    _git(clone, "switch", "-q", "release/next")
+    path = clone / "releases" / "0.7.0-beta.yaml"
+    path.write_text(path.read_text().replace("reads more rows", "Reads every row"))
+    _git(clone, "commit", "-q", "-a", "--amend", "--no-edit")  # keeps the Release-Base trailer
+    amended = _sha(clone, "release/next")
+    with pytest.raises(release.ReleaseError, match=f"{amended[:12]}.*git branch -f release/next origin/release/next"):
+        _draft(clone, gh, [])
+    assert _sha(clone, "release/next") == amended
+
+
+def test_an_unpushed_no_push_draft_that_matches_does_not_block(clone, week):
+    gh = FakeGitHub()
+    assert _draft(clone, gh, [], push=False) == "opened"
+    assert _draft(clone, gh, []) == "opened"  # the leftover equals what the draft builds
+
+
+def test_unpushed_commits_without_a_remote_branch_get_advice_that_works(clone, week):
+    _draft(clone, FakeGitHub(), [], push=False)
+    _on_branch_edit(clone, "0.7.0-beta", lambda d: d["fetchers"][0].update(note="Mine"), push=False)
+    with pytest.raises(release.ReleaseError) as err:
+        _draft(clone, FakeGitHub(), [])
+    assert "origin/release/next" not in str(err.value).split(";", 1)[1]
+    assert "git push origin release/next" in str(err.value) and "git branch -D release/next" in str(err.value)
+
+
 def test_draft_refuses_a_version_with_a_v(clone, week):
     with pytest.raises(release.ReleaseError, match="--version"):
         _draft(clone, FakeGitHub(), [], version="v0.7.0")
@@ -533,6 +561,12 @@ def test_notify_failure_sends_the_run_link(monkeypatch):
         thread.join(5)
         server.server_close()
     assert received == [{"text": "The weekly release job failed.", "url": run}]
+
+
+def test_a_webhook_that_is_not_a_url_is_printed_and_does_not_raise(monkeypatch, capsys):
+    monkeypatch.setenv("SLACK_RELEASE_WEBHOOK", "not-a-url")
+    release.notify("hello", "https://example.com")
+    assert "slack: could not send" in capsys.readouterr().out
 
 
 def test_a_failed_post_is_printed_and_does_not_raise(monkeypatch, capsys):

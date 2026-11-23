@@ -192,18 +192,44 @@ def _on_branch(root: Path, rows: List[dict]) -> Tuple[Optional[dict], List[dict]
     return previous, [r for r in rows if _key(r) not in seen], base
 
 
-def _refuse_local_work(root: Path, base_sha: str, remote_sha: Optional[str]) -> None:
-    """Stop before a draft could hide or lose work in this clone."""
+def _keep_advice(remote_sha: Optional[str]) -> str:
+    if remote_sha:
+        return f"push them, or drop them with: git branch -f {BRANCH} origin/{BRANCH}"
+    return f"push them (git push origin {BRANCH}), or delete the branch: git branch -D {BRANCH}"
+
+
+def _refuse_local_work(root: Path, base_sha: str, remote_sha: Optional[str]) -> Optional[str]:
+    """Stop before a draft could hide or lose work in this clone.
+
+    Returns the local release/next tip when it has unpushed draft commits (with
+    a Release-Base trailer): `_refuse_changed_draft` checks it after the build.
+    """
     if git(root, "status", "--porcelain", "--untracked-files=no").strip():
         raise ReleaseError("the checkout has uncommitted changes; commit or stash them, then run draft again")
-    if _rev(root, f"refs/heads/{BRANCH}") is None:
-        return
-    log = git(root, "log", "--format=%x00%(trailers:key=Release-Base,valueonly)", f"refs/heads/{BRANCH}",
+    tip = _rev(root, f"refs/heads/{BRANCH}")
+    if tip is None:
+        return None
+    log = git(root, "log", "--format=%x00%(trailers:key=Release-Base,valueonly)", tip,
               "--not", base_sha, *([remote_sha] if remote_sha else []))
-    mine = sum(1 for trailer in log.split("\0")[1:] if not trailer.strip())  # draft commits are rebuilt anyway
+    trailers = log.split("\0")[1:]
+    mine = sum(1 for trailer in trailers if not trailer.strip())
     if mine:
-        raise ReleaseError(f"local {BRANCH} has {_plural(mine, 'commit')} that origin/{BRANCH} lacks; push them, "
-                           f"or drop them with: git branch -f {BRANCH} origin/{BRANCH}")
+        lacks = f"that origin/{BRANCH} lacks" if remote_sha else "that are not pushed"
+        raise ReleaseError(f"local {BRANCH} has {_plural(mine, 'commit')} {lacks}; {_keep_advice(remote_sha)}")
+    return tip if trailers else None
+
+
+def _refuse_changed_draft(
+    root: Path, tip: Optional[str], built: Optional[str], remote_sha: Optional[str]
+) -> None:
+    """An unpushed draft commit may be amended by hand: keep it unless it matches the build or origin."""
+    if tip is None:
+        return
+    trees = {git(root, "rev-parse", f"{sha}^{{tree}}").strip() for sha in (built, remote_sha) if sha}
+    if git(root, "rev-parse", f"{tip}^{{tree}}").strip() not in trees:
+        where = f"origin/{BRANCH} and a fresh draft" if remote_sha else "a fresh draft"
+        raise ReleaseError(f"local {BRANCH} {tip[:12]} is not pushed and differs from {where}; "
+                           f"{_keep_advice(remote_sha)}")
 
 
 # --------------------------------------------------------------------------- #
@@ -254,9 +280,9 @@ def notify(text: str, url: str) -> None:
     if not hook:
         print(f"slack: {text} {url}")
         return
-    req = urllib.request.Request(hook, data=json.dumps({"text": text, "url": url}).encode(),
-                                 headers={"Content-Type": "application/json"}, method="POST")
     try:
+        req = urllib.request.Request(hook, data=json.dumps({"text": text, "url": url}).encode(),
+                                     headers={"Content-Type": "application/json"}, method="POST")
         with urllib.request.urlopen(req, timeout=10):
             pass
     except (OSError, ValueError, http.client.HTTPException) as e:
@@ -368,7 +394,7 @@ def draft(root: Path, *, base: str, today: str, gh: GitHub, notify: Notify = not
         git(root, "fetch", "--quiet", "--prune", "--tags", "origin")
     base_sha = git(root, "rev-parse", f"{base}^{{commit}}").strip()
     remote_sha = _rev(root, f"refs/remotes/origin/{BRANCH}")
-    _refuse_local_work(root, base_sha, remote_sha)
+    local_tip = _refuse_local_work(root, base_sha, remote_sha)
     send: Notify = notify if push else (lambda text, url: print(f"Would notify: {text} {url}"))
 
     tag = last_tag(root, base_sha)
@@ -399,11 +425,14 @@ def draft(root: Path, *, base: str, today: str, gh: GitHub, notify: Notify = not
     doc["version"] = version
 
     if pr and previous is not None and built_on == base_sha and _same(doc, previous):
+        _refuse_changed_draft(root, local_tip, None, remote_sha)  # origin is what a build would give
         if reminder:
             send(f"v{version} is still waiting for you.", pr["url"])
         return "unchanged"
 
-    _point_branch(root, _build(root, base_sha, files, doc, today))
+    built = _build(root, base_sha, files, doc, today)
+    _refuse_changed_draft(root, local_tip, built, remote_sha)
+    _point_branch(root, built)
     if push:
         git(root, "push", "--quiet", f"--force-with-lease=refs/heads/{BRANCH}:{remote_sha or ''}",
             "origin", f"refs/heads/{BRANCH}:refs/heads/{BRANCH}")
