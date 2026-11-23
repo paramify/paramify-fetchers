@@ -104,7 +104,8 @@ CHANGE_OPERATIONS = {
 }
 
 # Changes that would let protected (immutable) log storage be altered or removed, kept out of the CIS map so its
-# totals do not move. An activity log alert fires on the attempt whatever its outcome, so a denied attempt is seen too.
+# totals do not move. An activity log alert with no outcome filter fires on the attempt whatever its outcome, so a
+# denied attempt is seen too; one that filters on status, subStatus or level might not be, so it counts only as possible.
 LOG_STORAGE_PROTECTION_OPERATIONS = {
     "delete_immutability_policy": (
         "Microsoft.Storage/storageAccounts/blobServices/containers/immutabilityPolicies/delete",),
@@ -117,6 +118,12 @@ LOG_STORAGE_PROTECTION_OPERATIONS = {
 
 # monitor_alert_service_health_exists is not an operationName alert: it needs BOTH
 # category == ServiceHealth and properties.incidentType == Incident on one rule.
+# Condition fields that narrow an alert to some outcomes of an operation (Succeeded, Failed, an error level).
+OUTCOME_FIELDS = ("status", "substatus", "level")
+RESOURCE_ID_FIELD = "resourceid"
+# Operations on the storage account itself: an alert scoped or filtered below the account (a blob service or
+# container) never sees them.
+ACCOUNT_LEVEL_PROTECTION_OPERATIONS = frozenset({"delete_storage_account"})
 SERVICE_HEALTH_CATEGORY = "servicehealth"
 SERVICE_HEALTH_INCIDENT_TYPE = "incident"
 KINDS = ("activity_log_alert", "action_group", "processing_rule")
@@ -206,6 +213,32 @@ def alert_operation_names(alert: dict) -> list[str]:
     return sorted(names)
 
 
+def outcome_filters(alert: dict) -> list[str]:
+    """The outcome fields (status, subStatus, level) one alert's conditions filter on, case-folded."""
+    conditions = ((alert.get("condition") or {}).get("all_of")) or []
+    found = set()
+    for condition in conditions:
+        for entry in (condition, *(condition.get("any_of") or [])):
+            field = str(entry.get("field") or "").strip().lower()
+            if field in OUTCOME_FIELDS:
+                found.add(field)
+    return sorted(found)
+
+
+def scoped_below_storage_account(alert: dict) -> bool:
+    """True when every scope, or a resourceId condition, narrows the alert to a blob service or container, so it can't
+    see an operation on the storage account itself."""
+    scopes = [str(s) for s in alert.get("scopes") or [] if s]
+    below = lambda rid: "/providers/microsoft.storage/storageaccounts/" in rid.lower() and "/blobservices" in rid.lower()  # noqa: E731
+    if scopes and all(below(s) for s in scopes):
+        return True
+    conditions = ((alert.get("condition") or {}).get("all_of")) or []
+    ids = set()
+    for condition in conditions:
+        ids |= _condition_values(condition, RESOURCE_ID_FIELD)
+    return bool(ids) and all(below(i) for i in ids)
+
+
 def is_service_health_alert(alert: dict) -> bool:
     """Prowler's monitor_alert_service_health_exists predicate.
 
@@ -248,6 +281,10 @@ def alert_record(alert: dict) -> dict:
         # an ENABLED rule contributes coverage.
         "monitored_operations": operations if enabled else [],
         "service_health_alert": enabled and is_service_health_alert(alert),
+        # For the log storage protection map: outcome filters that could skip a denied attempt, and a scope too narrow
+        # to see the storage account itself.
+        "outcome_filters": outcome_filters(alert),
+        "scoped_below_storage_account": scoped_below_storage_account(alert),
     }
 
 
@@ -264,7 +301,36 @@ def with_routing(alert: dict, groups: dict, processing_rules: list[dict]) -> dic
     return {**alert, **route(alert["enabled"], alert["action_groups"], alert["scopes"], groups, processing_rules)}
 
 
-def summarize(alerts: list[dict]) -> dict:
+def protection_coverage(alerts: list[dict], read: dict | None = None) -> dict:
+    """Per log storage protection change: True if an alert that reaches a person fires on every attempt at it, None if
+    only one that might, False if none does.
+
+    An alert filtered on an outcome (status, subStatus, level) may skip a denied attempt, so it counts only as possible.
+    One scoped below the storage account gets no credit for deleting the account. With the alert list unread, every
+    change is unknown; with the action groups or processing (suppression) rules unread, a sure match is only possible.
+    """
+    read = read or {}
+    if read.get("activity_log_alerts") is False:
+        return {key: None for key in LOG_STORAGE_PROTECTION_OPERATIONS}
+    routing_known = read.get("action_groups", True) is not False and read.get("processing_rules", True) is not False
+    result = {}
+    for key, operations in LOG_STORAGE_PROTECTION_OPERATIONS.items():
+        wanted = {o.lower() for o in operations}
+        sure = maybe = False
+        for a in alerts:
+            if not a.get("enabled") or a.get("reaches_human") is False or not wanted & set(a["monitored_operations"]):
+                continue
+            if key in ACCOUNT_LEVEL_PROTECTION_OPERATIONS and a.get("scoped_below_storage_account"):
+                continue
+            if a.get("reaches_human") is True and not a.get("outcome_filters") and routing_known:
+                sure = True
+            else:
+                maybe = True
+        result[key] = True if sure else None if maybe else False
+    return result
+
+
+def summarize(alerts: list[dict], read: dict | None = None) -> dict:
     """Coverage of the monitored operations is the headline, not the alert count."""
     coverage = operation_coverage(alerts)
     covered = sum(1 for is_covered in coverage.values() if is_covered)
@@ -287,7 +353,7 @@ def summarize(alerts: list[dict]) -> dict:
             key for key, is_covered in coverage.items() if not is_covered
         ),
         "service_health_alert_configured": any(alert["service_health_alert"] for alert in alerts),
-        **routing_summary(alerts),
+        **routing_summary(alerts, read),
     }
 
 
@@ -298,11 +364,12 @@ def coverage_reaching_human(alerts: list[dict], operations_map: dict) -> dict:
     return {key: True if sure[key] else None if maybe[key] else False for key in operations_map}
 
 
-def routing_summary(alerts: list[dict]) -> dict:
-    """Coverage again, counting only alerts that reach a person, plus the App Service change map."""
+def routing_summary(alerts: list[dict], read: dict | None = None) -> dict:
+    """Coverage again, counting only alerts that reach a person, plus the App Service and log storage protection maps."""
     enabled = [a for a in alerts if a.get("enabled")]
     change = coverage_reaching_human(alerts, CHANGE_OPERATIONS)
-    protection = coverage_reaching_human(alerts, LOG_STORAGE_PROTECTION_OPERATIONS)
+    protection = protection_coverage(alerts, read)
+    protection_unread = (read or {}).get("activity_log_alerts") is False
     return {
         "alerts_routing_to_enabled_receiver": sum(1 for a in enabled if a.get("routes_to_enabled_receiver") is True),
         "alerts_routing_unknown": sum(1 for a in enabled if a.get("routes_to_enabled_receiver") is None),
@@ -317,12 +384,16 @@ def routing_summary(alerts: list[dict]) -> dict:
         "change_operations_total": len(CHANGE_OPERATIONS),
         "all_change_operations_covered": tri_state(change.values()),
         "uncovered_change_operations": sorted(k for k, v in change.items() if v is False),
+        # With the alert list unread nothing is known: the map reads null for every change and the counts are null.
         "log_storage_protection_coverage": protection,
-        "log_storage_protection_operations_covered": sum(1 for v in protection.values() if v is True),
-        "log_storage_protection_operations_possibly_covered": sum(1 for v in protection.values() if v is None),
+        "log_storage_protection_operations_covered":
+            None if protection_unread else sum(1 for v in protection.values() if v is True),
+        "log_storage_protection_operations_possibly_covered":
+            None if protection_unread else sum(1 for v in protection.values() if v is None),
         "log_storage_protection_operations_total": len(LOG_STORAGE_PROTECTION_OPERATIONS),
-        "all_log_storage_protection_operations_covered": tri_state(protection.values()),
-        "uncovered_log_storage_protection_operations": sorted(k for k, v in protection.items() if v is False),
+        "all_log_storage_protection_operations_covered": None if protection_unread else tri_state(protection.values()),
+        "uncovered_log_storage_protection_operations":
+            None if protection_unread else sorted(k for k, v in protection.items() if v is False),
     }
 
 
@@ -460,6 +531,9 @@ def main() -> int:
             "change_operations": {
                 key: list(operations) for key, operations in CHANGE_OPERATIONS.items()
             },
+            "log_storage_protection_operations": {
+                key: list(operations) for key, operations in LOG_STORAGE_PROTECTION_OPERATIONS.items()
+            },
             "action_groups": sorted(group_records, key=lambda g: (g["id"] or "").lower()),
             "processing_rules": sorted(processing_rules, key=lambda p: (p["id"] or "").lower()),
             "provider_registration_status": registration,
@@ -467,7 +541,7 @@ def main() -> int:
             "excluded": excluded,
         },
         summary={
-            **summarize(alerts),
+            **summarize(alerts, read),
             "provider_registration_status": registration,
             **counts,
         },
