@@ -1,13 +1,13 @@
 name: aws_config_conformance_packs
-version: 0.5.0
-description: Collects AWS Config conformance pack deployment status, rule and resource compliance, and maps Config rules to FedRAMP and NIST SP 800-53 Rev. 5 controls.
+version: 0.6.0
+description: Shows AWS Config conformance pack deployment status, rule and resource compliance, and the FedRAMP and NIST SP 800-53 Revision 5 controls each rule maps to.
 category: aws
 
 supports_targets: true
 
 runtime:
-  type: bash
-  entry: fetcher.sh
+  type: python
+  entry: fetcher.py
 
 output:
   type: json
@@ -43,4 +43,18 @@ ksis:
 evidence_set:
   reference_id: EVD-CONFIG-PACKS
   name: AWS Config Conformance Packs
-  instructions: 'Script: aws/config_conformance_packs/fetcher.sh. Commands executed: aws configservice describe-conformance-packs, describe-conformance-pack-status, describe-conformance-pack-compliance, describe-config-rules, get-conformance-pack-compliance-summary, get-conformance-pack-compliance-details. Source.SourceIdentifier links generated conformance-pack rule names to the selected FedRAMP and NIST SP 800-53 Rev. 5 mappings.'
+  instructions: |
+    Script: aws/config_conformance_packs/fetcher.py
+
+    Access: sts:GetCallerIdentity, config:DescribeConformancePacks, config:DescribeConformancePackStatus, config:DescribeConformancePackCompliance, config:DescribeConfigRules, config:GetConformancePackComplianceSummary and config:GetConformancePackComplianceDetails.
+
+    Commands Executed:
+    - STS GetCallerIdentity — record the account collected from
+    - Config DescribeConformancePacks — list the conformance packs deployed in the region
+    - Config DescribeConformancePackStatus (per pack) — read the pack's deployment state
+    - Config DescribeConformancePackCompliance (per pack) — read each rule's compliance: compliant, non-compliant or insufficient data
+    - Config DescribeConfigRules (per pack) — resolve the pack's generated rule names to their Source.SourceIdentifier, which links them to the FedRAMP and NIST SP 800-53 Revision 5 mappings
+    - Config GetConformancePackComplianceDetails (per rule) — read the resource evaluations behind each rule's result
+    - Config GetConformancePackComplianceSummary (per pack) — read AWS's own compliance summary for the pack
+
+    Output: aws_config_conformance_packs_<profile>_<region>.json — for each conformance pack, its deployment state, every rule's compliance with its FedRAMP and NIST SP 800-53 Revision 5 controls, the non-compliant resources, control-level compliance rolled up from the mapped rules, and how the deployed rules compare with the selected FedRAMP reference pack, plus a per-pack summary of rule and control counts; any failed call fails the run.

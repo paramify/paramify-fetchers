@@ -12,6 +12,13 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **`aws_config_conformance_packs` 0.6.0 runs on boto3.** One Python process with one Config client replaces a shell
+  script that started the AWS CLI and `jq` for every API page. Resource evaluations are still requested one rule at a
+  time, but eight rules are read at once, so a pack with a hundred or more rules no longer spends most of its time
+  starting processes. The output, its file name, the IAM actions and the failure codes are unchanged, except that an
+  unknown `fedramp_pack` now reports `bad_config`. It needs the `aws` extra (boto3), which the Docker image already
+  installs.
+
 - **`aws_inspector_ecr_findings` and `aws_inspector_ecr_report` 0.3.0: image counts and an opt-in for an empty scope.**
   - The evidence summary adds `repository_image_count`, every image in the selected repositories before tag,
     push-date and usage filters, next to `image_count`, the images that match them. Both are logged. No new API calls.
