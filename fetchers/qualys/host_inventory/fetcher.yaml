@@ -6,6 +6,7 @@ description: >-
 category: qualys
 
 kind: inventory
+status: beta
 pipeline:
   type: inventory
   id_scheme: qualys-host-id
