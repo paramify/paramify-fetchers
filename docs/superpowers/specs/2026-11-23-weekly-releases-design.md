@@ -239,8 +239,8 @@ section 4 that need git history and prints what to fix.
    - after a merge commit, the release branch's last commit (it is on `main`);
    - after a squash or rebase merge, the new commit on `main`, but only if its
      tree equals the branch's last commit's tree;
-   - otherwise it refuses and DMs Tate. With the ruleset's "branch must be up
-     to date" rule on (section 7), this case should not happen.
+   - otherwise it refuses and DMs Tate. The redraft on every push to `main`
+     keeps this rare.
 3. Creates the GitHub Release, `--prerelease` while the version has a
    pre-release suffix. Body: the three sections rendered as Markdown from the
    notes file, then the CHANGELOG section inside a collapsed `<details>`
@@ -358,16 +358,14 @@ GitHub also notifies Tate as assignee and requested reviewer.
   - Secrets `RELEASE_APP_ID` and `RELEASE_APP_PRIVATE_KEY`. Each workflow
     mints a short-lived token with `actions/create-github-app-token`.
 - `SLACK_RELEASE_WEBHOOK`, from the Slack workflow above.
-- **Turn on the `protect-main` ruleset** (Tate's decision: `main` refuses a
-  merge while CI is red). It exists but is disabled, and it is stale: it
-  requires the old per-job checks (`test (py 3.10)` and others) that no longer
-  report, so turning it on as is would block every pull request. Before
-  enabling, replace its required checks with `ci-ok` alone, as the comment in
-  `ci.yml` says to. Its other rules (one approving review, resolved threads,
-  branch up to date, no force-push or deletion of `main`) apply to every pull
-  request, not only releases; the team should agree to them when it is
-  turned on. The workflows never push to `main` directly, and the ruleset
-  targets only `main`, so the app can push `release/*` branches and tags.
+- **The `protect-main` ruleset** (Tate's decision: `main` refuses a merge
+  while CI is red). Done 2026-11-23: it is active and requires only the
+  `ci-ok` check from GitHub Actions. It also blocks deleting or force-pushing
+  `main`. It has no review rule and no "branch must be up to date" rule, and
+  nobody can bypass it. The workflows never push to `main` directly, and the
+  ruleset targets only `main`, so the app can push `release/*` branches and
+  tags. Because the "up to date" rule is off, `publish` keeps its own check
+  that the tagged commit matches what was reviewed (section 3).
 
 ### 8. Installer and customers on `main`
 
@@ -405,8 +403,8 @@ GitHub also notifies Tate as assignee and requested reviewer.
 Each step is its own pull request and leaves `main` working.
 
 0. Setup, by Tate (no code): create and install the GitHub App, add its two
-   secrets, create the Slack DM workflow and add its secret, fix and turn on
-   the `protect-main` ruleset (section 7). Steps 1 and 2 don't need it; step 3
+   secrets, create the Slack DM workflow and add its secret (section 7). The
+   `protect-main` ruleset is already done. Steps 1 and 2 don't need it; step 3
    does.
 1. Notes format: schema (`fetchers`, `draft`), loader, update view grouped by
    release, fetcher notes in "Your fetchers", the pytest rules. Old files keep
