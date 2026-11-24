@@ -42,6 +42,7 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
+from framework.attachments import read_original
 from framework.paramify.client import ApiError, ErrorKind
 from framework.paramify.resources import (
     Artifact,
@@ -269,8 +270,12 @@ def _delivered_run(e: EntryDesired, obs: EntryObserved) -> bool:
 
 
 def _file_json(f: DeliveryFile) -> Dict[str, Any]:
-    return {"path": str(f.path), "original_file_name": f.original_file_name, "title": f.title, "note": f.note,
-            "effective_date": f.effective_date, "pipeline": f.pipeline}
+    result: Dict[str, Any] = {"path": str(f.path), "original_file_name": f.original_file_name, "title": f.title, "note": f.note,
+              "effective_date": f.effective_date, "pipeline": f.pipeline}
+    if f.raw_sha256 is not None:
+        result.update(raw_sha256=f.raw_sha256, raw_bytes=f.raw_bytes,
+                      attachment_root=f.attachment_root, attachment_path=f.attachment_path)
+    return result
 
 
 def _utc_now() -> str:
@@ -849,13 +854,26 @@ class DeliveryProvider:
         """
         run.already_present = [n for n in self._wanted(p) if n in present]
         to_send = [f for f in p.get("files") or [] if f["original_file_name"] not in present]
+        for item in to_send:
+            if item.get("raw_sha256") is not None:
+                try:
+                    read_original(item["attachment_root"], item["attachment_path"], item["raw_sha256"], item["raw_bytes"])
+                except OSError:
+                    run.held.append(item["original_file_name"])
+        if run.held:
+            return None
         for name in run.already_present:
             self._emit(action_id, name, "already_present", None, len(to_send), 0)
         for n, f in enumerate(to_send, 1):
             name = f["original_file_name"]
             try:
-                content = self._read(Path(f["path"]), bool(f.get("pipeline")))
+                content = (read_original(f["attachment_root"], f["attachment_path"], f["raw_sha256"], f["raw_bytes"])
+                           if f.get("raw_sha256") is not None
+                           else self._read(Path(f["path"]), bool(f.get("pipeline"))))
             except OSError as exc:
+                if f.get("raw_sha256") is not None:
+                    run.held.append(name)
+                    continue
                 run.dropped.append({"name": name, "reason": f"cannot read {name}: {exc.strerror or exc}"})
                 # An unreadable file is an error, as it is at plan time; the rest still goes in.
                 self._emit(action_id, name, "error", n, len(to_send), 0, run.dropped[-1]["reason"])
@@ -869,7 +887,10 @@ class DeliveryProvider:
                 run.uploaded.append(name)
                 outcome = "uploaded"
             except ApiError as exc:
-                if exc.kind is ErrorKind.PERMANENT:
+                if exc.kind is ErrorKind.PERMANENT and f.get("raw_sha256") is not None:
+                    run.held.append(name)
+                    outcome, reason = "held", exc.message
+                elif exc.kind is ErrorKind.PERMANENT:
                     reason = WAF_BLOCKED if exc.status == 403 else exc.message
                     run.dropped.append({"name": name, "reason": reason})
                     outcome = "dropped"

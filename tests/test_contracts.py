@@ -502,9 +502,9 @@ SUMMARY_DOCS_PENDING_MAX = 29
 MAX_DESCRIPTION_WORDS = 30
 MAX_INSTRUCTIONS_CHARS = 20_000
 MAX_FIELD_LINE_CHARS = 800
-FIELD_LINE = re.compile(r"^- (\S+) — \S")
+FIELD_LINE = re.compile(r"^- (\S+) (?:—|-) \S")
 BREAKDOWN_LINE = re.compile(r"^  - \S+ \(\S.*\)$")
-COMMAND_LINE = re.compile(r"^- \S.* — \S")
+COMMAND_LINE = re.compile(r"^- \S.* (?:—|-) \S")
 
 
 CHECKED_YAMLS = [y for y in FETCHER_YAMLS if _short(y) not in TEXT_FORMAT_PENDING]
@@ -550,7 +550,7 @@ def _text_format_problems(yaml_path: Path, spec: dict) -> list[str]:
         return problems
     if len(blocks[2]) < 2 or any(not COMMAND_LINE.match(ln) for ln in blocks[2][1:]):
         problems.append("each Commands Executed line must read '- <call> — <why>'")
-    if len(blocks[3]) > 1 or " — " not in labels[3]:
+    if len(blocks[3]) > 1 or not any(sep in labels[3] for sep in (" — ", " - ")):
         problems.append("Output must be one line: '<file> — <what it holds>'")
     rest = blocks[4:]
     if rest:

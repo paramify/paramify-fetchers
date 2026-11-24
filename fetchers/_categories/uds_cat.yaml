@@ -1,0 +1,10 @@
+display_name: UDS CAT
+description: Package attestations, SBOMs, scanner reports and policy evidence retained by UDS CAT.
+secrets:
+  - name: api_token
+    env: CAT_API_TOKEN
+    description: Existing CAT credential with read access to the selected organization's artifacts.
+requires:
+  tools: []
+  python_packages:
+    - requests

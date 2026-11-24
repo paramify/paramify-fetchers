@@ -46,6 +46,11 @@
           "description": "Output format. For an issue_report fetcher this is the format the source tool emits, and is the single source for the MIME type the uploader sends (xml and nessus are the scan-report formats; Paramify's intake accepts csv, json, xml, and nessus)."
         },
         "path": { "type": "string" },
+        "attachments": {
+          "type": "boolean",
+          "default": false,
+          "description": "Opt in to original-byte companions declared in the raw evidence attachments array. Native delivery verifies and uploads them to the same destination without JSON rewriting; not scanner intake."
+        },
         "aggregation": {
           "type": "string",
           "enum": ["per_target", "aggregate"],
@@ -212,6 +217,10 @@
   },
 
   "allOf": [
+    {
+      "if": {"properties": {"output": {"properties": {"attachments": {"const": true}}, "required": ["attachments"]}}, "required": ["output"]},
+      "then": {"properties": {"kind": {"const": "evidence"}, "output": {"properties": {"type": {"const": "json"}}}}}
+    },
     {
       "$comment": "A pipeline block names the Paramify pipeline the output feeds. Only an inventory or an issue_report has one: an evidence file goes to its evidence set alone, and a discovery fetcher's output is not uploaded.",
       "if": {

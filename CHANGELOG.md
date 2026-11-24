@@ -60,6 +60,9 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`uds_cat_package_evidence` 0.1.0** retains a pinned CAT package evidence graph, including attestations, SBOMs, all stored scanner formats, policy bundles and explicit collection gaps. Real-package qualification remains required.
+- JSON evidence fetchers can opt in to [original-file attachments](docs/evidence_attachments_guide.md), delivered through native evidence routing without changing their bytes. Existing fetchers are unchanged.
+
 - **The TUI shows which environment variables a manifest is missing, and stops a run that would fail on them.**
   - The manifest settings row has an `env` button (`✓ all set` or `✗ 2 missing`), each fetcher's status names what it
     needs (`✗ needs OKTA_API_TOKEN`), and the line under the table splits what a run needs from what only an upload needs.

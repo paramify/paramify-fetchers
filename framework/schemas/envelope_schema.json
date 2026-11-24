@@ -38,6 +38,19 @@
             "frequency": { "type": "string" }
           }
         },
+        "attachments": {
+          "type": "array",
+          "description": "Original-byte companions from an opted-in JSON evidence fetcher. Paths are relative to the run directory; native delivery verifies confinement, byte length and digest.",
+          "items": {
+            "type": "object",
+            "required": ["path", "sha256", "bytes"],
+            "properties": {
+              "path": {"type": "string", "pattern": "^_attachments/"},
+              "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+              "bytes": {"type": "integer", "minimum": 0}
+            }
+          }
+        },
         "pipeline": {
           "type": "object",
           "description": "The Paramify pipeline this output feeds, copied from the fetcher's `pipeline:` block. Present only when the fetcher declares one.",
