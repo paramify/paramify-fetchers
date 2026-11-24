@@ -450,7 +450,22 @@ def test_scope_level(scope, expected):
         ("https://token.actions.githubusercontent.com", "github_actions"),
         ("https://vstoken.dev.azure.com/abc", "azure_devops"),
         ("https://eastus.oic.prod-aks.azure.com/tenant/guid/", "aks_workload_identity"),
+        ("https://oidc.prod-aks.azure.com/guid/", "aks_workload_identity"),
+        ("https://app.vstoken.visualstudio.com/abc", "azure_devops"),
+        ("https://accounts.google.com", "google"),
+        ("https://cognito-identity.amazonaws.com", "aws"),
+        ("HTTPS://Token.Actions.GitHubUserContent.com", "github_actions"),
+        ("token.actions.githubusercontent.com", "github_actions"),
         ("https://example.com", "other"),
+        (None, "other"),
+        ("", "other"),
+        ("https://[bad", "other"),
+        # A known host name in the path, query or a longer host name is not that issuer.
+        ("https://evil.example/token.actions.githubusercontent.com", "other"),
+        ("https://evil.example/?next=accounts.google.com", "other"),
+        ("https://accounts.google.com.evil.example", "other"),
+        ("https://notamazonaws.com", "other"),
+        ("https://evil.example/oic.prod-aks.azure.com", "other"),
     ],
 )
 def test_issuer_kind(issuer, expected):

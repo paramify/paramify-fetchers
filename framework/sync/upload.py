@@ -2,7 +2,7 @@
 
 This is the integration layer, so unlike the engine it knows the Paramify API.
 It loads the uploader config, builds the providers (evidence sets, then the
-validator sync when asked, then delivery), checks once whether the workspace
+validator sync when asked, then delivery, then the frequency of sets that exist), checks once whether the workspace
 takes batches (when it does not, every entry is sent direct and the plan says
 so in a note), plans and applies under the run lock, and maps the outcomes to
 what front-ends have always read: the `uploaded` / `skipped_duplicate` /
@@ -28,14 +28,11 @@ from dotenv import load_dotenv
 from framework import yaml_io
 from framework.config_loader import discover_fetchers
 from framework.custom_tags import Tagger, category_display_names, resolve_tag_policy
-from framework.paramify.client import Client, base_url_error
+from framework.paramify.client import Client
+from framework.paramify.connection import client_for
+from framework.paramify.connection import settings as paramify_settings
 from framework.paramify.resources import Reader, Resources
 from framework.paramify.version import Capability, delivery_capability
-from framework.paramify_auth import (
-    missing_token_error,
-    resolve_base_url,
-    resolve_upload_token,
-)
 from framework.run_files import is_evidence_file
 from framework.runner import manifest_loader
 from framework.sync import engine
@@ -47,7 +44,9 @@ from framework.sync.providers.delivery import (
 )
 from framework.sync.providers.desired import settings_notes
 from framework.sync.providers.evidence_sets import (
+    FREQUENCY,
     TAGS_UNAVAILABLE,
+    EvidenceFrequencyProvider,
     EvidenceSetsProvider,
 )
 from framework.sync.providers.legacy_validators import LegacyValidatorsProvider
@@ -130,9 +129,9 @@ def manifest_notes(run_dir: Path, root: Path, manifest_path: Optional[Path],
                for e, key in zip(parsed.entries, manifest_loader.entry_keys(parsed.entries))}
     except Exception:  # noqa: BLE001 — advice only; a bad manifest is reported where it is used
         return []
-    if not isinstance(run_settings, dict):
-        return []
-    return settings_notes(run_settings, now, stack_override=stack_override, owner_override=owner_override)
+    return settings_notes(run_settings if isinstance(run_settings, dict) else {}, now,
+                          stack_override=stack_override, owner_override=owner_override,
+                          run_schedule=meta.get("schedule"), manifest_schedule=parsed.schedule)
 
 
 # ---- setup ------------------------------------------------------------------ #
@@ -151,12 +150,12 @@ class _Setup:
         self.config_path = config_path
         # An in-memory config replaces the file: nothing is read or written.
         self.config = upload_cfg if upload_cfg is not None else load_config(config_path)
-        self.token = token
         # Config wins, then an explicit argument, then the environment.
-        self.base_url, _ = resolve_base_url((self.config.get("paramify") or {}).get("base_url") or base_url)
-        url_error = base_url_error(self.base_url)
-        if url_error:
-            raise ValueError(url_error)
+        self.settings = paramify_settings(self.config, base_url=base_url, token=token)
+        self.base_url = self.settings.base_url
+        url_errors = self.settings.errors(need_token=False)
+        if url_errors:
+            raise ValueError(url_errors[0])
         self.files = [p for p in sorted(self.run_dir.glob("*.json"))
                       if is_evidence_file(p) and (not only_file or p.name == only_file)]
         if not self.files:
@@ -167,10 +166,10 @@ class _Setup:
         self.notes: List[str] = []
 
     def client(self) -> Client:
-        token = self.token or resolve_upload_token()[0]
-        if not token:
-            raise ValueError(missing_token_error())
-        return Client(token, self.base_url)
+        problems = self.settings.errors(need_token=True)
+        if problems:
+            raise ValueError(problems[0])
+        return client_for(self.settings)
 
     def providers(
         self,
@@ -194,16 +193,19 @@ class _Setup:
                 online=online, custom_tags=custom_tags, on_event=on_event,
             ))
         providers.append(delivery)
+        # After delivery (its runs_after): a frequency change may rebuild a set's requests.
+        providers.append(EvidenceFrequencyProvider())
         return providers, delivery
 
 
 def _plan(providers: Sequence[Any], ctx: Any, reader: Any, capability: Optional[Capability] = None,
           notes: Sequence[str] = ()) -> Plan:
-    """The engine's plan, less the tags of sets that get no delivery, with a note when batches are off
-    and the `notes` given (see manifest_notes).
+    """The engine's plan, less the tags and frequency changes of sets that get no delivery, with a
+    note when batches are off and the `notes` given (see manifest_notes).
 
-    The tag action runs before delivery, so without this an entry that is
-    refused (no request, a stack mismatch) would still tag its set.
+    A set's tags and frequency are planned apart from its delivery, so without
+    this an entry that is refused (no request, a stack mismatch) would still tag
+    its set and change its frequency.
     """
     plan = engine.plan(providers, ctx, reader)
     if capability is not None and not capability.batches:
@@ -216,7 +218,8 @@ def _plan(providers: Sequence[Any], ctx: Any, reader: Any, capability: Optional[
     refused = {ref for ref, vs in verbs.items() if vs and all(v == "refuse" for v in vs)}
     plan.actions = [a for a in plan.actions
                     if not (a.provider == "evidence_sets" and a.verb == "tag"
-                            and a.key.startswith("tags/") and a.key[len("tags/"):] in refused)]
+                            and a.key.startswith("tags/") and a.key[len("tags/"):] in refused)
+                    and not (a.provider == FREQUENCY and a.verb == "update" and a.key in refused)]
     return plan
 
 
@@ -318,7 +321,7 @@ class _Report:
         self.emit(ev)
 
     def _start(self, action: Action) -> None:
-        """Files known at plan time: skipped ones and plan-time WAF drops."""
+        """Files known at plan time: the skipped ones."""
         if action.id in self._started:
             return
         self._started.add(action.id)
@@ -327,8 +330,6 @@ class _Report:
             if outcome == "error":
                 self.file_errors += 1
             self.file(action, s["original_file_name"], outcome, s.get("reason"))
-        for d in action.payload.get("dropped") or []:
-            self.file(action, d["original_file_name"], "dropped", d.get("reason"))
 
     # -- dry run ---------------------------------------------------------- #
     def planned(self) -> None:
@@ -397,11 +398,14 @@ class _Report:
 
     def summary(self, outcomes: Optional[Sequence[Outcome]]) -> Dict[str, Any]:
         entries = self.entries(outcomes)
+        failed_changes = 0  # frequency changes that failed: the files went, the change did not
         if outcomes is None:
             refused = [a.id for a in self.plan.actions if a.verb == "refuse"]
             ok = not refused and self.file_errors == 0
         else:
             refused = [o.action_id for o in outcomes if o.status == "refused"]
+            failed_changes = sum(1 for o in outcomes
+                                 if o.status == "failed" and o.action_id.startswith(f"{FREQUENCY}/"))
             # Tags never block an upload; a failed set or validator sync does.
             others_ok = all(
                 o.status in ("applied", "noop") for o in outcomes
@@ -413,7 +417,7 @@ class _Report:
             "uploaded": self.counts["uploaded"],
             "skipped_duplicate": self.counts["skipped_duplicate"],
             "skipped_failed": self.counts["skipped_failed"],
-            "errors": self._errors(entries, refused, applied=outcomes is not None),
+            "errors": self._errors(entries, refused, applied=outcomes is not None) + failed_changes,
             "dropped": self.counts["dropped"],
             "ok": ok,
             "plan": self.plan.to_json(),
@@ -505,7 +509,7 @@ def run_upload(
                    upload_cfg=upload_cfg, token=token, base_url=base_url, owner=owner)
     setup.notes = manifest_notes(setup.run_dir, root, manifest_path, stack, owner)
     policy = resolve_tag_policy(setup.config, override_off=None if custom_tags else NO_TAGS)
-    report = _Report(emit, dry_run, Tagger(None, "", policy=policy, display_names=category_display_names(root)))
+    report = _Report(emit, dry_run, Tagger(None, policy=policy, display_names=category_display_names(root)))
     base = {"run_dir": str(setup.run_dir), "base_url": setup.base_url, "dry_run": dry_run,
             "files": len(setup.files)}
 

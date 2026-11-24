@@ -30,10 +30,12 @@ from textual.screen import Screen
 from textual.widgets import Static
 
 from framework import api
-from framework.paramify_auth import READ_TOKEN_ENV, UPLOAD_TOKEN_ENV
+from framework.paramify_auth import UPLOAD_TOKEN_ENV
 from framework.tui import palette
+from framework.tui.components.chrome import UpdateNotice
 from framework.tui.components.table import DataTable
 from framework.tui.modals import ConfirmModal, FormModal, PickerModal
+from framework.tui.words import plural
 
 # The stack step's "skip" choice; no stack id can contain a NUL.
 _NO_STACK = "\0none"
@@ -145,6 +147,7 @@ class WelcomeScreen(Screen):
             with Center():
                 yield Static(LOGO, id="welcome-logo", markup=False)
             yield Static(self._tagline(), id="welcome-tagline")
+            yield UpdateNotice(id="welcome-update")
             yield Static("", id="welcome-checks")
             with Container(id="welcome-panel"):
                 yield DataTable(id="welcome-manifests")
@@ -230,26 +233,27 @@ class WelcomeScreen(Screen):
             cat = getattr(self.app, "catalog_data", None)
             if cat:
                 results[1] = (
-                    1, f"✓ {cat['fetcher_count']} fetchers · {len(cat['categories'])} categories"
+                    1, f"✓ {plural(cat['fetcher_count'], 'fetcher')} · {plural(len(cat['categories']), 'category', 'categories')}"
                 )
             else:
                 results[1] = (-2, "✗ load failed")
             uploader = Path(root) / "uploaders" / "paramify_evidence"
-            results[3] = (1, "✓ paramify_evidence") if uploader.is_dir() else (-1, "not present")
+            results[3] = (1, "✓ ready") if uploader.is_dir() else (-1, "not present")
         n = len(self._manifests or [])
         results[2] = (1, f"✓ {n} discovered") if n else (-1, "none yet")
         self._check_results = results
         cat = getattr(self.app, "catalog_data", None)
         self._summary_parts = [
-            f"{cat['fetcher_count']} fetchers" if cat else "catalog unavailable",
-            f"{n} manifest{'' if n == 1 else 's'}" if n else "no manifests yet",
-            "uploader ready" if results[3][0] == 1 else "no uploader",
+            plural(cat["fetcher_count"], "fetcher") if cat else "catalog unavailable",
+            plural(n, "manifest") if n else "no manifests yet",
         ]
+        if results[3][0] != 1:
+            self._summary_parts.append("no uploader")
 
     def _summary_line(self) -> Text:
         text = Text()
         text.append("✓ ", style=palette.OK)
-        text.append("workspace ok · " + " · ".join(self._summary_parts), style=palette.MUTED)
+        text.append(" · ".join(self._summary_parts), style=palette.MUTED)
         return text
 
     def _render_checks(self, t: float) -> Text:
@@ -324,14 +328,14 @@ class WelcomeScreen(Screen):
 
     def _tagline(self) -> Text:
         t = Text()
-        t.append("fetcher", style="#BB9AF7 bold")
+        t.append("fetchers", style="#BB9AF7 bold")
         t.append(" — collect compliance evidence from your stack", style="#565F89")
         return t
 
     def _panel_title(self) -> str:
         return (
-            "select a run manifest" if self._manifests
-            else "no manifests yet — add one under manifests/ or press n"
+            "manifests" if self._manifests
+            else "no manifests yet · press n to create one"
         )
 
     def _hints(self) -> Text:
@@ -376,7 +380,7 @@ class WelcomeScreen(Screen):
         screen and a local file should not wait on the network.
         """
         if not self.app.root_path:
-            self.notify("Cannot create a manifest: repo root not found.", severity="error")
+            self.notify("Couldn't create a manifest: the repo root wasn't found.", severity="error")
             return
         self._ask_name("")
 
@@ -400,19 +404,19 @@ class WelcomeScreen(Screen):
                 self._load_stacks(name)
             else:
                 self._ask_stack(name, [], notice=(
-                    "No Paramify API token found, so the workspace's stacks can't be listed.\n"
-                    f"Set {UPLOAD_TOKEN_ENV} (or {READ_TOKEN_ENV}), then pick a stack on the manifest screen."
+                    "No Paramify API token, so stacks can't be listed.\n"
+                    f"Set {UPLOAD_TOKEN_ENV}, then pick a stack on the manifest screen."
                 ))
 
         self.app.push_screen(
             FormModal(
                 "New manifest",
                 {"new manifest": [{
-                    "key": "name", "label": "file name", "kind": "text", "value": typed,
+                    "key": "name", "label": "name", "kind": "text", "value": typed,
                     "placeholder": "e.g. aws-prod", "required": True,
-                    "help": "created under manifests/",
+                    "help": "saved under manifests/",
                 }]},
-                subtitle="Name it, then choose the Paramify stack it uploads to",
+                subtitle="Then pick the Paramify stack it uploads to.",
                 save_label="Next",
             ),
             done,
@@ -424,8 +428,8 @@ class WelcomeScreen(Screen):
             stacks = api.list_stacks(self.app.root_path)
         except Exception as exc:
             self.app.call_from_thread(self._ask_stack, name, [], notice=(
-                f"Could not list the workspace's stacks:\n{exc}\n"
-                "Check the API token and the Paramify URL, then pick a stack on the manifest screen."
+                f"Couldn't list stacks: {exc}\n"
+                "Check the API token and URL, then pick a stack on the manifest screen."
             ))
             return
         self.app.call_from_thread(self._ask_stack, name, stacks)
@@ -440,7 +444,8 @@ class WelcomeScreen(Screen):
             stack = None if choice in (None, _NO_STACK) else choice
             self._create(name, stack, names.get(stack) if stack else None)
 
-        skip = "create without a stack — set it later" if notice else "skip — set it later"
+        # With no list to pick from, the one choice must not read as cancelling.
+        skip = "Create it without a stack (set it later)" if notice else "Skip: set it later"
         options = [(_NO_STACK, skip)]
         options += [(s["id"], f"{s['name']}  ({s['id']})") for s in stacks]
         self.app.push_screen(
@@ -455,7 +460,7 @@ class WelcomeScreen(Screen):
             self.notify(f"{name} already exists.", severity="warning")
             return
         except (ValueError, OSError) as exc:
-            self.notify(f"Could not create manifest: {exc}", severity="error")
+            self.notify(f"Couldn't create the manifest: {exc}", severity="error")
             return
         self.post_message(ManifestSelected(str(path)))  # open the new one
 
@@ -470,12 +475,12 @@ class WelcomeScreen(Screen):
             try:
                 Path(path).unlink()
             except OSError as exc:
-                self.notify(f"Could not delete: {exc}", severity="error")
+                self.notify(f"Couldn't delete it: {exc}", severity="error")
                 return
             self.notify(f"Deleted {Path(path).name}.")
             self._reload_table()
 
-        self.app.push_screen(ConfirmModal(f"Delete '{Path(path).name}' (the file on disk)?"), done)
+        self.app.push_screen(ConfirmModal(f"Delete {Path(path).name}? This removes the file."), done)
 
     def _reload_table(self) -> None:
         self._manifests = api.list_manifests(self.app.root_path) if self.app.root_path else []

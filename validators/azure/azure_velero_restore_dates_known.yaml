@@ -1,0 +1,21 @@
+key: azure_velero_restore_dates_known
+name: 'Azure Velero: Every Restore Has a Known Date'
+type: AUTOMATED
+role: integrity
+source: community
+statement: >
+  Every restore result has a readable date (restores_date_unknown is 0). A restore without a date
+  never counts as recent. Does not check whether the collection run succeeded.
+
+regex: '"restores_date_unknown":\s*(?<restores_date_unknown>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # restores_date_unknown
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-VELERO-BACKUPS

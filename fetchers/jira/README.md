@@ -32,10 +32,24 @@ Declared once on the category ([`_categories/jira.yaml`](../_categories/jira.yam
 Use a dedicated service account. It needs **Browse Projects** on every project
 you want in the evidence — projects it cannot see are simply absent, not
 reported as errors — and, for Jira Service Management sites, agent access to the
-service desks to be listed. `jira_site_inventory` and `jira_remediation_items`
-need no Jira administrator permission; `jira_audit_records` and
-`jira_access_roles` need **Administer Jira**, so run them under a separate admin
-collector account (override `secrets:` for those two in the manifest).
+service desks to be listed. `jira_site_inventory`, `jira_remediation_items`,
+`jira_change_requests` and `jira_incident_postmortems` need no Jira
+administrator permission; `jira_audit_records` and `jira_access_roles` need
+**Administer Jira**, so run them under a separate admin collector account
+(override `secrets:` for those two in the manifest).
+
+### Without Jira admin access
+
+The **Administer Jira** requirement is on the account, not the token. Jira
+checks it on the server for the audit log (`GET /rest/api/3/auditing/record`),
+application roles and other projects' role members, and no token scope can
+replace it. If your policy does not give a service account Jira admin, leave
+`jira_audit_records` and `jira_access_roles` out of the manifest. The other four
+fetchers run with Browse Projects and the read scopes below, with no admin
+access. The evidence those two would have collected (the Jira audit log, Jira
+admin group membership and privileged project grants) then has to come from
+another source, for example your identity provider's group membership or an
+audit log export from Atlassian Administration.
 
 ### Read-only scoped token (recommended)
 
@@ -61,12 +75,36 @@ A scoped token only works through the API gateway. Find the site's `cloudId` at
 required. Scopes limit what the token can do; they do not grant permissions, so
 the admin collector account still needs Administer Jira.
 
+#### `401 Unauthorized; scope does not match`
+
+Jira gives this answer in two cases:
+
+- **`JIRA_BASE_URL` is the site URL** (`https://<site>.atlassian.net`) and the
+  token is scoped. Every call fails, and adding scopes does not help. Switch
+  `JIRA_BASE_URL` to the gateway URL above. A fetcher run stops at the first call
+  with `bad_config` and gives the `tenant_info` link to use.
+- **Through the gateway:** the token lacks a scope that call needs. The run
+  records the call as `not_authorized`. Add the scope from the table above. Do
+  not add `manage:jira-configuration` to fix it. If *every* call fails through
+  the gateway, check the four scopes `GET /rest/api/3/myself` needs first
+  (`read:application-role:jira`, `read:group:jira`, `read:user:jira`,
+  `read:avatar:jira`). Each fetcher calls it first, and a token made only for
+  browsing projects usually lacks them.
+
+To test a scoped token by hand, call the gateway, not the site, starting with `/myself`:
+
+```sh
+curl -sS -u "$JIRA_EMAIL:$JIRA_API_TOKEN" -H 'Accept: application/json' \
+  "https://api.atlassian.com/ex/jira/<cloudId>/rest/api/3/myself"
+```
+
 ### `jira_site_inventory`
 
 | Config key | Env | Default | Description |
 |---|---|---|---|
 | `lookback_days` | `JIRA_LOOKBACK_DAYS` | `90` | Collect issues updated in the last N days |
 | `jql` | `JIRA_ISSUE_JQL` | — | Explicit JQL; overrides `lookback_days` |
+| `projects` | `JIRA_PROJECTS` | none | Comma-separated project keys or exact names (case-insensitive). Limits projects, issue types, statuses, service desks and issues to these projects; see below |
 | `max_issues` | `JIRA_MAX_ISSUES` | `2000` | Issue cap; `metadata.issues_truncated` records whether it was hit |
 
 ### `jira_remediation_items`
@@ -243,6 +281,20 @@ Change and incident tickets are picked out by issue-type name — the Jira Servi
 Management defaults (`Change`, `Normal/Standard/Emergency Change`, `Incident`,
 `Major Incident`, …). A site that names them differently still has every issue
 in `issues`; narrow `jql` to the relevant projects to shape the evidence.
+
+With `projects` set, the inventory covers only the named projects. The other
+projects are left out and only counted (`metadata.projects_left_out`); issue
+types are the ones those projects list, statuses come from
+`GET /rest/api/3/project/{id}/statuses` for each of them (instead of the
+site-wide `/status`), and service desks are those of the named projects.
+Priorities stay site-wide (`metadata.priorities_scope: site`). The issue query
+becomes `project in (<ids>) AND (<jql or lookback>)`, so a `jql` that names
+other projects can narrow the result but never widen it; `metadata.jql` is the
+query that ran (null when the run stopped before any query). A value is matched
+as a project key first and as a name only when it is no project's key, and
+`metadata.projects_selected` lists the keys that were matched. A name that matches no project the account can see fails the
+run as `bad_config` before any issue is read, and if the project list cannot be
+read in full nothing else is collected.
 
 ## Output
 

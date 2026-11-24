@@ -5,9 +5,10 @@ Walks `fetchers/<category>/<short_name>/fetcher.yaml` and
 starts with `_` (e.g. _shared, _categories, _template).
 """
 
+import copy
 import json
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 
 from jsonschema import Draft202012Validator
 
@@ -59,14 +60,61 @@ def _fetcher_dirs(tree_root: Path):
                 yield fetcher_dir
 
 
+#: A file's identity for the caches below: it changes when the file is edited or replaced.
+_Stamp = Tuple[int, int, int]
+
+
+def _stamp(path: Path) -> _Stamp:
+    st = path.stat()
+    return (st.st_mtime_ns, st.st_size, st.st_ino)
+
+
+#: {schema path: (stamp, validator)}.
+_validators: Dict[Path, Tuple[_Stamp, Draft202012Validator]] = {}
+#: {fetcher.yaml path: (its stamp, the schema's stamp, its parsed and schema-valid data)}.
+_valid_fetcher_yaml: Dict[Path, Tuple[_Stamp, _Stamp, dict]] = {}
+
+
+def _fetcher_validator(repo_root: Path) -> Tuple[_Stamp, Draft202012Validator]:
+    path = repo_root / "framework" / "schemas" / "fetcher_schema.json"
+    stamp = _stamp(path)
+    hit = _validators.get(path)
+    if hit is None or hit[0] != stamp:
+        hit = (stamp, Draft202012Validator(json.loads(path.read_text())))
+        _validators[path] = hit
+    return hit
+
+
+def _load_valid_fetcher_yaml(yaml_path: Path, schema_stamp: _Stamp,
+                             validator: Draft202012Validator) -> dict:
+    """The parsed fetcher.yaml, checked against the schema. Raises ValueError if it is invalid.
+
+    Parsing and checking 350 files takes about 0.13s, and the TUI discovers
+    several times per start and on every reload. A file is read again only when
+    it or the schema changes. Each caller gets its own copy, so a caller that
+    changes the data or the Fetcher built from it changes nothing for the next.
+    """
+    stamp = _stamp(yaml_path)
+    hit = _valid_fetcher_yaml.get(yaml_path)
+    if hit is None or hit[0] != stamp or hit[1] != schema_stamp:
+        data = yaml_io.load_path(yaml_path)
+        errors = list(validator.iter_errors(data))
+        if errors:
+            _valid_fetcher_yaml.pop(yaml_path, None)
+            detail = "\n".join(f"  {e.message}" for e in errors)
+            raise ValueError(f"{yaml_path}: schema validation failed:\n{detail}")
+        hit = (stamp, schema_stamp, data)
+        _valid_fetcher_yaml[yaml_path] = hit
+    return copy.deepcopy(hit[2])
+
+
 def discover_fetchers(repo_root: Path) -> Dict[str, Fetcher]:
     """Walk fetchers/*/*/fetcher.yaml and comparators/*/*/fetcher.yaml into one namespace.
 
     Raises ValueError on schema-invalid yaml or duplicate names. A comparator's
     inputs are checked by `validate` and `run`, not here.
     """
-    schema = _load_schema(repo_root)
-    validator = Draft202012Validator(schema)
+    schema_stamp, validator = _fetcher_validator(repo_root)
 
     fetchers: Dict[str, Fetcher] = {}
     trees = [repo_root / "fetchers"]
@@ -79,12 +127,7 @@ def discover_fetchers(repo_root: Path) -> Dict[str, Fetcher]:
             if not yaml_path.exists():
                 continue
 
-            data = yaml_io.load_path(yaml_path)
-            errors = list(validator.iter_errors(data))
-            if errors:
-                detail = "\n".join(f"  {e.message}" for e in errors)
-                raise ValueError(f"{yaml_path}: schema validation failed:\n{detail}")
-
+            data = _load_valid_fetcher_yaml(yaml_path.resolve(), schema_stamp, validator)
             fetcher = _parse_fetcher(data, fetcher_dir)
             if fetcher.name in fetchers:
                 raise ValueError(
@@ -184,6 +227,7 @@ def _parse_fetcher(data: dict, path: Path) -> Fetcher:
         evidence_set=evidence_set,
         ksis=list(data.get("ksis") or []),
         kind=data.get("kind", "evidence"),
+        source=data.get("source") or "paramify",
         issue_report=issue_report,
         pipeline=pipeline,
         depends_on=list(data.get("depends_on") or []),

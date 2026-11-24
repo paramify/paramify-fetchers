@@ -1,0 +1,44 @@
+# What `paramify update` shows for changes on main since the last release.
+# Add a row in the pull request that makes the change, and only when it breaks
+# something or is worth announcing. Format and rules: releases/README.md.
+version: unreleased
+highlights:
+  - tag: cli
+    title: paramify update brings your clone up to date, and checks it first
+    detail: Follows main or a pinned release, and tells you which of your fetchers change
+    try: paramify update --check
+  - tag: cli
+    title: paramify status shows what each fetcher has in Paramify
+    detail: Evidence set, artifact count and validators for every fetcher in a manifest
+    try: paramify status <manifest>
+  - tag: fetcher
+    title: GitHub, Oracle Cloud, Qualys and Sophos categories
+    detail: Over fifty new fetchers, plus many more for Azure
+    try: paramify catalog
+  - tag: new
+    title: paramify upload --plan shows what an upload would do
+    detail: Reads the workspace and changes nothing; uploads now go out as batches
+    try: paramify upload --plan
+  - tag: cli
+    title: Shell tab completion
+    try: paramify --install-completion
+  - tag: breaking
+    title: An inventory fetcher needs a pipeline block in fetcher.yaml
+    fix: "Add pipeline: {type: inventory, id_scheme: <scheme>} to your kind: inventory fetchers"
+    custom_fetchers: true
+  - tag: breaking
+    title: Inventory records must carry asset_type
+    fix: Set a non-empty asset_type, such as endpoint, on every record your fetcher writes
+    custom_fetchers: true
+  - tag: breaking
+    title: Datadog evidence fields were removed, renamed or changed meaning
+    fix: Re-check validators that read Datadog fields; a failed page now gives null counts
+    fetchers: [datadog_*]
+  - tag: tui
+    title: The TUI tells you when an update is waiting, and applies it
+    detail: Press U for the plan paramify update shows; apply it or roll back from there
+    try: paramify tui
+  - tag: fetcher
+    title: GitHub credentials evidence no longer needs Secrets read
+    detail: Actions secret names and ages are collected only when the token has that grant
+    fetchers: [github_non_user_credentials]

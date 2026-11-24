@@ -1,0 +1,14 @@
+validator: github_image_signing_ran_successfully
+cases:
+- name: compliant
+  expect: PASS
+  artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"signing_workflow_runs_successful":3}}}'
+- name: none
+  expect: FAIL
+  artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"signing_workflow_runs_successful":0}}}'
+- name: unread
+  expect: FAIL
+  artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"signing_workflow_runs_successful":null}}}'
+- name: renamed
+  expect: FAIL
+  artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"signing_workflow_runs_successful_renamed":3}}}'

@@ -85,7 +85,7 @@ RichLog:focus {
     padding: 0 1;
 }
 #app-header-left { width: auto; }
-#app-header-crumb { width: 1fr; text-align: center; color: #7DCFFF; }
+#app-header-crumb { width: 1fr; min-width: 6; height: 1; text-wrap: nowrap; text-overflow: ellipsis; text-align: center; color: #7DCFFF; }
 #app-header-clock { width: auto; color: $text-muted; }
 
 #app-footer {
@@ -189,8 +189,14 @@ ManifestPanel {
     padding: 0 1 0 0;
 }
 
+/* One column: the row holds stack, owner, frequency and env and still fits 120. */
 #manifest-top .after-button {
-    margin-left: 2;
+    margin-left: 1;
+}
+
+/* The env button while a required variable has no value. */
+#manifest-top Button.env-missing {
+    color: $text-warning;
 }
 
 #manifest-output-dir {
@@ -217,6 +223,8 @@ ManifestPanel.no-detail #manifest-entries-panel { width: 1fr; }
 
 #manifest-issues {
     height: auto;
+    text-wrap: nowrap;  /* a wrapped line takes a row from the catalog */
+    text-overflow: ellipsis;
     border-top: solid $panel;
     padding: 0 1;
 }
@@ -337,6 +345,10 @@ PipelinesPage {
 #pipelines-fetchers { height: auto; max-height: 10; }
 #pipelines-log-panel { height: 1fr; min-height: 6; margin: 1 1 0 1; }
 #pipelines-log { height: 1fr; }
+/* No scan-report fetchers: only the send panel's one-line note shows. */
+PipelinesPage.no-scans #pipelines-fetchers-panel,
+PipelinesPage.no-scans #pipelines-log-panel,
+PipelinesPage.no-scans #issues-actions { display: none; }
 #pipelines-banner {
     height: auto;
     padding: 0 1;
@@ -383,8 +395,9 @@ ModalScreen {
     padding-bottom: 1;
 }
 
-/* Why a picker's list is short: no token, an API error. */
-#picker-notice {
+/* Why a picker's list is short: no token, an API error. Why the
+   environment view opened on its own: a run that stopped. */
+#picker-notice, #env-notice {
     color: $warning;
     border-left: tall $warning;
     padding: 0 1;
@@ -416,12 +429,37 @@ ModalScreen {
     padding-top: 1;
 }
 
-#targets-keys {
+#targets-keys, #env-keys {
     color: $text-muted;
+}
+
+/* Environment view: the variables a run reads, sized to them up to a cap,
+   with the count above and the key legend pinned under. */
+#modal-card.env {
+    width: 76;
+    max-width: 95%;
+    max-height: 95%;
+}
+
+#modal-card.env #modal-body {
+    max-height: 45vh;
+    padding: 0;
+    margin: 1 0;
+}
+
+#env-unmapped, #env-others {
+    padding-bottom: 1;
 }
 
 #preview-text {
     width: 1fr;
+}
+
+/* ReportModal: the question under what will be sent. */
+#report-question {
+    width: 100%;
+    padding-top: 1;
+    text-style: bold;
 }
 
 #modal-buttons {
@@ -469,3 +507,23 @@ ModalScreen {
     margin-top: 0;
 }
 
+/* ---- update: the quiet notice, and the screen that applies it ---- */
+UpdateNotice {
+    width: auto;
+    height: 1;
+    padding: 0 1;
+    text-wrap: nowrap;
+}
+#welcome-update { width: 100%; text-align: center; padding: 0; }
+
+#update-root { padding: 1 2; }
+#update-title { padding-bottom: 1; }
+#update-body { height: 1fr; }
+#update-header { padding-bottom: 1; }
+#update-check { height: auto; padding-bottom: 1; }
+.update-heading { height: auto; }
+#update-fetchers { height: auto; max-height: 10; margin-bottom: 1; }
+#update-breaking, #update-new, #update-rest { height: auto; padding-bottom: 1; }
+#update-result { height: auto; padding-top: 1; }
+#update-buttons { height: auto; padding-top: 1; }
+#update-buttons Button { margin-right: 2; }

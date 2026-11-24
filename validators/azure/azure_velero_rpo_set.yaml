@@ -1,0 +1,19 @@
+key: azure_velero_rpo_set
+name: 'Azure Velero: Recovery Point Objective Is Configured'
+type: AUTOMATED
+role: configuration
+source: community
+statement: >
+  A recovery point objective is configured (rpo_hours is a whole number above 0). Fails while
+  rpo_hours is not set, which marks the objective as unset rather than a backup as broken. Does not
+  check whether the collection run succeeded.
+
+regex: '"rpo_hours":\s*(?<rpo_hours>[1-9]\d*)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-VELERO-BACKUPS

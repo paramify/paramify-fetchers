@@ -1,0 +1,14 @@
+validator: github_code_scanning_all_repositories_analysed
+cases:
+- name: compliant
+  expect: PASS
+  artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"repositories_not_analysed":[]}}}'
+- name: listed
+  expect: FAIL
+  artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"repositories_not_analysed":["example-repo"]}}}'
+- name: unread
+  expect: FAIL
+  artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"repositories_not_analysed":null}}}'
+- name: renamed
+  expect: FAIL
+  artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"repositories_not_analysed_renamed":[]}}}'

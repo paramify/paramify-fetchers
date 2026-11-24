@@ -352,6 +352,90 @@ def test_bad_base_url_fails_before_any_call(monkeypatch, tmp_path, name):
     assert status["code"] == "bad_config" and "evil.example" not in status["error"]
 
 
+SCOPE_401 = {"code": 401, "message": "Unauthorized; scope does not match"}
+JQL_ENV = {
+    "JIRA_REMEDIATION_JQL": "labels = x",
+    "JIRA_CHANGE_JQL": "labels = x",
+    "JIRA_INCIDENT_JQL": "labels = x",
+}
+ALL_JIRA = ["site_inventory", "remediation_items", "audit_records", "access_roles",
+            "change_requests", "incident_postmortems"]
+
+
+def _gateway_run(monkeypatch, tmp_path, name, router, base_url):
+    calls = []
+    monkeypatch.setattr("time.sleep", lambda s: None)
+
+    def fake_request(self, method, url, params=None, json=None, timeout=None, **kw):
+        assert url.startswith(base_url)
+        path = url[len(base_url):]
+        calls.append(path)
+        status, body = router(method, path)
+        return FakeResponse(status, body)
+
+    monkeypatch.setattr(requests.Session, "request", fake_request)
+    for k, v in {"JIRA_BASE_URL": base_url, "JIRA_EMAIL": "svc@example.com", "JIRA_API_TOKEN": "t",
+                 "EVIDENCE_DIR": str(tmp_path), "FETCHER_STATUS_FILE": str(tmp_path / "s.json"),
+                 **JQL_ENV}.items():
+        monkeypatch.setenv(k, v)
+    code = load(name).main()
+    return code, calls, json.loads((tmp_path / "s.json").read_text())
+
+
+@pytest.mark.parametrize("name", ALL_JIRA)
+def test_scoped_token_at_site_url_says_to_use_the_gateway(monkeypatch, tmp_path, name):
+    """A scoped token sent to the site URL gets 'scope does not match' on every call."""
+    code, calls, status = _gateway_run(
+        monkeypatch, tmp_path, name, lambda m, p: (401, SCOPE_401), "https://example.atlassian.net"
+    )
+    assert code == 1 and len(calls) == 1  # stops at the first call, not one failure per endpoint
+    assert status["code"] == "bad_config"
+    assert "https://api.atlassian.com/ex/jira/<cloudId>" in status["error"]
+    assert "https://example.atlassian.net/_edge/tenant_info" in status["error"]
+
+
+def test_scoped_token_at_gov_site_url_names_the_gov_gateway(monkeypatch, tmp_path):
+    _, _, status = _gateway_run(
+        monkeypatch, tmp_path, "audit_records", lambda m, p: (401, SCOPE_401),
+        "https://example.atlassian-us-gov-mod.net",
+    )
+    assert status["code"] == "bad_config"
+    assert "https://api.atlassian-us-gov-mod.com/ex/jira/<cloudId>" in status["error"]
+
+
+def test_scope_mismatch_through_the_gateway_is_a_missing_scope(monkeypatch, tmp_path):
+    """Through the gateway the URL is right; the token lacks a scope for one call."""
+    def router(method, path):
+        if path == "/rest/api/3/myself":
+            return 200, ME
+        return 401, SCOPE_401
+
+    code, _, status = _gateway_run(
+        monkeypatch, tmp_path, "audit_records", router,
+        "https://api.atlassian.com/ex/jira/eadac007-8666-4024-a026-0bfb4d34aa2e",
+    )
+    assert code == 1 and status["code"] == "not_authorized"
+    assert "lacks a scope" in status["error"] and "tenant_info" not in status["error"]
+
+
+def test_scope_mismatch_on_first_gateway_call_is_not_a_bad_url(monkeypatch, tmp_path):
+    code, calls, status = _gateway_run(
+        monkeypatch, tmp_path, "remediation_items", lambda m, p: (401, SCOPE_401),
+        "https://api.atlassian.com/ex/jira/eadac007-8666-4024-a026-0bfb4d34aa2e",
+    )
+    assert code == 1 and len(calls) == 1
+    assert status["code"] == "not_authorized" and "lacks a scope" in status["error"]
+
+
+def test_plain_401_is_still_auth_failed(monkeypatch, tmp_path):
+    _, _, status = _gateway_run(
+        monkeypatch, tmp_path, "audit_records",
+        lambda m, p: (401, {"errorMessages": ["Client must be authenticated"]}),
+        "https://example.atlassian.net",
+    )
+    assert status["code"] == "auth_failed" and "gateway" not in status["error"]
+
+
 def test_redirect_is_not_followed_and_fails(run):
     def router(method, path, params, body):
         if path == "/rest/api/3/myself":
@@ -2210,3 +2294,135 @@ def test_site_inventory_capped_summary_has_no_data_keys(run):
     code, out, _, _ = run("site_inventory", _inventory_router(issues), {"JIRA_MAX_ISSUES": "2"})
     assert out["summary"]["issues"]["resolution_hours"]["by_priority"] is None
     assert out["summary"]["issues"]["by_priority"] is None
+
+
+# ---------- site_inventory: JIRA_PROJECTS limits the inventory to named projects ----------
+
+def _two_project_router(project_list_fails=False, status_fails_for=None):
+    """A site with a board in scope (CCB), one out of scope (APP), and a desk on each."""
+    issues = [_issue(1, "Draft", "new")]
+
+    def router(method, path, params, body):
+        if path == "/rest/api/3/project/search":
+            if project_list_fails:
+                return 503, {"errorMessages": ["down"]}
+            return 200, {"isLast": True, "values": [
+                {"id": "10", "key": "CCB", "name": "Change Control Board", "projectTypeKey": "service_desk",
+                 "lead": {"displayName": "Lead"}, "issueTypes": [{"id": "1", "name": "Change"}]},
+                {"id": "20", "key": "APP", "name": "Product App", "projectTypeKey": "software",
+                 "lead": {"displayName": "Lead"}, "issueTypes": [{"id": "2", "name": "Story"}]}]}
+        if path == "/rest/api/3/issuetype":
+            return 200, [{"id": "1", "name": "Change"}, {"id": "2", "name": "Story"}]
+        if path == "/rest/api/3/status":
+            raise AssertionError("site-wide statuses must not be read when JIRA_PROJECTS is set")
+        if path.startswith("/rest/api/3/project/") and path.endswith("/statuses"):
+            if status_fails_for and f"/{status_fails_for}/" in path:
+                return 503, {"errorMessages": ["down"]}
+            pid = path.split("/")[5]
+            name = {"10": "Draft", "20": "In Review"}[pid]
+            return 200, [{"name": "Change", "statuses": [{"id": pid, "name": name, "statusCategory": {"key": "new"}}]}]
+        if path == "/rest/servicedeskapi/servicedesk":
+            return 200, {"isLastPage": True, "values": [{"id": "1", "projectKey": "CCB", "projectName": "Change Control Board"},
+                                                        {"id": "2", "projectKey": "APP", "projectName": "Product App"}]}
+        if path == "/rest/api/3/search/jql":
+            return 200, {"issues": issues, "isLast": True}
+        return _inventory_router([])(method, path, params, body)
+    return router
+
+
+def test_projects_filter_limits_every_project_section(run):
+    code, out, calls, status = run("site_inventory", _two_project_router(),
+                                   {"JIRA_PROJECTS": " change control board ",
+                                    "JIRA_ISSUE_JQL": 'project in (APP, CCB) ORDER BY updated DESC'})
+    m = out["metadata"]
+    assert code == 0 and status is None and m["complete"] is True
+    assert [p["key"] for p in out["projects"]] == ["CCB"] and m["projects_left_out"] == 1
+    assert [t["name"] for t in out["issue_types"]] == ["Change"]
+    assert [s["name"] for s in out["statuses"]] == ["Draft"]
+    assert out["service_management"]["service_desks"] == [{"id": "1", "project_key": "CCB",
+                                                           "project_name": "Change Control Board"}]
+    # The query is limited to the selected project even though the configured JQL also names APP.
+    assert m["jql"] == "project in (10) AND (project in (APP, CCB)) ORDER BY updated DESC"
+    sent = [b["jql"] for meth, p, _, b in calls if p == "/rest/api/3/search/jql"]
+    assert sent == [m["jql"]]
+    assert (m["projects_filter"], m["issue_types_scope"], m["statuses_scope"], m["priorities_scope"]) == (
+        ["change control board"], "projects", "projects", "site")
+    assert m["projects_selected"] == ["CCB"]
+    assert "Product App" not in json.dumps(out) and "In Review" not in json.dumps(out)
+
+
+def test_projects_filter_matches_keys_and_builds_a_lookback_query(run):
+    code, out, _, _ = run("site_inventory", _two_project_router(), {"JIRA_PROJECTS": "ccb,APP"})
+    assert code == 0 and out["metadata"]["projects_left_out"] == 0
+    assert sorted(p["key"] for p in out["projects"]) == ["APP", "CCB"]
+    assert out["metadata"]["jql"] == "project in (10, 20) AND (updated >= -90d) ORDER BY updated DESC"
+    assert sorted(s["name"] for s in out["statuses"]) == ["Draft", "In Review"]
+
+
+def test_without_projects_filter_nothing_changes(run):
+    code, out, calls, _ = run("site_inventory", _inventory_router([]))
+    m = out["metadata"]
+    assert code == 0 and m["projects_filter"] is None and m["projects_left_out"] is None
+    assert (m["issue_types_scope"], m["statuses_scope"]) == ("site", "site")
+    assert m["jql"] == "updated >= -90d ORDER BY updated DESC"
+    assert not any(p.endswith("/statuses") for _, p, _, _ in calls)
+
+
+def test_a_projects_name_that_matches_nothing_is_bad_config(run_raw):
+    router = _two_project_router()
+    code, out, _, status = run_raw("site_inventory", lambda *a: FakeResponse(*router(*a)),
+                                   {"JIRA_PROJECTS": "Change Control Board, Incident Board"})
+    assert code == 1 and out is None and status["code"] == "bad_config"
+    assert "Incident Board" in status["error"] and "Change Control Board" not in status["error"]
+
+
+def test_an_unread_project_list_collects_nothing_site_wide(run):
+    code, out, calls, status = run("site_inventory", _two_project_router(project_list_fails=True),
+                                   {"JIRA_PROJECTS": "CCB"})
+    assert code == 1 and out["metadata"]["partial_failure"] is True
+    assert out["projects"] == [] and out["issues"] == [] and out["issue_types"] == [] and out["statuses"] == []
+    assert not any(p in ("/rest/api/3/search/jql", "/rest/api/3/issuetype") for _, p, _, _ in calls)
+    assert any(f["operation"] == "JIRA_PROJECTS" for f in out["metadata"]["api_failures"])
+    # No query ran, so the unscoped one is not shown as if it had, and nothing is reported as selected.
+    assert out["metadata"]["jql"] is None and out["metadata"]["projects_selected"] is None
+
+
+def test_a_failed_project_status_read_is_partial(run):
+    code, out, _, status = run("site_inventory", _two_project_router(status_fails_for="20"),
+                               {"JIRA_PROJECTS": "CCB, APP"})
+    assert code == 1 and status["code"] == "partial_failure" and out["metadata"]["partial_failure"] is True
+    assert [s["name"] for s in out["statuses"]] == ["Draft"]
+
+
+def test_scoped_jql_handles_order_by_and_bare_conditions():
+    sys.path.insert(0, str(JIRA / "_shared"))
+    mod = load("site_inventory")
+    assert mod._scoped_jql(["1"], "ORDER BY created") == "project in (1) ORDER BY created"
+    assert mod._scoped_jql(["1"], "status = Done") == "project in (1) AND (status = Done)"
+    assert mod._scoped_jql(["1", "2"], "a = b order by c") == "project in (1, 2) AND (a = b) order by c"
+
+
+def test_scoped_jql_ignores_order_by_inside_a_quoted_string():
+    mod = load("site_inventory")
+    q = mod._scoped_jql
+    assert q(["10"], 'summary ~ "order by" AND updated >= -30d ORDER BY created') == (
+        'project in (10) AND (summary ~ "order by" AND updated >= -30d) ORDER BY created')
+    assert q(["10"], "summary ~ 'order by me'") == "project in (10) AND (summary ~ 'order by me')"
+    assert q(["10"], 'summary ~ "say \\"order by\\" twice" order by key') == (
+        'project in (10) AND (summary ~ "say \\"order by\\" twice") order by key')
+    assert q(["10"], 'text ~ "order by"') == 'project in (10) AND (text ~ "order by")'
+
+
+def test_a_projects_value_is_a_key_first_and_a_name_only_when_no_key_matches():
+    mod = load("site_inventory")
+    raw = [{"id": "1", "key": "OPS", "name": "Operations"}, {"id": "2", "key": "X", "name": "OPS"},
+           {"id": "3", "key": "CCB", "name": "Change Control Board"}]
+    matched, unmatched = mod._match_projects(raw, ["ops"])
+    assert [p["id"] for p in matched] == ["1"] and unmatched == []  # the project named OPS is not pulled in
+    matched, unmatched = mod._match_projects(raw, ["Change Control Board", "x", "nope"])
+    assert sorted(p["id"] for p in matched) == ["2", "3"] and unmatched == ["nope"]
+
+
+def test_without_projects_filter_nothing_is_reported_as_selected(run):
+    code, out, _, _ = run("site_inventory", _inventory_router([]))
+    assert code == 0 and out["metadata"]["projects_selected"] is None
