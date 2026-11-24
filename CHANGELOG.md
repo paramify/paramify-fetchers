@@ -107,6 +107,13 @@ schemas and the `paramify` CLI — not the internal code.
   `change_items_with_unreadable_changesets`. Unset, a refused changeset still fails the run and the evidence only gains
   these keys.
 
+### Changed
+
+- **`azure_entra_sign_in_logs` 0.4.0: 50053 sign-in rejections.** `sign_ins_rejected_50053` counts interactive
+  sign-ins Entra rejected with ResultType 50053, and `users_rejected_50053` counts the users they belong to. Entra logs
+  both smart lockout and sign-ins from a malicious IP address under that code, so the counts are evidence, not a
+  pass or fail on smart lockout. With the sign-in logs unread, both are null.
+
 ### Fixed
 
 - **Front Door counts and verdicts read null when a list they're built from wasn't read.** Before, a refused list
