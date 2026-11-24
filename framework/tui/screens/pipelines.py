@@ -37,7 +37,11 @@ from framework.tui.screens.paramify_events import (
     job_text,
     latest_run_scoped,
     upload_event_lines,
+    upload_summary,
 )
+from framework.tui.words import host, plural
+
+NO_SCANS = "This manifest has no scan-report fetchers. Add one on the Fetchers tab (1)."
 
 
 class PipelinesPage(ParamifyWriter, ButtonRowNav, Vertical):
@@ -74,6 +78,7 @@ class PipelinesPage(ParamifyWriter, ButtonRowNav, Vertical):
         self._issues_preflight: dict | None = None
         # What the log and banner are reporting on: a send or a cycle close.
         self._upload_kind = "scan report"
+        self._no_scan_fetchers = False
 
         self.query_one("#issues-panel", Vertical).border_title = "send"
         log_panel = self.query_one("#pipelines-log-panel", Vertical)
@@ -167,6 +172,7 @@ class PipelinesPage(ParamifyWriter, ButtonRowNav, Vertical):
         for key, use, descriptor in scans:
             table.add_row(use, render.destination_cell(descriptor, views.get(key)))
         self.query_one("#pipelines-fetchers-panel", Vertical).border_title = f"scan-report fetchers ({len(scans)})"
+        self._no_scan_fetchers = not scans
 
     def _rebuild_issues(self) -> None:
         """Send readiness for the newest run that collected scan reports.
@@ -183,14 +189,20 @@ class PipelinesPage(ParamifyWriter, ButtonRowNav, Vertical):
         self._notes([])
         submit = self.query_one("#issues-submit", Button)
         submit.disabled = True
+        self._show_no_scans(False)
 
         try:
             latest, _ = latest_run_scoped(self.app, "issue_report")
         except Exception as exc:
-            self._notes([("status", f"cannot list runs: {exc}", palette.FAIL)])
+            self._notes([("status", f"Couldn't list runs: {exc}", palette.FAIL)])
             return
         if latest is None:
-            table.add_row("status", Text("no run collected scan reports", style="dim"))
+            if self._no_scan_fetchers:
+                # Nothing to send and nothing that could collect any: one line, not three empty panels.
+                self._show_no_scans(True)
+                self._notes([("", NO_SCANS, palette.MUTED)])
+            else:
+                table.add_row("status", Text("no scan reports collected yet", style="dim"))
             return
 
         self._issues_run_dir = latest["dir"]
@@ -203,7 +215,7 @@ class PipelinesPage(ParamifyWriter, ButtonRowNav, Vertical):
             return
 
         self._issues_preflight = preflight
-        table.add_row("Paramify API", preflight["base_url"])
+        table.add_row("Paramify", host(preflight["base_url"]))
         table.add_row(
             "API token",
             palette.pill("present", "ok") if preflight["token_present"]
@@ -218,7 +230,7 @@ class PipelinesPage(ParamifyWriter, ButtonRowNav, Vertical):
             else:
                 op = plan.get("operation") or "?"
                 value = Text(
-                    f"{plan['files']} file(s) → {op}",
+                    f"{plural(plan['files'], 'file')} → {op}",
                     style=palette.WARN if op == "PROCESS_CLOSE" else "",
                 )
                 if plan.get("close_skipped"):
@@ -232,6 +244,12 @@ class PipelinesPage(ParamifyWriter, ButtonRowNav, Vertical):
         else:
             notes += [("preflight error", err, palette.FAIL) for err in preflight["errors"]]
         self._notes(notes)
+
+    def _show_no_scans(self, on: bool) -> None:
+        """The empty state. The summary table stays (it holds focus, so i / j / C
+        still answer) but is headerless; the other panels hide."""
+        self.set_class(on, "no-scans")
+        self.query_one("#issues-summary", DataTable).show_header = not on
 
     def _notes(self, notes: list) -> None:
         """Show (label, message, style) lines under the send table, or hide them.
@@ -273,12 +291,12 @@ class PipelinesPage(ParamifyWriter, ButtonRowNav, Vertical):
             p for p in pf.get("assessments") or [] if p.get("operation") == "PROCESS_CLOSE"
         ]
         question = (
-            f"Send {pf['file_count']} scan report(s) into their assessments' "
-            f"pipelines at {pf['base_url']} and process them?"
+            f"Send {plural(pf['file_count'], 'scan report')} to their assessments' "
+            f"pipelines at {host(pf['base_url'])} and process them?"
         )
         if closing:
             question += (
-                f"\n\nThis also closes the cycle on {len(closing)} assessment(s). "
+                f"\n\nThis also closes the cycle on {plural(len(closing), 'assessment')}. "
                 "Open issues not in these files will be auto-closed as resolved."
             )
         self.app.push_screen(ConfirmModal(question), go)
@@ -286,7 +304,7 @@ class PipelinesPage(ParamifyWriter, ButtonRowNav, Vertical):
     def _start_intake(self, run_dir: str) -> None:
         self._uploading = True
         self._upload_kind = "scan report"
-        self._begin_log(Text("sending scan reports...", style=palette.WARN))
+        self._begin_log(Text("Sending scan reports…", style=palette.WARN))
         self._issues_worker(run_dir, self.app.root_path)
 
     @work(thread=True, exclusive=True)
@@ -315,15 +333,16 @@ class PipelinesPage(ParamifyWriter, ButtonRowNav, Vertical):
             log.write(line)
         if etype == "upload_start":
             mode = " (dry-run)" if ev.get("dry_run") else ""
-            self._set_banner(Text(f"uploading {ev.get('files', 0)} {noun}(s) to {ev.get('base_url', '')}{mode}", style=palette.WARN))
+            self._set_banner(Text(f"Sending {plural(ev.get('files', 0), noun)} to {host(ev.get('base_url'))}{mode}…",
+                                  style=palette.WARN))
         elif etype == "job_queued":
             self._set_banner(Text(
-                f"processing on {ev.get('assessment_id')} — job {ev.get('job_id')} queued",
+                f"Processing on assessment {ev.get('assessment_id')} (job {ev.get('job_id')} queued)…",
                 style=palette.WARN,
             ))
         elif etype == "job_status":
             self._set_banner(Text(
-                f"job {ev.get('job_id')} {ev.get('status')} on {ev.get('assessment_id')}",
+                f"Job {ev.get('job_id')} {str(ev.get('status') or '').lower()} on assessment {ev.get('assessment_id')}",
                 style=palette.WARN,
             ))
         elif etype == "upload_complete":
@@ -331,8 +350,8 @@ class PipelinesPage(ParamifyWriter, ButtonRowNav, Vertical):
         elif etype == "_upload_failed":
             self._uploading = False
             self._restore_actions()
-            log.write(Text(f"upload failed: {ev.get('error', '')}", style=f"bold {palette.FAIL}"))
-            self._set_banner(Text(f"upload failed: {ev.get('error', '')}", style=palette.FAIL))
+            log.write(Text(f"Send failed: {ev.get('error', '')}", style=f"bold {palette.FAIL}"))
+            self._set_banner(Text(f"Send failed: {ev.get('error', '')}", style=palette.FAIL))
 
     def _finalize_upload(self, ev: dict) -> None:
         self._uploading = False
@@ -341,16 +360,9 @@ class PipelinesPage(ParamifyWriter, ButtonRowNav, Vertical):
         self.rebuild()
         self._restore_actions()
         ok = ev.get("ok")
-        msg = Text(
-            f"{self._upload_kind} upload complete — "
-            f"uploaded={ev.get('uploaded', 0)} "
-            f"duplicates={ev.get('skipped_duplicate', 0)} "
-            f"errors={ev.get('errors', 0)}"
-            + (f" jobs_failed={ev['jobs_failed']}" if ev.get("jobs_failed") else ""),
-            style=palette.OK if ok else palette.FAIL,
-        )
+        msg = Text(upload_summary(ev, self._upload_kind), style=palette.OK if ok else palette.FAIL)
         if ev.get("halted"):
-            msg.append(f"   stopped early: {ev['halted']}", style=palette.FAIL)
+            msg.append(f"   Stopped early: {ev['halted']}", style=palette.FAIL)
         if ev.get("log_path"):
             msg.append(f"   {ev['log_path']}", style="dim")
         self._set_banner(msg)
@@ -483,7 +495,7 @@ class PipelinesPage(ParamifyWriter, ButtonRowNav, Vertical):
                 if ok:
                     self._uploading = True
                     self._upload_kind = "cycle close"
-                    self._begin_log(Text(f"closing the current cycle of {label}...",
+                    self._begin_log(Text(f"Closing the current cycle of {label}…",
                                          style=palette.WARN))
                     self._close_worker(self.app.root_path, aid)
 
@@ -495,7 +507,7 @@ class PipelinesPage(ParamifyWriter, ButtonRowNav, Vertical):
 
         self.app.push_screen(
             PickerModal("Close which assessment's cycle?", choices,
-                        subtitle="for assessments filled by several runs (close_cycle: never)"),
+                        subtitle="for assessments whose cycle you close by hand"),
             chosen,
         )
 

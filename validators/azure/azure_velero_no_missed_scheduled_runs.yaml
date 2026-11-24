@@ -1,0 +1,25 @@
+key: azure_velero_no_missed_scheduled_runs
+name: 'Azure Velero: No Missed Scheduled Runs'
+type: AUTOMATED
+role: configuration
+source: community
+statement: >
+  No expected schedule missed a run (missed_scheduled_runs is 0), counted from the gaps between
+  Completed backups with 10% grace, over the part of missed_run_lookback_days the backups are kept
+  for, so a backup Velero deleted at the end of its retention is not a missed run. Also fails while
+  expected_schedules is not set or a location is unread (see 'Expected Backup Schedules Are
+  Configured' and 'Every Backup Storage Location Read' for the cause), so an undecided or unread value
+  is never reported as a pass. Does not check whether the collection run succeeded.
+
+regex: '"missed_scheduled_runs":\s*(?<missed_scheduled_runs>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # missed_scheduled_runs
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-VELERO-BACKUPS

@@ -53,7 +53,7 @@ class UpdateScreen(ButtonRowNav, Screen):
 
     @property
     def _errors(self) -> List[str]:
-        return [] if self.plan.get("ok", True) else list(self.plan.get("errors") or ["the update could not be planned"])
+        return [] if self.plan.get("ok", True) else list(self.plan.get("errors") or ["the update couldn't be planned"])
 
     @property
     def _ready(self) -> bool:
@@ -139,7 +139,7 @@ class UpdateScreen(ButtonRowNav, Screen):
         return Group(*view.breaking(self.plan.get("breaking") or []))
 
     def _new_text(self) -> Group:
-        return Group(*view.whats_new(self.plan.get("highlights") or []))
+        return Group(*view.whats_new(self.plan.get("highlights") or [], self.plan.get("releases") or []))
 
     def _rest_text(self) -> Group:
         return Group(*view.rest(self.plan))

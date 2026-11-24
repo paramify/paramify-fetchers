@@ -191,7 +191,7 @@ def env(monkeypatch, tmp_path):
     for name in (mod.TYPES_ENV, mod.TAGS_ENV, mod.LOOKBACK_ENV, mod.APPROVAL_STATES_ENV, mod.APPROVAL_PATTERN_ENV,
                  mod.APPROVAL_TYPES_ENV, mod.APPROVAL_MENTIONS_ENV, mod.APPROVAL_FIELD_ENV, mod.APPROVAL_SOURCE_ENV,
                  mod.APPROVAL_FIELD_FROM_ENV, mod.APPROVAL_BEFORE_FIELD_ENV, mod.EMERGENCY_TYPES_ENV,
-                 "AZURE_DEVOPS_PROJECTS"):
+                 mod.INCLUSIONS_ENV, "AZURE_DEVOPS_PROJECTS"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("AZURE_DEVOPS_ORG_URL", ORG)
     monkeypatch.setenv("AZURE_DEVOPS_PAT", "pat-do-not-write")
@@ -228,7 +228,7 @@ def with_items(fake, extra, updates=None, comments=None):
 
 def test_fetcher_yaml_follows_the_shape():
     spec_ = yaml.safe_load((FETCHER_DIR / "fetcher.yaml").read_text())
-    assert spec_["name"] == mod.NAME and spec_["version"] == "0.3.0" and spec_["category"] == "azure"
+    assert spec_["name"] == mod.NAME and spec_["version"] == "0.4.0" and spec_["category"] == "azure"
     assert spec_["ksis"] == ["KSI-CMT-LMC", "KSI-PIY-RES"]
     assert spec_["evidence_set"]["reference_id"] == "EVD-AZURE-DEVOPS-WORK-ITEMS"
     config = spec_["config_schema"]
@@ -238,7 +238,10 @@ def test_fetcher_yaml_follows_the_shape():
         "approval_types": mod.APPROVAL_TYPES_ENV, "approval_mentions": mod.APPROVAL_MENTIONS_ENV,
         "approval_field": mod.APPROVAL_FIELD_ENV, "approval_source": mod.APPROVAL_SOURCE_ENV,
         "approval_field_from": mod.APPROVAL_FIELD_FROM_ENV, "approval_before_field": mod.APPROVAL_BEFORE_FIELD_ENV,
-        "emergency_types": mod.EMERGENCY_TYPES_ENV}
+        "emergency_types": mod.EMERGENCY_TYPES_ENV, "changeset_inclusions": mod.INCLUSIONS_ENV}
+    inclusions = config["changeset_inclusions"]
+    assert (inclusions["type"], inclusions["prefixes"], inclusions["bare"], inclusions["globs"],
+            inclusions["exclusion"]) == ("patterns", ["path"], False, False, False) and "default" not in inclusions
     assert config["approval_source"]["default"] == mod.HISTORY == config["approval_before_field"]["default"]
     assert "default" not in config["approval_field"] and "default" not in config["emergency_types"]
     assert config["approval_mentions"]["default"] is False and config["approval_mentions"]["type"] == "boolean"
@@ -411,6 +414,8 @@ def test_an_unread_changeset_leaves_the_change_order_unknown(tmp_path):
     assert work_item(evidence, 102)["changed_before_approval"] is None
     assert evidence["summary"]["change_items_changed_before_approval"] is None
     assert evidence["summary"]["change_items_with_linked_changes"] == 2
+    # Without changeset_inclusions a refused changeset is a failure, never left out.
+    assert evidence["results"]["excluded"] == [] and evidence["summary"]["not_readable_changesets"] is None
 
 
 def test_an_item_the_batch_omits_is_a_failure_and_leaves_the_counts_unknown(tmp_path):
@@ -1101,3 +1106,344 @@ def test_by_default_no_field_is_read_and_approval_is_as_before(tmp_path):
     assert work_item(evidence, 104)["field_approval"] is None and work_item(evidence, 104)["approval"] is None
     assert work_item(evidence, 101)["approval_route"] == "states_and_comments"
     assert (s["change_items_approved"], s["change_items_approved_by_field"]) == (2, 0)
+
+
+# --------------------------------------------------------------------------- #
+# changeset_inclusions: only changesets under the included TFVC paths are in scope.
+# --------------------------------------------------------------------------- #
+
+INCLUDED = "$/ProjectA/Production"
+LATEST = {INCLUDED.lower(): 900}
+TF14098 = "TF14098: Access Denied: User x needs Read permission(s) for at least one item in changeset {}."
+
+
+def change(path, source=None):
+    found = {"item": {"version": 1, "path": path}, "changeType": "edit"}
+    return {**found, "sourceServerItem": source} if source else found
+
+
+def scoped(fake, files, latest=None, more=()):
+    """Serves the included paths' latest changesets and each linked changeset's changed files."""
+    latest = LATEST if latest is None else latest
+
+    def history(params, body):
+        if params["searchCriteria.itemPath"].lower() not in latest:
+            return err(404, f"VS403405: The item {params['searchCriteria.itemPath']} does not exist on the server, "
+                            "or you do not have permission to access it.", "ItemNotFoundException")
+        return Resp(body={"count": 1, "value": [{"changesetId": latest[params["searchCriteria.itemPath"].lower()]}]})
+
+    fake.routes[("GET", "/contoso/_apis/tfvc/changesets")] = history
+    for cid in set(latest.values()):
+        fake.routes[("GET", f"/contoso/_apis/tfvc/changesets/{cid}")] = Resp(body={
+            "changesetId": cid, "author": who("dave@example.com"), "createdDate": ago(days=1)})
+    for cid, found in files.items():
+        fake.routes[("GET", f"/contoso/_apis/tfvc/changesets/{cid}")] = found if isinstance(found, Resp) else \
+            Resp(body={**CHANGESETS[cid], "changes": found, **({"hasMoreChanges": True} if cid in more else {})})
+    return fake
+
+
+def include(monkeypatch, *patterns):
+    monkeypatch.setenv(mod.INCLUSIONS_ENV, ",".join(patterns or (f"path:{INCLUDED}",)))
+
+
+def run_without_evidence(tmp_path, fake):
+    code = dr.run_org(fetcher=mod.NAME, logger=mod.logger, collect=mod.collect, session=fake)
+    return code, json.loads((tmp_path / "status.json").read_text()), fake
+
+
+def test_included_paths_are_read_first_and_a_refused_changeset_is_left_out(tmp_path, monkeypatch):
+    include(monkeypatch)
+    fake = scoped(FakeADO(), {501: [change(f"{INCLUDED}/app/config.json")],
+                              502: err(500, TF14098.format(502))})
+    code, evidence, status, fake, _ = run(tmp_path, fake)
+    assert code == 0 and status is None and evidence["metadata"]["partial_failure"] is False
+    results, s = evidence["results"], evidence["summary"]
+    assert results["changeset_inclusion_checks"] == [
+        {"pattern": f"path:{INCLUDED}", "path": INCLUDED, "readable": True, "latest_changeset": 900}]
+    assert results["excluded"] == [{"kind": "changeset", "name": None, "pattern": None, "reason": "not_readable",
+                                    "id": 502, "work_items": [102], "detail": (
+        "not readable; the included paths were readable this run, so it is outside them or in a sub-folder the app "
+        "can't read")}]
+    assert results["selection"]["changeset_inclusions"] == [f"path:{INCLUDED}"]
+    assert [c["id"] for c in results["changesets"]] == [501]
+    refused = work_item(evidence, 102)
+    assert (refused["changed_before_approval"], refused["approved_by_change_author"],
+            refused["first_linked_change"]) == (None, None, None)
+    assert work_item(evidence, 101)["changed_before_approval"] is False
+    assert (s["in_scope_changesets"], s["not_included_changesets"], s["not_readable_changesets"]) == (1, 0, 1)
+    assert s["changeset_inclusion_patterns"] == [f"path:{INCLUDED}"]
+    # 102 has no in-scope change left to check, so it doesn't hold the change-order lists unknown.
+    assert s["change_items_linked_changes_checked"] == 1 and s["change_items_changed_before_approval"] == []
+    assert s["change_items_approved_by_change_author"] == [] and s["change_items_with_linked_changes"] == 2
+    assert (refused["unreadable_linked_changesets"], work_item(evidence, 101)["unreadable_linked_changesets"]) == (
+        True, False)
+    assert s["change_items_with_unreadable_changesets"] == [102]
+    paths = [path for _, path, _, _ in fake.calls]
+    assert paths.index("/contoso/_apis/tfvc/changesets") < paths.index("/contoso/_apis/projects")
+    check = next(params for _, path, params, _ in fake.calls if path == "/contoso/_apis/tfvc/changesets")
+    assert (check["searchCriteria.itemPath"], check["$top"]) == (INCLUDED, 1)
+    read = next(params for _, path, params, _ in fake.calls if path.endswith("/changesets/501"))
+    assert (read["maxChangeCount"], read["includeSourceRename"]) == (100, "true")
+
+
+def test_an_item_linking_a_refused_changeset_is_flagged_beside_its_change_order(tmp_path, monkeypatch):
+    include(monkeypatch)
+    # 101 links 501, made after its approval, and 503, which is refused.
+    fake = with_items(FakeADO(), {101: item(101, "Change Request", "Closed", relations=[
+        artifact("vstfs:///VersionControl/Changeset/501", "Fixed in Changeset"),
+        artifact("vstfs:///VersionControl/Changeset/503", "Fixed in Changeset")])},
+        updates={101: UPDATES[101]}, comments={101: COMMENTS[101]})
+    fake = scoped(fake, {501: [change(f"{INCLUDED}/a.cs")], 502: [change(f"{INCLUDED}/b.cs")],
+                         503: err(500, TF14098.format(503))})
+    code, evidence, status, _, _ = run(tmp_path, fake)
+    assert code == 0 and status is None
+    flagged, s = work_item(evidence, 101), evidence["summary"]
+    assert (flagged["changed_before_approval"], flagged["unreadable_linked_changesets"]) == (False, True)
+    assert work_item(evidence, 102)["unreadable_linked_changesets"] is False
+    # The change-order lists stay known, and the new list names the item they can't fully cover.
+    assert s["change_items_linked_changes_checked"] == 2 and s["change_items_changed_before_approval"] == [102]
+    assert s["change_items_with_unreadable_changesets"] == [101]
+    assert (s["in_scope_changesets"], s["not_readable_changesets"]) == (2, 1)
+    assert [(e["id"], e["work_items"]) for e in evidence["results"]["excluded"]] == [(503, [101])]
+
+
+def test_a_refused_changeset_has_the_included_paths_read_again_at_the_end(tmp_path, monkeypatch):
+    include(monkeypatch)
+    fake = scoped(FakeADO(), {501: [change(f"{INCLUDED}/a.cs")], 502: err(500, TF14098.format(502))})
+    code, evidence, status, fake, _ = run(tmp_path, fake)
+    assert code == 0 and status is None
+    assert evidence["results"]["changeset_inclusion_recheck"] == [
+        {"pattern": f"path:{INCLUDED}", "path": INCLUDED, "readable": True, "latest_changeset": 900}]
+    assert evidence["summary"]["changeset_inclusions_rechecked"] is True
+    paths = [path for _, path, _, _ in fake.calls]
+    checks = [n for n, path in enumerate(paths) if path == "/contoso/_apis/tfvc/changesets"]
+    assert len(checks) == 2 and checks[1] > paths.index("/contoso/_apis/tfvc/changesets/502")
+
+
+@pytest.mark.parametrize("lost", ["path", "latest"])
+def test_a_recheck_that_no_longer_reads_withholds_the_evidence(tmp_path, monkeypatch, lost):
+    include(monkeypatch)
+    fake = scoped(FakeADO(), {501: [change(f"{INCLUDED}/a.cs")], 502: err(500, TF14098.format(502))})
+    if lost == "path":  # the path itself answers as missing the second time
+        route = ("GET", "/contoso/_apis/tfvc/changesets")
+        refusal = err(404, f"VS403405: The item {INCLUDED} does not exist on the server, or you do not have "
+                           "permission to access it.", "ItemNotFoundException")
+    else:  # its latest changeset is refused the second time
+        route, refusal = ("GET", "/contoso/_apis/tfvc/changesets/900"), err(500, TF14098.format(900))
+    first, seen = fake.routes[route], []
+
+    def answer(params, body):
+        seen.append(1)
+        if len(seen) > 1:
+            return refusal
+        return first(params, body) if callable(first) else first
+    fake.routes[route] = answer
+    code, status, fake = run_without_evidence(tmp_path, fake)
+    assert code == 1 and status["code"] == "not_authorized" and "tfvc.inclusion_recheck" in status["error"]
+    assert not (tmp_path / "azure_devops_work_items_contoso.json").exists()
+
+
+def test_a_changeset_with_no_file_under_an_included_path_is_not_included(tmp_path, monkeypatch):
+    include(monkeypatch)
+    fake = scoped(FakeADO(), {501: [change("$/ProjectA/Production2/app.cs"), change("$/ProjectB/Production/a.cs")],
+                              502: [change("$/projecta/PRODUCTION/hotfix.cs")]})
+    code, evidence, _, _, _ = run(tmp_path, fake)
+    assert code == 0
+    assert evidence["results"]["excluded"] == [{"kind": "changeset", "name": None, "pattern": None,
+                                                "reason": "not_included", "id": 501, "work_items": [101]}]
+    left_out = work_item(evidence, 101)
+    assert (left_out["changed_before_approval"], left_out["first_linked_change"]) == (None, None)
+    assert work_item(evidence, 102)["changed_before_approval"] is True
+    s = evidence["summary"]
+    assert (s["in_scope_changesets"], s["not_included_changesets"], s["not_readable_changesets"]) == (1, 1, 0)
+    assert s["change_items_changed_before_approval"] == [102] and s["change_items_linked_changes_checked"] == 1
+    assert s["finished_change_items_without_linked_change"] == [103]
+    # Nothing was refused, so the paths aren't read again.
+    assert evidence["results"]["changeset_inclusion_recheck"] is None and s["changeset_inclusions_rechecked"] is False
+
+
+def outside(count, start=0):
+    return [change(f"$/ProjectB/Main/f{n}.cs") for n in range(start, start + count)]
+
+
+def change_list(fake, cid, found, per_page=None):
+    """Serves a changeset's /changes by $skip and $top, at most per_page a page when the server caps it."""
+    def page(params, body):
+        skip, top = int(params["$skip"]), min(int(params["$top"]), per_page or int(params["$top"]))
+        return Resp(body={"count": len(found[skip:skip + top]), "value": found[skip:skip + top]})
+    fake.routes[("GET", f"/contoso/_apis/tfvc/changesets/{cid}/changes")] = page
+
+
+def test_a_long_change_list_is_paged_until_an_included_path_or_its_end(tmp_path, monkeypatch):
+    include(monkeypatch)
+    fake = scoped(FakeADO(), {501: outside(100), 502: outside(100)}, more=(501,))
+    change_list(fake, 501, outside(100) + [change(f"{INCLUDED}/late.cs")])
+    change_list(fake, 502, outside(103))
+    code, evidence, _, fake, _ = run(tmp_path, fake)
+    assert code == 0
+    assert [c["id"] for c in evidence["results"]["changesets"]] == [501]
+    assert [(e["id"], e["reason"]) for e in evidence["results"]["excluded"]] == [(502, "not_included")]
+    # Paging starts from the first change, and ends only on an empty page.
+    skips = [(path.split("/")[-2], params["$skip"]) for _, path, params, _ in fake.calls if path.endswith("/changes")]
+    assert skips == [("501", 0), ("501", 100), ("502", 0), ("502", 100), ("502", 103)]
+
+
+def test_paging_reads_from_the_start_when_the_change_list_comes_in_another_order(tmp_path, monkeypatch):
+    include(monkeypatch)
+    fake = scoped(FakeADO(), {501: outside(100), 502: [change(f"{INCLUDED}/a.cs")]}, more=(501,))
+    # The included file is 51st in /changes but wasn't among the 100 the changeset read listed.
+    change_list(fake, 501, outside(50, 100) + [change(f"{INCLUDED}/x.cs")] + outside(49, 150) + outside(100))
+    code, evidence, _, _, _ = run(tmp_path, fake)
+    assert code == 0 and evidence["results"]["excluded"] == []
+    assert {c["id"] for c in evidence["results"]["changesets"]} == {501, 502}
+
+
+def test_paging_goes_past_a_short_page(tmp_path, monkeypatch):
+    include(monkeypatch)
+    fake = scoped(FakeADO(), {501: outside(100), 502: [change(f"{INCLUDED}/a.cs")]}, more=(501,))
+    # The server answers 50 at a time, and the included file is the 152nd change.
+    change_list(fake, 501, outside(151) + [change(f"{INCLUDED}/deep.cs")], per_page=50)
+    code, evidence, _, _, _ = run(tmp_path, fake)
+    assert code == 0 and evidence["results"]["excluded"] == []
+    assert {c["id"] for c in evidence["results"]["changesets"]} == {501, 502}
+
+
+@pytest.mark.parametrize("read, pages", [
+    ({}, []),  # no changes key, and an empty change list
+    ({"changes": []}, {"count": 0}),  # an empty list, and a page without value
+    ({"changes": outside(100), "hasMoreChanges": True}, {"count": 0}),  # truncated, then a page without value
+    ({"changes": [{"changeType": "edit"}]}, [{"changeType": "edit"}]),  # changes that name no path
+])
+def test_change_data_without_every_path_keeps_the_changeset_in_scope(tmp_path, monkeypatch, read, pages):
+    include(monkeypatch)
+    fake = scoped(FakeADO(), {501: [change(f"{INCLUDED}/a.cs")],
+                              502: Resp(body={**CHANGESETS[502], **read})})
+    fake.routes[("GET", "/contoso/_apis/tfvc/changesets/502/changes")] = Resp(
+        body=pages if isinstance(pages, dict) else {"count": len(pages), "value": pages})
+    code, evidence, _, fake, _ = run(tmp_path, fake)
+    assert code == 0 and evidence["results"]["excluded"] == []
+    assert {c["id"] for c in evidence["results"]["changesets"]} == {501, 502}
+    assert any(path.endswith("/changesets/502/changes") for _, path, _, _ in fake.calls)
+
+
+def test_a_change_list_that_cant_be_read_to_its_end_counts_as_in_scope(tmp_path, monkeypatch):
+    include(monkeypatch)
+    fake = scoped(FakeADO(), {501: outside(100), 502: [change(f"{INCLUDED}/a.cs")]})
+    # $skip ignored: the same page every time, so the rest can't be reached.
+    fake.routes[("GET", "/contoso/_apis/tfvc/changesets/501/changes")] = Resp(body={"value": outside(100, 100)})
+    code, evidence, _, _, _ = run(tmp_path, fake)
+    assert code == 0 and evidence["results"]["excluded"] == []
+    assert {c["id"] for c in evidence["results"]["changesets"]} == {501, 502}
+
+
+@pytest.mark.parametrize("failure", ["missing", "empty", "latest_refused", "latest_forbidden"])
+def test_an_included_path_that_cant_be_read_fails_closed(tmp_path, monkeypatch, failure):
+    include(monkeypatch, f"path:{INCLUDED}", "path:$/ProjectA/Docs")
+    fake = scoped(FakeADO(), {}, latest={} if failure == "missing" else {**LATEST, "$/projecta/docs": 901})
+    if failure == "empty":
+        fake.routes[("GET", "/contoso/_apis/tfvc/changesets")] = Resp(body={"count": 0, "value": []})
+    elif failure == "latest_refused":
+        fake.routes[("GET", "/contoso/_apis/tfvc/changesets/900")] = err(500, TF14098.format(900))
+    elif failure == "latest_forbidden":
+        fake.routes[("GET", "/contoso/_apis/tfvc/changesets/900")] = err(403, "Forbidden")
+    code, status, fake = run_without_evidence(tmp_path, fake)
+    assert code == 1 and status["code"] == "not_authorized" and INCLUDED in status["error"]
+    assert not (tmp_path / "azure_devops_work_items_contoso.json").exists()
+    assert not any(path.endswith("/_apis/projects") or "/wit/" in path for _, path, _, _ in fake.calls)
+
+
+def test_an_included_path_read_timeout_fails_closed_with_its_own_code(tmp_path, monkeypatch):
+    import requests
+
+    include(monkeypatch)
+    fake = scoped(FakeADO(), {})
+
+    def timeout(params, body):
+        raise requests.ReadTimeout("read timed out")
+    fake.routes[("GET", "/contoso/_apis/tfvc/changesets")] = timeout
+    code, status, _ = run_without_evidence(tmp_path, fake)
+    assert code == 1 and status["code"] == "target_unreachable"
+    assert not (tmp_path / "azure_devops_work_items_contoso.json").exists()
+
+
+@pytest.mark.parametrize("failure", ["timeout", "server_error", "change_list"])
+def test_with_inclusions_other_errors_still_fail(tmp_path, monkeypatch, failure):
+    import requests
+
+    include(monkeypatch)
+    fake = scoped(FakeADO(), {501: [change(f"{INCLUDED}/a.cs")], 502: outside(100)})
+
+    def timeout(params, body):
+        raise requests.ReadTimeout("read timed out")
+    if failure == "timeout":
+        fake.routes[("GET", "/contoso/_apis/tfvc/changesets/502")] = timeout
+    elif failure == "server_error":
+        fake.routes[("GET", "/contoso/_apis/tfvc/changesets/502")] = err(500, "VS402371: an internal error occurred")
+    else:
+        fake.routes[("GET", "/contoso/_apis/tfvc/changesets/502/changes")] = err(500, "an internal error occurred")
+    code, evidence, status, _, _ = run(tmp_path, fake)
+    assert code == 1 and evidence["metadata"]["partial_failure"] is True
+    assert status["code"] == ("target_unreachable" if failure == "timeout" else "internal_error")
+    assert evidence["results"]["excluded"] == []
+    if failure == "change_list":  # a change list that couldn't be read leaves the changeset in scope
+        assert {c["id"] for c in evidence["results"]["changesets"]} == {501, 502}
+    else:
+        assert work_item(evidence, 102)["changed_before_approval"] is None
+        assert evidence["summary"]["change_items_changed_before_approval"] is None
+        assert evidence["summary"]["in_scope_changesets"] is None
+
+
+def test_without_inclusions_the_evidence_only_gains_the_new_keys(tmp_path):
+    code, evidence, _, fake, _ = run(tmp_path)
+    assert code == 0
+    results, s = evidence["results"], evidence["summary"]
+    assert (results["changeset_inclusion_checks"], results["excluded"]) == ([], [])
+    assert results["changeset_inclusion_recheck"] is None and s["changeset_inclusions_rechecked"] is None
+    assert results["selection"]["changeset_inclusions"] == [] and s["changeset_inclusion_patterns"] == []
+    assert (s["in_scope_changesets"], s["not_included_changesets"], s["not_readable_changesets"]) == (2, None, None)
+    assert s["change_items_with_unreadable_changesets"] is None
+    assert {i["unreadable_linked_changesets"] for i in results["work_items"]} == {None}
+    tfvc = [(path, params) for _, path, params, _ in fake.calls if "/tfvc/" in path]
+    assert tfvc == [("/contoso/_apis/tfvc/changesets/501", {"api-version": "7.1"}),
+                    ("/contoso/_apis/tfvc/changesets/502", {"api-version": "7.1"})]
+
+
+def test_one_path_listed_twice_is_read_once(tmp_path, monkeypatch):
+    include(monkeypatch, f"path:{INCLUDED}", f"path:{INCLUDED}/")
+    fake = scoped(FakeADO(), {501: [change(f"{INCLUDED}/a.cs")], 502: [change("$/ProjectA/Docs/b.md")]})
+    code, evidence, _, fake, _ = run(tmp_path, fake)
+    assert code == 0
+    assert [(c["pattern"], c["path"]) for c in evidence["results"]["changeset_inclusion_checks"]] == [
+        (f"path:{INCLUDED}", INCLUDED), (f"path:{INCLUDED}/", INCLUDED)]
+    assert sum(1 for _, path, _, _ in fake.calls if path == "/contoso/_apis/tfvc/changesets") == 1
+    assert [(e["id"], e["reason"]) for e in evidence["results"]["excluded"]] == [(502, "not_included")]
+
+
+@pytest.mark.parametrize("pattern", ["$/ProjectA/Production", "path:ProjectA/Production", "repo:$/ProjectA",
+                                     "path:", "path:$/ProjectA/*", "path:$/Project?/Production"])
+def test_a_pattern_that_cant_name_a_tfvc_path_is_bad_config(tmp_path, monkeypatch, pattern):
+    monkeypatch.setenv(mod.INCLUSIONS_ENV, pattern)
+    code, _, status, fake, _ = run(tmp_path)
+    assert code == 1 and status["code"] == "bad_config" and mod.INCLUSIONS_ENV in status["error"]
+    assert not any("/tfvc/" in path or path.endswith("/_apis/projects") for _, path, _, _ in fake.calls)
+
+
+@pytest.mark.parametrize("pattern, path, included", [
+    ("path:$/ProjectA/Production", "$/ProjectA/Production", True),
+    ("path:$/ProjectA/Production", "$/ProjectA/Production/src/app.cs", True),
+    ("path:$/ProjectA/Production/", "$/projecta/PRODUCTION/app.cs", True),
+    ("path:$/ProjectA/Production", "$/ProjectA/Production2/app.cs", False),
+    ("path:$/ProjectA/Production", "$/ProjectA", False),
+    ("path:$/ProjectA", "$/ProjectAB/app.cs", False),
+    ("path:$/A/[Legacy]", "$/A/[Legacy]/app.cs", True),
+    ("path:$/A/[Legacy]", "$/A/L/app.cs", False),
+    ("path:$/", "$/Anything/at/all.cs", True),
+])
+def test_an_inclusion_takes_in_its_path_and_everything_under_it(pattern, path, included):
+    assert mod.ChangesetScope([pattern]).includes(path) is included
+
+
+def test_a_rename_counts_its_source_path():
+    renamed = [change("$/ProjectB/Archive/app.cs", source=f"{INCLUDED}/app.cs")]
+    assert mod.changed_paths(renamed) == ["$/ProjectB/Archive/app.cs", f"{INCLUDED}/app.cs"]
+    assert any(mod.ChangesetScope([f"path:{INCLUDED}"]).includes(p) for p in mod.changed_paths(renamed))

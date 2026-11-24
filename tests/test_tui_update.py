@@ -173,6 +173,22 @@ def test_screen_lists_breaking_that_touch():
     _run(body)
 
 
+def test_screen_shows_the_newest_fetcher_note():
+    plan = _plan()
+    plan["fetchers"]["yours"][0]["notes"] = [
+        {"release": "0.8.0-beta", "version": "0.3.1", "note": "alerts fire sooner"},
+        {"release": "0.7.0-beta", "version": "0.3.0", "note": "older note"}]
+
+    async def body(app, pilot):
+        await app.push_screen(UpdateScreen(plan))
+        await pilot.pause()
+        table = app.screen.query_one("#update-fetchers", DataTable)
+        cell = table.get_row_at(0)[2].plain
+        assert cell.startswith("0.8.0-beta  alerts fire sooner") and cell.endswith("+1 earlier")
+
+    _run(body)
+
+
 def test_rollback_button_only_when_there_is_something_to_roll_back_to():
     async def body(app, pilot):
         await app.push_screen(UpdateScreen(_plan(can_roll_back=True)))
@@ -363,11 +379,12 @@ def test_a_plan_with_errors_shows_them_and_cannot_be_applied():
     _run(body)
 
 
-def test_u_key_opens_the_screen_with_the_plan(monkeypatch):
+@pytest.mark.parametrize("key", ["U", "u"])
+def test_u_key_opens_the_screen_with_the_plan(monkeypatch, key):
     monkeypatch.setattr(api, "update_plan", lambda root: _plan())
 
     async def body(app, pilot):
-        await pilot.press("U")
+        await pilot.press(key)
         await pilot.pause()
         await app.workers.wait_for_complete()
         await pilot.pause()
@@ -532,7 +549,7 @@ def test_resizing_a_wide_header_down_to_80_keeps_the_clock(monkeypatch):
 
 def test_the_notice_gives_way_when_the_row_is_too_short(monkeypatch):
     monkeypatch.setattr(api, "update_notice", lambda root: "12 new commits on main")
-    got = _header_probe(56)
+    got = _header_probe(42)
     assert not got.notice
     assert got.clock.right <= got.right
     assert got.crumb.width >= 6
@@ -570,7 +587,7 @@ def _late_notice_probe(width):
 
 def test_a_late_notice_on_a_short_row_stays_hidden(monkeypatch):
     monkeypatch.setattr(api, "update_notice", lambda root: None)
-    got = _late_notice_probe(56)
+    got = _late_notice_probe(42)
     assert not got.notice
     assert got.clock.right <= got.right
     assert got.crumb.width >= 6 and got.crumb.right <= got.clock.x

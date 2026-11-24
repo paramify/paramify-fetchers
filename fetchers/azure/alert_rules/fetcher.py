@@ -219,7 +219,7 @@ def main() -> int:
     excluded: list[dict] = []
     excluded_processing: list[dict] = []
     unread = True
-    processing_read = True
+    read = dict.fromkeys(("alert_rules", "action_groups", "processing_rules"), False)
     registration = {ns: REGISTRATION_UNKNOWN for ns in ("Microsoft.Insights", "Microsoft.AlertsManagement")}
     if subscription_id and cred is not None:
         for ns in registration:
@@ -230,6 +230,8 @@ def main() -> int:
         raw_rules: list[tuple[str, dict]] = []
         if rest is not None:
             unread = False
+            # An unregistered provider holds none, so its lists count as read.
+            read = dict.fromkeys(read, True)
             for rule_type, ns, path, api in SOURCES:
                 if registration[ns] == NOT_REGISTERED:
                     continue
@@ -238,6 +240,7 @@ def main() -> int:
                     lambda path=path, api=api: list_all(rest, f"/subscriptions/{subscription_id}/providers/{path}", api),
                 )
                 unread = unread or listed is None
+                read["alert_rules"] = read["alert_rules"] and listed is not None
                 if listed:
                     pages[rule_type] = listed["pages"]
                     raw_rules.extend((rule_type, r) for r in listed["items"])
@@ -245,14 +248,15 @@ def main() -> int:
                 groups = collector.guard("Microsoft.Insights/actionGroups list", lambda: collect_action_groups(rest, subscription_id))
                 group_records = groups["groups"] if groups else []
                 unread = unread or groups is None
+                read["action_groups"] = groups is not None
             if alerts_mgmt:
                 apr = collector.guard(
                     "Microsoft.AlertsManagement/actionRules list",
                     lambda: collect_processing_rules(rest, subscription_id, now),
                 )
                 processing_rules = apr["rules"] if apr else []
-                processing_read = apr is not None
                 unread = unread or apr is None
+                read["processing_rules"] = apr is not None
             raw_rules, excluded = exclusions.split(
                 raw_rules, "alert_rule", resource_id=lambda t: t[1].get("id"), location=lambda t: t[1].get("location"),
                 resource_group=lambda t: None, name=lambda t: t[1].get("name"))
@@ -269,7 +273,7 @@ def main() -> int:
                 outside_scope = sorted({g for g in referenced if not g.lower().startswith(prefix)})
                 referenced = [g for g in referenced if g.lower().startswith(prefix)]
             add_referenced_groups(rest, referenced, by_id, collector)
-            rules = [rule_record(t, r, by_id, processing_rules if processing_read else None) for t, r in raw_rules]
+            rules = [rule_record(t, r, by_id, processing_rules if read["processing_rules"] else None) for t, r in raw_rules]
             processing_rules = in_scope_processing
     elif not subscription_id:
         collector.record(
@@ -304,10 +308,11 @@ def main() -> int:
             "excluded": excluded,
         },
         summary={
-            **summarize(rules, group_records, processing_rules, processing_read),
+            **summarize(rules, group_records, processing_rules, read["processing_rules"]),
             "provider_registration_status": registration,
             **exclusions.summary(excluded, ("alert_rule", "action_group", "processing_rule"), {
-                "alert_rules": len(rules), "action_groups": len(group_records), "processing_rules": len(processing_rules) if processing_read else None}),
+                name: len(rows) if read[name] else None for name, rows in (
+                    ("alert_rules", rules), ("action_groups", group_records), ("processing_rules", processing_rules))}),
         },
     )
 
