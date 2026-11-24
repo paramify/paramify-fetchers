@@ -10,7 +10,7 @@ statement: >
   Fails when the vault list was not read or the counts appear other than exactly once. Does not
   check whether the collection run succeeded.
 
-regex: '"immutability_enabled_vaults":\s*(?<immutability_enabled_vaults>\d+)[\s\S]*?"total_backup_vaults":\s*(?<total_backup_vaults>\d+)'
+regex: '"immutability_enabled_vaults":\s*(?<immutability_enabled_vaults>\d+)(?:(?!"immutability_enabled_vaults")[\s\S])*?"total_backup_vaults":\s*(?<total_backup_vaults>\d+)'
 rules_summary: MATCH_COUNT EQUALS 1; MATCH_GROUP[1] EQUALS MATCH_GROUP[2]; MATCH_GROUP[2] GREATER_THAN 0
 validation_rules:
   - regexOperation: { type: MATCH_COUNT }
