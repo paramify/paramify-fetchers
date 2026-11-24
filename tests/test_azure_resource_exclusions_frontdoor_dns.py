@@ -551,7 +551,8 @@ def run_origins(monkeypatch, tmp_path, patterns, reads=None, scope=None, collect
         "read_site_configs": lambda cred, collector, sites: reads.extend(("config", s["name"]) for s in sites) or {
             fd.arm_key(_site_id("app-east")): APP_EAST_CONFIG},
         "collect_origin_metrics": lambda sub, cred, collector, profiles, window: reads.extend(
-            ("metrics", p["name"]) for p in profiles) or {},
+            ("metrics", p["name"]) for p in profiles) or {
+            fd.arm_key(p["id"]): {"health": [], "requests": []} for p in profiles},
     }.items():
         monkeypatch.setattr(origins, attr, fake)
     for env in (origins.PRODUCTION_TAG_ENV, origins.LOOKBACK_ENV):
@@ -772,11 +773,18 @@ def _serve_profile_reads(monkeypatch, module):
             monkeypatch.setattr(origins, name, lambda x: x)
 
 
-def _run_profile_reads(module, monkeypatch, tmp_path, refuse=None):
+def _run_profile_reads(module, monkeypatch, tmp_path, refuse=None, scope="route:nothing-*"):
     _serve_profile_reads(monkeypatch, module)
-    if refuse:
+    if refuse == DEFINITIONS_REFUSED:
+        policies, _ = _blocking_waf_policies()
+
+        def unread_definitions(subscription_id, cred, collector):
+            collector.record(DEFINITIONS_REFUSED, REFUSED)
+            return policies, fd.definition_index(None)
+
+        monkeypatch.setattr(module, "collect_waf_policies", unread_definitions)
+    elif refuse:
         _refuse(monkeypatch, module, refuse)
-    scope = "route:nothing-*"
     if module is tls:
         return _run(tls, monkeypatch, tmp_path, "rg:rg-out", "azure_front_door_tls", scope)
     if module is coverage:
@@ -787,6 +795,7 @@ def _run_profile_reads(module, monkeypatch, tmp_path, refuse=None):
 # The in-scope count each fetcher adds beyond hosts, custom domains, endpoints and routes.
 OWN_COUNT = {tls: "secrets", coverage: "host_routes", origins: "origin_groups"}
 ROUTES_REFUSED = "cdn.routes.list_by_endpoint(fd-in/e)"
+DEFINITIONS_REFUSED = "frontdoor.managed_rule_sets.list"
 DOMAINS_REFUSED = "cdn.afd_custom_domains.list_by_profile(fd-in)"
 
 
@@ -889,3 +898,157 @@ def test_scope_exclusion_counts_use_the_kinds_plural():
     summary = tls.ScopeExclusions().summary([{"kind": "policy"}], ("policy",), {"policies": 1})
     assert (summary["excluded_policies"], summary["in_scope_policies"]) == (1, 1)
     assert tls.ScopeExclusions().summary([], ("policy",), {"policies": None})["excluded_policies"] is None
+
+
+# --- every summary field built from an unread list reads null ---
+
+def _summary_keys(module) -> list:
+    if module is tls:
+        return list(tls.summarize([], {}, [], [], []))
+    if module is coverage:
+        return list(coverage.summarize([], {}, [], [], [], []))
+    if module is waf:
+        return list(waf.summarize([], {}))
+    return [*origins.summarize([], {}, []), *origins.summarize_app_services([], [], None),
+            *origins.summarize_health([], [], 7, ("start", "end"))]
+
+
+@pytest.mark.parametrize("module", [tls, coverage, waf, origins], ids=["tls", "coverage", "waf", "origins"])
+def test_every_summary_field_names_the_lists_it_is_built_from(module):
+    mapped = [f for _, fields in module.FIELDS_BY_LISTS for f in fields]
+    assert sorted(mapped) == sorted(_summary_keys(module)) and len(mapped) == len(set(mapped))
+
+
+def _fields(module, unread) -> set:
+    return {f for lists, fields in module.FIELDS_BY_LISTS if set(lists) & unread for f in fields}
+
+
+def _constants(module) -> set:
+    return {f for lists, fields in module.FIELDS_BY_LISTS if not lists for f in fields}
+
+
+@pytest.mark.parametrize("module, refuse, unread", [
+    (tls, ROUTES_REFUSED, {"routes"}),
+    (tls, DOMAINS_REFUSED, {"custom_domains"}),
+    (tls, "cdn.secrets.list_by_profile(fd-in)", {"secrets"}),
+    (tls, "cdn.rule_sets.list_by_profile(fd-in)", {"rule_sets"}),
+    (tls, None, set()),
+    (coverage, ROUTES_REFUSED, {"routes"}),
+    (coverage, DOMAINS_REFUSED, {"custom_domains"}),
+    (coverage, "cdn.security_policies.list_by_profile(fd-in)", {"security_policies"}),
+    (coverage, "monitor.diagnostic_settings.list(fd-in)", {"log_settings"}),
+    (coverage, DEFINITIONS_REFUSED, {"rule_set_definitions"}),
+    (coverage, None, set()),
+    (origins, ROUTES_REFUSED, {"routes"}),
+    (origins, "cdn.rule_sets.list_by_profile(fd-in)", {"rule_sets"}),
+    (origins, "cdn.afd_origins.list_by_origin_group(fd-in/g)", {"origins"}),
+    (origins, "cdn.afd_origins.list_by_origin_group(fd-out/g)", {"excluded_profile_origins"}),
+    (origins, None, set()),
+], ids=lambda v: v if isinstance(v, str) else None)
+def test_summary_fields_built_from_an_unread_list_read_null(module, refuse, unread, monkeypatch, tmp_path):
+    code, evidence = _run_profile_reads(module, monkeypatch, tmp_path, refuse)
+    summary = evidence["summary"]
+    nulls = _fields(module, unread)
+    assert code == (1 if refuse else 0)
+    assert {f: summary[f] for f in nulls} == dict.fromkeys(nulls)
+    numbers = {f for _, fields in module.FIELDS_BY_LISTS for f in fields} - nulls - _constants(module)
+    assert [f for f in sorted(numbers) if summary[f] is None] == []
+
+
+@pytest.mark.parametrize("module, count", [(tls, "route_count"), (coverage, "route_count"), (origins, "origin_group_count")],
+                         ids=["tls", "coverage", "origins"])
+def test_a_profiles_own_counts_are_null_when_its_route_list_is_unread(module, count, monkeypatch, tmp_path):
+    _, evidence = _run_profile_reads(module, monkeypatch, tmp_path, ROUTES_REFUSED)
+    profiles = {p["name"]: p for p in evidence["results"]["profiles"]}
+    assert (profiles["fd-in"][count], profiles["fd-named"][count]) == (None, 1)
+
+
+def test_tls_domains_routed_and_served_are_null_when_their_profiles_routes_are_unread(monkeypatch, tmp_path):
+    _, evidence = _run_profile_reads(tls, monkeypatch, tmp_path, ROUTES_REFUSED)
+    domains = {d["profile"]: d for d in evidence["results"]["custom_domains"]}
+    assert (domains["fd-in"]["routed"], domains["fd-in"]["served"]) == (None, None)
+    assert (domains["fd-named"]["routed"], domains["fd-named"]["served"]) == (True, True)
+
+
+def test_coverage_host_routes_are_unknown_when_their_profiles_security_policies_are_unread(monkeypatch, tmp_path):
+    _, evidence = _run_profile_reads(coverage, monkeypatch, tmp_path, "cdn.security_policies.list_by_profile(fd-in)")
+    by_profile = {h["profile"]: h for h in evidence["results"]["host_routes"]}
+    assert (by_profile["fd-in"]["effective_scope"], by_profile["fd-in"]["protected"]) == ("unknown", None)
+    assert by_profile["fd-named"]["effective_scope"] == "domain"
+    profiles = {p["name"]: p for p in evidence["results"]["profiles"]}
+    assert profiles["fd-in"]["waf_in_use"] is None and profiles["fd-named"]["waf_in_use"] is True
+
+
+def test_coverage_waf_log_export_is_null_when_a_log_list_is_unread(monkeypatch, tmp_path):
+    _, evidence = _run_profile_reads(coverage, monkeypatch, tmp_path, "monitor.diagnostic_settings_category.list(fd-in)")
+    profiles = {p["name"]: p for p in evidence["results"]["profiles"]}
+    assert (profiles["fd-in"]["waf_log_exported"], profiles["fd-named"]["waf_log_exported"]) == (None, True)
+    assert evidence["summary"]["profiles_waf_log_exported"] is None
+
+
+def test_coverage_protection_is_unknown_when_rule_set_definitions_are_unread(monkeypatch, tmp_path):
+    _, evidence = _run_profile_reads(coverage, monkeypatch, tmp_path, DEFINITIONS_REFUSED)
+    assert {(h["waf_blocking"], h["protected"]) for h in evidence["results"]["host_routes"]} == {(None, None)}
+    assert all("waf_not_blocking" not in h["unprotected_reasons"] for h in evidence["results"]["host_routes"])
+
+
+def test_an_excluded_origin_groups_origins_are_null_when_its_origin_list_is_unread(monkeypatch, tmp_path):
+    _, evidence = _run_profile_reads(origins, monkeypatch, tmp_path, "cdn.afd_origins.list_by_origin_group(fd-in/g)",
+                                     scope="route:r")
+    groups = {e["profile"]: e for e in evidence["results"]["excluded"] if e["kind"] == "origin_group"}
+    assert groups["fd-in"]["origins"] is None and groups["fd-named"]["origins"] == ["app-east"]
+
+
+def test_waf_policies_definition_counts_are_null_when_the_definitions_are_unread(monkeypatch, tmp_path):
+    client = NS(policies=NS(list_by_subscription=lambda: []), managed_rule_sets=NS(list=lambda: []))
+    monkeypatch.setitem(sys.modules, "azure.mgmt.frontdoor", NS(FrontDoorManagementClient=lambda **kw: client))
+    _refuse(monkeypatch, waf, DEFINITIONS_REFUSED)
+    code, evidence = _run(waf, monkeypatch, tmp_path, None, "azure_front_door_waf_policies")
+    summary = evidence["summary"]
+    nulls = _fields(waf, {"rule_set_definitions"})
+    assert code == 1 and {f: summary[f] for f in nulls} == dict.fromkeys(nulls)
+    assert (summary["total_waf_policies"], summary["policies_in_detection_mode"]) == (0, 0)
+
+
+def test_a_policys_blocking_is_unknown_only_when_nothing_else_decides_it():
+    rule_set = {"rule_set_type": "Microsoft_DefaultRuleSet", "rule_set_version": "2.1", "rule_set_action": "Block",
+                "exclusions": [], "rule_group_overrides": []}
+    unread = fd.definition_index(None)
+    record = fd.waf_policy_record({**_waf_policy(IN_RG, "p"), "managed_rule_sets": [rule_set]}, unread)
+    assert (record["blocking"], record["not_blocking_reasons"]) == (None, [])
+    assert record["managed_rule_sets"][0]["rule_definition_found"] is None
+    detection = fd.waf_policy_record({**_waf_policy(IN_RG, "p", mode="Detection"), "managed_rule_sets": [rule_set]}, unread)
+    assert (detection["blocking"], detection["not_blocking_reasons"]) == (False, ["mode_detection"])
+    missing = fd.waf_policy_record({**_waf_policy(IN_RG, "p"), "managed_rule_sets": [rule_set]}, fd.definition_index([]))
+    assert (missing["blocking"], missing["not_blocking_reasons"]) == (False, ["rule_definition_not_found"])
+
+
+def test_a_route_relying_on_unread_rule_sets_has_an_unknown_https_verdict():
+    route = {"supported_protocols": ["Http", "Https"], "https_redirect": "Disabled", "rule_set_ids": ["rs1"]}
+    assert fd.route_https(route, {}, rule_sets_read=False)["https_only"] is None
+    assert fd.route_https(route, {})["https_only"] is False
+    assert fd.route_https({**route, "rule_set_ids": []}, {}, rule_sets_read=False)["https_only"] is False
+    assert fd.route_https({**route, "https_redirect": "Enabled"}, {}, rule_sets_read=False)["https_only"] is True
+    assert origins.protocols_to_origin("MatchRequest", None) is None
+
+
+def test_a_tls_domain_naming_an_unread_secret_has_no_certificate_verdict():
+    profile = {"name": "fd", "sku": "Premium_AzureFrontDoor"}
+    domain = {**_fd_topology("fd-in")["custom_domains"][0], "secret_id": f"{IN_RG}/secrets/s",
+              "certificate_type": "CustomerCertificate"}
+    now = tls.datetime.now(tls.timezone.utc)
+    record = tls.domain_record(profile, domain, {}, set(), set(), now, secrets_read=False)
+    assert (record["certificate_status"], record["certificate_expired"]) == (None, None)
+    assert tls.domain_record(profile, domain, {}, set(), set(), now)["certificate_status"] == "missing"
+
+
+def test_an_origin_groups_verdicts_are_null_for_what_wasnt_read():
+    group = {k: v for k, v in _fd_topology("fd-in")["origin_groups"][0].items() if k != "origins_projected"}
+    profile = _fd_topology("fd-in")["profile"]
+    path = {"origin_group_id": group["id"], "serving": True, "protocols_to_origin": ["Https"], "endpoint": "e",
+            "route": "r", "via": "route", "forwarding_protocol": "HttpsOnly"}
+    unread = origins.group_record(profile, group, None, [path], {}, {})
+    assert (unread["origins"], unread["total_origins"], unread["connection_protected"]) == (None, None, None)
+    assert unread["serving"] is True
+    no_paths = origins.group_record(profile, group, [], [path], {}, {}, paths_read=False)
+    assert (no_paths["serving"], no_paths["protocols_to_origin"], no_paths["connection_protected"]) == (None, None, None)

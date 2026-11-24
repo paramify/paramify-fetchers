@@ -740,9 +740,20 @@ def test_health_data_counts_an_unresolved_region():
 
 
 def test_group_without_metrics_has_no_data():
-    [record], _ = origin_health([health_group()], {})
+    group = health_group()
+    [record], _ = origin_health([group], {origins.profile_key(group["id"]): {"health": [], "requests": []}})
     assert (record["has_health_data"], record["has_traffic"], record["all_regions_healthy_last_hour"]) == (
         False, False, None)
+
+
+def test_group_whose_metrics_werent_read_has_unknown_health_and_traffic():
+    group = health_group()
+    key = origins.profile_key(group["id"])
+    for metrics in ({}, {key: {"health": None, "requests": None}}):
+        [record], _ = origin_health([group], metrics)
+        assert (record["has_health_data"], record["has_traffic"], record["requests"]) == (None, None, None)
+    [record], _ = origin_health([group], {key: {"health": None, "requests": []}})
+    assert (record["has_health_data"], record["has_traffic"]) == (None, False)
 
 
 def test_health_summary():

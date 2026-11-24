@@ -109,18 +109,42 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
-- **Front Door in-scope counts read null when a list inside one profile wasn't read.** Before, a refused endpoint,
-  route, custom domain or secret list in one profile read as empty, so the in-scope counts came out short and
-  `scope_exclusion_patterns_unmatched` could name a pattern never compared with that profile's routes. Now each
-  in-scope count, and its `excluded_*` count, is null when any in-scope profile has an unread list it's built from,
-  and `scope_exclusion_patterns_unmatched` is null with it. `in_scope_custom_domains` needs the custom domain lists,
-  `in_scope_endpoints` the endpoint lists, `in_scope_hosts` both, and `in_scope_routes` the endpoint, route and
-  custom domain lists. `azure_front_door_tls` 0.6.3 (`in_scope_secrets` also needs the secret lists),
-  `azure_front_door_waf_coverage` 0.6.3 (`in_scope_host_routes` needs what `in_scope_routes` does) and
-  `azure_front_door_origins` 0.8.3 (`in_scope_origin_groups` also needs the rule set and origin group lists;
-  `in_scope_apps` and `excluded_apps` are null when `in_scope_origin_groups` is, or when any profile's origin group
-  or origin list wasn't read, excluded profiles included).
-  `azure_front_door_waf_policies` doesn't read these lists and is unchanged.
+- **Front Door counts and verdicts read null when a list they're built from wasn't read.** Before, a refused list
+  inside one profile (endpoints, routes, custom domains, rule sets, secrets, security policies, diagnostic settings,
+  origin groups, origins, metrics), or the profile list itself, read as empty: counts came out short or 0, verdicts
+  were judged against nothing, and `scope_exclusion_patterns_unmatched` could name a pattern never compared with a
+  profile's routes. Now every summary field reads null when any in-scope profile has an unread list it's built from;
+  each fetcher's `fetcher.yaml` names those lists field by field.
+  - In-scope counts follow the same rule, and each `excluded_*` count and `scope_exclusion_patterns_unmatched` read
+    null with them. `in_scope_routes` needs the endpoint, route and custom domain lists, since a route leaves scope
+    when every host it serves is excluded.
+  - Records: each profile's own counts (`route_count`, `endpoint_count`, `custom_domain_count`, `secret_count`,
+    `rule_set_count`, `origin_group_count`, `origin_count`) are null when their list wasn't read. A route that
+    accepts HTTP and carries a rule set has a null `https_only` while the profile's rule sets weren't all read.
+  - `azure_front_door_tls` 0.6.3: a custom domain's `routed` and `served` are null while its profile's routes
+    weren't read, and its certificate status and expiry are null when it names a secret and the secret list wasn't
+    read.
+  - `azure_front_door_waf_coverage` 0.6.3:
+    - A host-route whose profile's security policies weren't read has `effective_scope: unknown` and `protected`
+      null.
+    - A WAF policy that can't be found while the WAF policy list wasn't read is unknown, not `waf_unresolved`.
+    - A profile's `waf_log_exported`, `access_log_exported`, `captured_log_categories` and `waf_log_destinations`
+      are null when either log list wasn't read, and `waf_in_use` is null rather than false while its routes
+      weren't read.
+    - `endpoints_without_routes` and `unrouted_custom_domains` no longer list anything from a profile whose routes
+      weren't read.
+  - `azure_front_door_origins` 0.8.3:
+    - An origin group's origin fields and connection verdict are null when its origin list wasn't read, and
+      `serving`, `protocols_to_origin` and `connection_protected` are null when a route or rule set reaching it
+      wasn't read. An excluded group lists `origins: null` then.
+    - `in_scope_apps` and `excluded_apps` are null when the origin group scope is unknown, or when any profile's
+      origin group or origin list wasn't read, excluded profiles included.
+    - Health records read `has_health_data`, `has_traffic` and `requests` null when that profile's metrics weren't
+      read.
+  - `azure_front_door_waf_policies` 0.2.2: when the managed rule set definitions weren't read, a default rule set's
+    `rule_definition_found` is null instead of false, so the policy is no longer reported as
+    `rule_definition_not_found`. Its `blocking` is null unless another reason already makes it false. The blocking, rule group and newest-version
+    counts read null, and every count reads null when the policy list wasn't read.
 
 - **In-scope counts read null, not 0, when their list couldn't be read.** A failed sign-in or list call left
   `in_scope_*` at 0, as if the subscription had none. Each now reads null when the list it counts wasn't read, and 0

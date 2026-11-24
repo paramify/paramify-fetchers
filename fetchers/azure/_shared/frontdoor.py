@@ -174,16 +174,17 @@ def _version_key(version: str):
         return None
 
 
-def definition_index(definitions: List[dict]) -> dict:
-    """Rule-set definitions keyed by (type, version), plus the newest numeric version per type."""
+def definition_index(definitions: Optional[List[dict]]) -> dict:
+    """Rule-set definitions keyed by (type, version), plus the newest numeric version per type; None means the definition
+    list wasn't read, which "read" records."""
     by_key, latest = {}, {}
-    for d in definitions:
+    for d in definitions or []:
         rs_type = str(d["rule_set_type"] or "").lower()
         by_key[(rs_type, d["rule_set_version"])] = d
         key = _version_key(d["rule_set_version"])
         if key is not None and (rs_type not in latest or key > _version_key(latest[rs_type])):
             latest[rs_type] = d["rule_set_version"]
-    return {"by_key": by_key, "latest": latest}
+    return {"by_key": by_key, "latest": latest, "read": definitions is not None}
 
 
 def effective_rule_counts(rule_set: dict, definition: Optional[dict], disabled_groups: List[str]) -> dict:
@@ -256,6 +257,10 @@ def rule_set_record(rule_set: dict, definitions: Optional[dict] = None) -> dict:
     index = definitions or {"by_key": {}, "latest": {}}
     rs_type = str(rule_set["rule_set_type"] or "").lower()
     definition = index["by_key"].get((rs_type, rule_set["rule_set_version"]))
+    counts = effective_rule_counts(rule_set, definition, disabled_groups)
+    if definition is None and index.get("read") is False:
+        # Not found only among definitions that were read; the list itself wasn't.
+        counts["rule_definition_found"] = None
     return {
         **rule_set,
         "effective_action": rule_set["rule_set_action"] or ("Block" if is_default else None),
@@ -265,7 +270,7 @@ def rule_set_record(rule_set: dict, definitions: Optional[dict] = None) -> dict:
         "log_only_rules": log_only_rules,
         "allow_rules": allow_rules,
         "total_exclusions": exclusion_count,
-        **effective_rule_counts(rule_set, definition, disabled_groups),
+        **counts,
         "latest_version_available": index["latest"].get(rs_type),
     }
 
@@ -308,9 +313,10 @@ def not_blocking_reasons(enabled_state: str, mode, rule_sets: List[dict], custom
     else:
         if not any(rs["effective_action"] in ENFORCING_ACTIONS for rs in default_sets):
             reasons.append("default_rule_set_log_only")
-        if not all(rs["rule_definition_found"] for rs in default_sets):
+        found = [rs["rule_definition_found"] for rs in default_sets]
+        if False in found:
             reasons.append("rule_definition_not_found")
-        elif any(rs["groups_without_blocking_rules"] for rs in default_sets):
+        elif None not in found and any(rs["groups_without_blocking_rules"] for rs in default_sets):
             reasons.append("rule_groups_not_blocking")
     if any(allows_all_requests(r) for r in custom_rules):
         reasons.append("allow_all_custom_rule")
@@ -323,6 +329,8 @@ def waf_policy_record(policy: dict, definitions: Optional[dict] = None) -> dict:
     custom_rules = [custom_rule_record(r) for r in policy["custom_rules"]]
     enabled_state = policy["enabled_state"] or "Enabled"
     reasons = not_blocking_reasons(enabled_state, policy["mode"], rule_sets, custom_rules)
+    # With no other reason, a default rule set whose definition wasn't read leaves blocking unknown.
+    unknown = not reasons and any(rs["rule_definition_found"] is None for rs in rule_sets if rs["is_default_rule_set"])
     return {
         **policy,
         "resource_group": resource_group_from_id(policy["id"]),
@@ -344,7 +352,7 @@ def waf_policy_record(policy: dict, definitions: Optional[dict] = None) -> dict:
         "default_rule_set_groups_without_blocking_rules": core["groups_without_blocking_rules"] if core else None,
         "default_rule_set_groups_off_by_default": core["groups_off_by_default"] if core else None,
         "associated": bool(policy["security_policy_links"]),
-        "blocking": not reasons,
+        "blocking": None if unknown else not reasons,
         "not_blocking_reasons": reasons,
     }
 
@@ -488,6 +496,23 @@ def profile_scope(profile: dict, endpoints: List[dict], domains: List[dict], exc
     return {"hosts": host_patterns, "routes": routes, "excluded": excluded, "in_scope": in_scope}
 
 
+def unread_kinds(collected: List[dict], listed: bool, kinds) -> frozenset:
+    """The lists unread in any of these profiles' reads; every one of `kinds`, and "profiles", when the profile list
+    itself wasn't read."""
+    if not listed:
+        return frozenset(kinds) | {"profiles"}
+    return frozenset().union(*(c.get("unread", frozenset()) for c in collected))
+
+
+def null_unread(summary: dict, fields_by_lists, unread) -> dict:
+    """The summary with every field built from an unread list set to None. `fields_by_lists` pairs the lists a group of
+    fields is built from with those fields; a group built from no list never reads None."""
+    for lists, fields in fields_by_lists:
+        if unread & set(lists):
+            summary.update(dict.fromkeys(fields))
+    return summary
+
+
 def total(counts) -> Optional[int]:
     """The sum of per-profile counts; None when any is None, because a list in that profile wasn't read."""
     counts = list(counts)
@@ -582,18 +607,20 @@ def https_only_basis(protocols: List[str], https_redirect: str, rule_set_redirec
     return None
 
 
-def route_https(route: dict, rule_sets_by_key: dict) -> dict:
-    """Whether a route only ever handles HTTPS requests, applying the API defaults for absent fields."""
+def route_https(route: dict, rule_sets_by_key: dict, rule_sets_read: bool = True) -> dict:
+    """Whether a route only ever handles HTTPS requests, applying the API defaults for absent fields. With the profile's
+    rule sets not all read, a route that accepts HTTP and carries a rule set reads None: the redirect may be in one."""
     protocols = route["supported_protocols"] or DEFAULT_SUPPORTED_PROTOCOLS
     redirect = route["https_redirect"] or DEFAULT_HTTPS_REDIRECT
     rule = rule_set_https_redirect(route["rule_set_ids"], rule_sets_by_key)
     basis = https_only_basis(protocols, redirect, rule is not None)
+    unknown = basis is None and not rule_sets_read and bool(route["rule_set_ids"])
     return {
         "effective_supported_protocols": protocols,
         "effective_https_redirect": redirect,
         "https_redirect_rule": rule if basis == "rule_set_redirect" else None,
         "accepts_http": "Http" in protocols,
-        "https_only": basis is not None,
+        "https_only": None if unknown else basis is not None,
         "https_only_basis": basis,
     }
 
@@ -716,7 +743,7 @@ def collect_waf_policies(subscription_id: str, cred, collector: Collector) -> Tu
         ),
     )
     if client is None:
-        return None, definition_index([])
+        return None, definition_index(None)
     policies = collector.guard(
         "frontdoor.policies.list_by_subscription",
         lambda: [project_waf_policy(p) for p in client.policies.list_by_subscription()],
@@ -724,6 +751,5 @@ def collect_waf_policies(subscription_id: str, cred, collector: Collector) -> Tu
     definitions = collector.guard(
         "frontdoor.managed_rule_sets.list",
         lambda: [project_rule_set_definition(d) for d in client.managed_rule_sets.list()],
-        default=[],
     )
     return policies, definition_index(definitions)

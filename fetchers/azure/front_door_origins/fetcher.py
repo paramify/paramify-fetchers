@@ -41,12 +41,14 @@ from frontdoor import (  # noqa: E402
     endpoints_with_routes,
     front_door_profiles,
     in_scope_totals,
+    null_unread,
     profile_scope,
     read_lists,
     route_https,
     route_serving,
     rule_sets_with_rules,
     total,
+    unread_kinds,
     wire,
 )
 from resource_exclusions import ResourceExclusions  # noqa: E402
@@ -71,6 +73,46 @@ PRODUCTION_TAG_ENV = "AZURE_PRODUCTION_APP_TAG"
 LOOKBACK_ENV = "AZURE_FRONT_DOOR_METRICS_LOOKBACK_DAYS"
 SCOPE_EXCLUSIONS_ENV = "AZURE_FRONT_DOOR_SCOPE_EXCLUSIONS"
 EXCLUDED_KINDS = ("custom_domain", "endpoint", "route", "origin_group", "app")
+# The per-profile lists this fetcher reads: the CDN lists, then each in-scope profile's metrics, then an excluded
+# profile's origin groups and origins (which can still keep an app in scope).
+PROFILE_LISTS = ("endpoints", "routes", "custom_domains", "rule_sets", "origin_groups", "origins", "health_metrics",
+                 "request_metrics", "excluded_profile_origins")
+# A group's routes, and so whether it serves and over what, come from these.
+PATH_LISTS = frozenset({"endpoints", "routes", "rule_sets"})
+GROUPS = ("endpoints", "routes", "custom_domains", "rule_sets", "origin_groups")
+ORIGINS = (*GROUPS, "origins")
+APP_GAPS = ("site_not_found", "site_not_visible", "access_restrictions_unread", "public_access_unrestricted",
+            "non_front_door_allow_rule", "front_door_rule_without_fdid", "unknown_front_door_id_allowed",
+            "other_front_door_id_allowed", "profile_front_door_id_not_allowed", "profile_front_door_id_unknown",
+            "scm_public_access_unrestricted")
+APP_COUNTS = ("", "_behind_front_door", "_not_behind_front_door", "_regional_twin_ready", "_without_regional_twin",
+              "_twin_capacity_short", "_twin_capacity_unknown")
+# Summary fields by the lists they are built from (the profile list too, always); each reads null when one is unread.
+FIELDS_BY_LISTS = (
+    (("profiles",), ("total_front_door_profiles", "premium_profiles", "standard_profiles", "skipped_profiles_by_sku")),
+    (GROUPS, ("total_origin_groups", "serving_origin_groups", "unused_origin_groups", "serving_groups_http_health_probe",
+              "serving_groups_origin_authentication", "serving_groups_http_to_origin")),
+    (ORIGINS, (
+        "total_origins", "enabled_origins", "private_link_origins", "origins_by_region_source", "serving_regions",
+        "serving_groups_multi_region_active_active", "serving_groups_multi_region_failover",
+        "serving_groups_single_enabled_origin", "serving_groups_without_enabled_origin",
+        "serving_groups_region_unresolved", "serving_groups_multi_origin_without_health_probe",
+        "serving_groups_connection_protected", "serving_groups_connection_unprotected",
+        "serving_groups_certificate_name_check_disabled", "serving_groups_without_private_link_or_origin_auth",
+        "serving_groups_all_private_link", "serving_multi_region_groups",
+        "app_service_origins", "serving_app_service_origins", "serving_app_service_origins_locked_to_front_door",
+        "serving_app_service_origins_not_locked", "serving_app_service_origins_public_network_access_disabled",
+        *(f"serving_app_service_origins_{gap}" for gap in APP_GAPS))),
+    ((*ORIGINS, "excluded_profile_origins"), tuple(
+        f"production_{app_type}s{suffix}" for app_type in ("web_app", "function_app") for suffix in APP_COUNTS)),
+    ((*ORIGINS, "health_metrics", "request_metrics"), (
+        "serving_groups_with_health_data", "serving_groups_with_traffic", "serving_groups_without_traffic",
+        "serving_groups_all_regions_healthy_last_hour", "serving_groups_region_unhealthy_last_hour",
+        "serving_multi_region_groups_all_regions_healthy_last_hour",
+        "serving_multi_region_groups_all_regions_serving_last_hour", "serving_multi_region_groups_with_traffic_shift",
+        "regions_serving_traffic", "origin_metric_series_unmatched")),
+    ((), ("origin_api_version", "production_tag", "metrics_lookback_days", "metrics_window_start", "metrics_window_end")),
+)
 RESOURCE_KINDS = ("profile", "production_app")
 DEFAULT_LOOKBACK_DAYS = 7
 # "Last hour" must fall in the window's last this-many hours; older data leaves it unknown.
@@ -203,15 +245,17 @@ def protocols_to_origin(forwarding_protocol: str, route_https_only: bool) -> lis
         return ["Http"]
     if forwarding_protocol == "MatchRequest" and route_https_only:
         return ["Https"]
+    if forwarding_protocol == "MatchRequest" and route_https_only is None:
+        return None
     return ["Http", "Https"]
 
 
-def origin_paths(profile: dict, endpoints: list[dict], rule_sets_by_key: dict) -> list[dict]:
+def origin_paths(profile: dict, endpoints: list[dict], rule_sets_by_key: dict, rule_sets_read: bool = True) -> list[dict]:
     """Every way a route reaches an origin group: its own originGroup, and each rule-set override attached to it."""
     paths = []
     for endpoint in endpoints:
         for route in endpoint["routes"]:
-            https = route_https(route, rule_sets_by_key)
+            https = route_https(route, rule_sets_by_key, rule_sets_read)
             base = {
                 "profile": profile["name"],
                 "endpoint": endpoint["name"],
@@ -258,8 +302,12 @@ def origin_record(origin: dict, regions_by_id: dict, regions_by_host: dict) -> d
     }
 
 
-def group_record(profile: dict, group: dict, origins: list[dict], paths: list[dict], regions_by_id: dict, regions_by_host: dict) -> dict:
-    records = [origin_record(o, regions_by_id, regions_by_host) for o in origins]
+def group_record(profile: dict, group: dict, origins: list[dict] | None, paths: list[dict], regions_by_id: dict,
+                 regions_by_host: dict, paths_read: bool = True) -> dict:
+    """`origins` None means the group's origin list wasn't read; `paths_read` False that a route or rule set reaching it
+    may be missing. Each field built from what wasn't read is None."""
+    origins_read = origins is not None
+    records = [origin_record(o, regions_by_id, regions_by_host) for o in origins or []]
     enabled = [o for o in records if o["effective_enabled_state"] == "Enabled"]
     priorities = [o["priority"] for o in enabled if o["priority"] is not None]
     best = min(priorities) if priorities else None
@@ -269,44 +317,52 @@ def group_record(profile: dict, group: dict, origins: list[dict], paths: list[di
     enabled_regions = sorted({o["region"] for o in enabled if o["region"]})
     group_paths = [p for p in paths if arm_key(p["origin_group_id"]) == arm_key(group["id"])]
     serving_paths = [p for p in group_paths if p["serving"]]
-    protocols = sorted({proto for p in serving_paths for proto in p["protocols_to_origin"]})
+    protocols = sorted({proto for p in serving_paths for proto in p["protocols_to_origin"] or []})
+    if any(p["protocols_to_origin"] is None for p in serving_paths):
+        paths_read = False
     name_check_off = sorted(o["name"] for o in enabled if not o["effective_enforce_certificate_name_check"])
     all_private_link = bool(enabled) and all(o["private_link"] for o in enabled)
     serving = bool(serving_paths)
 
     reasons = []
-    if not enabled:
+    if origins_read and not enabled:
         reasons.append("no_enabled_origin")
     if "Http" in protocols:
         reasons.append("http_to_origin")
     if name_check_off:
         reasons.append("certificate_name_check_disabled")
-    if not all_private_link and group["authentication"] is None:
+    if origins_read and not all_private_link and group["authentication"] is None:
         reasons.append("no_private_link_or_origin_auth")
+    serving_known = serving if paths_read else None
+    protected = (None if serving_known is None or (serving_known and not reasons and not origins_read)
+                 else serving_known and not reasons)
+
+    def if_read(value):
+        return value if origins_read else None
     return {
         "profile": profile["name"],
         "profile_sku": profile["sku"],
         **group,
-        "origins": records,
+        "origins": if_read(records),
         "routes": [{k: p[k] for k in ("endpoint", "route", "serving", "via", "forwarding_protocol", "protocols_to_origin")}
                    for p in group_paths],
-        "serving": serving,
-        "total_origins": len(records),
-        "enabled_origins": len(enabled),
+        "serving": serving_known,
+        "total_origins": if_read(len(records)),
+        "enabled_origins": if_read(len(enabled)),
         "best_priority": best,
-        "active_origins": len(active),
+        "active_origins": if_read(len(active)),
         "active_regions": active_regions,
         "enabled_regions": enabled_regions,
-        "enabled_origins_region_unresolved": sum(1 for o in enabled if not o["region"]),
-        "multi_region_active_active": len(active_regions) >= 2,
-        "multi_region_failover": len(enabled_regions) >= 2,
+        "enabled_origins_region_unresolved": if_read(sum(1 for o in enabled if not o["region"])),
+        "multi_region_active_active": if_read(len(active_regions) >= 2),
+        "multi_region_failover": if_read(len(enabled_regions) >= 2),
         "health_probe_enabled": group["health_probe"] is not None,
-        "protocols_to_origin": protocols,
-        "certificate_name_check_disabled_origins": name_check_off,
-        "private_link_origins": sum(1 for o in enabled if o["private_link"]),
-        "all_enabled_origins_private_link": all_private_link,
+        "protocols_to_origin": protocols if paths_read else None,
+        "certificate_name_check_disabled_origins": if_read(name_check_off),
+        "private_link_origins": if_read(sum(1 for o in enabled if o["private_link"])),
+        "all_enabled_origins_private_link": if_read(all_private_link),
         "origin_authentication": group["authentication"] is not None,
-        "connection_protected": serving and not reasons,
+        "connection_protected": protected,
         "unprotected_reasons": reasons,
     }
 
@@ -319,7 +375,8 @@ def profile_groups(collected: dict, regions_by_id: dict, regions_by_host: dict, 
     profile = collected["profile"]
     unread = collected.get("unread", frozenset())
     scope = profile_scope(profile, collected["endpoints"], collected["custom_domains"], exclusions, unread)
-    paths = origin_paths(profile, collected["endpoints"], collected["rule_sets"])
+    paths = origin_paths(profile, collected["endpoints"], collected["rule_sets"], "rule_sets" not in unread)
+    paths_read = not unread & PATH_LISTS
     in_scope = [p for p in paths if arm_key(p["route_id"]) not in scope["routes"]]
     records, excluded_groups, excluded = [], set(), list(scope["excluded"])
     for g in collected["origin_groups"]:
@@ -327,12 +384,13 @@ def profile_groups(collected: dict, regions_by_id: dict, regions_by_host: dict, 
         reaching = [p for p in paths if arm_key(p["origin_group_id"]) == key]
         out = bool(reaching) and not any(arm_key(p["origin_group_id"]) == key for p in in_scope)
         records.append(group_record(profile, {k: v for k, v in g.items() if k != "origins_projected"}, g["origins_projected"],
-                                    paths if out else in_scope, regions_by_id, regions_by_host))
+                                    paths if out else in_scope, regions_by_id, regions_by_host, paths_read))
         if out:
             excluded_groups.add(key)
             excluded.append(excluded_item("origin_group", g["name"], None, reason="only_excluded_routes", profile=profile["name"],
                                           id=g["id"], routes=sorted({p["route"] for p in reaching}),
-                                          origins=[o["name"] for o in g["origins_projected"]]))
+                                          origins=None if g["origins_projected"] is None
+                                          else [o["name"] for o in g["origins_projected"]]))
     # Which groups the routes reach also depends on the rule sets' origin overrides.
     in_groups = None if unread & (ROUTE_SCOPE_LISTS | {"origin_groups", "rule_sets"}) else len(records) - len(excluded_groups)
     return {"groups": records, "excluded_groups": excluded_groups, "excluded": excluded,
@@ -340,8 +398,9 @@ def profile_groups(collected: dict, regions_by_id: dict, regions_by_host: dict, 
 
 
 def summarize(profiles: list[dict], skipped_by_sku: dict, groups: list[dict]) -> dict:
+    """The profile and origin group counts; main nulls those built from an unread list (FIELDS_BY_LISTS)."""
     serving = [g for g in groups if g["serving"]]
-    origins = [o for g in groups for o in g["origins"]]
+    origins = [o for g in groups for o in g["origins"] or []]
 
     def count(items, pred) -> int:
         return sum(1 for i in items if pred(i))
@@ -366,9 +425,9 @@ def summarize(profiles: list[dict], skipped_by_sku: dict, groups: list[dict]) ->
         "serving_groups_multi_region_failover": count(serving, lambda g: g["multi_region_failover"]),
         "serving_groups_single_enabled_origin": count(serving, lambda g: g["enabled_origins"] == 1),
         "serving_groups_without_enabled_origin": count(serving, lambda g: g["enabled_origins"] == 0),
-        "serving_groups_region_unresolved": count(serving, lambda g: g["enabled_origins_region_unresolved"] > 0),
+        "serving_groups_region_unresolved": count(serving, lambda g: (g["enabled_origins_region_unresolved"] or 0) > 0),
         "serving_groups_multi_origin_without_health_probe": count(
-            serving, lambda g: g["enabled_origins"] > 1 and not g["health_probe_enabled"]
+            serving, lambda g: (g["enabled_origins"] or 0) > 1 and not g["health_probe_enabled"]
         ),
         "serving_groups_http_health_probe": count(serving, lambda g: (g["health_probe"] or {}).get("probe_protocol") == "Http"),
         "serving_groups_connection_protected": count(serving, lambda g: g["connection_protected"]),
@@ -531,7 +590,7 @@ def fronting_profiles(groups: list[dict], profile_fdids: dict, sites_by_host: di
     """Per app, the Front Door ids of the profiles whose serving groups reach it through an enabled origin."""
     fronting: dict = {}
     for group in groups:
-        for origin in group["origins"]:
+        for origin in group["origins"] or []:
             site_id, _ = origin_site_id(origin, sites_by_host)
             fdid = profile_fdids.get(profile_key(group["id"]))
             if site_id and fdid and group["serving"] and origin["effective_enabled_state"] == "Enabled":
@@ -549,7 +608,7 @@ def app_service_origin_records(groups: list[dict], profile_fdids: dict, sites_by
         fronting = fronting_profiles(groups, profile_fdids, sites_by_host)
     records = []
     for group in groups:
-        for origin in group["origins"]:
+        for origin in group["origins"] or []:
             site_id, source = origin_site_id(origin, sites_by_host)
             if site_id is None:
                 continue
@@ -623,7 +682,7 @@ def web_app_record(site: dict, groups_by_key: dict, app_origins: list[dict], ori
     twins, unresolved = [], False
     for row in serving:
         group = groups_by_key[arm_key(row["origin_group_id"])]
-        for other in group["origins"]:
+        for other in group["origins"] or []:
             if arm_key(other["id"]) == arm_key(row["origin_id"]) or other["effective_enabled_state"] != "Enabled":
                 continue
             twin_app = origins_by_key.get(arm_key(other["id"]))
@@ -708,6 +767,20 @@ def exclude_apps(apps: list[dict], all_app_origins: list[dict], app_origins: lis
         excluded.append(excluded_item("app", app["name"], None, reason="only_excluded_origin_groups", id=app["id"],
                                       origin_groups=sorted(groups)))
     return kept, excluded
+
+
+def metrics_unread(collected: list[dict], metrics_by_profile: dict) -> set:
+    """Which metric lists ("health_metrics", "request_metrics") weren't read for some in-scope profile."""
+    unread = set()
+    for c in collected:
+        read = metrics_by_profile.get(arm_key(c["profile"]["id"])) or {"health": None, "requests": None}
+        unread |= {f"{name}_metrics" for name, key in (("health", "health"), ("request", "requests")) if read[key] is None}
+    return unread
+
+
+def excluded_origins_unread(outside: list[dict]) -> set:
+    return {"excluded_profile_origins"} if any(c.get("unread", frozenset()) & {"origin_groups", "origins"}
+                                               for c in outside) else set()
 
 
 def app_scope_unread(scoped_profiles: list[dict], profiles: list[dict]) -> bool:
@@ -835,7 +908,7 @@ def group_health_record(profile_key_: str, group: dict, health: list[dict], requ
     threshold = health_threshold(group)
     group_name = str(group["name"] or "").lower()
     origin_rows, origin_hours, region_hours = [], [], {}
-    for o in group["origins"]:
+    for o in group["origins"] or []:
         host = str(o["host_name"] or "").lower()
         keys = request_keys(o)
         o_health = hourly([s for s in health if str(s["origin_group"] or "").lower() == group_name
@@ -932,20 +1005,28 @@ def origin_health_records(groups: list[dict], metrics_by_profile: dict, window_e
     """Each group's health and traffic per origin and region, and the metric series matching no origin."""
     hosts_by_profile: dict = {}
     for g in groups:
-        for o in g["origins"]:
+        for o in g["origins"] or []:
             for k in request_keys(o):
                 hosts_by_profile.setdefault((profile_key(g["id"]), k), set()).add(g["name"])
     records = []
     for g in groups:
         key = profile_key(g["id"])
-        metrics = metrics_by_profile.get(key) or {"health": [], "requests": []}
-        records.append(group_health_record(key, g, metrics["health"], metrics["requests"], hosts_by_profile,
-                                           *last_hours(metrics, window_end)))
+        read = metrics_by_profile.get(key) or {"health": None, "requests": None}
+        metrics = {name: read[name] or [] for name in ("health", "requests")}
+        record = group_health_record(key, g, metrics["health"], metrics["requests"], hosts_by_profile,
+                                     *last_hours(metrics, window_end))
+        # Metrics or origins that weren't read leave health and traffic unknown, not absent.
+        if read["health"] is None or g["origins"] is None:
+            record.update(has_health_data=None, all_regions_healthy_last_hour=None)
+        if read["requests"] is None or g["origins"] is None:
+            record.update(has_traffic=None, requests=None, all_enabled_regions_serving_last_hour=None)
+        records.append(record)
     unmatched = [
         {"profile_id": key, "metric": metric, "origin": s["origin"], "origin_group": s["origin_group"],
          "total": sum(p["total"] or 0 for p in s["points"]) if metric == "OriginRequestCount" else None}
         for key, metrics in sorted(metrics_by_profile.items())
-        for metric, series in (("OriginHealthPercentage", metrics["health"]), ("OriginRequestCount", metrics["requests"]))
+        for metric, series in (("OriginHealthPercentage", metrics["health"] or []),
+                               ("OriginRequestCount", metrics["requests"] or []))
         for s in series
         if (key, metric_host(s["origin"])) not in hosts_by_profile
     ]
@@ -1162,14 +1243,12 @@ def collect_origin_metrics(subscription_id, cred, collector: Collector, profiles
                 lambda: project_metric_series(monitor.metrics.list(
                     uri, timespan=timespan, interval=timedelta(hours=1), metricnames="OriginHealthPercentage",
                     aggregation="Average,Minimum", filter="Origin eq '*' and OriginGroup eq '*'", top=METRICS_TOP)),
-                default=[],
             ),
             "requests": collector.guard(
                 f"monitor.metrics.list(OriginRequestCount, {profile['name']})",
                 lambda: project_metric_series(monitor.metrics.list(
                     uri, timespan=timespan, interval=timedelta(hours=1), metricnames="OriginRequestCount",
                     aggregation="Total", filter="Origin eq '*'", top=METRICS_TOP)),
-                default=[],
             ),
         }
     return metrics
@@ -1211,7 +1290,7 @@ def collect_profiles(subscription_id, cred, collector: Collector) -> tuple[list[
                 f"cdn.afd_origins.list_by_origin_group({name}/{group['name']})",
                 lambda: [project_origin(o) for o in cdn_origins.afd_origins.list_by_origin_group(rg, name, group["name"])],
             )
-            group["origins_projected"] = origins or []
+            group["origins_projected"] = origins
             origins_unread |= origins is None
         read = read_lists({
             "profile": profile,
@@ -1271,7 +1350,7 @@ def main() -> int:
         listed = read is not None
         collected, outside, boundary = split_profiles(read or [], resources)
         # Excluded profiles' origins are still looked up: in-scope apps' regional twins are worked out against them.
-        origins = [o for c in collected + outside for g in c["origin_groups"] for o in g["origins_projected"]]
+        origins = [o for c in collected + outside for g in c["origin_groups"] for o in g["origins_projected"] or []]
         ids = sorted({arm_key(i) for o in origins for i in (o["azure_origin_id"], (o["private_link"] or {}).get("target_id")) if i})
         hosts = sorted({str(o["host_name"]).lower() for o in origins if o["host_name"]})
         graph = graph_client(cred, collector)
@@ -1281,7 +1360,7 @@ def main() -> int:
         outside_groups = [g for c in outside for g in profile_groups(c, regions_by_id, regions_by_host, ScopeExclusions())["groups"]]
         out_of_scope = set().union(*(sp["excluded_groups"] for sp in scoped_profiles))
         in_scope_origins = [o for c in collected for g in c["origin_groups"] if arm_key(g["id"]) not in out_of_scope
-                            for o in g["origins_projected"]]
+                            for o in g["origins_projected"] or []]
         known_sites = [(o, origin_site_id(o, {})[0]) for o in origins]
         sites_by_key, sites_by_host = lookup_sites(
             graph, collector, subscription_id, sorted({k for _, k in known_sites if k}),
@@ -1312,8 +1391,8 @@ def main() -> int:
         excluded += scoped["excluded"]
         profiles.append({
             **c["profile"],
-            "origin_group_count": len(in_scope),
-            "origin_count": sum(g["total_origins"] for g in in_scope),
+            "origin_group_count": None if c.get("unread", frozenset()) & set(GROUPS) else len(in_scope),
+            "origin_count": None if c.get("unread", frozenset()) & set(ORIGINS) else total(g["total_origins"] for g in in_scope),
         })
 
     # An excluded profile's Front Door id is still one of the subscription's, not an unknown one.
@@ -1347,9 +1426,12 @@ def main() -> int:
         results={"origin_groups": groups, "profiles": profiles, "provider_registration_status": registration,
                  "app_service_origins": app_origins, "production_apps": apps, "origin_health": health,
                  "unmatched_origin_metrics": unmatched, "excluded": excluded},
-        summary={**summarize(profiles, skipped_by_sku, groups), "provider_registration_status": registration,
-                 **summarize_app_services(app_origins, apps, production_tag),
-                 **summarize_health(health, unmatched, days, window),
+        summary={**null_unread({**summarize(profiles, skipped_by_sku, groups),
+                                 **summarize_app_services(app_origins, apps, production_tag),
+                                 **summarize_health(health, unmatched, days, window)},
+                                FIELDS_BY_LISTS, unread_kinds(collected, listed, PROFILE_LISTS) | metrics_unread(
+                                    collected, metrics_by_profile) | excluded_origins_unread(outside)),
+                 "provider_registration_status": registration,
                  **exclusions.summary(excluded, EXCLUDED_KINDS, {
                      **{name: n if listed else None for name, n in {
                          **in_scope_totals([sp["in_scope"] for sp in scoped_profiles]),
