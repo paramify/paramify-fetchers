@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Azure Application Gateway listeners with their protocol, redirect behaviour and effective TLS policy."""
 
+import fnmatch
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -33,6 +35,41 @@ PREDEFINED_MIN_TLS = {
 }
 TLS_ORDER = ("TLSv1_0", "TLSv1_1", "TLSv1_2", "TLSv1_3")
 BELOW_TLS12 = ("TLSv1_0", "TLSv1_1")
+EXPECTED_ENV = "AZURE_APPGW_EXPECTED_LISTENERS"
+EXPECTED_PREFIXES = ("name", "host")
+
+
+def expected_listener_patterns(raw: str | None) -> tuple[list[str] | None, list[str]]:
+    """(patterns, invalid entries) from comma-separated name:<glob> or host:<glob> entries; None when unset."""
+    entries = [e.strip() for e in (raw or "").split(",") if e.strip()]
+    if not entries:
+        return None, []
+    valid = [e for e in entries if e.split(":", 1)[0].lower() in EXPECTED_PREFIXES and e.split(":", 1)[1:] != [""]
+             and ":" in e]
+    return valid, [e for e in entries if e not in valid]
+
+
+def listener_matches(pattern: str, listener: dict) -> bool:
+    """A name: pattern matches the listener's name, a host: pattern any of its host names; globs, without case."""
+    prefix, glob = pattern.split(":", 1)
+    values = [listener.get("name") or ""] if prefix.lower() == "name" else listener.get("host_names") or []
+    return any(fnmatch.fnmatchcase(v.lower(), glob.strip().lower()) for v in values)
+
+
+def expected_listeners(patterns: list[str] | None, listeners: list[dict], listed: bool) -> dict:
+    """Which expected listeners are missing from the in-scope gateways.
+
+    Null while unset; the missing fields are also null when the gateways are unread or an entry is invalid, so a
+    typo can't shrink the list and pass.
+    """
+    if patterns is None:
+        return {"expected_listeners": None, "expected_listeners_missing": None, "expected_listeners_missing_patterns": None}
+    missing = sorted(p for p in patterns if not any(listener_matches(p, li) for li in listeners)) if listed else None
+    return {
+        "expected_listeners": patterns,
+        "expected_listeners_missing": len(missing) if missing is not None else None,
+        "expected_listeners_missing_patterns": missing,
+    }
 
 
 def project_ssl_policy(policy) -> dict | None:
@@ -240,6 +277,10 @@ def build(raw_gateways: list | None, collector: Collector, subscription_id, cred
     # The completeness check already ran against the full list; listeners follow their gateway.
     exclusions = ResourceExclusions.from_env()
     exclusions.record_invalid(collector)
+    patterns, invalid = expected_listener_patterns(os.environ.get(EXPECTED_ENV))
+    for entry in invalid:
+        collector.record(f"config {EXPECTED_ENV}", ValueError(
+            f"{entry!r} is not name:<listener name glob> or host:<host name glob>"))
     listed = raw_gateways is not None
     raw_gateways, excluded = split_gateways(raw_gateways or [], exclusions)
     if not listed:
@@ -255,7 +296,8 @@ def build(raw_gateways: list | None, collector: Collector, subscription_id, cred
     gateways.sort(key=lambda r: arm_id_key(r["id"]))
     listeners.sort(key=lambda r: arm_id_key(r["id"]))
     results = {"application_gateways": gateways, "listeners": listeners, "excluded": excluded}
-    summary = {**summarize(gateways, listeners), **exclusions.summary(excluded, ("application_gateway",), {
+    summary = {**summarize(gateways, listeners), **expected_listeners(patterns, listeners, listed and not invalid),
+               **exclusions.summary(excluded, ("application_gateway",), {
         "application_gateways": len(gateways) if listed else None, "listeners": len(listeners) if listed else None})}
     return results, summary
 

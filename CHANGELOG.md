@@ -60,6 +60,17 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`azure_app_gateway_tls_listeners` 0.3.0 checks that the expected listeners exist.** The new optional
+  `expected_listeners` setting (`AZURE_APPGW_EXPECTED_LISTENERS`) takes comma-separated `name:<glob>` or
+  `host:<glob>` patterns. The summary adds `expected_listeners`, `expected_listeners_missing` and
+  `expected_listeners_missing_patterns`. There is no default: unset, the missing count is null. An entry without a
+  `name:` or `host:` prefix is recorded as a failure and also leaves the count null, so a typo can't shorten the
+  list. A listener on an excluded gateway does not count.
+  - New validators: `azure_appgw_expected_listeners_present` (`EVD-AZURE-APPGW-TLS-LISTENERS`,
+    `expected_listeners_missing` is 0) and `azure_appgw_waf_no_detection_only` (`EVD-AZURE-APPGW-WAF`, no web
+    listener's WAF in Detection mode, with at least one web listener), for deployments where Prevention mode is
+    expected.
+
 - **The TUI shows which environment variables a manifest is missing, and stops a run that would fail on them.**
   - The manifest settings row has an `env` button (`✓ all set` or `✗ 2 missing`), each fetcher's status names what it
     needs (`✗ needs OKTA_API_TOKEN`), and the line under the table splits what a run needs from what only an upload needs.

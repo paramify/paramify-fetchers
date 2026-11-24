@@ -1,0 +1,25 @@
+key: azure_appgw_waf_no_detection_only
+name: 'Application Gateway WAF: No Web Listener in Detection Mode'
+type: AUTOMATED
+role: configuration
+source: community
+statement: >
+  No web listener, public or private, has an effective WAF Enabled in Detection mode, which logs
+  attacks without blocking them (listeners_waf_detection_only is 0), on a subscription with at least
+  one in-scope web listener (total_http_listeners above 0). Use where Prevention mode is expected;
+  a gateway kept in Detection for tuning fails until it is switched. Says nothing about listeners with
+  no WAF or a disabled one; see 'Every Web Listener Has a WAF'. Fails if the counts appear other than
+  exactly once. Does not check whether the collection run succeeded.
+
+regex: '"listeners_waf_detection_only":\s*(?<listeners_waf_detection_only>\d+)(?:(?!"listeners_waf_detection_only")[\s\S])*?"total_http_listeners":\s*(?<total_http_listeners>[1-9]\d*)'
+rules_summary: MATCH_COUNT EQUALS 1; MATCH_GROUP[1] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "1" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # listeners_waf_detection_only
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-APPGW-WAF

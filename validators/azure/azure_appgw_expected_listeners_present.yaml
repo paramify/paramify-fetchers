@@ -1,0 +1,25 @@
+key: azure_appgw_expected_listeners_present
+name: 'Application Gateway: Expected Listeners Present'
+type: AUTOMATED
+role: completeness
+source: community
+statement: >
+  Every listener named in the expected_listeners setting, by listener name or host name, exists on
+  an in-scope Application Gateway (expected_listeners_missing is 0). Fails while the setting is
+  unset, an entry is invalid, or the gateway list was not read, since the count is then null, and
+  fails if the count appears other than exactly once. Shows the listeners exist, not that they are
+  encrypted or behind a WAF; see the TLS and WAF validators. Does not check whether the collection
+  run succeeded.
+
+regex: '"expected_listeners_missing":\s*(?<expected_listeners_missing>\d+)'
+rules_summary: MATCH_COUNT EQUALS 1; MATCH_GROUP[1] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "1" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # expected_listeners_missing
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-APPGW-TLS-LISTENERS

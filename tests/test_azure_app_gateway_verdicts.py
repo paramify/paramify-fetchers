@@ -178,6 +178,44 @@ def test_l4_tcp_listener_counts_as_plaintext_and_tls_as_encrypted():
     assert (summary["plaintext_listeners"], summary["public_plaintext_listeners"]) == (1, 1)
 
 
+# --- expected listeners ---------------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("raw, patterns, invalid", [
+    pytest.param(None, None, [], id="unset"),
+    pytest.param(" , ", None, [], id="blank"),
+    pytest.param("name:sso-*, HOST:*.example.com", ["name:sso-*", "HOST:*.example.com"], [], id="both prefixes"),
+    pytest.param("name:a, b, id:c, host:", ["name:a"], ["b", "id:c", "host:"], id="invalid entries"),
+])
+def test_expected_listener_patterns(raw, patterns, invalid):
+    assert tls.expected_listener_patterns(raw) == (patterns, invalid)
+
+
+@pytest.mark.parametrize("pattern, matches", [
+    ("name:SSO-https", True), ("name:sso-*", True), ("name:registry*", False),
+    ("host:login.example.com", True), ("host:*.EXAMPLE.com", True), ("host:other.example.com", False),
+])
+def test_listener_matches_by_name_or_any_host_name(pattern, matches):
+    listener = {"name": "sso-https", "host_names": ["auth.example.com", "login.example.com"]}
+    assert tls.listener_matches(pattern, listener) is matches
+
+
+def test_expected_listeners_null_when_unset_or_unread():
+    unset = tls.expected_listeners(None, [], True)
+    assert unset == {"expected_listeners": None, "expected_listeners_missing": None,
+                     "expected_listeners_missing_patterns": None}
+    unread = tls.expected_listeners(["name:a"], [], False)
+    assert (unread["expected_listeners"], unread["expected_listeners_missing"]) == (["name:a"], None)
+
+
+def test_expected_listeners_reports_the_missing_patterns():
+    records = tls.listener_records(gateway(http_listeners=[
+        http_listener("sso", "Https", host_names=["sso.example.com"]), http_listener("registry", "Https", host_name="cr.example.com"),
+    ]))
+    result = tls.expected_listeners(["host:sso.example.com", "host:cr.example.com", "name:cat*"], records, True)
+    assert (result["expected_listeners_missing"], result["expected_listeners_missing_patterns"]) == (1, ["name:cat*"])
+
+
 # --- effective TLS policy -------------------------------------------------------------------------------------
 
 

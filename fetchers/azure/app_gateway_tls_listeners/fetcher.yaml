@@ -1,5 +1,5 @@
 name: azure_app_gateway_tls_listeners
-version: 0.2.1
+version: 0.3.0
 description: >-
   Shows whether each Application Gateway listener accepts only encrypted traffic, which minimum TLS version it enforces, and whether the gateway runs in FIPS mode.
 category: azure
@@ -27,6 +27,16 @@ config_schema:
       fetcher that has this field; fetchers without it ignore it. Each item is a
       pattern, or a pattern with a reason. Empty: every
       resource is in scope.
+  expected_listeners:
+    type: string
+    required: false
+    env: AZURE_APPGW_EXPECTED_LISTENERS
+    description: >
+      The listeners that must exist on the in-scope gateways, as comma-separated case-insensitive glob patterns, each
+      name:<listener name> or host:<host name>, such as name:sso-https, host:registry.* or host:*.example.com. A host
+      pattern matches any of a listener's host names. There is no default: while it is unset,
+      expected_listeners_missing is null. An entry without one of these prefixes is recorded as a failure and leaves
+      expected_listeners_missing null, so a typo can't shorten the list.
 
 supports_targets: true
 
@@ -76,7 +86,7 @@ evidence_set:
     - application_gateways.list_all() — every gateway with its listeners, routing rules, redirects, TLS policies and FIPS setting
     - Resource Graph count of microsoft.network/applicationgateways — confirms the gateway list is complete; a mismatch is counted again after 30 seconds, and the run fails if it persists
 
-    Output: azure_app_gateway_tls_listeners_<subscription>.json — each listener (layer 7 HTTP/HTTPS and layer 4 TCP/TLS) with its protocol, public or private frontend, redirect behaviour, TLS policy source and minimum TLS version, plus the gateways left out and why.
+    Output: azure_app_gateway_tls_listeners_<subscription>.json — each listener (layer 7 HTTP/HTTPS and layer 4 TCP/TLS) with its protocol, public or private frontend, redirect behaviour, TLS policy source and minimum TLS version, plus the gateways left out and why. With expected_listeners set, the summary also names each expected listener pattern that matches no in-scope listener; a listener on an excluded gateway does not count.
 
     Summary fields:
 
@@ -110,3 +120,8 @@ evidence_set:
     - gateways_fips_enabled — Number of in-scope application gateways with FIPS mode on
     - gateways_fips_disabled — Number of in-scope application gateways with FIPS mode off
     - gateways_fips_not_reported — Number of in-scope application gateways where the API returns no FIPS setting; not read as off
+
+    Are the expected listeners in place?
+    - expected_listeners — List of the expected_listeners patterns; null when unset
+    - expected_listeners_missing — Number of expected_listeners patterns that match no listener on an in-scope gateway; null when expected_listeners is unset, an entry is invalid, or the gateway list could not be read
+    - expected_listeners_missing_patterns — List of those patterns; null under the same conditions
