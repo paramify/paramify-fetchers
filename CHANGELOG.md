@@ -10,6 +10,7 @@ schemas and the `paramify` CLI — not the internal code.
 
 ## [Unreleased]
 
+## [0.7.0-beta] - 2026-11-24
 ### Breaking
 
 - **`kind: inventory` requires a `pipeline:` block.** A `fetcher.yaml` with
@@ -6154,7 +6155,8 @@ change before 1.0 (see [`docs/versioning.md`](https://github.com/paramify/parami
 - TUI restyled — border titles, status pills, denser controls, and hatched empty
   states.
 
-[Unreleased]: https://github.com/paramify/paramify-fetchers/compare/v0.6.0-beta...HEAD
+[Unreleased]: https://github.com/paramify/paramify-fetchers/compare/v0.7.0-beta...HEAD
+[0.7.0-beta]: https://github.com/paramify/paramify-fetchers/compare/v0.6.0-beta...v0.7.0-beta
 [0.6.0-beta]: https://github.com/paramify/paramify-fetchers/compare/v0.5.1-beta...v0.6.0-beta
 [0.5.1-beta]: https://github.com/paramify/paramify-fetchers/compare/v0.5.0-beta...v0.5.1-beta
 [0.5.0-beta]: https://github.com/paramify/paramify-fetchers/compare/v0.4.0-beta...v0.5.0-beta
