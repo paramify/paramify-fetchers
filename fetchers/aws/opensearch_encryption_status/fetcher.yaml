@@ -1,5 +1,5 @@
 name: aws_opensearch_encryption_status
-version: 0.2.0
+version: 0.2.1
 description: For each OpenSearch/Elasticsearch domain in the region, reports encryption at rest, node-to-node encryption, and enforced-HTTPS endpoint settings.
 category: aws
 

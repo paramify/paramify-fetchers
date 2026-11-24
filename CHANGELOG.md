@@ -10,6 +10,20 @@ schemas and the `paramify` CLI — not the internal code.
 
 ## [Unreleased]
 
+### Added
+- **A second container image on Chainguard's `wolfi-base`** (`deploy/Dockerfile.wolfi`, pinned by digest). It has the
+  same tools and settings as `deploy/Dockerfile`, with far fewer known CVEs. Python is 3.14 from the Wolfi
+  `python-3.14` package, and `aws-cli`, `kubectl` and the other tools also come from the Wolfi package repo. Build it
+  with `PARAMIFY_DOCKERFILE=Dockerfile.wolfi`. The scheduler runs cronie's `crond`, and the entrypoint starts the
+  cron daemon that the image has. `deploy/Dockerfile` (Debian) stays the default for now; the Wolfi image is planned
+  to replace it.
+
+### Fixed
+- **`aws_codebuild_pipeline_config` 0.2.1 and `aws_opensearch_encryption_status` 0.2.1 work with jq 1.8.** Both split
+  names into batches with jq's private `_nwise`, which jq 1.8 removed. Under jq 1.8 the batching filter failed to
+  compile, no batch ran, and the fetcher reported no CodeBuild projects or OpenSearch domains without an error. The
+  batches now come from `range`, which gives the same batches on jq 1.7 and 1.8.
+
 ## [0.7.0-beta] - 2026-11-24
 ### Breaking
 

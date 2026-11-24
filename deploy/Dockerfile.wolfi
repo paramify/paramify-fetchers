@@ -1,0 +1,91 @@
+# Beta deployment image for the paramify fetchers, built on Chainguard Wolfi.
+#
+# This is the second of two images. deploy/Dockerfile is the Debian image
+# (python:3.14-slim) and stays the default until this one replaces it. Keep the
+# two in step: the same tools, settings and ENV lines.
+#
+# It bundles the tool, its Python deps, AND the system binaries the fetchers
+# shell out to (pip does NOT install those):
+#   jq (41 fetchers), aws-cli (33), kubectl (3 k8s), git (checkov clone), curl, checkov.
+#
+# Build (from the REPO ROOT, not deploy/):
+#   docker build -f deploy/Dockerfile.wolfi -t paramify-fetchers:beta .
+# or with docker compose: set PARAMIFY_DOCKERFILE=Dockerfile.wolfi (see
+# deploy/docker-compose.yml).
+#
+# The base is Chainguard's Wolfi base image: a minimal, glibc-based image that
+# Chainguard rebuilds daily, so it carries far fewer known CVEs than Debian.
+# Chainguard's free `python` image only has a `latest` tag, and that tag moves
+# to each new Python minor. So we start from wolfi-base and install a fixed
+# Python minor from the Wolfi package repo. The digest pin makes builds
+# repeatable; Dependabot bumps it (see .github/dependabot.yml).
+FROM cgr.dev/chainguard/wolfi-base:latest@sha256:be019c1c74fe69204a42c4e10bc4d886a49bf5403ffa74374ef7baa408fc9a26
+
+# ---------------------------------------------------------------------------
+# System binaries
+# ---------------------------------------------------------------------------
+# python-3.14: keep in step with the newest Python in CI (.github/workflows/ci.yml).
+# coreutils/grep/sed/gawk/findutils: the GNU tools. wolfi-base has only busybox,
+#   and the bash fetchers were written against the GNU versions.
+# aws-cli-2: the current AWS CLI v2. (The `aws-cli-v2` package is an old build.)
+# kubectl-latest: the newest kubectl, as the old curl from stable.txt gave.
+# cronie: the cron daemon for the `scheduler` mode (see entrypoint.sh).
+RUN apk add --no-cache \
+        python-3.14 py3.14-pip \
+        bash coreutils grep sed gawk findutils tzdata \
+        git curl jq \
+        aws-cli-2 kubectl-latest \
+        tini cronie
+
+# NOTE: one fetcher references `terraform`. Checkov *scans* terraform source
+# statically and does not need the binary; add the Wolfi `terraform` package
+# only if a fetcher actually invokes terraform.
+
+# ---------------------------------------------------------------------------
+# The tool + Python deps
+# ---------------------------------------------------------------------------
+# A virtualenv first on PATH gives `python`, `pip` and `paramify` stable names,
+# whatever the Wolfi Python package links into /usr/bin.
+RUN python3.14 -m venv /opt/venv
+ENV PATH=/opt/venv/bin:$PATH
+# The python:*-slim images set this, and the fetchers were tested under it.
+# wolfi-base sets no locale; glibc has C.UTF-8 built in.
+ENV LANG=C.UTF-8
+
+WORKDIR /app
+COPY . .
+
+# tui extra → `paramify tui` works inside the container; checkov extra → the
+# checkov scanner fetchers; aws extra → boto3 for the Inspector ECR fetchers.
+# Toggle for faster local builds:
+#   docker build --build-arg INSTALL_EXTRAS=tui ...
+ARG INSTALL_EXTRAS=tui,checkov,aws
+RUN pip install --no-cache-dir -e ".[${INSTALL_EXTRAS}]"
+
+# The checkov fetchers run the `checkov` CLI, so checkov gets its own virtualenv
+# with only its executable on PATH. It pins exact versions of libraries the
+# other fetchers also use (boto3), which would otherwise hold them back.
+RUN case ",${INSTALL_EXTRAS}," in \
+      *,checkov,*) \
+        python3.14 -m venv /opt/checkov \
+        && /opt/checkov/bin/pip install --no-cache-dir checkov \
+        && mkdir -p /usr/local/bin \
+        && ln -s /opt/checkov/bin/checkov /usr/local/bin/checkov ;; \
+    esac
+
+# Tells `paramify update` it is running in this image. The image is a copy of
+# the clone with no .git (see .dockerignore), so there is nothing to update in
+# here: update the clone on the host, then rebuild the image.
+ENV PARAMIFY_CONTAINER=1
+
+# Collected evidence lands here; mount a volume to persist it to the host.
+ENV EVIDENCE_DIR=/app/evidence
+VOLUME ["/app/evidence"]
+
+COPY deploy/entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh /app/deploy/run-and-upload.sh || true
+
+# tini = clean PID-1 signal handling (matters for the cron scheduler mode).
+# Exec-form resolves `tini` via PATH, so it works wherever the package installs it.
+ENTRYPOINT ["tini", "--", "/usr/local/bin/entrypoint.sh"]
+CMD ["paramify", "list"]

@@ -9,6 +9,10 @@
 #   schedule   : docker compose -f deploy/docker-compose.yml up scheduler   # cron schedule
 #   logs       : docker compose -f deploy/docker-compose.yml logs -f scheduler
 #
+# Two images: deploy/Dockerfile (Debian, the default) and deploy/Dockerfile.wolfi
+# (Chainguard Wolfi). To build the Wolfi one, set PARAMIFY_DOCKERFILE=Dockerfile.wolfi
+# in the shell or in deploy/.env, then build again.
+#
 # Collected evidence appears on the host in ./evidence (repo root).
 # Put your secrets in deploy/.env (copy deploy/.env.example). They are injected
 # at run time, never baked into the image.
@@ -16,7 +20,7 @@
 x-collector: &collector
   build:
     context: ..                 # repo root — the image COPYs the project
-    dockerfile: deploy/Dockerfile
+    dockerfile: deploy/${PARAMIFY_DOCKERFILE:-Dockerfile}
   image: paramify-fetchers:beta
   working_dir: /app
   env_file:

@@ -703,8 +703,9 @@ def test_a_copy_without_git_counts_as_a_container(tmp_path, git_env):
     assert up.check_for_update(tmp_path) is None
 
 
-def test_dockerfile_marks_the_image():
-    assert "ENV PARAMIFY_CONTAINER=1" in (REPO_ROOT / "deploy/Dockerfile").read_text()
+@pytest.mark.parametrize("dockerfile", ["deploy/Dockerfile", "deploy/Dockerfile.wolfi"])
+def test_dockerfile_marks_the_image(dockerfile):
+    assert "ENV PARAMIFY_CONTAINER=1" in (REPO_ROOT / dockerfile).read_text()
 
 
 # --------------------------------------------------------------------------- #
