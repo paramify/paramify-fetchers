@@ -4,18 +4,19 @@ type: AUTOMATED
 role: configuration
 source: community
 statement: >
-  Every in-scope virtual network is linked to a DNS security policy with an enabled Block rule on
-  Azure's threat-intelligence list, AzureDnsThreatIntel (virtual_networks_without_threat_intel_block
-  is 0). Fails where only the GA API answered, since the list is not visible there, and while any
-  policy's links or rules are unread. Shows the blocking is configured, not that a malicious query
+  Every in-scope virtual network has a successfully provisioned link to a DNS security policy with
+  an enabled Block rule on Azure's threat-intelligence list, AzureDnsThreatIntel, that no enabled
+  Allow rule of higher priority might override (virtual_networks_without_threat_intel_block is 0).
+  Fails where only the GA API answered, since the list is not visible there, and while the policy
+  list or any policy's links or rules are unread. Shows the blocking is configured, not that a malicious query
   was refused. Does not check whether the collection run succeeded.
 
 regex: '"virtual_networks_without_threat_intel_block":\s*(?<virtual_networks_without_threat_intel_block>\d+)'
-rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0
+rules_summary: MATCH_COUNT EQUALS 1; MATCH_GROUP[1] EQUALS 0
 validation_rules:
   - regexOperation: { type: MATCH_COUNT }
-    criteria: NOT_EQUALS
-    value: { type: CUSTOM_TEXT, customText: "0" }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "1" }
   - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # virtual_networks_without_threat_intel_block
     criteria: EQUALS
     value: { type: CUSTOM_TEXT, customText: "0" }

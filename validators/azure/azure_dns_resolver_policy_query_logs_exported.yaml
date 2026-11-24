@@ -11,11 +11,11 @@ statement: >
   reviewed. Does not check whether the collection run succeeded.
 
 regex: '"policies_without_query_logs_exported":\s*(?<policies_without_query_logs_exported>\d+)'
-rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0
+rules_summary: MATCH_COUNT EQUALS 1; MATCH_GROUP[1] EQUALS 0
 validation_rules:
   - regexOperation: { type: MATCH_COUNT }
-    criteria: NOT_EQUALS
-    value: { type: CUSTOM_TEXT, customText: "0" }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "1" }
   - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # policies_without_query_logs_exported
     criteria: EQUALS
     value: { type: CUSTOM_TEXT, customText: "0" }

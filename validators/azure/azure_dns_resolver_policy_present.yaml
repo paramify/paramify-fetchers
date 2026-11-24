@@ -5,14 +5,17 @@ role: completeness
 source: community
 statement: >
   At least one DNS security policy was read and is in scope (in_scope_dns_resolver_policies is
-  above 0). Fails when the policy list could not be read or the subscription has none. Says nothing
+  above 0). Fails when the policy list could not be read, the subscription has none, or the count appears other than exactly once. Says nothing
   about what the policies block. Does not check whether the collection run succeeded.
 
-regex: '"in_scope_dns_resolver_policies":\s*[1-9]\d*'
-rules_summary: MATCH_COUNT NOT_EQUALS 0
+regex: '"in_scope_dns_resolver_policies":\s*(?<in_scope_dns_resolver_policies>\d+)'
+rules_summary: MATCH_COUNT EQUALS 1; MATCH_GROUP[1] GREATER_THAN 0
 validation_rules:
   - regexOperation: { type: MATCH_COUNT }
-    criteria: NOT_EQUALS
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "1" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # in_scope_dns_resolver_policies
+    criteria: GREATER_THAN
     value: { type: CUSTOM_TEXT, customText: "0" }
 
 evidence_sets:
