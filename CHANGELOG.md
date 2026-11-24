@@ -109,6 +109,18 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **`jira_incident_postmortems` 0.2.0: report deadlines from due-date fields, a post-mortem field, linked action
+  items.** New optional roles in `JIRA_INCIDENT_FIELDS`, all off unless named. With `initial_report_due`, the initial
+  report is judged against that due time instead of `report_minutes` after detection, and only the `reported_at`
+  field's own value counts as the report, never the ticket's created time. `next_update_due` and `final_report_due`
+  (with `last_report_sent`) add `update_overdue`, `no_report_by_final_due` and `last_report_after_final_due`.
+  `reportable` with `JIRA_INCIDENT_REPORTABLE_VALUES` limits every reporting check to incidents that must be reported.
+  `postmortem` names a text field on the incident that holds the post-mortem; only whether it is filled in is
+  recorded. `JIRA_ACTION_ITEM_ISSUE_TYPES` counts issues linked straight to an incident as action items. `phase` may
+  name the built-in Status field. Settings that contradict each other are refused as `bad_config`, and a configured
+  field that cannot be resolved runs none of its checks. A site that sets none of these gets the same findings as
+  before; each action item gains a `source` and each incident the new fields.
+
 - **`azure_entra_sign_in_logs` 0.4.0: 50053 sign-in rejections.** `sign_ins_rejected_50053` counts interactive
   sign-ins Entra rejected with ResultType 50053, and `users_rejected_50053` counts the users they belong to. Entra logs
   both smart lockout and sign-ins from a malicious IP address under that code, so the counts are evidence, not a

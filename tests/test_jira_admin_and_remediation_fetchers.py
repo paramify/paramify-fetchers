@@ -2426,3 +2426,346 @@ def test_a_projects_value_is_a_key_first_and_a_name_only_when_no_key_matches():
 def test_without_projects_filter_nothing_is_reported_as_selected(run):
     code, out, _, _ = run("site_inventory", _inventory_router([]))
     assert code == 0 and out["metadata"]["projects_selected"] is None
+
+
+# ---------- incident_postmortems: report deadlines, post-mortem field, linked action items ----------
+
+DEADLINE_FIELDS = FIELD_LIST + [
+    {"id": "cf20", "name": "Reportable", "custom": True},
+    {"id": "cf21", "name": "Initial Report Due", "custom": True},
+    {"id": "cf22", "name": "Next Update Due", "custom": True},
+    {"id": "cf23", "name": "Final Report Due", "custom": True},
+    {"id": "cf24", "name": "Last Report Sent", "custom": True},
+    {"id": "cf25", "name": "What Happened", "custom": True},
+    {"id": "status", "name": "Status", "custom": False},
+]
+DEADLINE_ENV = {
+    "JIRA_INCIDENT_JQL": "project = IR",
+    "JIRA_INCIDENT_FIELDS": json.dumps({
+        "category": "", "phase": "", "reportable": "Reportable", "initial_report_due": "Initial Report Due",
+        "next_update_due": "Next Update Due", "final_report_due": "Final Report Due",
+        "last_report_sent": "Last Report Sent"}),
+    "JIRA_INCIDENT_REPORTABLE_VALUES": "Yes",
+}
+
+
+def _deadline_router(incidents, fields=DEADLINE_FIELDS, bulk=None, histories=None):
+    def router(method, path, params, body):
+        if path == "/rest/api/3/myself":
+            return 200, ME
+        if path == "/rest/api/3/field":
+            return 200, fields
+        if path == "/rest/api/3/status":
+            return 200, STATUS_LIST
+        if path == "/rest/api/3/search/jql":
+            return 200, {"issues": incidents, "isLast": True}
+        if path == "/rest/api/3/changelog/bulkfetch":
+            return 200, {"issueChangeLogs": histories or []}
+        if path == "/rest/api/3/issue/bulkfetch":
+            return bulk(body) if bulk else (200, {"issues": [], "issueErrors": []})
+        raise AssertionError(path)
+    return router
+
+
+YES, NO = {"value": "Yes"}, {"value": "No"}
+SEV = {"cf10": {"value": "SEV 2"}}
+
+
+def test_incident_initial_report_is_judged_against_its_due_time_not_a_fixed_window(run):
+    # Detected 10:00, reported 11:15, due 11:30: 75 minutes after detection but on time.
+    on_time = _incident(1, {**SEV, "cf20": YES, "cf12": "2020-11-03T10:00:00.000-0500",
+                            "cf13": "2020-11-03T11:15:00.000-0500", "cf21": "2020-11-03T11:30:00.000-0500"}, cat="new")
+    late = _incident(2, {**SEV, "cf20": YES, "cf12": "2020-11-03T10:00:00.000-0500",
+                         "cf13": "2020-11-03T11:45:00.000-0500", "cf21": "2020-11-03T11:30:00.000-0500"}, cat="new")
+    never = _incident(3, {**SEV, "cf20": YES, "cf12": "2020-11-03T10:00:00.000-0500",
+                          "cf21": "2020-11-03T11:30:00.000-0500"}, cat="new")
+    pending = _incident(4, {**SEV, "cf20": YES, "cf12": "2020-11-03T10:00:00.000-0500",
+                            "cf21": "2099-01-01T00:00:00.000+0000"}, cat="new")
+    not_reportable = _incident(5, {**SEV, "cf20": NO, "cf12": "2020-11-03T10:00:00.000-0500",
+                                   "cf13": "2020-11-09T10:00:00.000-0500", "cf21": "2020-11-03T11:30:00.000-0500"},
+                               cat="new")
+    undecided = _incident(6, {**SEV, "cf12": "2020-11-03T10:00:00.000-0500",
+                              "cf21": "2020-11-03T11:30:00.000-0500"}, cat="new")
+    incs = [on_time, late, never, pending, not_reportable, undecided]
+    code, out, _, status = run("incident_postmortems", _deadline_router(incs), DEADLINE_ENV)
+    assert code == 0 and status is None
+    by = {i["key"]: i for i in out["incidents"]}
+    assert by["IR-1"]["findings"] == [] and by["IR-1"]["initial_report_on_time"] is True
+    assert by["IR-1"]["minutes_to_report"] == 75.0 and by["IR-1"]["report_window_minutes"] is None
+    assert by["IR-2"]["findings"] == ["initial_report_late"]
+    # No report recorded: the ticket's created time is never used as the report.
+    assert by["IR-3"]["findings"] == ["initial_report_not_recorded_past_due"]
+    assert by["IR-3"]["reported_at"] is None and by["IR-3"]["reported_at_source"] is None
+    assert by["IR-4"]["findings"] == [] and by["IR-4"]["initial_report_on_time"] is None
+    assert by["IR-5"]["findings"] == [] and by["IR-5"]["reporting_checks_apply"] is False
+    assert by["IR-6"]["findings"] == [] and by["IR-6"]["reportable"] is None
+    m, s = out["metadata"], out["summary"]
+    assert m["report_rule"] == "due_date_field" and m["report_window_minutes"] is None
+    assert {"reported_late", "reported_before_detected"} <= set(m["checks_disabled"])
+    assert s["reporting_checks_applied"] == 4 and s["by_reportable"] == {"Yes": 4, "No": 1, "(none)": 1}
+    assert (s["initial_report_on_time"], s["initial_report_late"], s["initial_report_not_recorded_past_due"]) == (1, 1, 1)
+    assert s["reported_late"] == 0 and s["reported_within_window"] == 0
+
+
+def test_incident_due_date_only_compares_calendar_days(run):
+    same_day = _incident(1, {**SEV, "cf20": YES, "cf13": "2020-11-03T23:30:00.000-0500", "cf21": "2020-11-03"}, cat="new")
+    next_day = _incident(2, {**SEV, "cf20": YES, "cf13": "2020-11-04T00:30:00.000-0500", "cf21": "2020-11-03"}, cat="new")
+    bad = _incident(3, {**SEV, "cf20": YES, "cf13": "sometime", "cf21": "2020-11-03T11:30:00.000-0500"}, cat="new")
+    env = {**DEADLINE_ENV, "JIRA_INCIDENT_FIELDS": json.dumps({
+        "category": "", "phase": "", "detected_at": "", "reportable": "Reportable",
+        "initial_report_due": "Initial Report Due"})}
+    code, out, _, _ = run("incident_postmortems", _deadline_router([same_day, next_day, bad]), env)
+    by = {i["key"]: i["findings"] for i in out["incidents"]}
+    assert by == {"IR-1": [], "IR-2": ["initial_report_late"], "IR-3": ["report_deadline_unparseable"]}
+    assert code == 0
+
+
+def test_incident_next_update_and_final_report_deadlines(run):
+    base = {**SEV, "cf20": YES, "cf13": "2020-11-03T11:00:00.000+0000", "cf21": "2020-11-03T11:30:00.000+0000"}
+    stale = _incident(1, {**base, "cf22": "2020-11-03T17:00:00.000+0000", "cf24": "2020-11-03T11:00:00.000+0000"}, cat="new")
+    # A report at or after the due time answers it, even before the next due time is entered.
+    updated = _incident(2, {**base, "cf22": "2020-11-03T17:00:00.000+0000", "cf24": "2020-11-03T17:10:00.000+0000"}, cat="new")
+    not_due = _incident(3, {**base, "cf22": "2099-01-01T00:00:00.000+0000", "cf24": "2020-11-03T11:00:00.000+0000"}, cat="new")
+    # A resolved incident owes no further update, whatever the old due time says.
+    resolved = _incident(4, {**base, "cf22": "2020-11-03T17:00:00.000+0000", "cf24": "2020-11-03T11:00:00.000+0000",
+                             "cf25": "done"}, links=[])
+    no_final = _incident(5, {**base, "cf23": "2020-11-04T00:00:00.000+0000"}, cat="new")
+    late_final = _incident(6, {**base, "cf23": "2020-11-04T00:00:00.000+0000", "cf24": "2020-11-05T09:00:00.000+0000"}, cat="new")
+    ok_final = _incident(7, {**base, "cf23": "2020-11-04T00:00:00.000+0000", "cf24": "2020-11-03T21:00:00.000+0000"}, cat="new")
+    exempt = _incident(8, {**base, "cf20": NO, "cf22": "2020-11-03T17:00:00.000+0000", "cf23": "2020-11-04T00:00:00.000+0000"}, cat="new")
+    env = {**DEADLINE_ENV, "JIRA_INCIDENT_FIELDS": json.dumps({
+        **json.loads(DEADLINE_ENV["JIRA_INCIDENT_FIELDS"]), "detected_at": "", "postmortem": "What Happened"})}
+    incs = [stale, updated, not_due, resolved, no_final, late_final, ok_final, exempt]
+    code, out, _, _ = run("incident_postmortems", _deadline_router(incs), env)
+    by = {i["key"]: i["findings"] for i in out["incidents"]}
+    assert by == {"IR-1": ["update_overdue"], "IR-2": [], "IR-3": [], "IR-4": [], "IR-5": ["no_report_by_final_due"],
+                  "IR-6": ["last_report_after_final_due"], "IR-7": [], "IR-8": []}
+    s = out["summary"]
+    assert (s["update_overdue"], s["no_report_by_final_due"], s["last_report_after_final_due"]) == (1, 1, 1)
+    assert code == 0
+
+
+def test_incident_without_deadline_fields_keeps_the_fixed_window_rule(run):
+    inc = _incident(1, {**SEV, "cf11": {"value": "CAT 1"}, "cf12": "2026-10-03T08:00:00.000+0000",
+                        "cf13": "2026-10-03T10:30:00.000+0000"}, cat="new")
+    code, out, _, _ = run("incident_postmortems", _ir_router([inc]), {"JIRA_INCIDENT_JQL": "project = IR"})
+    i = out["incidents"][0]
+    assert i["findings"] == ["reported_late"] and i["report_window_minutes"] == 60
+    assert i["reporting_checks_apply"] is True and i["reportable"] is None
+    assert out["metadata"]["report_rule"] == "minutes_from_detection"
+    assert out["metadata"]["reportable_values"] == "all incidents"
+    assert "reported_late" not in out["metadata"]["checks_disabled"]
+    assert "reportable" not in out["metadata"]["field_problems"]
+
+
+def test_incident_reportable_values_gate_the_fixed_window_rule_too(run):
+    late = {"cf12": "2026-10-03T08:00:00.000+0000", "cf13": "2026-10-03T10:30:00.000+0000"}
+    incs = [_incident(1, {**SEV, **late, "cf20": YES}, cat="new"), _incident(2, {**SEV, **late, "cf20": NO}, cat="new")]
+    env = {"JIRA_INCIDENT_JQL": "project = IR", "JIRA_INCIDENT_REPORTABLE_VALUES": "yes",
+           "JIRA_INCIDENT_FIELDS": '{"category": "", "phase": "", "reportable": "Reportable"}'}
+    code, out, _, _ = run("incident_postmortems", _deadline_router(incs), env)
+    assert {i["key"]: i["findings"] for i in out["incidents"]} == {"IR-1": ["reported_late"], "IR-2": []}
+    assert out["summary"]["reported_late"] == 1 and code == 0
+
+
+def test_incident_unresolved_reportable_field_runs_no_deadline_check_and_fails_the_run(run):
+    # The Reportable field is configured but is not a field on the site.
+    fields = [f for f in DEADLINE_FIELDS if f["name"] != "Reportable"]
+    inc = _incident(1, {**SEV, "cf12": "2020-11-03T10:00:00.000-0500", "cf13": "2020-11-09T10:00:00.000-0500",
+                        "cf21": "2020-11-03T11:30:00.000-0500"}, cat="new")
+    code, out, _, status = run("incident_postmortems", _deadline_router([inc], fields=fields), DEADLINE_ENV)
+    assert out["incidents"][0]["findings"] == [] and out["incidents"][0]["reporting_checks_apply"] is False
+    assert out["metadata"]["field_problems"]["reportable"] == "unresolved"
+    assert code == 1 and out["metadata"]["partial_failure"] is True
+
+
+ADF = {"type": "doc", "version": 1, "content": [{"type": "paragraph", "content": [{"type": "text", "text": "root cause text"}]}]}
+EMPTY_ADF = {"type": "doc", "version": 1, "content": []}
+
+
+def test_incident_postmortem_field_counts_as_the_postmortem_and_its_text_is_not_collected(run):
+    env = {"JIRA_INCIDENT_JQL": "project = IR",
+           "JIRA_INCIDENT_FIELDS": '{"category": "", "phase": "", "detected_at": "", "postmortem": "What Happened"}'}
+    incs = [_incident(1, {**SEV, "cf25": ADF}), _incident(2, {**SEV, "cf25": EMPTY_ADF}), _incident(3, {**SEV}),
+            _incident(4, {**SEV, "cf25": ADF}, cat="new")]
+    code, out, _, _ = run("incident_postmortems", _deadline_router(incs), env)
+    by = {i["key"]: i for i in out["incidents"]}
+    assert by["IR-1"]["findings"] == [] and by["IR-1"]["postmortem_field_filled"] is True
+    assert by["IR-2"]["findings"] == ["resolved_without_postmortem"] and by["IR-2"]["postmortem_field_filled"] is False
+    assert by["IR-3"]["findings"] == ["resolved_without_postmortem"]
+    assert by["IR-4"]["findings"] == []
+    s = out["summary"]
+    assert s["resolved_with_postmortem"] == 1 and s["postmortem_recorded_in_field"] == 2
+    assert s["resolved_without_postmortem"] == 2
+    assert "root cause text" not in json.dumps(out) and code == 0
+
+
+def test_incident_unresolved_postmortem_field_is_unknown_not_a_missing_postmortem(run):
+    fields = [f for f in DEADLINE_FIELDS if f["name"] != "What Happened"]
+    env = {"JIRA_INCIDENT_JQL": "project = IR",
+           "JIRA_INCIDENT_FIELDS": '{"category": "", "phase": "", "detected_at": "", "postmortem": "What Happened"}'}
+    code, out, _, _ = run("incident_postmortems", _deadline_router([_incident(1, {**SEV})], fields=fields), env)
+    i = out["incidents"][0]
+    assert i["findings"] == [] and i["unknown"] == ["postmortem_field_not_read"]
+    assert i["postmortem_field_filled"] is None
+    assert code == 1 and out["metadata"]["partial_failure"] is True
+
+
+def _with_links(inc, links):
+    inc["fields"]["issuelinks"] = [
+        {"type": {"name": "Relates"}, "outwardIssue": {"key": k, "fields": {"issuetype": {"name": t}}}} for k, t in links]
+    return inc
+
+
+def _follow_up(key, done, assignee, due):
+    return {"key": key, "fields": {"summary": "follow-up", "duedate": due, "parent": None,
+            "status": {"name": "Done" if done else "To Do", "statusCategory": {"key": "done" if done else "new"}},
+            "assignee": {"displayName": "Owner"} if assignee else None}}
+
+
+LINKED_ENV = {"JIRA_INCIDENT_JQL": "project = IR", "JIRA_ACTION_ITEM_ISSUE_TYPES": "Follow-up",
+              "JIRA_INCIDENT_FIELDS": '{"category": "", "phase": "", "detected_at": "", "postmortem": "What Happened"}'}
+
+
+def test_incident_linked_issues_of_the_action_item_types_are_action_items(run):
+    inc = _with_links(_incident(1, {**SEV, "cf25": ADF}),
+                      [("IR-20", "Follow-up"), ("IR-21", "Follow-up"), ("IR-22", "Follow-up"), ("OPS-9", "Task")])
+    none = _incident(2, {**SEV, "cf25": ADF})
+    pool = {"IR-20": _follow_up("IR-20", True, True, "2020-01-01"), "IR-21": _follow_up("IR-21", False, False, "2099-01-01"),
+            "IR-22": _follow_up("IR-22", False, True, "2020-01-01")}
+
+    def bulk(body):
+        assert set(body["issueIdsOrKeys"]) == set(pool), "only the action item types are followed"
+        return 200, {"issues": [pool[k] for k in body["issueIdsOrKeys"]], "issueErrors": []}
+
+    code, out, _, status = run("incident_postmortems", _deadline_router([inc, none], bulk=bulk), LINKED_ENV)
+    assert code == 0 and status is None
+    by = {i["key"]: i for i in out["incidents"]}
+    items = by["IR-1"]["action_items"]
+    assert [a["key"] for a in items] == ["IR-20", "IR-21", "IR-22"]
+    assert {a["source"] for a in items} == {"linked"} and {a["postmortem"] for a in items} == {None}
+    assert set(by["IR-1"]["findings"]) == {"unassigned_action_items", "overdue_action_items"}
+    # A filled post-mortem field with no linked action items is not a finding.
+    assert by["IR-2"]["findings"] == [] and by["IR-2"]["action_items"] == []
+    assert out["summary"]["action_items"] == {"total": 3, "open": 2, "done": 1, "open_unassigned": 1, "overdue": 1}
+    assert out["metadata"]["action_item_issue_types"] == ["follow-up"]
+
+
+@pytest.mark.parametrize("reply", [(200, {"issues": [], "issueErrors": [{"errorMessages": ["hidden"]}]}), (403, {})])
+def test_incident_unreadable_linked_action_items_are_unknown_never_none(run, reply):
+    inc = _with_links(_incident(1, {**SEV, "cf25": ADF}), [("IR-20", "Follow-up")])
+    code, out, _, _ = run("incident_postmortems", _deadline_router([inc], bulk=lambda body: reply), LINKED_ENV)
+    i = out["incidents"][0]
+    assert i["findings"] == [] and i["unknown"] == ["action_items_not_visible"] and i["action_items"] == []
+    assert out["summary"]["action_items"]["total"] is None
+    assert out["metadata"]["related_issues_not_visible"] == ["IR-20"]
+    assert code == 1 and out["metadata"]["partial_failure"] is True
+
+
+def test_incident_phases_can_be_read_from_the_status_field(run):
+    def moves(issue_id, steps):
+        return {"issueId": issue_id, "changeHistories": [
+            {"id": f"{issue_id}-{n}", "created": f"2026-10-0{n + 1}T10:00:00.000+00:00", "author": {"displayName": "IR"},
+             "items": [{"field": "status", "fieldId": "status", "fromString": a, "toString": b}]}
+            for n, (a, b) in enumerate(steps)]}
+    full = _incident(1, {**SEV})
+    full["fields"]["status"] = {"name": "Closed", "statusCategory": {"key": "done"}}
+    skipped = _incident(2, {**SEV})
+    skipped["fields"]["status"] = {"name": "Closed", "statusCategory": {"key": "done"}}
+    histories = [moves("701", [("Reported", "Investigating"), ("Investigating", "Resolved"), ("Resolved", "Closed")]),
+                 moves("702", [("Reported", "Closed")])]
+    env = {"JIRA_INCIDENT_JQL": "project = IR", "JIRA_INCIDENT_REQUIRED_PHASES": "Reported,Investigating,Resolved,Closed",
+           "JIRA_INCIDENT_FIELDS": '{"category": "", "detected_at": "", "phase": "Status", "postmortem": "What Happened"}'}
+    full["fields"]["cf25"] = skipped["fields"]["cf25"] = ADF
+    router = _deadline_router([full, skipped], histories=histories)
+    code, out, calls, _ = run("incident_postmortems", router, env)
+    by = {i["key"]: i for i in out["incidents"]}
+    assert by["IR-1"]["phases_seen"] == ["Reported", "Investigating", "Resolved", "Closed"]
+    assert by["IR-1"]["findings"] == [] and by["IR-1"]["current_phase"] == "Closed"
+    assert len(by["IR-1"]["status_transitions"]) == 3 and len(by["IR-1"]["phase_changes"]) == 3
+    assert by["IR-2"]["findings"] == ["phases_missing"]
+    assert by["IR-2"]["phases_missing"] == ["Investigating", "Resolved"]
+    history_call = next(c for c in calls if c[1] == "/rest/api/3/changelog/bulkfetch")
+    assert history_call[3]["fieldIds"] == ["status"], "the status history is asked for once"
+    assert out["metadata"]["fields_resolved"]["phase"] == ["status"] and code == 0
+
+
+@pytest.mark.parametrize("env", [
+    {"JIRA_INCIDENT_FIELDS": '{"reportable": "Reportable"}'},
+    {"JIRA_INCIDENT_REPORTABLE_VALUES": "Yes"},
+    {"JIRA_INCIDENT_FIELDS": '{"initial_report_due": "Due", "reported_at": ""}'},
+    {"JIRA_INCIDENT_FIELDS": '{"initial_report_due": "Due"}', "JIRA_INCIDENT_REPORT_MINUTES": "60"},
+    {"JIRA_INCIDENT_FIELDS": '{"next_update_due": "Next"}'},
+    {"JIRA_INCIDENT_FIELDS": '{"final_report_due": "Final"}'},
+    {"JIRA_POSTMORTEM_ISSUE_TYPES": "Follow-up", "JIRA_ACTION_ITEM_ISSUE_TYPES": "follow-up"},
+    {"JIRA_ACTION_ITEM_ISSUE_TYPES": "Post-mortem"},
+    {"JIRA_INCIDENT_FIELDS": '{"final_due": "Final"}'},
+    {"JIRA_INCIDENT_FIELDS": '{"postmortem": 7}'},
+])
+def test_incident_conflicting_deadline_settings_are_bad_config(monkeypatch, tmp_path, env):
+    for k, v in {"JIRA_BASE_URL": "https://x.atlassian.net", "JIRA_EMAIL": "e", "JIRA_API_TOKEN": "t",
+                 "JIRA_INCIDENT_JQL": "project = IR", "EVIDENCE_DIR": str(tmp_path),
+                 "FETCHER_STATUS_FILE": str(tmp_path / "s.json"), **env}.items():
+        monkeypatch.setenv(k, v)
+    assert load("incident_postmortems").main() == 1
+    assert json.loads((tmp_path / "s.json").read_text())["code"] == "bad_config"
+    assert not (tmp_path / "jira_incident_postmortems.json").exists()
+
+
+def test_incident_reportable_without_a_due_time_is_a_finding(run):
+    yes_no_due = _incident(1, {**SEV, "cf20": YES}, cat="new")
+    no = _incident(2, {**SEV, "cf20": NO}, cat="new")
+    env = {**DEADLINE_ENV, "JIRA_INCIDENT_FIELDS": json.dumps({
+        "category": "", "phase": "", "detected_at": "", "reportable": "Reportable",
+        "initial_report_due": "Initial Report Due"})}
+    code, out, _, _ = run("incident_postmortems", _deadline_router([yes_no_due, no]), env)
+    assert {i["key"]: i["findings"] for i in out["incidents"]} == {"IR-1": ["initial_report_due_not_set"], "IR-2": []}
+    assert out["summary"]["initial_report_due_not_set"] == 1 and code == 0
+
+
+def test_incident_no_due_time_is_not_a_finding_without_a_reportable_field(run):
+    # Nothing says which incidents owe a report, so an empty due time is not a gap.
+    env = {"JIRA_INCIDENT_JQL": "project = IR", "JIRA_INCIDENT_FIELDS": json.dumps({
+        "category": "", "phase": "", "detected_at": "", "initial_report_due": "Initial Report Due"})}
+    code, out, _, _ = run("incident_postmortems", _deadline_router([_incident(1, {**SEV}, cat="new")]), env)
+    assert out["incidents"][0]["findings"] == [] and out["incidents"][0]["reporting_checks_apply"] is True
+
+
+def test_incident_due_rule_without_a_reportable_field_applies_to_every_incident(run):
+    late = _incident(1, {**SEV, "cf13": "2020-11-03T11:45:00.000-0500", "cf21": "2020-11-03T11:30:00.000-0500"}, cat="new")
+    env = {"JIRA_INCIDENT_JQL": "project = IR", "JIRA_INCIDENT_FIELDS": json.dumps({
+        "category": "", "phase": "", "detected_at": "", "initial_report_due": "Initial Report Due"})}
+    code, out, _, _ = run("incident_postmortems", _deadline_router([late]), env)
+    assert out["incidents"][0]["findings"] == ["initial_report_late"] and code == 0
+
+
+def test_incident_date_only_due_passes_when_the_day_ends_in_the_collectors_zone():
+    from datetime import datetime, timezone
+    from zoneinfo import ZoneInfo
+    sys.path.insert(0, str(JIRA / "_shared"))
+    mod = load("incident_postmortems")
+    now = datetime(2026, 11, 4, 2, 0, tzinfo=timezone.utc)  # still Nov 3, 21:00 in New York
+    assert mod._is_past("2026-11-03", now) is True
+    assert mod._is_past("2026-11-03", now, ZoneInfo("America/New_York")) is False
+    assert mod._is_past("2026-11-02", now, ZoneInfo("America/New_York")) is True
+    assert mod._is_past("not a date", now) is None and mod._is_past(None, now) is None
+    assert mod._is_after("2026-11-03T23:59:00.000-0500", "2026-11-03") is False
+    assert mod._is_after("x", "2026-11-03") is None
+
+
+def test_incident_postmortem_ticket_without_subtasks_but_with_linked_action_items_is_not_flagged(run):
+    inc = _with_links(_incident(1, {**SEV}), [("IR-7", "Post-mortem"), ("IR-20", "Follow-up")])
+    pool = {"IR-7": {"key": "IR-7", "fields": {"issuetype": {"name": "Post-mortem"}, "status": {"name": "Done"},
+                                              "summary": "pm", "subtasks": []}},
+            "IR-20": _follow_up("IR-20", True, True, "2020-01-01")}
+
+    def bulk(body):
+        return 200, {"issues": [pool[k] for k in body["issueIdsOrKeys"] if k in pool], "issueErrors": []}
+
+    env = {"JIRA_INCIDENT_JQL": "project = IR", "JIRA_ACTION_ITEM_ISSUE_TYPES": "Follow-up",
+           "JIRA_INCIDENT_FIELDS": '{"category": "", "phase": "", "detected_at": ""}'}
+    code, out, calls, _ = run("incident_postmortems", _deadline_router([inc], bulk=bulk), env)
+    i = out["incidents"][0]
+    assert i["findings"] == [] and [a["key"] for a in i["action_items"]] == ["IR-20"] and code == 0
+    search = next(c for c in calls if c[1] == "/rest/api/3/search/jql")
+    assert len(search[3]["fields"]) == len(set(search[3]["fields"])), "no field is asked for twice"

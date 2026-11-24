@@ -209,7 +209,11 @@ with no `JIRA_CHANGE_APPROVED_STATUSES`), and for incidents
 `JIRA_POSTMORTEM_REQUIRED_SEVERITIES` with `severity` off,
 `JIRA_INCIDENT_REQUIRED_PHASES` with `phase` off, or
 `JIRA_INCIDENT_CATEGORY_TARGETS` / `JIRA_INCIDENT_REPORT_MINUTES` with
-`category` or `detected_at` off.
+`category` or `detected_at` off, an `initial_report_due` field together with
+`JIRA_INCIDENT_REPORT_MINUTES` or with `reported_at` off, `next_update_due` or
+`final_report_due` without `last_report_sent`, a `reportable` field without
+`JIRA_INCIDENT_REPORTABLE_VALUES` (or the reverse), and an issue type listed in
+both `JIRA_POSTMORTEM_ISSUE_TYPES` and `JIRA_ACTION_ITEM_ISSUE_TYPES`.
 
 When a change has no deployed-at field, its deployment time is the first move
 into any done-category status (the status list is read once from
@@ -256,7 +260,9 @@ renamed status does not move it.
 | Config key | Env | Default | Description |
 |---|---|---|---|
 | `jql` | `JIRA_INCIDENT_JQL` | (required) | JQL selecting the incident tickets |
-| `field_names` | `JIRA_INCIDENT_FIELDS` | see yaml | JSON mapping roles (`severity`, `category`, `detected_at`, `reported_at`, `phase`) to field names |
+| `field_names` | `JIRA_INCIDENT_FIELDS` | see yaml | JSON mapping roles (`severity`, `category`, `detected_at`, `reported_at`, `phase`) to field names. Optional roles, off unless named: `reportable`, `initial_report_due`, `next_update_due`, `final_report_due`, `last_report_sent`, `postmortem`. `phase` may be the built-in `Status` field |
+| `reportable_values` | `JIRA_INCIDENT_REPORTABLE_VALUES` | (none) | Values of the `reportable` field that mean the incident must be reported; reporting checks then run only on those incidents |
+| `action_item_issue_types` | `JIRA_ACTION_ITEM_ISSUE_TYPES` | (none) | Issue types that count as action items when linked straight to an incident |
 | `report_minutes` | `JIRA_INCIDENT_REPORT_MINUTES` | `60` | Detection-to-report window |
 | `category_targets` | `JIRA_INCIDENT_CATEGORY_TARGETS` | (none) | JSON of per-category notification targets in minutes, matched by name or prefix |
 | `postmortem_issue_types` | `JIRA_POSTMORTEM_ISSUE_TYPES` | `Post-mortem` | Linked issue types that count as post-mortems; their sub-tasks are the action items. The collector needs Browse Projects on the post-mortem project too: Jira removes links to issues the caller cannot see, so a hidden post-mortem looks like no post-mortem |
