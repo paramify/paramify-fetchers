@@ -123,6 +123,17 @@ schemas and the `paramify` CLI — not the internal code.
   no credit for deleting the account. It is kept apart from the 12 CIS operations, so their totals do not move.
   `all_log_storage_protection_operations_covered` gives one verdict.
 
+- **`azure_resource_inventory` 0.5.0: reconciled against an expected population.** Two new settings work together.
+  `required_resources` takes exact ARM ids (`id:` only, compared without case, no globs): each must itself be in the
+  in-scope inventory, and no child, sibling or pattern match stands in for it; a resource group id is checked against
+  the subscription's resource groups. `allowed_resources` takes `rg:`, `location:` and `id:` globs for families whose
+  ids change, such as backup snapshots; a family may be empty. Resource groups are reconciled in both directions
+  under the same `resource_exclusions` as resources: an excluded required group is missing, and an in-scope group
+  that is neither required nor allowed, even an empty one, is unexpected. Missing required ids are counted and listed
+  (`required_resources_missing`), resources and resource groups neither required nor allowed are counted by type
+  (`unexpected_resources`), each records what expects it, and `inventory_matches_expected` gives one verdict.
+  Unset, the fields stay null.
+
 ### Fixed
 
 - **Front Door counts and verdicts read null when a list they're built from wasn't read.** Before, a refused list

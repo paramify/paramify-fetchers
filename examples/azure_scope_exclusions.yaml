@@ -40,6 +40,21 @@ run:
             reason: Developer sandboxes; no customer data
           - pattern: rg:rg-load-test
             reason: Short-lived load-test environment
+        # The resources the boundary must hold, each as one exact ARM id. A required id is present only if
+        # that resource itself is returned: a child, a sibling in its group or an allowed pattern never
+        # stands in for it. Not an exclusion list, so `manifest exclude` never changes it.
+        required_resources:
+          - pattern: id:/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/rg-platform
+            reason: Shared networking, Key Vault and monitoring
+          - pattern: id:/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/rg-platform/providers/Microsoft.Network/virtualNetworks/vnet-hub
+            reason: Hub network from infrastructure as code
+        # Families whose ids change, as globs. A family may be empty. Anything neither required nor allowed
+        # is reported as unexpected.
+        allowed_resources:
+          - pattern: id:*/providers/microsoft.compute/snapshots/backup-*
+            reason: Backup tool snapshots, created and expired by the backup schedule
+          - pattern: id:*/providers/microsoft.network/networkwatchers/*
+            reason: Created by Azure, one per region
 
     # scope_exclusions takes different prefixes in Front Door (route: and host
     # names) and DNS (record names only), so it is set per entry.
