@@ -187,7 +187,7 @@ def test_an_excluded_network_leaves_the_counts(run, monkeypatch):
     assert [e["name"] for e in ev["results"]["excluded"]] == ["vnet-isolated"]
 
 
-# --- Todd's review: unread policies, provisioned links, Allow overriding Block ---
+# --- Review fixes: unread policies, provisioned links, Allow overriding Block ---
 
 def test_an_unread_policy_list_leaves_each_network_unknown_not_uncovered(run):
     code, ev, _ = run(refused={f"{SUB}/providers/Microsoft.Network/dnsResolverPolicies"})
