@@ -829,7 +829,7 @@ def describe_cmd(
                 var = f"  {style.dim('env=')}{style.env(fld['env'])}" if fld.get("env") else ""
                 if fld.get("type") == patterns.TYPE:
                     # Written in the manifest only; the env var is the runner's hand-off, not a user setting.
-                    takes = api.grammar_text(fld.get("prefixes") or (), fld.get("bare", True))
+                    takes = api.grammar_text(fld.get("prefixes") or (), fld.get("bare", True), fld.get("globs", True))
                     var = f"  {style.dim('takes=')}{style.env(takes)}"
                 typer.echo(
                     f"    - {style.env(fld['name'])} {style.dim('(' + fld['type'] + ',')} "

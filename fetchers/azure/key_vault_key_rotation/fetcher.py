@@ -1092,20 +1092,34 @@ def main() -> int:
     app_service_certificates, excluded_certificates = exclusions.split(
         app_service_certificates, "app_service_certificate")
     excluded += excluded_certificates
-    lists_read = bool(subscription_id and cred is not None) and not any(
-        f["operation"] in UNREAD_LIST_OPERATIONS or f["operation"].split(" (")[0] in UNREAD_LIST_OPERATIONS
-        for f in collector.failures)
+    signed_in = bool(subscription_id and cred is not None)
+
+    def failed(*operations):
+        return any(f["operation"] in operations or f["operation"].split(" (")[0] in operations
+                   for f in collector.failures)
+
+    lists_read = signed_in and not failed(*UNREAD_LIST_OPERATIONS)
     if not lists_read:
         exclusions.mark_unread()
     exclusions.warn_unmatched(logger)
+    vaults_read = signed_in and not failed("keyvault.KeyVaultManagementClient (init)", "keyvault.vaults.list_by_subscription")
+    read = {
+        "key_vaults": vaults_read,
+        "keys": vaults_read and not failed("keyvault.keys.list"),
+        "secrets": vaults_read and not failed("keyvault.secrets.list"),
+        "certificates": vaults_read and not failed("keyvault.certificates.list_properties_of_certificates"),
+        "app_service_certificates": signed_in and not failed("web.WebSiteManagementClient (init)", "web.certificates.list"),
+    }
 
     results, summary = evidence_sections(vaults, registration, app_service_certificates, web_registration)
     results["excluded"] = excluded
-    summary.update(exclusions.summary(excluded, EXCLUSION_KINDS, {
+    counts = {
         "key_vaults": len(vaults),
         **{field: sum(len(v[field]) for v in vaults) for field, _ in VAULT_CHILD_KINDS},
         "app_service_certificates": len(app_service_certificates),
-    }))
+    }
+    summary.update(exclusions.summary(excluded, EXCLUSION_KINDS, {
+        name: n if read[name] else None for name, n in counts.items()}))
     evidence = build_payload(
         subscription_id=subscription_id,
         subscription_source=sub["subscription_source"],

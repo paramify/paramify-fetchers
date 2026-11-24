@@ -1,0 +1,53 @@
+validator: entra_enabled_users_all_mfa_registered
+cases:
+  - name: every_enabled_account_registered
+    expect: PASS
+    note: 'disabled accounts (80% over all users) do not count'
+    artifact: '{"schema_version":"1.0","metadata":{"exit_code":0,"status":"success","evidence_set":{"reference_id":"EVD-AZURE-ENTRA-MFA"}},"payload":{"metadata":{"partial_failure":false,"api_failures":[]},"results":{"users":[]},"summary":{"total_users":40,"enabled_users":36,"enabled_member_users":30,"mfa_capable_enabled_users":36,"mfa_coverage_percentage":100,"member_mfa_coverage_percentage":100,"mfa_coverage_percentage_all_users":80}}}'
+
+  - name: pretty_printed
+    expect: PASS
+    artifact: |
+      {
+        "metadata": {
+          "evidence_set": {
+            "reference_id": "EVD-AZURE-ENTRA-MFA"
+          },
+          "exit_code": 0,
+          "status": "success"
+        },
+        "payload": {
+          "metadata": {
+            "api_failures": [],
+            "partial_failure": false
+          },
+          "results": {
+            "users": []
+          },
+          "summary": {
+            "enabled_member_users": 30,
+            "enabled_users": 36,
+            "member_mfa_coverage_percentage": 100,
+            "mfa_capable_enabled_users": 36,
+            "mfa_coverage_percentage": 100,
+            "mfa_coverage_percentage_all_users": 80,
+            "total_users": 40
+          }
+        },
+        "schema_version": "1.0"
+      }
+
+  - name: unregistered_guest
+    expect: FAIL
+    note: 'members all registered (100%) but one enabled guest is not: 35 of 36 floors to 97'
+    artifact: '{"schema_version":"1.0","metadata":{"exit_code":0,"status":"success","evidence_set":{"reference_id":"EVD-AZURE-ENTRA-MFA"}},"payload":{"metadata":{"partial_failure":false,"api_failures":[]},"results":{"users":[]},"summary":{"total_users":40,"enabled_users":36,"enabled_member_users":30,"mfa_capable_enabled_users":34,"mfa_coverage_percentage":97,"member_mfa_coverage_percentage":100,"mfa_coverage_percentage_all_users":80}}}'
+
+  - name: no_enabled_accounts
+    expect: FAIL
+    note: 'the fetcher writes 0, not 100, for an empty denominator'
+    artifact: '{"schema_version":"1.0","metadata":{"exit_code":0,"status":"success","evidence_set":{"reference_id":"EVD-AZURE-ENTRA-MFA"}},"payload":{"metadata":{"partial_failure":false,"api_failures":[]},"results":{"users":[]},"summary":{"total_users":40,"enabled_users":0,"enabled_member_users":30,"mfa_capable_enabled_users":0,"mfa_coverage_percentage":0,"member_mfa_coverage_percentage":100,"mfa_coverage_percentage_all_users":80}}}'
+
+  - name: coverage_key_renamed
+    expect: FAIL
+    note: 'member_mfa_coverage_percentage still reads 100; it must not stand in'
+    artifact: '{"schema_version":"1.0","metadata":{"exit_code":0,"status":"success","evidence_set":{"reference_id":"EVD-AZURE-ENTRA-MFA"}},"payload":{"metadata":{"partial_failure":false,"api_failures":[]},"results":{"users":[]},"summary":{"total_users":40,"enabled_users":36,"enabled_member_users":30,"mfa_capable_enabled_users":36,"mfa_pct":100,"member_mfa_coverage_percentage":100,"mfa_coverage_percentage_all_users":80}}}'

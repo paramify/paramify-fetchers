@@ -13,15 +13,23 @@ CONFIG = {
     "max_runs": ("GITHUB_MAX_WORKFLOW_RUNS", 2000),
     "max_artifacts": ("GITHUB_MAX_ARTIFACTS", 2000),
     "include_branch_names": ("GITHUB_WORKFLOW_RUNS_INCLUDE_BRANCH_NAMES", True),
+    "include_actors": ("GITHUB_WORKFLOW_RUNS_INCLUDE_ACTORS", True),
 }
 MAX_DAYS_BACK = 366
 FAILED = ("failure", "timed_out", "startup_failure")
+SCHEDULE_NOTE = ("No person starts a scheduled run. GitHub reports as its actor the user who last changed the "
+                 "workflow's schedule (or the repository's default branch), so actor is null on scheduled runs. "
+                 "triggering_actor is null on a scheduled run's first attempt and names who re-ran it on a later one.")
 
 
 def run_row(r, default_branch):
     head_repo = r.get("head_repository") or {}
     # A pull request from a fork can carry a branch of the same name as the default branch (measured).
     own = head_repo.get("id") is not None and head_repo.get("id") == (r.get("repository") or {}).get("id")
+    # On a scheduled run GitHub's actor is whoever last changed the schedule, not someone who started this run, so it
+    # is not carried as one. A re-run is started by a person: triggering_actor is kept from the second attempt on.
+    scheduled = r.get("event") == "schedule"
+    rerun = (r.get("run_attempt") or 1) > 1
     return {
         "id": r.get("id"),
         "workflow": r.get("name"),
@@ -35,8 +43,8 @@ def run_row(r, default_branch):
         "head_sha": r.get("head_sha"),
         "head_repository": head_repo.get("full_name"),
         "on_default_branch": own and r.get("head_branch") == default_branch,
-        "actor": (r.get("actor") or {}).get("login"),
-        "triggering_actor": (r.get("triggering_actor") or {}).get("login"),
+        "actor": None if scheduled else (r.get("actor") or {}).get("login"),
+        "triggering_actor": None if scheduled and not rerun else (r.get("triggering_actor") or {}).get("login"),
         "created_at": r.get("created_at"),
         "updated_at": r.get("updated_at"),
         "artifacts": [],
@@ -85,7 +93,14 @@ def collect(client, org, repos, config):
         for r in done:
             for x in r["runs"]:
                 x.pop("head_branch", None)
+    if not config["include_actors"]:
+        # Removed, not nulled, like branch names: metadata.include_actors says why the keys are absent.
+        for r in done:
+            for x in r["runs"]:
+                x.pop("actor", None)
+                x.pop("triggering_actor", None)
     runs = [(r["repository"], x) for r in done for x in r["runs"]]
+    scheduled_runs = sum(1 for _, x in runs if x["event"] == "schedule")
     on_default = [(repo, x) for repo, x in runs if x["on_default_branch"]]
     artifacts = [a for _, x in runs for a in x["artifacts"]]
     # A workflow is failing on the default branch when its newest finished run there failed. Runs are newest first.
@@ -94,7 +109,9 @@ def collect(client, org, repos, config):
         if x["status"] == "completed":
             latest.setdefault(f"{repo}:{x['path']}", x)
     return {
-        "metadata": {"since": iso(since)},
+        "metadata": {"since": iso(since),
+                     **({"scheduled_runs_actor_note": SCHEDULE_NOTE}
+                        if scheduled_runs and config["include_actors"] else {})},
         "summary": {
             "runs_total": len(runs),
             "runs_by_outcome": {o: sum(1 for _, x in runs if outcome(x) == o)
@@ -103,6 +120,7 @@ def collect(client, org, repos, config):
             "default_branch_runs_failed": sum(1 for _, x in on_default if x["conclusion"] in FAILED),
             "workflows_failing_on_default_branch": sorted(k for k, x in latest.items() if x["conclusion"] in FAILED),
             "runs_rerun": sum(1 for _, x in runs if (x["run_attempt"] or 1) > 1),
+            "runs_scheduled": scheduled_runs,
             "workflows_run": len({f"{repo}:{x['path']}" for repo, x in runs}),
             "repositories_with_runs": sorted(r["repository"] for r in done if r["runs"]),
             "repositories_without_runs": sorted(r["repository"] for r in done if not r["runs"]),
