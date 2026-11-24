@@ -1,0 +1,23 @@
+key: azure_acr_no_anonymous_pull
+name: 'Azure Container Registry: No Anonymous Pull'
+type: AUTOMATED
+role: configuration
+source: community
+statement: >
+  No in-scope container registry lets anyone pull images without signing in
+  (anonymous_pull_enabled_registries is 0). Fails when no registry is in scope, the registry list
+  was not read, or the counts appear other than exactly once. Does not check whether the collection
+  run succeeded.
+
+regex: '"anonymous_pull_enabled_registries":\s*(?<anonymous_pull_enabled_registries>\d+)(?:(?!"anonymous_pull_enabled_registries")[\s\S])*?"in_scope_registries":\s*(?<in_scope_registries>[1-9]\d*)'
+rules_summary: MATCH_COUNT EQUALS 1; MATCH_GROUP[1] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "1" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # anonymous_pull_enabled_registries
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-ACR-CONFIG

@@ -1,0 +1,36 @@
+validator: storage_accounts_all_enforce_tls_1_2
+cases:
+  - name: https_only_tls_1_2_everywhere
+    expect: PASS
+    note: the summary's minimum_tls_1_2_accounts and https_only_accounts keys must not count.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"storage_accounts":[{"name":"sa1","enable_https_traffic_only":true,"minimum_tls_version":"TLS1_2"},{"name":"sa2","enable_https_traffic_only":true,"minimum_tls_version":"TLS1_3"}]},"summary":{"https_only_accounts":2,"minimum_tls_1_2_accounts":2}}}'
+
+  - name: https_only_tls_1_2_pretty_printed
+    expect: PASS
+    note: guards the whitespace backtrack.
+    artifact: |
+      {
+        "metadata": {"exit_code": 0},
+        "payload": {"results": {"storage_accounts": [
+          {"enable_https_traffic_only": true, "minimum_tls_version":   "TLS1_2", "name": "sa1"}
+        ]}}
+      }
+
+  - name: one_account_tls_1_0
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"storage_accounts":[{"name":"sa1","enable_https_traffic_only":true,"minimum_tls_version":"TLS1_2"},{"name":"sa2","enable_https_traffic_only":true,"minimum_tls_version":"TLS1_0"}]}}}'
+
+  - name: one_account_allows_http
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"storage_accounts":[{"name":"sa1","enable_https_traffic_only":false,"minimum_tls_version":"TLS1_2"}]}}}'
+
+  - name: tls_unset
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"storage_accounts":[{"name":"sa1","enable_https_traffic_only":true,"minimum_tls_version":null}]}}}'
+
+  - name: keys_renamed_ALONE_THIS_PASSES
+    expect: PASS
+    note: >
+      Deliberate. storage_encryption_fields_present fails here; see
+      set_EVD-AZURE-STORAGE-ENC.yaml.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"storage_accounts":[{"name":"sa1","https_only":false,"min_tls":"TLS1_0"}]}}}'

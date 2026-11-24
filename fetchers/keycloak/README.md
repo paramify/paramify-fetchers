@@ -12,9 +12,10 @@ client-credentials grant as a dedicated service-account client, then issues only
    Keycloak's admin API now requires its audience, and a new client doesn't get it, so without it every call returns 401.
    Don't request the scope in the token call instead: Keycloak 26.8.1 and earlier reject an unknown scope.
 3. Give its service account the roles `view-realm`, `view-identity-providers` and `view-events`, and nothing else:
-   - for a client in the realm being read, from that realm's `realm-management` client;
-   - for a client in `master` (then set `auth_realm: master`), from the `<realm>-realm` client in `master`, such as
-     `example-realm-realm`. These are Keycloak's realm-specific admin roles.
+   - for a client in `master`, from the `<realm>-realm` client in `master`, such as `example-realm-realm`. These are
+     Keycloak's realm-specific admin roles. Set `auth_realm: master` when the realm being read is not `master`. To read
+     `master` itself, use `master-realm`: `master` has no `realm-management` client.
+   - for a client in any other realm being read, from that realm's `realm-management` client.
    No manage-* role is needed.
 4. Set `KEYCLOAK_BASE_URL`, `KEYCLOAK_REALM` (required), optionally `KEYCLOAK_AUTH_REALM`, and the
    `KEYCLOAK_CLIENT_ID` and `KEYCLOAK_CLIENT_SECRET` secrets. The fetcher must run from a network that can reach the

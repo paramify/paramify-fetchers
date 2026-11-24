@@ -1,0 +1,20 @@
+{
+  "status": "success",
+  "data": [
+    {
+      "namespace": "falco",
+      "pod": "falco-abcde",
+      "container": "falco"
+    },
+    {
+      "namespace": "falco",
+      "pod": "falco-fghij",
+      "container": "falco"
+    },
+    {
+      "namespace": "falco",
+      "pod": "falco-klmno",
+      "container": "falco"
+    }
+  ]
+}

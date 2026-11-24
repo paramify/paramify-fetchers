@@ -1,0 +1,9 @@
+evidence_set: EVD-AZURE-AI-SERVICES-CONFIG
+cases:
+  - name: compliant
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"accounts_audit_logs_exported":2,"accounts_audit_logs_unknown":0,"accounts_open_to_all_networks":0,"accounts_with_api_keys_enabled":0,"connections_auth_type_unrecognized":0,"connections_unauthenticated":0,"connections_unknown_accounts":0,"connections_using_stored_secrets":0,"search_services_audit_logs_exported":2,"search_services_open_to_all_networks":0,"search_services_with_api_keys_enabled":0,"total_accounts":2,"total_search_services":2}}}'
+
+  - name: failed_collection
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":1},"payload":{"results":{},"summary":{"accounts_audit_logs_exported":2,"accounts_audit_logs_unknown":0,"accounts_open_to_all_networks":0,"accounts_with_api_keys_enabled":0,"connections_auth_type_unrecognized":0,"connections_unauthenticated":0,"connections_unknown_accounts":0,"connections_using_stored_secrets":0,"search_services_audit_logs_exported":2,"search_services_open_to_all_networks":0,"search_services_with_api_keys_enabled":0,"total_accounts":2,"total_search_services":2}}}'

@@ -173,6 +173,22 @@ def test_screen_lists_breaking_that_touch():
     _run(body)
 
 
+def test_screen_shows_the_newest_fetcher_note():
+    plan = _plan()
+    plan["fetchers"]["yours"][0]["notes"] = [
+        {"release": "0.8.0-beta", "version": "0.3.1", "note": "alerts fire sooner"},
+        {"release": "0.7.0-beta", "version": "0.3.0", "note": "older note"}]
+
+    async def body(app, pilot):
+        await app.push_screen(UpdateScreen(plan))
+        await pilot.pause()
+        table = app.screen.query_one("#update-fetchers", DataTable)
+        cell = table.get_row_at(0)[2].plain
+        assert cell.startswith("0.8.0-beta  alerts fire sooner") and cell.endswith("+1 earlier")
+
+    _run(body)
+
+
 def test_rollback_button_only_when_there_is_something_to_roll_back_to():
     async def body(app, pilot):
         await app.push_screen(UpdateScreen(_plan(can_roll_back=True)))

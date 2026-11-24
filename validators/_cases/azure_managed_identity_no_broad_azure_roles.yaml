@@ -1,0 +1,21 @@
+validator: azure_managed_identity_no_broad_azure_roles
+cases:
+  - name: compliant
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"identities_role_assignments_unknown":0,"identities_with_broad_role":0,"role_assignments_unresolved_role":0}}}'
+
+  - name: identities_role_assignments_unknown_nonzero
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"identities_role_assignments_unknown":1,"identities_with_broad_role":0,"role_assignments_unresolved_role":0}}}'
+
+  - name: identities_with_broad_role_nonzero
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"identities_role_assignments_unknown":0,"identities_with_broad_role":1,"role_assignments_unresolved_role":0}}}'
+
+  - name: role_assignments_unresolved_role_nonzero
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"identities_role_assignments_unknown":0,"identities_with_broad_role":0,"role_assignments_unresolved_role":1}}}'
+
+  - name: identities_role_assignments_unknown_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"identities_role_assignments_unknown_renamed":0,"identities_with_broad_role":0,"role_assignments_unresolved_role":0}}}'

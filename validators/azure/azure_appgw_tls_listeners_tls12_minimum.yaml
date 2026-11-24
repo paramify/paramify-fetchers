@@ -1,0 +1,24 @@
+key: azure_appgw_tls_listeners_tls12_minimum
+name: 'Application Gateway: No Encrypted Listener Allows Below TLS 1.2'
+type: AUTOMATED
+role: configuration
+source: community
+statement: >
+  No encrypted listener's effective minimum TLS version is 1.0 or 1.1, judged from its SSL profile,
+  else the gateway's SSL policy, else the platform default (listeners_below_tls12 is 0). A listener
+  whose version cannot be determined is not counted here; see 'Every Listener's TLS Version Is
+  Known'. Fails if the count appears other than exactly once. Does not check whether the collection
+  run succeeded.
+
+regex: '"listeners_below_tls12":\s*(?<listeners_below_tls12>\d+)'
+rules_summary: MATCH_COUNT EQUALS 1; MATCH_GROUP[1] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "1" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # listeners_below_tls12
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-APPGW-TLS-LISTENERS
