@@ -12,6 +12,16 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`kubernetes_workload_resilience` fetcher and `kubernetes` category.** Reads any cluster's Kubernetes API (GET and
+  LIST only) through a kubeconfig, including AKS with kubelogin, or the in-cluster service account. For each Deployment
+  and StatefulSet: replicas with any autoscaler minimum, PodDisruptionBudget coverage and budgets that block node drains,
+  zone spread as configured and where ready pods actually run (the scheduler spreads by default, so placement decides),
+  and readiness and liveness probes. A workload's pods are the ones it owns, found through its ReplicaSets, not every
+  pod with matching labels. Each budget is judged once, over every pod it selects, with Kubernetes' rounding. When a
+  pod's zone or owner, or a budget's pod count, can't be found, the workload is listed as unknown and the matching list
+  is null, not empty. An API server that can't be reached is recorded as `target_unreachable`, and each call times
+  out. System namespaces are left out by default. The README has the least-privilege RBAC.
+
 - **Literal pattern lists.** A `type: patterns` field can declare `globs: false`; `validate`, the run and the TUI then
   refuse a pattern holding `*` or `?`, and `describe` says the field takes patterns without wildcards.
 
