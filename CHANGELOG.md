@@ -21,6 +21,17 @@ schemas and the `paramify` CLI — not the internal code.
   pod's zone or owner, or a budget's pod count, can't be found, the workload is listed as unknown and the matching list
   is null, not empty. An API server that can't be reached is recorded as `target_unreachable`, and each call times
   out. System namespaces are left out by default. The README has the least-privilege RBAC.
+- **`alertmanager_alert_delivery` fetcher and `alertmanager` category.** Reads Prometheus Alertmanager's v2 API and
+  metrics endpoint, GET only: the route tree and receivers (names and integration types only, never receiver
+  settings), active, silenced and inhibited alerts, silences, and the notifications started and the notifications that
+  failed after all their retries. Counts are per receiver when Alertmanager runs with receiver-name-in-metrics,
+  otherwise per integration type. Routes written with the older `match` and `match_re` keys show those as matchers.
+  Reports receivers and routes that deliver nowhere. The counts do not show that an integration accepted a
+  notification, or that a person received it. `counters_since` is when the counts started: the process start, or with
+  receiver names the last successful configuration reload, which also resets them. An unread endpoint, or a response
+  that is not the shape Alertmanager documents, is a failed read: its fields are null, not 0, and the run exits 1. This
+  includes a `/metrics` page without `alertmanager_build_info`, a missing notification counter, a counter value that
+  is not a number, and a status without its configuration.
 
 - **Literal pattern lists.** A `type: patterns` field can declare `globs: false`; `validate`, the run and the TUI then
   refuse a pattern holding `*` or `?`, and `describe` says the field takes patterns without wildcards.
