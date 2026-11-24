@@ -189,15 +189,20 @@ def gateway_servers(gateways: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 
 def tls_disabled(rules: List[Dict[str, Any]]) -> List[str]:
-    """DestinationRules that turn TLS off for a host or a port (trafficPolicy.tls.mode DISABLE)."""
+    """DestinationRules that turn TLS off (tls.mode DISABLE) for a host or a port, in the rule's trafficPolicy or in a
+    subset's, which overrides the rule's for traffic routed to that subset."""
     out = []
     for r in rules:
-        policy = (r.get("spec") or {}).get("trafficPolicy") or {}
-        if ((policy.get("tls") or {}).get("mode") or "").upper() == "DISABLE":
-            out.append(_ref(r))
-        for p in policy.get("portLevelSettings") or []:
-            if ((p.get("tls") or {}).get("mode") or "").upper() == "DISABLE":
-                out.append(f"{_ref(r)}:{(p.get('port') or {}).get('number')}")
+        spec = r.get("spec") or {}
+        policies = [("", spec.get("trafficPolicy"))]
+        policies += [(f" subset {s.get('name')}", s.get("trafficPolicy")) for s in spec.get("subsets") or []]
+        for subset, policy in policies:
+            policy = policy or {}
+            if ((policy.get("tls") or {}).get("mode") or "").upper() == "DISABLE":
+                out.append(f"{_ref(r)}{subset}")
+            for p in policy.get("portLevelSettings") or []:
+                if ((p.get("tls") or {}).get("mode") or "").upper() == "DISABLE":
+                    out.append(f"{_ref(r)}:{(p.get('port') or {}).get('number')}{subset}")
     return sorted(out)
 
 

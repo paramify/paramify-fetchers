@@ -41,7 +41,7 @@ evidence_set:
     - GET /apis/security.istio.io/v1/authorizationpolicies — default-deny (allow nothing) policies, allow-all rules and deny policies
     - GET /apis/networking.istio.io/v1/gateways — each ingress server's protocol, TLS mode, HTTPS redirect and minimum TLS version
     - GET /apis/networking.istio.io/v1/virtualservices — which routes are bound to a gateway
-    - GET /apis/networking.istio.io/v1/destinationrules — rules that turn TLS off for a host or port
+    - GET /apis/networking.istio.io/v1/destinationrules — rules that turn TLS off for a host or port, for all traffic or for a subset
     - GET /api/v1/namespaces/{root}/configmaps/istio — the mesh configuration's outbound traffic policy
     - GET /api/v1/namespaces/{root}/configmaps/istio-ca-root-cert — the mesh root certificate (public; no private key)
     - GET /apis/apps/v1/namespaces/{root}/deployments?labelSelector=app=istiod — istiod's workload certificate lifetime setting
@@ -80,7 +80,7 @@ evidence_set:
     - virtual_services_on_gateways — Number of VirtualServices bound to a gateway, the routes ingress exposes; null if they could not be read
 
     Is traffic otherwise restricted?
-    - destination_rules_tls_disabled — List of DestinationRules that turn TLS off (tls.mode DISABLE) for a host or a port; null if they could not be read
+    - destination_rules_tls_disabled — List of DestinationRules that turn TLS off (tls.mode DISABLE) for a host or a port, in the rule's traffic policy or in a subset's. Each is namespace/name, with :port for a port setting and "subset <name>" for a subset setting; null if they could not be read
     - outbound_traffic_policy — The mesh configuration's outbound traffic policy: REGISTRY_ONLY (only registered services) or ALLOW_ANY, Istio's default; null if the mesh configuration could not be read or parsed
 
     Are mesh certificates current?

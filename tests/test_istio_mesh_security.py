@@ -218,6 +218,22 @@ def test_plaintext_follows_istio_gateway_semantics(protocol, tls, plaintext):
     assert im.is_plaintext(protocol, tls) is plaintext
 
 
+def _rule(subset_policy):
+    return {"metadata": {"namespace": "payments", "name": "ledger"},
+            "spec": {"host": "ledger", "trafficPolicy": {"tls": {"mode": "ISTIO_MUTUAL"}},
+                     "subsets": [{"name": "v1", "labels": {"version": "v1"}},
+                                 {"name": "v2", "labels": {"version": "v2"}, "trafficPolicy": subset_policy}]}}
+
+
+@pytest.mark.parametrize("subset_policy, found", [
+    ({"tls": {"mode": "DISABLE"}}, ["payments/ledger subset v2"]),
+    ({"portLevelSettings": [{"port": {"number": 8443}, "tls": {"mode": "DISABLE"}}]}, ["payments/ledger:8443 subset v2"]),
+    ({"tls": {"mode": "ISTIO_MUTUAL"}}, [])])
+def test_a_subset_that_turns_tls_off_is_reported(subset_policy, found):
+    assert im.tls_disabled([_rule(subset_policy)]) == found
+    assert im.tls_disabled(fx("destinationrules")["items"] + [_rule(subset_policy)]) == ["legacy/legacy-db"] + found
+
+
 def test_lists_are_read_page_by_page():
     ev, _, api = _summary(page_size=2)
     assert ev["summary"]["namespaces"] == 6 and ev["summary"]["authorization_policies"] == 5
