@@ -707,6 +707,72 @@ def test_host_split_that_cannot_see_every_row_is_a_failure(fake, tmp_path):
     assert ev["scope"]["assessments_not_read"] == 1 and ev["scope"]["split_slices"]
 
 
+def _reject_not_assessed(fake):
+    """Wiz for Gov answers {result: NOT_ASSESSED} with HTTP 400 (#473).
+    Returns the wrapper's own record of attempted filters, since refused
+    calls never reach the fake's graphql_calls list."""
+    real = fake.__call__
+    attempted = []
+
+    def rejected(url, data=None, json=None, headers=None, timeout=None, allow_redirects=True):
+        filter_by = ((json or {}).get("variables") or {}).get("filterBy") or {}
+        if url == API and filter_by.get("result") == "NOT_ASSESSED":
+            attempted.append(filter_by)
+            return FakeResponse(400, {"errors": [{"message": "Value NOT_ASSESSED is not valid for field 'result'"}]})
+        return real(url, data=data, json=json, headers=headers, timeout=timeout, allow_redirects=allow_redirects)
+
+    wiz_client.requests.post = rejected
+    return attempted
+
+
+def test_host_rejected_empty_slice_does_not_fail_a_complete_read(fake, tmp_path):
+    # The reported run: every row Wiz counts is read, and the empty
+    # NOT_ASSESSED slice is the only failure - the run must exit 0 (#473).
+    fake.pages["hostConfigurationRuleAssessments"] = [[
+        _host(1, "PASS", "HIGH", RHEL_STIG, fake=fake), _host(2, "FAIL", "LOW", RHEL_STIG, fake=fake)]]
+    refused = _reject_not_assessed(fake)
+    code, ev = run("host_configuration_posture", tmp_path)
+    assert code == 0, ev["api_failures"]
+    sc = ev["scope"]
+    assert sc["assessments_not_read"] == 0
+    assert [r["filter"] for r in sc["rejected_slices"]] == [{"result": "NOT_ASSESSED"}]
+    assert "NOT_ASSESSED" in sc["rejected_slices"][0]["wiz_errors"][0]
+    # a refused filter is never split further: no call narrows it by severity or status
+    assert refused and all(set(f) == {"result"} for f in refused)
+    assert not any(s["filter"].get("result") == "NOT_ASSESSED" for s in sc["split_slices"])
+
+
+def test_host_rejected_slice_with_unread_rows_is_a_failure(fake, tmp_path):
+    # Same refusal, but Wiz's count now has a row the read never reached.
+    fake.pages["hostConfigurationRuleAssessments"] = [[
+        _host(1, "PASS", "HIGH", RHEL_STIG, fake=fake), _host(2, "FAIL", "LOW", RHEL_STIG, fake=fake),
+        _host(3, "NOT_ASSESSED", "LOW", RHEL_STIG, fake=fake)]]
+    _reject_not_assessed(fake)
+    code, ev = run("host_configuration_posture", tmp_path)
+    assert code == 1
+    assert ev["api_failures"][-1]["type"] == "WizRejectedSlices"
+    assert ev["scope"]["assessments_not_read"] == 1
+    assert ev["scope"]["rejected_slices"]
+
+
+def test_http_error_keeps_the_response_body(fake, tmp_path):
+    # The bare "HTTP {status}" record made #473 undebuggable; the failure now
+    # carries Wiz's own message from the body.
+    real = fake.__call__
+
+    def bad(url, data=None, json=None, headers=None, timeout=None, allow_redirects=True):
+        if url == API:
+            return FakeResponse(400, {"errors": [{"message": "Cannot query field 'bogus' on type 'Query'"}]})
+        return real(url, data=data, json=json, headers=headers, timeout=timeout, allow_redirects=allow_redirects)
+
+    wiz_client.requests.post = bad
+    client = wiz_client.build_client()
+    assert client.graphql("cloudAccounts", "query { cloudAccounts { nodes { id } } }") is None
+    failure = client.api_failures[-1]
+    assert failure["type"] == "HTTPError" and failure["status_code"] == 400
+    assert "Cannot query field 'bogus'" in failure["message"]
+
+
 # --- modules not yet exercised on a live tenant ---------------------------
 
 

@@ -96,6 +96,27 @@ def _is_transient(errors: List[Any]) -> bool:
     return "internal error" in text or "timeout" in text or "temporarily unavailable" in text
 
 
+def _error_detail(response: Any) -> Optional[str]:
+    """Best detail from a non-200 GraphQL response body.
+
+    The bare "HTTP {status}" record leaves a Wiz tenant's Bad Request
+    unreadable; the body usually carries the reason (a rejected filter value,
+    an unknown field) as GraphQL errors[] or as short text. Bounded to 200
+    chars; ``_record`` caps at 500.
+    """
+    try:
+        payload = response.json()
+    except ValueError:
+        payload = None
+    if isinstance(payload, dict):
+        msgs = [str(e.get("message", e)) for e in (payload.get("errors") or [])[:3]]
+        msgs = [m for m in msgs if m.strip()]
+        if msgs:
+            return "; ".join(msgs)
+    text = str(getattr(response, "text", "") or "").strip()
+    return text[:200] or None
+
+
 _NAME = re.compile(r"[_A-Za-z][_0-9A-Za-z]*")
 _FORBIDDEN_OPERATIONS = {"mutation", "subscription"}
 
@@ -440,6 +461,9 @@ class WizClient:
             last_response = response
             if response.status_code != 200:
                 last_error = f"HTTP {response.status_code}"
+                detail = _error_detail(response)
+                if detail:
+                    last_error = f"{last_error}: {detail}"
                 break
 
             try:

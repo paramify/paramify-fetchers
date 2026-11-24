@@ -216,7 +216,7 @@ def total_count(client: WizClient, filter_by: Dict[str, Any]) -> Any:
 
 def fetch_slice(client: WizClient, filter_by: Dict[str, Any], depth: int, cap: int,
                 found: Dict[str, Dict[str, Any]], unreadable: List[Dict[str, Any]],
-                split: List[Dict[str, Any]]) -> None:
+                split: List[Dict[str, Any]], rejected: List[Dict[str, Any]]) -> None:
     """
     Read one filter slice into ``found`` (keyed by assessment id). If Wiz still
     fails on it, keep what came back, split the slice on the next filter in
@@ -233,6 +233,17 @@ def fetch_slice(client: WizClient, filter_by: Dict[str, Any], depth: int, cap: i
     new_failures = client.api_failures[before:]
     if not new_failures:
         return
+    # A 400 rejects the filter value itself, not the page size or the query
+    # shape: every narrower slice inherits it, so splitting only repeats the
+    # refusal. Take the slice out of api_failures and let body() reconcile it
+    # against Wiz's own totalCount; a rejected slice that turns out to have
+    # held rows is still a failure there.
+    rejected_400 = [f for f in new_failures if f.get("status_code") == 400]
+    if len(rejected_400) == len(new_failures):
+        del client.api_failures[before:]
+        rejected.append({"filter": dict(filter_by), "records_read_before_error": len(nodes),
+                         "wiz_errors": [f.get("message") for f in rejected_400][:3]})
+        return
     # Only Wiz's own "internal error" is worth routing around; auth, rate
     # limits, caps and cursor problems are reported exactly as they happened.
     hard = [f for f in new_failures if "internal error" in str(f.get("message", "")).lower()]
@@ -247,7 +258,7 @@ def fetch_slice(client: WizClient, filter_by: Dict[str, Any], depth: int, cap: i
     logger.warning("slice %s kept failing; splitting on %s", filter_by, field)
     split.append({"filter": dict(filter_by), "split_on": field})
     for v in values:
-        fetch_slice(client, {**filter_by, field: v}, depth + 1, cap, found, unreadable, split)
+        fetch_slice(client, {**filter_by, field: v}, depth + 1, cap, found, unreadable, split, rejected)
 
 
 def body(client: WizClient) -> Dict[str, Any]:
@@ -261,10 +272,11 @@ def body(client: WizClient) -> Dict[str, Any]:
     found: Dict[str, Dict[str, Any]] = {}
     unreadable: List[Dict[str, Any]] = []
     split: List[Dict[str, Any]] = []
+    rejected: List[Dict[str, Any]] = []
     by_result_fetched: Dict[str, int] = {}
     for result in RESULTS:
         before = len(found)
-        fetch_slice(client, {"result": result}, 0, cap, found, unreadable, split)
+        fetch_slice(client, {"result": result}, 0, cap, found, unreadable, split, rejected)
         by_result_fetched[result] = len(found) - before
     raw = list(found.values())
     missing = (expected - len(raw)) if expected is not None else None
@@ -287,6 +299,17 @@ def body(client: WizClient) -> Dict[str, Any]:
             "message": (f"Wiz failed on {len(split)} slice(s), which were re-read by severity/status; "
                         f"{missing if missing is not None else 'an unknown number'} of "
                         f"{expected if expected is not None else '?'} assessments were not read that way."),
+        })
+    if rejected and missing != 0:
+        # The tenant refused these filters outright (HTTP 400). Forgiving one
+        # is only safe when Wiz's own count says nothing is left unread.
+        client.api_failures.append({
+            "operation": "hostConfigurationRuleAssessments",
+            "type": "WizRejectedSlices",
+            "message": (f"Wiz refused {len(rejected)} filter slice(s) with HTTP 400; "
+                        f"{missing if missing is not None else 'an unknown number of'} "
+                        f"of {expected if expected is not None else '?'} assessments could not be read. "
+                        "See scope.rejected_slices for the filters and Wiz's response."),
         })
 
     rule_ids = sorted({(a.get("rule") or {}).get("id") for a in raw if (a.get("rule") or {}).get("id")})
@@ -324,6 +347,7 @@ def body(client: WizClient) -> Dict[str, Any]:
             "assessments_not_read": missing,
             "assessments_by_result_fetched": by_result_fetched,
             "unreadable_slices": unreadable,
+            "rejected_slices": rejected,
             "split_slices": split,
             "assessments_by_benchmark": dict(all_benchmarks.most_common()),
             "pages_served_by_lighter_query": client.fallback_pages,
