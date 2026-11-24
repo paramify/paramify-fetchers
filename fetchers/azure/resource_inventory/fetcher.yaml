@@ -1,5 +1,5 @@
 name: azure_resource_inventory
-version: 0.4.1
+version: 0.4.2
 description: >-
   Lists every resource in the subscription with its details, and how many Defender for Cloud assessments and Azure Policy evaluations cover it and how many fail.
 category: azure
@@ -84,8 +84,8 @@ evidence_set:
     Which resources are left out of scope?
     - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
     - resource_exclusion_patterns_unmatched — List of configured patterns that matched no resource and no Defender assessment's or Policy state's target, such as a mistyped name, or null when the inventory, the Defender assessments or the Policy states could not be read
-    - excluded_resources — Number of resources left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, and no other count includes them
-    - in_scope_resources — Number of resources read and in scope; 0 means none was read or the patterns took out every resource, which a check can catch by requiring more than 0
+    - excluded_resources — Number of resources left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, and no other count includes them; null when the resource list could not be read
+    - in_scope_resources — Number of resources read and in scope; null when the resource list could not be read; 0 means there are none or the patterns took out every resource, which a check can catch by requiring more than 0
 
     What resources exist?
     - total_resources — Number of in-scope resources (resource groups and the subscription itself are not counted)

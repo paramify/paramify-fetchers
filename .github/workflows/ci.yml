@@ -10,12 +10,15 @@ name: CI
 #   test      — every fetcher.yaml / category file validates against its JSON Schema
 #   azure-sdk — the Azure SDK operation groups the fetchers read still exist
 #   oci-sdk   — the OCI fetchers run against recorded responses (needs the oci extra)
+#   release-check — only on the release PR (branch release/next): the release
+#               file is complete and consistent (tools/release.py check)
 #   smoke     — the CLI discovery surface works across all fetchers, and the
 #               demo run / validate / upload --dry-run output matches its goldens
 #   tui       — the terminal UI on the lowest textual 8 with the oldest Python and
 #               the latest textual 8 with the deployed Python: pilot tests, SVG
 #               snapshots, the end-to-end demo flow, a 160x50 layout check, and a
-#               real pty launch. The only job that runs the TUI suite.
+#               real pty launch. The only job that runs the TUI suite. Each
+#               textual row runs as three shards.
 #   lint      — the framework's own code passes ruff + mypy
 #   secrets   — no credentials in the tree or its full git history
 #   ci-ok     — passes only if every job above passed or was skipped by `changes`.
@@ -49,10 +52,11 @@ jobs:
       scope: ${{ steps.plan.outputs.scope }}
       azure: ${{ steps.plan.outputs.azure }}
       oci: ${{ steps.plan.outputs.oci }}
+      release: ${{ steps.plan.outputs.release }}
       pythons: ${{ steps.matrix.outputs.pythons }}
       tui: ${{ steps.matrix.outputs.tui }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # The merge commit and its parents: the planner diffs HEAD^1..HEAD.
           fetch-depth: 2
@@ -73,29 +77,42 @@ jobs:
       # minor can render differently. --deselect, not --ignore: an ignore does
       # not drop a file named on the command line, and a skip would trip
       # --fail-on-skip.
+      #
+      # Each textual row runs as TUI_SHARDS jobs, each with every Nth test
+      # (--shard in tests/conftest.py). Whole, the suite took 7 to 8.5 minutes on
+      # latest and set the wall time of the workflow: no test is slow, there are
+      # just 360 app starts for 4 cores.
       - name: matrices for the scope
         id: matrix
         env:
           SCOPE: ${{ steps.plan.outputs.scope }}
+          TUI_SHARDS: 3
         run: |
           set -euo pipefail
-          lowest='{"textual":"lowest","python-version":"3.11","pin":"textual==8.0.0","pytest-args":"--deselect tests/test_tui_snapshots.py"}'
-          latest='{"textual":"latest","python-version":"3.14","pin":"textual>=8,<9","pytest-args":""}'
+          lowest='"textual":"lowest","python-version":"3.11","pin":"textual==8.0.0","pytest-args":"--deselect tests/test_tui_snapshots.py"'
+          latest='"textual":"latest","python-version":"3.14","pin":"textual>=8,<9","pytest-args":""'
           if [ "$SCOPE" = fetchers ]; then
             echo 'pythons=["3.11","3.14"]' >> "$GITHUB_OUTPUT"
-            echo "tui=[$latest]" >> "$GITHUB_OUTPUT"
+            textuals=("$latest")
           else
             echo 'pythons=["3.11","3.12","3.13","3.14","3.15"]' >> "$GITHUB_OUTPUT"
-            echo "tui=[$lowest,$latest]" >> "$GITHUB_OUTPUT"
+            textuals=("$lowest" "$latest")
           fi
+          rows=()
+          for row in "${textuals[@]}"; do
+            for i in $(seq 1 "$TUI_SHARDS"); do
+              rows+=("{$row,\"shard\":\"$i\",\"shards\":\"$TUI_SHARDS\"}")
+            done
+          done
+          (IFS=,; echo "tui=[${rows[*]}]") >> "$GITHUB_OUTPUT"
           cat "$GITHUB_OUTPUT"
 
   lint:
     name: lint (ruff + mypy)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
           cache: pip
@@ -122,8 +139,8 @@ jobs:
         # pull request. The lists are in the `changes` job.
         python-version: ${{ fromJSON(needs.changes.outputs.pythons) }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
@@ -155,8 +172,8 @@ jobs:
     if: needs.changes.outputs.azure == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
           cache: pip
@@ -190,8 +207,8 @@ jobs:
     if: needs.changes.outputs.oci == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
           cache: pip
@@ -224,8 +241,8 @@ jobs:
     # The goldens step runs real commands; a hang should not hold a runner for 6h.
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
           cache: pip
@@ -266,14 +283,16 @@ jobs:
           print(f"smoke ok: described all {len(names)} discovered fetchers")
           EOF
       # The headless path a new user takes first, end to end and offline: run the
-      # credential-free demo manifest, validate it, dry-run its upload. Output is
+      # credential-free demo manifest, validate it, dry-run its upload; then
+      # set-stack and set-owner on a copy, and the dry run's note that they
+      # changed after the run. Output is
       # compared with tests/goldens/cli/ after the repo path, run ids and
       # timestamps are normalised out. Refresh: python tools/cli_goldens.py --update
       - name: paramify run / validate / upload --dry-run on the demo (goldens)
         run: python tools/cli_goldens.py
 
   tui:
-    name: tui (textual ${{ matrix.textual }}, py ${{ matrix.python-version }})
+    name: tui (textual ${{ matrix.textual }}, py ${{ matrix.python-version }}, ${{ matrix.shard }}/${{ matrix.shards }})
     needs: changes
     runs-on: ubuntu-latest
     # A wedged app or pty would otherwise hold the runner for the 6h default.
@@ -283,11 +302,11 @@ jobs:
       matrix:
         # Both textual rows, or only `latest` for a fetcher-only pull request: the
         # TUI boots against the real catalog, so a fetcher can still break it.
-        # The rows are in the `changes` job.
+        # Each row is split into shards. The rows are in the `changes` job.
         include: ${{ fromJSON(needs.changes.outputs.tui) }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
@@ -303,19 +322,21 @@ jobs:
       # check and the pty launch.
       # --fail-on-skip (tests/conftest.py) fails the job if any of them skipped.
       # `-n auto` as in the `test` job: serial, this step took 8 to 11 minutes and
-      # set the wall time of the whole workflow.
+      # set the wall time of the whole workflow. --shard keeps a snapshot module
+      # whole in one shard, and reports the other shards' tests as deselected.
       - name: pytest (TUI)
         run: >-
           pytest -q -rsx -n auto --fail-on-skip --snapshot-report snapshot_report.html
+          --shard ${{ matrix.shard }}/${{ matrix.shards }}
           ${{ matrix.pytest-args }}
           tests/test_tui_*.py tests/test_manifest_autosave.py tests/test_target_editor.py
       # Side-by-side SVG diff of every mismatched snapshot. Refresh after an
       # intended UI change: pytest tests/test_tui_snapshots.py --snapshot-update
       - name: upload the snapshot report
         if: failure()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: snapshot-report-textual-${{ matrix.textual }}
+          name: snapshot-report-textual-${{ matrix.textual }}-shard-${{ matrix.shard }}
           path: snapshot_report.html
           if-no-files-found: ignore
 
@@ -324,10 +345,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # 3.11: the oldest Python the installer accepts, so a newer-only feature
       # in the install fails here.
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.11"
       - name: shellcheck
@@ -350,7 +371,7 @@ jobs:
     name: secrets (gitleaks full history)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0  # full history — scanning it is the whole point
       # The OSS binary, not the marketplace action (which requires an org
@@ -367,12 +388,39 @@ jobs:
       - name: gitleaks (full history)
         run: gitleaks git --verbose --redact
 
+  release-check:
+    name: release-check (release PR)
+    needs: changes
+    # Only the release PR, which always comes from release/next. Skipped on every
+    # other pull request, and ci-ok allows that.
+    if: needs.changes.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The check reads the tags and the history since the last release.
+          fetch-depth: 0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - run: python -m pip install -e .
+      # On a pull request the checkout is the merge commit; its second parent is
+      # the PR head, which is the release branch itself.
+      - name: check the release file
+        run: |
+          ref=HEAD
+          if git rev-parse --verify -q HEAD^2 > /dev/null; then ref=HEAD^2; fi
+          python tools/release.py check --ref "$ref"
+
   ci-ok:
     name: ci-ok
     # always(): a failed or cancelled job above would otherwise skip this one,
     # and a skipped required check counts as passing.
     if: always()
-    needs: [changes, lint, test, azure-sdk, oci-sdk, smoke, tui, install, secrets]
+    needs: [changes, lint, test, azure-sdk, oci-sdk, release-check, smoke, tui, install, secrets]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -382,12 +430,12 @@ jobs:
         run: |
           set -euo pipefail
           jq -r 'to_entries[] | "\(.key): \(.value.result)"' <<<"$NEEDS"
-          # Only the two SDK jobs may be skipped, and only when `changes` itself
+          # Only the two SDK jobs and release-check may be skipped, and only when `changes` itself
           # passed: if it failed, everything after it is skipped, not cleared.
           jq -e '
             .changes.result == "success"
             and ([to_entries[]
-                  | select(.key != "azure-sdk" and .key != "oci-sdk")
+                  | select(.key != "azure-sdk" and .key != "oci-sdk" and .key != "release-check")
                   | .value.result] | all(. == "success"))
-            and ([."azure-sdk".result, ."oci-sdk".result] | all(. == "success" or . == "skipped"))
+            and ([."azure-sdk".result, ."oci-sdk".result, ."release-check".result] | all(. == "success" or . == "skipped"))
           ' <<<"$NEEDS" > /dev/null || { echo "::error::a job failed, was cancelled, or did not run"; exit 1; }

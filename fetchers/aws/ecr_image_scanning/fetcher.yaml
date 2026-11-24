@@ -1,5 +1,5 @@
 name: aws_ecr_image_scanning
-version: 0.4.0
+version: 0.5.0
 description: Lists ECR repositories, effective scanning configuration and latest-image findings across basic, manual and enhanced scanning, preserving scan status, timestamps and every severity.
 category: aws
 

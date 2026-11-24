@@ -347,9 +347,8 @@ def summarize(workspaces: list[dict] | None) -> dict:
 
 def collect_workspaces(subscription_id, cred, collector: Collector, exclusions: ResourceExclusions | None = None,
                        excluded: list | None = None) -> list[dict] | None:
-    """One workspaces.list(), then three GETs per workspace; excluded ones are appended to `excluded` unread.
-
-    None when the workspace list could not be read."""
+    """One workspaces.list(), then three GETs per workspace; excluded ones are appended to `excluded` unread. None
+    when the workspace list couldn't be read."""
 
     def _client():
         from azure.mgmt.loganalytics import LogAnalyticsManagementClient  # lazy
@@ -446,7 +445,8 @@ def main() -> int:
             ),
         )
 
-    if not (subscription_id and cred is not None):
+    listed = workspaces is not None
+    if not listed:
         exclusions.mark_unread()
     exclusions.record_invalid(collector)
     exclusions.warn_unmatched(logger)
@@ -463,7 +463,7 @@ def main() -> int:
         summary={
             **summarize(workspaces),
             "provider_registration_status": registration,
-            **exclusions.summary(excluded, ("workspace",), {"workspaces": None if workspaces is None else len(workspaces)}),
+            **exclusions.summary(excluded, ("workspace",), {"workspaces": len(workspaces) if listed else None}),
         },
     )
 

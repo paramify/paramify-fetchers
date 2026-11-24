@@ -1,0 +1,23 @@
+key: azure_velero_expired_backups_removed
+name: 'Azure Velero: Expired Backups Are Removed'
+type: AUTOMATED
+role: configuration
+source: community
+statement: >
+  No backup stays in storage more than expiry_grace_hours past its expiration
+  (expired_backups_not_deleted is 0), so Velero's retention is enforced. Does not show that the
+  retention period itself is the authorized one. Does not check whether the collection run
+  succeeded.
+
+regex: '"expired_backups_not_deleted":\s*(?<expired_backups_not_deleted>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # expired_backups_not_deleted
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-VELERO-BACKUPS

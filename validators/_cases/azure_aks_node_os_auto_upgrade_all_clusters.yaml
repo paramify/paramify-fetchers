@@ -1,0 +1,33 @@
+validator: azure_aks_node_os_auto_upgrade_all_clusters
+cases:
+  - name: compliant
+    expect: PASS
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"metadata": {"api_failures": [], "datetime": "2026-11-17T00:00:00Z", "environment": null, "partial_failure": false, "subscription_id": "00000000-0000-0000-0000-000000000000", "subscription_source": "target"}, "results": {}, "summary": {"auto_upgrade_clusters": 2, "autoscaling_agent_pools": 2, "kubernetes_versions": ["1.30"], "node_os_auto_upgrade_clusters": 2, "node_os_unmanaged_clusters": 0, "node_os_upgrade_channel_unknown_clusters": 0, "total_agent_pools": 3, "total_clusters": 2}}}'
+
+  - name: all_covered_at_ten_times_scale
+    expect: PASS
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"metadata": {"api_failures": [], "datetime": "2026-11-17T00:00:00Z", "environment": null, "partial_failure": false, "subscription_id": "00000000-0000-0000-0000-000000000000", "subscription_source": "target"}, "results": {}, "summary": {"auto_upgrade_clusters": 2, "autoscaling_agent_pools": 2, "kubernetes_versions": ["1.30"], "node_os_auto_upgrade_clusters": 20, "node_os_unmanaged_clusters": 0, "node_os_upgrade_channel_unknown_clusters": 0, "total_agent_pools": 3, "total_clusters": 20}}}'
+
+  - name: one_not_covered
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"metadata": {"api_failures": [], "datetime": "2026-11-17T00:00:00Z", "environment": null, "partial_failure": false, "subscription_id": "00000000-0000-0000-0000-000000000000", "subscription_source": "target"}, "results": {}, "summary": {"auto_upgrade_clusters": 2, "autoscaling_agent_pools": 2, "kubernetes_versions": ["1.30"], "node_os_auto_upgrade_clusters": 2, "node_os_unmanaged_clusters": 0, "node_os_upgrade_channel_unknown_clusters": 0, "total_agent_pools": 3, "total_clusters": 3}}}'
+
+  - name: one_not_covered_at_ten_times_scale
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"metadata": {"api_failures": [], "datetime": "2026-11-17T00:00:00Z", "environment": null, "partial_failure": false, "subscription_id": "00000000-0000-0000-0000-000000000000", "subscription_source": "target"}, "results": {}, "summary": {"auto_upgrade_clusters": 2, "autoscaling_agent_pools": 2, "kubernetes_versions": ["1.30"], "node_os_auto_upgrade_clusters": 19, "node_os_unmanaged_clusters": 0, "node_os_upgrade_channel_unknown_clusters": 0, "total_agent_pools": 3, "total_clusters": 20}}}'
+
+  - name: empty_population
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"metadata": {"api_failures": [], "datetime": "2026-11-17T00:00:00Z", "environment": null, "partial_failure": false, "subscription_id": "00000000-0000-0000-0000-000000000000", "subscription_source": "target"}, "results": {}, "summary": {"auto_upgrade_clusters": 2, "autoscaling_agent_pools": 2, "kubernetes_versions": ["1.30"], "node_os_auto_upgrade_clusters": 0, "node_os_unmanaged_clusters": 0, "node_os_upgrade_channel_unknown_clusters": 0, "total_agent_pools": 3, "total_clusters": 0}}}'
+
+  - name: node_os_auto_upgrade_clusters_null
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"metadata": {"api_failures": [], "datetime": "2026-11-17T00:00:00Z", "environment": null, "partial_failure": false, "subscription_id": "00000000-0000-0000-0000-000000000000", "subscription_source": "target"}, "results": {}, "summary": {"auto_upgrade_clusters": 2, "autoscaling_agent_pools": 2, "kubernetes_versions": ["1.30"], "node_os_auto_upgrade_clusters": null, "node_os_unmanaged_clusters": 0, "node_os_upgrade_channel_unknown_clusters": 0, "total_agent_pools": 3, "total_clusters": 2}}}'
+
+  - name: total_clusters_renamed
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"metadata": {"api_failures": [], "datetime": "2026-11-17T00:00:00Z", "environment": null, "partial_failure": false, "subscription_id": "00000000-0000-0000-0000-000000000000", "subscription_source": "target"}, "results": {}, "summary": {"auto_upgrade_clusters": 2, "autoscaling_agent_pools": 2, "kubernetes_versions": ["1.30"], "node_os_auto_upgrade_clusters": 2, "node_os_unmanaged_clusters": 0, "node_os_upgrade_channel_unknown_clusters": 0, "total_agent_pools": 3, "total_clusters_renamed": 2}}}'
+
+  - name: node_os_auto_upgrade_clusters_renamed
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"metadata": {"api_failures": [], "datetime": "2026-11-17T00:00:00Z", "environment": null, "partial_failure": false, "subscription_id": "00000000-0000-0000-0000-000000000000", "subscription_source": "target"}, "results": {}, "summary": {"auto_upgrade_clusters": 2, "autoscaling_agent_pools": 2, "kubernetes_versions": ["1.30"], "node_os_auto_upgrade_clusters_renamed": 2, "node_os_unmanaged_clusters": 0, "node_os_upgrade_channel_unknown_clusters": 0, "total_agent_pools": 3, "total_clusters": 2}}}'

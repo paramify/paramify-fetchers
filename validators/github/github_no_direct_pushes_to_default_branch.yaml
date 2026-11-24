@@ -1,0 +1,26 @@
+key: github_no_direct_pushes_to_default_branch
+name: GitHub No Direct Pushes to Default Branch
+type: AUTOMATED
+role: configuration
+source: community
+statement: >-
+  No commit reached a default branch in the window without a merged pull request. Every direct push fails,
+  whoever made it.
+regex: '"direct_pushes":\s*(?<direct_pushes>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0
+validation_rules:
+- regexOperation:
+    type: MATCH_COUNT
+  criteria: NOT_EQUALS
+  value:
+    type: CUSTOM_TEXT
+    customText: '0'
+- regexOperation:
+    type: MATCH_GROUP
+    groupNumber: 1
+  criteria: EQUALS
+  value:
+    type: CUSTOM_TEXT
+    customText: '0'
+evidence_sets:
+- EVD-GITHUB-PR-CHECKS

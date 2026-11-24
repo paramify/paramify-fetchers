@@ -1,0 +1,15 @@
+validator: log_analytics_local_auth_disabled
+cases:
+  - name: all_disabled
+    expect: PASS
+    artifact: '{"metadata": {"exit_code": 0,"status": "success"},"payload": {"results": {"workspaces": [{"local_auth_disabled": true,"name": "law-0","retention_in_days": 400,"table_retention": {"custom_table_count": 0,"max_total_retention_in_days": 800,"min_retention_in_days": 400,"min_total_retention_in_days": 800,"non_default_or_custom_tables": [],"non_default_retention_table_count": 0,"table_count": 700},"tables_status": "collected"},{"local_auth_disabled": true,"name": "law-1","retention_in_days": 400,"table_retention": {"custom_table_count": 0,"max_total_retention_in_days": 800,"min_retention_in_days": 400,"min_total_retention_in_days": 800,"non_default_or_custom_tables": [],"non_default_retention_table_count": 0,"table_count": 700},"tables_status": "collected"}]},"summary": {"min_table_total_retention_in_days": 800,"min_workspace_retention_in_days": 400,"total_workspaces": 2,"workspaces_local_auth_disabled": 2}}}'
+
+  - name: one_enabled
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0,"status": "success"},"payload": {"results": {"workspaces": [{"local_auth_disabled": true,"name": "law-0","retention_in_days": 400,"table_retention": {"custom_table_count": 0,"max_total_retention_in_days": 800,"min_retention_in_days": 400,"min_total_retention_in_days": 800,"non_default_or_custom_tables": [],"non_default_retention_table_count": 0,"table_count": 700},"tables_status": "collected"},{"local_auth_disabled": false,"name": "law-1","retention_in_days": 400,"table_retention": {"custom_table_count": 0,"max_total_retention_in_days": 800,"min_retention_in_days": 400,"min_total_retention_in_days": 800,"non_default_or_custom_tables": [],"non_default_retention_table_count": 0,"table_count": 700},"tables_status": "collected"}]},"summary": {"min_table_total_retention_in_days": 800,"min_workspace_retention_in_days": 400,"total_workspaces": 2,"workspaces_local_auth_disabled": 1}}}'
+
+  - name: flag_renamed_ALONE_THIS_PASSES
+    expect: PASS
+    note: >
+      log_analytics_local_auth_flags_present fails here (set-level case).
+    artifact: '{"metadata": {"exit_code": 0,"status": "success"},"payload": {"results": {"workspaces": [{"disable_local_auth": false,"name": "law-0","retention_in_days": 400,"table_retention": {"custom_table_count": 0,"max_total_retention_in_days": 800,"min_retention_in_days": 400,"min_total_retention_in_days": 800,"non_default_or_custom_tables": [],"non_default_retention_table_count": 0,"table_count": 700},"tables_status": "collected"},{"disable_local_auth": false,"name": "law-1","retention_in_days": 400,"table_retention": {"custom_table_count": 0,"max_total_retention_in_days": 800,"min_retention_in_days": 400,"min_total_retention_in_days": 800,"non_default_or_custom_tables": [],"non_default_retention_table_count": 0,"table_count": 700},"tables_status": "collected"}]},"summary": {"min_table_total_retention_in_days": 800,"min_workspace_retention_in_days": 400,"total_workspaces": 2,"workspaces_local_auth_disabled": 0}}}'

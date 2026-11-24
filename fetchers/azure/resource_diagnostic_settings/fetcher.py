@@ -683,7 +683,8 @@ def main() -> int:
         )
 
     inventory_read = inventory["read"]
-    if not inventory_read:
+    listed = inventory["total_records"] is not None
+    if not listed:
         exclusions.mark_unread()
     exclusions.warn_unmatched(logger)
     records = sorted((with_ingestion(r, workspaces, approved) for r in records), key=lambda r: (r["id"] or "").lower())
@@ -709,7 +710,7 @@ def main() -> int:
                       inventory_read),
             "provider_registration_status": registration,
             **summarize_ingestion(records, destinations, days, hours, approved, inventory_read),
-            **exclusions.summary(excluded, ("resource",), {"resources": len(records) if inventory_read else None}),
+            **exclusions.summary(excluded, ("resource",), {"resources": len(records) if listed else None}),
         },
     )
 

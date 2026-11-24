@@ -98,7 +98,7 @@ will not discover it as an output artifact.
 The evidence is compact JSON. `results` contains:
 
 - `scope`: every setting as applied, plus `pushed_after` (the cutoff timestamp) when `pushed_within_days` is set.
-- `summary`: finding, severity, vulnerability, image, index-digest and coverage-gap counts, and findings per repository and per vulnerability ID.
+- `summary`: finding, severity, vulnerability, image, index-digest and coverage-gap counts, and findings per repository and per vulnerability ID. `repository_image_count` counts every image in the selected repositories (index digests excluded) before tag, push-date and usage filters; `image_count` counts the images that match them.
 - `images`: one record per selected image: `imageDigest`, `imageTags`, `imagePushedAt`, `lastRecordedPullTime`, `imageSizeInBytes`, `imageManifestMediaType`, `repository`, `repository_arn`, `resource_id` (the key of its coverage record), and `index_tags` when it was selected through a tagged index.
 - `coverage`: Inspector coverage records for the selected images, once each.
 - `vulnerabilities`: per vulnerability ID, the fields shared by its findings: `description`, `remediation`, `epss`, `exploitabilityDetails`, `inspectorScoreDetails`, and under `packageVulnerabilityDetails` the `source`, `sourceUrl`, `cvss`, `referenceUrls`, `relatedVulnerabilities` and vendor fields.

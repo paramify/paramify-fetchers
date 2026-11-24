@@ -659,6 +659,12 @@ def test_diagnostic_settings_unread_inventory_leaves_unmatched_patterns_null(mon
     code, evidence, _ = run_rds(monkeypatch, tmp_path, PATTERNS, inventory={"rows": [], "total_records": None, "pages": 0, "read": False})
     assert evidence["summary"]["resource_exclusion_patterns_unmatched"] is None
     assert "matched nothing" not in caplog.text
+    assert (evidence["summary"]["in_scope_resources"], evidence["summary"]["excluded_resources"]) == (None, None)
+
+
+def test_diagnostic_settings_empty_inventory_reads_zero_in_scope(monkeypatch, tmp_path):
+    _, evidence, _ = run_rds(monkeypatch, tmp_path, PATTERNS, inventory={"rows": [], "total_records": 0, "pages": 1, "read": True})
+    assert (evidence["summary"]["in_scope_resources"], evidence["summary"]["excluded_resources"]) == (0, 0)
 
 
 def test_diagnostic_settings_exclude_and_skip_resources_but_still_read_an_excluded_destination(
