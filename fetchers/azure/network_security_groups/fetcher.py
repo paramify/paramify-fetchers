@@ -641,9 +641,9 @@ def split_network_interfaces(nics: list[dict], exclusions: ResourceExclusions) -
 
 def collect_network(
     subscription_id, cred, collector: Collector
-) -> tuple[list[dict], list[dict], list[dict]]:
+) -> tuple[list[dict] | None, list[dict] | None, list[dict] | None]:
     """Three subscription-wide list calls: NSGs (with inline and default rules), VNets
-    and network interfaces.
+    and network interfaces; a list that couldn't be read comes back None.
 
     `list_all()` is the subscription-scoped variant (vs `list(resource_group)`) and
     returns an ItemPaged, so the SDK follows nextLink itself. NICs are resolved against
@@ -656,7 +656,7 @@ def collect_network(
 
     client = collector.guard("network.NetworkManagementClient (init)", _client)
     if client is None:
-        return [], [], []
+        return None, None, None
 
     groups = collector.guard(
         "network.network_security_groups.list_all",
@@ -664,7 +664,6 @@ def collect_network(
             security_group_record(project_security_group(g))
             for g in client.network_security_groups.list_all()
         ],
-        default=[],
     )
     vnets = collector.guard(
         "network.virtual_networks.list_all",
@@ -672,23 +671,20 @@ def collect_network(
             virtual_network_record(project_virtual_network(v))
             for v in client.virtual_networks.list_all()
         ],
-        default=[],
     )
 
     raw_nics = collector.guard(
         "network.network_interfaces.list_all",
         lambda: [project_network_interface(n) for n in client.network_interfaces.list_all()],
-        default=[],
     )
-    subnet_index = subnet_nsg_index(vnets)
-    nics = [network_interface_record(n, subnet_index) for n in raw_nics]
-    vnets = with_east_west(vnets, groups)
+    subnet_index = subnet_nsg_index(vnets or [])
+    nics = None if raw_nics is None else [network_interface_record(n, subnet_index) for n in raw_nics]
+    vnets = None if vnets is None else with_east_west(vnets, groups or [])
 
-    return (
-        sorted(groups, key=lambda r: r.get("id") or ""),
-        sorted(vnets, key=lambda r: r.get("id") or ""),
-        sorted(nics, key=lambda r: r.get("id") or ""),
-    )
+    def _sorted(rows):
+        return None if rows is None else sorted(rows, key=lambda r: r.get("id") or "")
+
+    return _sorted(groups), _sorted(vnets), _sorted(nics)
 
 
 def main() -> int:
@@ -708,9 +704,9 @@ def main() -> int:
     subscription_id = sub["subscription_id"]
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
-    security_groups: list[dict] = []
-    virtual_networks: list[dict] = []
-    network_interfaces: list[dict] = []
+    security_groups: list[dict] | None = None
+    virtual_networks: list[dict] | None = None
+    network_interfaces: list[dict] | None = None
     registration = REGISTRATION_UNKNOWN
     if subscription_id and cred is not None:
         # Asked BEFORE the list calls, so a zero-NSG result is legible: Azure
@@ -736,12 +732,14 @@ def main() -> int:
             ),
         )
 
+    read = {"network_security_groups": security_groups is not None, "virtual_networks": virtual_networks is not None,
+            "network_interfaces": network_interfaces is not None}
     # NIC coverage and east-west verdicts were resolved against every NSG and VNet, so in-scope verdicts don't change.
     exclusions = ResourceExclusions.from_env()
     exclusions.record_invalid(collector)
-    security_groups, excluded = exclusions.split(security_groups, "network_security_group")
-    virtual_networks, excluded_vnets = exclusions.split(virtual_networks, "virtual_network")
-    network_interfaces, excluded_nics = split_network_interfaces(network_interfaces, exclusions)
+    security_groups, excluded = exclusions.split(security_groups or [], "network_security_group")
+    virtual_networks, excluded_vnets = exclusions.split(virtual_networks or [], "virtual_network")
+    network_interfaces, excluded_nics = split_network_interfaces(network_interfaces or [], exclusions)
     excluded += excluded_vnets + excluded_nics
     unread_ops = "network."
     if not (subscription_id and cred is not None) or any(f["operation"].startswith(unread_ops) for f in collector.failures):
@@ -763,8 +761,9 @@ def main() -> int:
             **summarize(security_groups, virtual_networks, network_interfaces),
             "provider_registration_status": registration,
             **exclusions.summary(excluded, ("network_security_group", "virtual_network", "network_interface"), {
-                "network_security_groups": len(security_groups), "virtual_networks": len(virtual_networks),
-                "network_interfaces": len(network_interfaces)}),
+                name: len(rows) if read[name] else None for name, rows in (
+                    ("network_security_groups", security_groups), ("virtual_networks", virtual_networks),
+                    ("network_interfaces", network_interfaces))}),
         },
     )
 

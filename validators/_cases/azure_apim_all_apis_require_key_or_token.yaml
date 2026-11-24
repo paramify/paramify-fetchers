@@ -1,0 +1,17 @@
+validator: azure_apim_all_apis_require_key_or_token
+cases:
+  - name: compliant
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"apis_access_control_unknown":0,"apis_without_access_control":0}}}'
+
+  - name: apis_access_control_unknown_nonzero
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"apis_access_control_unknown":1,"apis_without_access_control":0}}}'
+
+  - name: apis_without_access_control_nonzero
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"apis_access_control_unknown":0,"apis_without_access_control":1}}}'
+
+  - name: apis_access_control_unknown_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"apis_access_control_unknown_renamed":0,"apis_without_access_control":0}}}'

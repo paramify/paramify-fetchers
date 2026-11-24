@@ -1,0 +1,24 @@
+# CodeQL configuration for .github/workflows/codeql.yml.
+#
+# The scan does not include test code or the local Claude skill scripts. These
+# paths contain mock servers, fake credentials and secret-scanner output. They
+# do not ship, and they only give false alerts.
+name: paramify-fetchers CodeQL config
+
+paths-ignore:
+  - tests
+  - "**/tests/**"
+  - .claude
+
+# These two queries mark a value as sensitive from its name alone ("secret",
+# "password", "token"). The fetchers collect evidence about secrets and password
+# policies (names and dates, never values), so such names are everywhere. Every
+# Azure fetcher also calls the shared `Collector.guard` helper, and CodeQL merges
+# its callers. As a result, one secret-named value marks every Azure fetcher's
+# subscription ID as a secret. A local run on 2026-11-23 gave 84 alerts, and all
+# of them were false. The gitleaks CI job finds secrets that are committed.
+query-filters:
+  - exclude:
+      id: py/clear-text-logging-sensitive-data
+  - exclude:
+      id: py/clear-text-storage-sensitive-data

@@ -1,0 +1,13 @@
+validator: azure_apim_no_weak_cipher_suites
+cases:
+  - name: compliant
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"services_with_weak_ciphers_enabled":0}}}'
+
+  - name: services_with_weak_ciphers_enabled_nonzero
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"services_with_weak_ciphers_enabled":1}}}'
+
+  - name: services_with_weak_ciphers_enabled_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"services_with_weak_ciphers_enabled_renamed":0}}}'

@@ -1,0 +1,34 @@
+validator: azure_policy_no_failed_remediation
+cases:
+  - name: tasks_all_succeeded
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"remediation_tasks":[{"failed_deployments":0,"provisioning_state":"Succeeded","successful_deployments":4}]},"summary":{"remediation_failed_deployments":0,"remediation_successful_deployments":4,"remediation_tasks":1,"remediation_tasks_by_provisioning_state":{"Succeeded":1}}}}'
+
+  - name: no_tasks
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"remediation_tasks":[]},"summary":{"remediation_failed_deployments":0,"remediation_successful_deployments":0,"remediation_tasks":0,"remediation_tasks_by_provisioning_state":{}}}}'
+
+  - name: a_task_with_failed_deployments
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"remediation_tasks":[{"failed_deployments":2,"provisioning_state":"Succeeded","successful_deployments":3}]},"summary":{"remediation_failed_deployments":2,"remediation_successful_deployments":3,"remediation_tasks":1,"remediation_tasks_by_provisioning_state":{"Succeeded":1}}}}'
+
+  - name: ten_failed_deployments_is_not_zero
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"remediation_failed_deployments":10,"remediation_tasks":1,"remediation_tasks_by_provisioning_state":{"Succeeded":1}}}}'
+
+  - name: task_failed_without_deployments
+    expect: FAIL
+    note: a task can fail before deploying anything, so its deployment counts stay 0
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"remediation_tasks":[{"failed_deployments":0,"provisioning_state":"Failed","successful_deployments":0}]},"summary":{"remediation_failed_deployments":0,"remediation_successful_deployments":0,"remediation_tasks":2,"remediation_tasks_by_provisioning_state":{"Failed":1,"Succeeded":1}}}}'
+
+  - name: per_task_failed_count_does_not_stand_in
+    expect: PASS
+    note: only the summary is counted; the per-task "failed_deployments" key is a different key
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"remediation_tasks":[{"failed_deployments":0,"provisioning_state":"Succeeded"}]},"summary":{"remediation_failed_deployments":0,"remediation_tasks":1,"remediation_tasks_by_provisioning_state":{"Succeeded":1}}}}'
+
+  - name: keys_renamed_ALONE_THIS_PASSES
+    expect: PASS
+    note: >
+      Deliberate: a violation count reads renamed keys as zero. The partner
+      azure_policy_remediation_fields_present fails it at set level.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"failed_remediation_deployments":2,"remediation_tasks":1,"tasks_by_provisioning_state":{"Failed":1}}}}'

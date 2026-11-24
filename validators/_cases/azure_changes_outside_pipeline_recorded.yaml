@@ -1,0 +1,35 @@
+validator: azure_changes_outside_pipeline_recorded
+cases:
+  - name: every_change_recorded
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"changes_needing_record":4,"changes_recorded":4,"changes_without_record":0,"changes_without_record_by_caller":{}}}}'
+
+  - name: application_changes_are_counted_apart
+    expect: PASS
+    note: Changes by applications need no record; they are counted in changes_by_application, not changes_without_record.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"changes_by_application":3,"changes_needing_record":2,"changes_recorded":2,"changes_without_record":0}}}'
+
+  - name: no_changes_outside_a_pipeline
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"changes_needing_record":0,"changes_recorded":0,"changes_without_record":0}}}'
+
+  - name: one_change_without_record
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"changes_needing_record":4,"changes_recorded":3,"changes_without_record":1,"changes_without_record_by_caller":{"someone@example.com":1}}}}'
+
+  - name: many_without_record_pretty_printed
+    expect: FAIL
+    artifact: "{\n  \"metadata\": {\"exit_code\": 0},\n  \"payload\": {\n    \"summary\": {\n      \"changes_without_record\": 12,\n      \"changes_without_record_by_caller\": {\n        \"unknown\": 12\n      }\n    }\n  }\n}"
+
+  - name: by_caller_breakdown_does_not_read_as_the_count
+    expect: FAIL
+    note: The by-caller key starts with the same name; the quote after "record" keeps it from being read as the count.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"changes_without_record_by_caller":{},"changes_without_record":2}}}'
+
+  - name: missing_input_nulls_the_count
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":1},"payload":{"summary":{"changes_needing_record":null,"changes_without_record":null,"inputs_complete":false}}}'
+
+  - name: count_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"changes_needing_record":4,"unrecorded_changes":2}}}'

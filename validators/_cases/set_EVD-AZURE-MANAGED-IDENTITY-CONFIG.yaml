@@ -1,0 +1,9 @@
+evidence_set: EVD-AZURE-MANAGED-IDENTITY-CONFIG
+cases:
+  - name: compliant
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"federated_credentials_broad_subject":0,"federated_credentials_nonstandard_audience":0,"graph_access":"read","identities_graph_roles_unknown":0,"identities_role_assignments_unknown":0,"identities_with_broad_role":0,"identities_with_privileged_graph_roles":0,"role_assignments_unresolved_role":0,"unattached_identities_with_roles":0}}}'
+
+  - name: failed_collection
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":1},"payload":{"results":{},"summary":{"federated_credentials_broad_subject":0,"federated_credentials_nonstandard_audience":0,"graph_access":"read","identities_graph_roles_unknown":0,"identities_role_assignments_unknown":0,"identities_with_broad_role":0,"identities_with_privileged_graph_roles":0,"role_assignments_unresolved_role":0,"unattached_identities_with_roles":0}}}'
