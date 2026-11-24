@@ -311,13 +311,13 @@ def test_a_recent_mysql_on_demand_backup_does_not_hide_stale_automatic_backups()
     assert (s["backup_within_window"], s["manual_backup_within_window"], s["manual_backups"]) == (False, True, 1)
 
 
-def test_a_live_mysql_backup_list_is_all_automatic_and_within_the_window():
-    # A real Azure Government response (identifiers replaced): daily-<time>-<id> names, FULL / Automatic, no provisioningState.
-    live = json.loads((FIXTURES / "mysql-backups-live-2024-12-30.json").read_text())["value"]
-    assert all("provisioningState" not in b["properties"] for b in live)
-    assert [db.backup_kind("mysql", b) for b in live] == [db.AUTOMATIC] * 7
-    newest = max(db.parse_time(b["properties"]["completedTime"]) for b in live)
-    s = db.with_backups(db.server_record("mysql", raw_server("my1", "mysql")), live, SETTINGS, newest + timedelta(hours=4))
+def test_a_hyphenated_mysql_backup_list_is_all_automatic_and_within_the_window():
+    # The 2024-12-30 api-version shape: daily-<time>-<id> names, FULL / Automatic, no provisioningState.
+    backups = json.loads((FIXTURES / "mysql-backups-hyphenated-2024-12-30.json").read_text())["value"]
+    assert all("provisioningState" not in b["properties"] for b in backups)
+    assert [db.backup_kind("mysql", b) for b in backups] == [db.AUTOMATIC] * 7
+    newest = max(db.parse_time(b["properties"]["completedTime"]) for b in backups)
+    s = db.with_backups(db.server_record("mysql", raw_server("my1", "mysql")), backups, SETTINGS, newest + timedelta(hours=4))
     assert (s["automatic_backups"], s["manual_backups"], s["unknown_type_backups"], s["backup_within_window"]) == (7, 0, 0, True)
 
 
