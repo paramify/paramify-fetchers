@@ -20,12 +20,21 @@ The uploader authenticates with `PARAMIFY_UPLOAD_API_TOKEN`. To create one:
 2. Click **+ API Key** and configure it:
    - **Name:** `PARAMIFY_UPLOAD_API_TOKEN` (or any recognizable label)
    - **Expiration:** 6 months to 1 year recommended
-   - **Permissions:** check all eight —
-     View Evidences, Write Evidences,
-     View Issues, Write Issues,
-     View Scripts, Write Scripts,
-     View Validators, Write Validators
+   - **Permissions:** check the permissions for each feature that you use (see the table below). An upload needs only View Evidences and Write Evidences.
 3. Copy the key immediately — it is not shown again.
+
+| Feature | Permissions |
+|---|---|
+| Upload evidence (`paramify upload`, `u` on the TUI's Paramify tab) | View Evidences, Write Evidences |
+| Choose a stack by name (`paramify stacks`, `paramify manifest set-stack`, the TUI's stack picker) | View Stacks |
+| Add the default custom tags to uploads. Without these permissions, the upload continues without tags. | View Custom Tags, Write Custom Tags |
+| Sync entry scripts (`paramify scripts sync`, `s` on the Paramify tab) | View Scripts, Write Scripts |
+| Sync validators (`paramify validators sync`, `upload --with-validators`, `v` on the Paramify tab) | View Validators, Write Validators |
+| Read solution capabilities (`paramify capabilities`, `paramify status`, the Paramify tab, `/suggest-validator`) | View Solution Capabilities |
+| Find programs by name (`paramify programs`) | View Programs |
+| Send scan reports and manage their jobs (`paramify issues`, the TUI's Pipelines tab) | View Pipelines, Queue Pipeline Processing, View Pipeline Jobs, Retry and Cancel Pipeline Jobs |
+
+The fetchers do not read or write Paramify issues, so they do not need View Issues or Write Issues.
 
 ```bash
 export PARAMIFY_UPLOAD_API_TOKEN=<paste key here>

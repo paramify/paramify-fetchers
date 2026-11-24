@@ -83,8 +83,13 @@ overridden.
 
 ## Validators
 
-`validators/fedramp_marketplace/`: attach **one** of `fedramp_vendor_certified`
+`validators/fedramp_marketplace/`: track **one** of `fedramp_vendor_certified`
 (strict) or `fedramp_vendor_certified_or_in_process` (Ready and In Process
 pass), plus `fedramp_vendor_not_delisted`, `fedramp_vendor_not_in_remediation`,
 `fedramp_vendor_package_id_resolves` and, optionally, `fedramp_feed_fresh`
 (data under 72 hours old).
+
+By default, a manifest entry tracks all of these validators, so both
+certification validators run. To track only one, untick the other with `space`
+on the TUI's **Validators** tab, or list the validators under the entry's
+`validators:` ([choosing validators](../../docs/run_manifest_guide.md#choose-the-validators-each-fetcher-tracks)).

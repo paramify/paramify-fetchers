@@ -3,7 +3,7 @@
 > [!RECALL]
 > Before we build: your fetcher reads an env var you exported in your shell but never declared in `fetcher.yaml`. What does the runner do with it — and which of the two test paths from Part 1 (direct invocation vs. `paramify run`) is the only one that would catch the mistake?
 
-In Part 1 you followed a fetcher somebody else wrote. Today `paramify list` goes from 172 to 173, and the 173rd is yours.
+In Part 1 you followed a fetcher somebody else wrote. Today `paramify list` goes from 353 to 354, and the 354th is yours.
 
 The evidence we'll collect is one of the oldest items on any security questionnaire: TLS certificate expiry. An expired certificate is the classic silent outage — nothing breaks until the moment everything does — and "show me your certificate inventory and expiry dates" is a standing audit request. No fetcher in the catalog collects it yet, and it has a property that makes it ideal for learning the authoring path: the data source is the public TLS handshake itself. No API token, no tenant, no sandbox.
 
@@ -104,7 +104,7 @@ paramify describe tls_certificate_expiry
 ```
 
 ```
-Discovered 173 fetchers:
+Discovered 354 fetchers:
 
 tls_certificate_expiry  v0.1.0  (category=tls)
   Collects the serving TLS certificate for a host — subject, issuer, validity window, and days until expiry. ...
@@ -305,17 +305,17 @@ python -m pytest tests -q
 Expected output:
 
 ```
-Discovered 173 fetchers:
+Discovered 354 fetchers:
 ..............................                                           [100%]
 30 passed in 2.88s
 ```
 
-The suite doesn't count fetchers — it guards the CLI/API/TUI parity from Part 1 — so passing here confirms your new category and fetcher broke nothing structural. The count line is the one that should have moved: 172 before, 173 with yours. (The absolute number grows with every release — what matters is that it moved by one.)
+The suite doesn't count fetchers — it guards the CLI/API/TUI parity from Part 1 — so passing here confirms your new category and fetcher broke nothing structural. The count line is the one that should have moved: 353 before, 354 with yours. (The absolute number grows with every release — what matters is that it moved by one.)
 
 **Likely errors:**
 
 - If `paramify list` shows a fetcher literally named `<category>_<short_name>`, you copied the template and ran discovery before editing `fetcher.yaml` — the placeholders are valid YAML and the schema can't tell them from real values.
-- If the count still says `Discovered 172 fetchers`, discovery isn't seeing your directory: check that it's `fetchers/tls/certificate_expiry/` (a directory whose name starts with `_` is skipped by design, and a misplaced `fetcher.yaml` is invisible).
+- If the count still says `Discovered 353 fetchers`, discovery isn't seeing your directory: check that it's `fetchers/tls/certificate_expiry/` (a directory whose name starts with `_` is skipped by design, and a misplaced `fetcher.yaml` is invisible).
 - If discovery errors with `'secrets' is a required property`, you deleted the `secrets` key instead of emptying it — the schema requires the key to exist; `secrets: []` is the declared-empty form.
 - If the positive smoke test fails with `SSLCertVerificationError` against a host you trust, you're likely behind a TLS-intercepting corporate proxy — your machine sees the proxy's certificate, not the host's. Try another network, and note that this, too, is the fetcher honestly reporting what it observed.
 - If the negative smoke test exits 0, your `main()` ending isn't returning 1 on a non-empty ledger, or `sys.exit(main())` isn't at the bottom — `main()` called bare discards the return value.

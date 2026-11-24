@@ -117,7 +117,7 @@ paramify issues jobs --cancel <job-id>        # and every unfinished job queued 
 paramify issues close <assessment-id>         # close the current cycle; asks first
 ```
 
-In the TUI's Paramify tab, `i` sends a run's reports, `j` lists jobs (enter on a
+In the TUI's Pipelines tab (`6`), `i` sends a run's reports, `j` lists jobs (enter on a
 failed or queued one to retry or cancel it), and `C` closes one of the manifest's
 assessments' cycles, after a warning.
 
