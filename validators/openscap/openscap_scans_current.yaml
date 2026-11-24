@@ -9,7 +9,7 @@ statement: >
   max_age_days is unset, any result file could not be read, no target was scanned, or the counts
   appear other than exactly once. Does not check whether the collection run succeeded.
 
-regex: '"targets_scan_older_than_max_age":\s*(?<targets_scan_older_than_max_age>\d+)[\s\S]*?"targets_scanned":\s*(?<targets_scanned>[1-9]\d*)'
+regex: '"targets_scan_older_than_max_age":\s*(?<targets_scan_older_than_max_age>\d+)(?:(?!"targets_scan_older_than_max_age")[\s\S])*?"targets_scanned":\s*(?<targets_scanned>[1-9]\d*)'
 rules_summary: MATCH_COUNT EQUALS 1; MATCH_GROUP[1] EQUALS 0
 validation_rules:
   - regexOperation: { type: MATCH_COUNT }
