@@ -40,12 +40,21 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
-- **`istio_mesh_security` fetcher and `istio` category.** Reads an Istio mesh through the Kubernetes API (GET and LIST
-  only), with a kubeconfig (including AKS with kubelogin) or the in-cluster service account: mesh-wide mTLS mode and
-  weaker namespace, workload or port overrides; allow-nothing default-deny policies and allow-all rules; plaintext and
-  sub-TLS 1.2 gateway servers; DestinationRules turning TLS off; the outbound traffic policy; the root certificate's
-  expiry and istiod's workload certificate lifetime. Judgments follow Istio's own rules (no mesh-wide policy means
-  PERMISSIVE). A refused call names the permission it needs; the README has the least-privilege RBAC.
+- **`istio_mesh_security` fetcher and `istio` category.** Reads an Istio mesh (1.22 or later) through the Kubernetes
+  API (GET and LIST only), with a kubeconfig (including AKS with kubelogin) or the in-cluster service account: mesh-wide
+  mTLS mode and weaker namespace, workload or port overrides; allow-nothing default-deny policies and allow-all rules;
+  plaintext and sub-TLS 1.2 gateway servers; DestinationRules turning TLS off; the outbound traffic policy; the root
+  certificate's expiry and istiod's workload certificate lifetime. A refused call names the permission it needs; the
+  README has the least-privilege RBAC.
+  - Judgments follow Istio's own rules. No mesh-wide policy means PERMISSIVE. When there are several, the oldest one
+    is in effect. A dry-run AuthorizationPolicy enforces nothing. A gateway server on any protocol but HTTPS or TLS is
+    plaintext unless it redirects to HTTPS. A DestinationRule subset can turn TLS off.
+  - Ambient namespaces count as in the mesh, as do sidecar-injected ones.
+  - Settings: `control_plane_namespace` (istiod, its ConfigMaps), `mesh_configmap` (`istio-<revision>` for a revisioned
+    install) and `root_namespace` (taken from the mesh config; the setting is a fallback).
+  - With more than one istiod revision, the longest workload certificate lifetime is reported.
+  - A ConfigMap that can't be parsed, or a call that times out, is a recorded failure that leaves only its own fields
+    null.
 - **The TUI shows which environment variables a manifest is missing, and stops a run that would fail on them.**
   - The manifest settings row has an `env` button (`✓ all set` or `✗ 2 missing`), each fetcher's status names what it
     needs (`✗ needs OKTA_API_TOKEN`), and the line under the table splits what a run needs from what only an upload needs.
