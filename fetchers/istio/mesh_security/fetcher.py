@@ -65,9 +65,12 @@ def _ref(o: Dict[str, Any]) -> str:
 
 
 def in_mesh(ns: Dict[str, Any]) -> bool:
-    """A namespace is in the mesh when sidecar injection is enabled for it, by label or by revision."""
+    """A namespace is in the mesh when it is in ambient mode (istio.io/dataplane-mode=ambient) or sidecar injection is
+    on for it: istio-injection=enabled, or an istio.io/rev label with no istio-injection label, which takes precedence
+    (Istio's injection webhooks match the revision label only where istio-injection does not exist)."""
     labels = (ns.get("metadata") or {}).get("labels") or {}
-    return labels.get("istio-injection") == "enabled" or bool(labels.get("istio.io/rev"))
+    return (labels.get("istio.io/dataplane-mode") == "ambient" or labels.get("istio-injection") == "enabled"
+            or (bool(labels.get("istio.io/rev")) and "istio-injection" not in labels))
 
 
 def _selects_workloads(spec: Dict[str, Any]) -> bool:

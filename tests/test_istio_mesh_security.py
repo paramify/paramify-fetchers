@@ -114,6 +114,27 @@ def test_real_mesh_gives_every_judgment(assert_summary_documented):
     assert_summary_documented("istio/mesh_security", s)
 
 
+@pytest.mark.parametrize("labels, meshed", [
+    ({"istio.io/dataplane-mode": "ambient"}, True), ({"istio-injection": "enabled"}, True), ({"istio.io/rev": "canary"}, True),
+    ({"istio-injection": "enabled", "istio.io/rev": "canary"}, True),
+    # istio-injection takes precedence: a revision label is ignored when it exists with any other value.
+    ({"istio-injection": "disabled", "istio.io/rev": "canary"}, False),
+    ({"istio.io/dataplane-mode": "none"}, False), ({}, False)])
+def test_mesh_membership_by_ambient_or_sidecar_labels(labels, meshed):
+    assert im.in_mesh({"metadata": {"name": "ns", "labels": labels}}) is meshed
+
+
+def test_an_ambient_namespace_counts_as_in_the_mesh():
+    data = {k: fx(k)["items"] for k in ("namespaces", "peerauthentications", "authorizationpolicies", "gateways",
+                                        "virtualservices", "destinationrules")}
+    for n in data["namespaces"]:
+        if n["metadata"]["name"] == "legacy":
+            n["metadata"]["labels"]["istio.io/dataplane-mode"] = "ambient"
+    s = im.summarize(data, None, None, None, ROOT, NOW)
+    assert (s["namespaces_in_mesh"], s["namespaces_not_in_mesh"]) == (5, ["default"])
+    assert s["namespaces_in_mesh_without_default_deny"] == ["ingress", "legacy", "monitoring"]
+
+
 def test_no_mesh_wide_policy_is_reported_as_none_never_strict():
     pas = [p for p in fx("peerauthentications")["items"] if p["metadata"]["namespace"] != ROOT]
     assert im.mesh_mtls(pas, ROOT) == ("NONE", None)   # Istio applies PERMISSIVE

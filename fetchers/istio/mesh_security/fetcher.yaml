@@ -36,7 +36,7 @@ evidence_set:
     Access: A Kubernetes identity, through a kubeconfig or the in-cluster service account, with a ClusterRole allowing list on namespaces, on peerauthentications and authorizationpolicies (security.istio.io), and on gateways, virtualservices and destinationrules (networking.istio.io); and a Role in the control-plane namespace allowing get on the mesh config ConfigMap (istio, or istio-<revision>) and istio-ca-root-cert and list on deployments. Nothing else: it reads no secrets and writes nothing. On AKS with Microsoft Entra ID, the kubeconfig can sign in through kubelogin.
 
     Commands Executed:
-    - GET /api/v1/namespaces — every namespace and whether sidecar injection is on (istio-injection=enabled, or an istio.io/rev label), page by page
+    - GET /api/v1/namespaces — every namespace and whether it is in the mesh (ambient mode, or sidecar injection on), page by page
     - GET /apis/security.istio.io/v1/peerauthentications — mTLS mode mesh-wide, per namespace, per workload and per port
     - GET /apis/security.istio.io/v1/authorizationpolicies — default-deny (allow nothing) policies, allow-all rules and deny policies
     - GET /apis/networking.istio.io/v1/gateways — each ingress server's protocol, TLS mode, HTTPS redirect and minimum TLS version
@@ -52,8 +52,8 @@ evidence_set:
 
     Which namespaces are in the mesh?
     - namespaces — Number of namespaces other than kube-system, kube-public, kube-node-lease, the root namespace and the control-plane namespace; null if namespaces could not be read, as are the two fields below
-    - namespaces_in_mesh — Number of those with sidecar injection on, by the istio-injection=enabled label or an istio.io/rev label
-    - namespaces_not_in_mesh — List of the namespaces without sidecar injection; their workloads get no mesh mTLS or authorization
+    - namespaces_in_mesh — Number of those in the mesh: in ambient mode (the istio.io/dataplane-mode=ambient label), or with sidecar injection on (the istio-injection=enabled label, or an istio.io/rev label with no istio-injection label)
+    - namespaces_not_in_mesh — List of the namespaces not in the mesh; their workloads get no mesh mTLS or authorization
 
     Is mTLS required?
     - mesh_mtls_mode — Mode of the root namespace's PeerAuthentication with no selector (STRICT, PERMISSIVE, DISABLE or UNSET). NONE when there is none, in which case Istio applies PERMISSIVE. When there are several, Istio uses the oldest and ignores the rest. CONFLICT when there are several and the oldest can't be told. Null if PeerAuthentications could not be read, as are the fields below
