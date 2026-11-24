@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Release Highlights Schema",
-  "description": "The short, user-facing rows for one release, in releases/<version>.yaml, or for main since the last release, in releases/unreleased.yaml. `paramify update` shows the rows that are new between the commit you run and the one you move to, instead of the CHANGELOG, which is written for maintainers and runs to thousands of lines. See releases/README.md.",
+  "description": "The short, user-facing rows for one release, in releases/<version>.yaml, or for main since the last release, in releases/unreleased.yaml. `paramify update` shows the rows that are new between the commit you run and the one you move to, and, in `fetchers`, one line per fetcher that changed, instead of the CHANGELOG, which is written for maintainers and runs to thousands of lines. See releases/README.md.",
   "type": "object",
   "additionalProperties": false,
   "required": ["version", "highlights"],
@@ -20,8 +20,25 @@
       "type": "array",
       "minItems": 0,
       "maxItems": 40,
-      "description": "Rows of what is new, plus one `breaking` row per Breaking entry in the CHANGELOG. A release file keeps three to five non-breaking rows; that limit is checked by tests/test_release_highlights.py, not here, so the message can say which rows to cut.",
+      "description": "Rows of what is new, plus one `breaking` row per Breaking entry in the CHANGELOG.",
       "items": { "$ref": "#/$defs/highlight" }
+    },
+    "fetchers": {
+      "type": "array",
+      "maxItems": 400,
+      "uniqueItems": true,
+      "description": "One line per fetcher that changed in the release, drafted at release time. `paramify update` shows the lines for the fetchers the user's manifests use.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "version", "note"],
+        "properties": {
+          "name": { "type": "string", "pattern": "^[a-z0-9_]+$", "description": "The fetcher's name." },
+          "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$", "description": "The fetcher's version in this release." },
+          "note": { "type": "string", "minLength": 3, "maxLength": 110, "pattern": "^[^\\n]*$", "description": "One line on what changed, for the person running the fetcher." },
+          "draft": { "type": "boolean", "description": "True while the line is a draft. A release cannot ship with a draft mark." }
+        }
+      }
     }
   },
   "$defs": {
@@ -65,6 +82,10 @@
           "uniqueItems": true,
           "items": { "type": "string", "pattern": "^[a-z0-9_*?\\[\\]]+$" },
           "description": "Fetcher names the change affects. Shell-style globs work (okta_*). A breaking row with fetchers names each of the user's manifests that uses one. A breaking row with neither `fetchers` nor `custom_fetchers` is treated as touching everyone."
+        },
+        "draft": {
+          "type": "boolean",
+          "description": "True while the row is a draft. A release cannot ship with a draft mark."
         },
         "custom_fetchers": {
           "type": "boolean",

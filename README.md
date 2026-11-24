@@ -223,7 +223,7 @@ You can use the fetchers in three ways. All three go through one facade (`framew
 
 ### The TUI
 
-`paramify tui` browses the catalog, builds and validates a manifest, runs it, and shows the evidence. You do all of this from the keyboard.
+`paramify tui` browses the catalog, builds and validates a manifest, runs it, and shows the evidence. You do all of this from the keyboard. The [TUI guide](docs/tui_guide.md) explains each tab and its keys.
 
 ![The paramify TUI: search the catalog, read a fetcher's contract, run a manifest, and open the evidence](docs/demo/tui.gif)
 

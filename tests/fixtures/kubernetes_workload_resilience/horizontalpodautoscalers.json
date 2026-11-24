@@ -1,0 +1,39 @@
+{
+  "apiVersion": "autoscaling/v2",
+  "items": [
+    {
+      "metadata": {
+        "name": "frontend",
+        "namespace": "web",
+        "uid": "00000000-0000-0000-0000-000000000011"
+      },
+      "spec": {
+        "maxReplicas": 10,
+        "metrics": [
+          {
+            "resource": {
+              "name": "cpu",
+              "target": {
+                "averageUtilization": 70,
+                "type": "Utilization"
+              }
+            },
+            "type": "Resource"
+          }
+        ],
+        "minReplicas": 3,
+        "scaleTargetRef": {
+          "apiVersion": "apps/v1",
+          "kind": "Deployment",
+          "name": "frontend"
+        }
+      },
+      "status": {
+        "currentMetrics": null,
+        "desiredReplicas": 0
+      }
+    }
+  ],
+  "kind": "HorizontalPodAutoscalerList",
+  "metadata": {}
+}

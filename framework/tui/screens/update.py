@@ -139,7 +139,7 @@ class UpdateScreen(ButtonRowNav, Screen):
         return Group(*view.breaking(self.plan.get("breaking") or []))
 
     def _new_text(self) -> Group:
-        return Group(*view.whats_new(self.plan.get("highlights") or []))
+        return Group(*view.whats_new(self.plan.get("highlights") or [], self.plan.get("releases") or []))
 
     def _rest_text(self) -> Group:
         return Group(*view.rest(self.plan))

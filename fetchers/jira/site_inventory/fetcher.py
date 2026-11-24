@@ -3,6 +3,7 @@
 
 import logging
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -21,6 +22,7 @@ from jira_common import (  # noqa: E402
     connection_settings,
     counts,
     int_env,
+    list_env,
     name_of,
     null_summary,
     number_stats,
@@ -61,6 +63,48 @@ CHANGE_TYPES = {
     "emergency change",
 }
 INCIDENT_TYPES = {"incident", "major incident", "security incident"}
+
+ORDER_BY = re.compile(r"\border\s+by\b", re.IGNORECASE)
+# A quoted JQL string, in either quote style, with backslash escapes.
+QUOTED = re.compile(r""""(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'""")
+
+
+def _match_projects(raw_projects: list, wanted: list):
+    """(projects named in JIRA_PROJECTS, ignoring case; names that matched none).
+
+    A value is a project key first. Only a value that is no project's key is tried as an exact project name, so a
+    value cannot select two projects, one by key and another that happens to carry the same text as its name.
+    """
+    keys = {str(p.get("key") or "").lower() for p in raw_projects}
+    by_key = {w.lower() for w in wanted if w.lower() in keys}
+    by_name = {w.lower() for w in wanted if w.lower() not in keys}
+    matched = [
+        p for p in raw_projects
+        if str(p.get("key") or "").lower() in by_key or str(p.get("name") or "").lower() in by_name
+    ]
+    names = {str(p.get("name") or "").lower() for p in raw_projects}
+    return matched, [w for w in wanted if w.lower() not in keys and w.lower() not in names]
+
+
+def _order_by_start(jql: str):
+    """Where the ORDER BY clause starts, or None. The words inside a quoted string are text, not the clause."""
+    # Quoted spans are blanked to the same length, so a match position is a position in the original query.
+    blanked = QUOTED.sub(lambda q: " " * len(q.group(0)), jql)
+    m = ORDER_BY.search(blanked)
+    return m.start() if m else None
+
+
+def _scoped_jql(project_ids: list, jql: str) -> str:
+    """Limit a query to the selected projects, whatever else it says.
+
+    ORDER BY always ends a JQL query, so the condition before it is wrapped and ANDed with the project clause: a
+    condition naming other projects can narrow the result, never widen it.
+    """
+    clause = f"project in ({', '.join(project_ids)})"
+    start = _order_by_start(jql)
+    condition, order = (jql.strip(), "") if start is None else (jql[:start].strip(), jql[start:].strip())
+    return " ".join(x for x in (clause, f"AND ({condition})" if condition else "", order) if x)
+
 
 def _project_record(p: dict) -> dict:
     insight = p.get("insight") or {}
@@ -191,6 +235,8 @@ def main() -> int:
             "bad_config",
         )
         return 1
+    # Comma-separated project keys or exact names (a name may contain spaces, not commas).
+    wanted_projects = list_env("JIRA_PROJECTS")
     jql = os.environ.get("JIRA_ISSUE_JQL", "").strip()
     if jql:
         lookback_days = None
@@ -209,6 +255,9 @@ def main() -> int:
     truncated = False
     projects_ok = False
     issues_ok = False
+    # projects_filter is the setting as given; projects_selected is the keys it matched, null until matched.
+    scope = {"projects_filter": wanted_projects or None, "projects_selected": None, "projects_left_out": None,
+             "issue_types_scope": "site", "statuses_scope": "site", "priorities_scope": "site"}
 
     try:
         # /myself first: serverInfo answers anonymously, so a bad token must be
@@ -228,9 +277,32 @@ def main() -> int:
             "GET /rest/api/3/project/search",
             params={"expand": "lead,insight,issueTypes"},
         )
+        selected = None
+        if wanted_projects:
+            if not projects_ok:
+                # Without the whole list the names cannot be matched, and nothing site-wide may stand in for them.
+                client.fail("JIRA_PROJECTS", "Unresolved", "the project list did not finish, so JIRA_PROJECTS "
+                            "could not be matched; no project, type, status or issue was collected", "partial_failure")
+                jql = None  # no query ran, and the unscoped one must not read as if it had
+                raise Abort
+            selected, unmatched = _match_projects(raw_projects, wanted_projects)
+            if unmatched:
+                report_failure(
+                    "JIRA_PROJECTS names no project this account can see: " + ", ".join(unmatched)
+                    + " (match is on the project key or its exact name)", "bad_config")
+                return 1
+            scope.update(projects_selected=sorted(str(p.get("key")) for p in selected),
+                         projects_left_out=len(raw_projects) - len(selected), issue_types_scope="projects",
+                         statuses_scope="projects")
+            raw_projects = selected
+            jql = _scoped_jql([str(p.get("id")) for p in selected], jql)
         projects = [_project_record(p) for p in raw_projects]
 
         raw_types = client.request("GET", "/rest/api/3/issuetype", "GET /rest/api/3/issuetype")
+        if selected is not None:
+            # A project lists the types it uses, team-managed copies included.
+            type_ids = {str(t.get("id")) for p in selected for t in p.get("issueTypes") or []}
+            raw_types = [t for t in raw_types or [] if str(t.get("id")) in type_ids]
         issue_types = [
             {
                 "id": t.get("id"),
@@ -252,7 +324,18 @@ def main() -> int:
             for p in raw_priorities
         ]
 
-        raw_statuses = client.request("GET", "/rest/api/3/status", "GET /rest/api/3/status")
+        if selected is None:
+            raw_statuses = client.request("GET", "/rest/api/3/status", "GET /rest/api/3/status")
+        else:
+            # The statuses each selected project's workflows use, once each; a project whose read fails is recorded.
+            by_id: dict = {}
+            for p in selected:
+                per_type = client.request("GET", f"/rest/api/3/project/{p.get('id')}/statuses",
+                                          "GET /rest/api/3/project/{id}/statuses")
+                for t in per_type or []:
+                    for st in t.get("statuses") or []:
+                        by_id.setdefault(str(st.get("id")), st)
+            raw_statuses = list(by_id.values())
         statuses = sorted(
             (
                 {
@@ -285,6 +368,8 @@ def main() -> int:
                     "project_name": d.get("projectName"),
                 }
                 for d in desks
+                if selected is None
+                or str(d.get("projectKey") or "") in {str(p.get("key") or "") for p in selected}
             ]
             jsm_available = True
 
@@ -307,6 +392,9 @@ def main() -> int:
             "max_issues": max_issues,
             "issues_collected": len(issues),
             "issues_truncated": truncated,
+            # With JIRA_PROJECTS, projects, issue types, statuses, service desks and issues are limited to the named
+            # projects (only a count of the others is kept); priorities are site-wide either way.
+            **scope,
             "partial_failure": bool(client.api_failures),
             "api_failures": client.api_failures,
         },

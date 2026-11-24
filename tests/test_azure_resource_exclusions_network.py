@@ -10,6 +10,8 @@ from pathlib import Path
 from types import ModuleType
 from types import SimpleNamespace as NS
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 AZURE = REPO_ROOT / "fetchers" / "azure"
 sys.path.insert(0, str(AZURE / "_shared"))
@@ -486,19 +488,164 @@ def test_nsg_unread_list_leaves_unmatched_null(monkeypatch, tmp_path, caplog):
     assert "matched nothing" not in caplog.text
 
 
-def test_private_endpoints_unread_list_leaves_unmatched_null(monkeypatch, tmp_path, caplog):
+NSG_LISTS = ("network_security_groups", "virtual_networks", "network_interfaces")
+
+
+def _nsg_main(monkeypatch, tmp_path, refuse=(), sign_in=True, rows=None):
+    """The real collect_network over an SDK listing `rows` (empty by default), a list in `refuse` raising."""
     network = ModuleType("azure.mgmt.network")
 
-    def refuse():
-        raise RuntimeError("403")
+    def lister(name):
+        def list_all():
+            if name in refuse:
+                raise RuntimeError("403")
+            return (rows or {}).get(name, [])
+        return NS(list_all=list_all)
 
-    network.NetworkManagementClient = lambda **kw: NS(private_endpoints=NS(list_by_subscription=refuse))
+    network.NetworkManagementClient = lambda **kw: NS(**{name: lister(name) for name in NSG_LISTS})
+    monkeypatch.setitem(sys.modules, "azure.mgmt.network", network)
+    monkeypatch.setattr(nsg, "provider_registration_status", lambda *a: "registered")
+    monkeypatch.setattr(nsg, "load_dotenv", lambda: None)
+    monkeypatch.setattr(nsg, "resolve_subscription", lambda c: {"subscription_id": "s1", "subscription_source": "env"})
+
+    def credential():
+        if not sign_in:
+            raise RuntimeError("sign-in failed")
+        return object()
+
+    monkeypatch.setattr(nsg, "credential", credential)
+    monkeypatch.setenv("EVIDENCE_DIR", str(tmp_path))
+    monkeypatch.setenv(ENV, "rg:rg-out")
+    code = nsg.main()
+    return code, json.loads((tmp_path / "azure_network_security_groups_s1.json").read_text())
+
+
+def _run_nsg_reads(monkeypatch, tmp_path, refuse=(), sign_in=True):
+    code, evidence = _nsg_main(monkeypatch, tmp_path, refuse, sign_in)
+    summary = evidence["summary"]
+    return code, {name: (summary[f"in_scope_{name}"], summary[f"excluded_{name}"]) for name in NSG_LISTS}
+
+
+def test_nsg_in_scope_counts_are_null_when_sign_in_fails(monkeypatch, tmp_path):
+    code, counts = _run_nsg_reads(monkeypatch, tmp_path, sign_in=False)
+    assert code == 1 and counts == dict.fromkeys(NSG_LISTS, (None, None))
+
+
+def test_nsg_in_scope_count_is_null_only_for_the_list_that_failed(monkeypatch, tmp_path):
+    code, counts = _run_nsg_reads(monkeypatch, tmp_path, refuse={"virtual_networks"})
+    assert code == 1
+    assert counts == {"network_security_groups": (0, 0), "virtual_networks": (None, None), "network_interfaces": (0, 0)}
+
+
+def test_nsg_in_scope_counts_are_zero_when_the_lists_are_read_and_empty(monkeypatch, tmp_path):
+    code, counts = _run_nsg_reads(monkeypatch, tmp_path)
+    assert code == 0 and counts == dict.fromkeys(NSG_LISTS, (0, 0))
+
+
+def _nsg_models():
+    """SDK models: one group opening SSH, a VNet whose app subnet has it, and NICs covered by their own, the subnet's or no group."""
+    nsg_id = f"{NET_IN}/networkSecurityGroups/nsg-app"
+    vnet_id = f"{NET_IN}/virtualNetworks/vnet-in"
+    ssh = NS(id=f"{nsg_id}/securityRules/ssh", name="ssh", destination_port_range="22", protocol="Tcp",
+             source_address_prefix="Internet", access="Allow", direction="Inbound", priority=100)
+    group = NS(id=nsg_id, name="nsg-app", location="regionwest", security_rules=[ssh], default_security_rules=[])
+    subnets = [NS(id=f"{vnet_id}/subnets/app", name="app", network_security_group=NS(id=nsg_id), address_prefix="10.0.1.0/24"),
+               NS(id=f"{vnet_id}/subnets/data", name="data", network_security_group=None, address_prefix="10.0.2.0/24")]
+    vnet = NS(id=vnet_id, name="vnet-in", location="regionwest", subnets=subnets)
+
+    def nic(name, subnet, own_nsg=None):
+        return NS(id=f"{NET_IN}/networkInterfaces/{name}", name=name, location="regionwest",
+                  network_security_group=own_nsg and NS(id=own_nsg), ip_configurations=[NS(name="ip", subnet=NS(id=subnet.id))])
+
+    nics = [nic("nic-own", subnets[1], nsg_id), nic("nic-subnet", subnets[0]), nic("nic-none", subnets[1])]
+    return {"network_security_groups": [group], "virtual_networks": [vnet], "network_interfaces": nics}
+
+
+def _fields(*lists):
+    return {f for names, fields in nsg.FIELDS_BY_LISTS if set(names) & set(lists) for f in fields}
+
+
+def test_nsg_every_summary_count_names_the_lists_it_is_built_from():
+    listed = [f for _, fields in nsg.FIELDS_BY_LISTS for f in fields]
+    assert sorted(listed) == sorted(nsg.summarize([], [], [])) and len(listed) == len(set(listed))
+    assert set(nsg.summarize(None, None, None).values()) == {None}
+
+
+def test_nsg_refused_group_list_nulls_group_counts_and_east_west_but_not_vnet_or_nic(monkeypatch, tmp_path):
+    code, evidence = _nsg_main(monkeypatch, tmp_path, refuse={"network_security_groups"}, rows=_nsg_models())
+    summary, results = evidence["summary"], evidence["results"]
+    assert code == 1 and summary["resource_exclusion_patterns_unmatched"] is None
+    unread = _fields("network_security_groups")
+    assert unread >= {"total_network_security_groups", "total_security_rules", "ssh_open_to_internet_groups",
+                      "workload_subnets_by_east_west_segmentation", "open_east_west_subnet_pairs"}
+    assert {k: summary[k] for k in unread} == dict.fromkeys(unread)
+    assert (summary["total_virtual_networks"], summary["total_subnets"], summary["subnets_with_nsg"],
+            summary["subnet_nsg_coverage_percentage"]) == (1, 2, 1, 50)
+    assert (summary["total_network_interfaces"], summary["nics_with_nic_nsg"], summary["nics_protected_by_subnet_nsg_only"],
+            summary["nics_without_any_nsg"], summary["nic_nsg_coverage_percentage"]) == (3, 1, 1, 1, 66)
+    for subnet in results["virtual_networks"][0]["subnets"]:
+        assert {k: subnet[k] for k in nsg.NO_EAST_WEST} == dict.fromkeys(nsg.NO_EAST_WEST)
+
+
+def test_nsg_refused_vnet_list_nulls_subnet_nic_coverage_and_east_west(monkeypatch, tmp_path):
+    code, evidence = _nsg_main(monkeypatch, tmp_path, refuse={"virtual_networks"}, rows=_nsg_models())
+    summary, results = evidence["summary"], evidence["results"]
+    assert code == 1 and results["virtual_networks"] == []
+    unread = _fields("virtual_networks")
+    assert unread >= {"total_subnets", "nics_without_any_nsg", "nic_nsg_coverage_percentage", "east_west_subnet_pairs"}
+    assert {k: summary[k] for k in unread} == dict.fromkeys(unread)
+    assert (summary["total_network_security_groups"], summary["total_security_rules"], summary["ssh_open_to_internet_groups"],
+            summary["unrestricted_internet_outbound_groups"]) == (1, 1, 1, 0)
+    assert (summary["total_network_interfaces"], summary["nics_with_nic_nsg"]) == (3, 1)
+    nics = {n["name"]: n for n in results["network_interfaces"]}
+    assert [(nics[n]["protected_by_nsg"], nics[n]["nsg_protection_source"], nics[n]["subnet_nsg_ids"])
+            for n in ("nic-own", "nic-subnet", "nic-none")] == [(True, None, None), (None, None, None), (None, None, None)]
+
+
+@pytest.mark.parametrize("refuse", [{"network_interfaces"}, {"network_security_groups", "virtual_networks"}],
+                         ids=["nic_list", "group_and_vnet_lists"])
+def test_nsg_refused_lists_null_exactly_the_counts_built_from_them(monkeypatch, tmp_path, refuse):
+    code, evidence = _nsg_main(monkeypatch, tmp_path, refuse=refuse, rows=_nsg_models())
+    summary = evidence["summary"]
+    unread = _fields(*refuse)
+    assert code == 1 and {k: summary[k] for k in unread} == dict.fromkeys(unread)
+    assert all(summary[k] is not None for k in _fields(*NSG_LISTS) - unread)
+
+
+def test_nsg_all_lists_read_give_numbers(monkeypatch, tmp_path):
+    code, evidence = _nsg_main(monkeypatch, tmp_path, rows=_nsg_models())
+    summary = evidence["summary"]
+    assert code == 0 and all(summary[k] is not None for k in _fields(*NSG_LISTS))
+    assert (summary["total_network_security_groups"], summary["nics_without_any_nsg"], summary["east_west_subnet_pairs"],
+            summary["open_east_west_subnet_pairs"]) == (1, 1, 2, 2)
+    assert summary["workload_subnets_by_east_west_segmentation"] == {
+        "segmented": 0, "partial": 0, "unsegmented": 2, "undetermined": 0, "no_peer_subnets": 0}
+
+
+def _run_pe_list(monkeypatch, tmp_path, list_by_subscription):
+    network = ModuleType("azure.mgmt.network")
+    network.NetworkManagementClient = lambda **kw: NS(private_endpoints=NS(list_by_subscription=list_by_subscription))
     monkeypatch.setitem(sys.modules, "azure.mgmt.network", network)
     monkeypatch.setattr(pe, "resource_graph_client", lambda cred: object())
     monkeypatch.setattr(pe, "readable_scopes", lambda cred, collector: None)
-    code, evidence = _run(pe, monkeypatch, tmp_path, "rg:typo", "azure_private_endpoint_configuration")
-    assert code == 1 and evidence["summary"]["resource_exclusion_patterns_unmatched"] is None
+    return _run(pe, monkeypatch, tmp_path, "rg:typo", "azure_private_endpoint_configuration")
+
+
+def test_private_endpoints_unread_list_leaves_unmatched_null(monkeypatch, tmp_path, caplog):
+    def refuse():
+        raise RuntimeError("403")
+
+    code, evidence = _run_pe_list(monkeypatch, tmp_path, refuse)
+    summary = evidence["summary"]
+    assert code == 1 and summary["resource_exclusion_patterns_unmatched"] is None
     assert "matched nothing" not in caplog.text
+    assert (summary["in_scope_private_endpoints"], summary["excluded_private_endpoints"]) == (None, None)
+
+
+def test_private_endpoints_empty_list_reads_zero_in_scope(monkeypatch, tmp_path):
+    code, evidence = _run_pe_list(monkeypatch, tmp_path, lambda: [])
+    assert code == 0
+    assert (evidence["summary"]["in_scope_private_endpoints"], evidence["summary"]["excluded_private_endpoints"]) == (0, 0)
 
 
 def test_private_dns_unread_list_leaves_unmatched_null(monkeypatch, tmp_path, caplog):
@@ -506,6 +653,14 @@ def test_private_dns_unread_list_leaves_unmatched_null(monkeypatch, tmp_path, ca
     code, evidence = _run(dns, monkeypatch, tmp_path, "rg:typo", "azure_private_dns_zone_configuration")
     assert code == 1 and evidence["summary"]["resource_exclusion_patterns_unmatched"] is None
     assert "matched nothing" not in caplog.text
+    assert (evidence["summary"]["in_scope_private_dns_zones"], evidence["summary"]["excluded_private_dns_zones"]) == (None, None)
+
+
+def test_private_dns_empty_zone_list_reads_zero_in_scope(monkeypatch, tmp_path):
+    monkeypatch.setattr(dns, "collect_zones", lambda sub, cred, collector: ([], [], "target_subscription"))
+    code, evidence = _run(dns, monkeypatch, tmp_path, "rg:typo", "azure_private_dns_zone_configuration")
+    assert code == 0
+    assert (evidence["summary"]["in_scope_private_dns_zones"], evidence["summary"]["excluded_private_dns_zones"]) == (0, 0)
 
 
 def test_egress_unread_list_leaves_unmatched_null_but_a_peering_failure_does_not(monkeypatch, tmp_path, caplog):

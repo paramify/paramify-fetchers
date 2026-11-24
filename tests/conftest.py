@@ -111,6 +111,10 @@ def pytest_addoption(parser):
         "--fail-on-skip", action="store_true",
         help="fail the run if any test or test module is skipped or xfailed",
     )
+    parser.addoption(
+        "--shard", metavar="I/N", default=None,
+        help="run only shard I of N (1-based) of the collected tests; the tui job's matrix rows",
+    )
 
 
 class _NotRun:
@@ -129,6 +133,8 @@ class _NotRun:
 
 
 def pytest_configure(config):
+    if config.getoption("--shard"):
+        _shard_option(config)  # a bad value fails here, before collection
     if config.getoption("--fail-on-skip"):
         config.pluginmanager.register(_NotRun(), "fail-on-skip")
 
@@ -136,6 +142,58 @@ def pytest_configure(config):
 def _not_run(config) -> list:
     plugin = config.pluginmanager.get_plugin("fail-on-skip")
     return plugin.reports if plugin else []
+
+
+# --------------------------------------------------------------------------- #
+# --shard I/N: the tui job splits its suite over parallel jobs.
+# --------------------------------------------------------------------------- #
+
+def _shard_option(config) -> tuple:
+    raw = config.getoption("--shard")
+    try:
+        index, count = (int(part) for part in raw.split("/"))
+    except ValueError:
+        raise pytest.UsageError(f"--shard takes I/N, like 2/3, not {raw!r}") from None
+    if not 1 <= index <= count:
+        raise pytest.UsageError(f"--shard {raw}: I must be from 1 to N")
+    return index, count
+
+
+def shard_units(nodeids: list, whole_modules: set, count: int) -> list:
+    """Split nodeids into `count` shards of about equal size, the same way on every run.
+
+    A test goes to a shard on its own, except that every test of a module in
+    `whole_modules` goes to the same shard. Largest unit first, each to the
+    shard with the fewest tests so far; ties go to the lowest shard.
+    """
+    units: dict = {}
+    for nodeid in sorted(nodeids):
+        module = nodeid.split("::", 1)[0]
+        units.setdefault(module if module in whole_modules else nodeid, []).append(nodeid)
+    shards: list = [[] for _ in range(count)]
+    for unit in sorted(units.values(), key=len, reverse=True):
+        min(shards, key=len).extend(unit)
+    return shards
+
+
+@pytest.hookimpl(trylast=True)
+def pytest_collection_modifyitems(config, items):
+    """Keep only this shard's tests. Runs after --deselect, so the shards split what is left.
+
+    Every module whose tests take `snap_compare` stays in one shard, so the
+    snapshot plugin sees all of a file's snapshots in the same run. The rest are
+    reported as deselected, not skipped, so --fail-on-skip still holds.
+    """
+    if not config.getoption("--shard"):
+        return
+    index, count = _shard_option(config)
+    whole = {item.nodeid.split("::", 1)[0] for item in items if "snap_compare" in getattr(item, "fixturenames", ())}
+    mine = set(shard_units([item.nodeid for item in items], whole, count)[index - 1])
+    keep = [item for item in items if item.nodeid in mine]
+    dropped = [item for item in items if item.nodeid not in mine]
+    if dropped:
+        config.hook.pytest_deselected(items=dropped)
+    items[:] = keep
 
 
 def pytest_sessionfinish(session, exitstatus):
