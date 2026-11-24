@@ -124,6 +124,40 @@ def test_artifacts_by_name_go_out_50_names_per_request(fake, res):
     assert [n for r in reads for n in r] == names
 
 
+def test_artifacts_by_name_split_when_the_query_would_pass_1500_bytes(fake, res):
+    ev, req = _request_for(fake)
+    batch = res.create_batch(artifact_request_id=req.id)
+    names = [f"{'f' * 95}{i:03}.json" for i in range(24)]  # 121 query bytes each
+    for name in names[::6]:
+        res.upload_to_batch(batch.id, name, b"{}", {})
+    fake.calls.clear()
+    got = res.artifacts(ev.id, original_file_names=names)
+    assert [a.original_file_name for a in got] == names[::6]
+    reads = [c[2]["originalFileName"] for c in fake.calls if c[1] == f"/evidence/{ev.id}/artifacts"]
+    assert [len(r) for r in reads] == [12, 12]
+    assert [n for r in reads for n in r] == names
+
+
+def test_artifacts_query_budget_counts_the_createdAt_parameters(fake, res):
+    ev, _ = _request_for(fake)
+    names = [f"{'f' * 95}{i:03}.json" for i in range(24)]
+    days = [date(2026, 10, 31), date(2026, 11, 1), date(2026, 11, 2)]  # 62 query bytes
+    fake.calls.clear()
+    res.artifacts(ev.id, original_file_names=names, created_on=days)
+    reads = [c[2] for c in fake.calls if c[1] == f"/evidence/{ev.id}/artifacts"]
+    assert [len(r["originalFileName"]) for r in reads] == [11, 11, 2]
+    assert all(r["createdAt"] == ["2026-10-31", "2026-11-01", "2026-11-02"] for r in reads)
+
+
+def test_artifacts_name_longer_than_the_query_budget_goes_alone(fake, res):
+    ev, _ = _request_for(fake)
+    long_name = "x" * 1600 + ".json"
+    fake.calls.clear()
+    res.artifacts(ev.id, original_file_names=["a.json", long_name, "b.json"])
+    reads = [c[2]["originalFileName"] for c in fake.calls if c[1] == f"/evidence/{ev.id}/artifacts"]
+    assert reads == [["a.json"], [long_name], ["b.json"]]
+
+
 def test_artifacts_created_on_is_the_repeated_createdAt_parameter(fake, res):
     ev, req = _request_for(fake)
     batch = res.create_batch(artifact_request_id=req.id)
@@ -258,3 +292,63 @@ def test_batches_flag_off_answers_403_and_can_be_undone(fake, res):
         assert "Artifact requests are not enabled for this workspace." in ei.value.message
     fake.batches_flag_off(False)
     assert list(res.batches()) == []
+
+
+def test_evidence_without_validators_key_parses_empty():
+    from framework.paramify.resources import _evidence
+    assert _evidence({"id": "e", "referenceId": "R", "channels": []}).validators == ()
+
+
+def test_evidence_validators_are_named():
+    from framework.paramify.resources import _evidence
+    ev = _evidence({"id": "e", "referenceId": "R", "validators": [{"id": "v1", "name": "VAL-1"}, {"id": "v2"}]})
+    assert ev.validators == ("VAL-1", "v2")
+
+
+@pytest.mark.parametrize("subject", ["SCRIPT", "VALIDATOR"])
+def test_associate_connects_once_and_a_repeat_is_the_state_we_wanted(fake, res, subject):
+    """The API has no association read-back, so asserting a link means CONNECTing
+    again; its 'already connected' refusal is success. One rule for every subject
+    (the scripts and validator stages once disagreed about it, GitHub #83)."""
+    ev = fake.add_evidence("EVD-A")
+    res.associate(ev.id, subject, "s-1")
+    res.associate(ev.id, subject, "s-1")
+    assert fake.associations == {(ev.id, subject, "s-1")}
+
+
+@pytest.mark.parametrize("status, text", [
+    (400, "Subject is already connected"),        # as observed live
+    (409, "Subject is already connected"),        # the same refusal on the code spec 0.9.2 permits
+])
+def test_associate_tolerates_already_connected_on_either_code(fake, res, status, text):
+    ev = fake.add_evidence("EVD-A")
+    fake.fail_route("POST", r"/evidence/[^/]+/associate", status, text)
+    res.associate(ev.id, "SCRIPT", "s-1")  # no raise
+
+
+@pytest.mark.parametrize("status, text", [
+    (400, "subjectId must be a uuid"),
+    (409, '{"statusMessage":"Conflict","error":{"message":"Conflict"}}'),
+    (403, "forbidden"),
+])
+def test_associate_other_refusals_raise(fake, res, status, text):
+    ev = fake.add_evidence("EVD-A")
+    fake.fail_route("POST", r"/evidence/[^/]+/associate", status, text)
+    with pytest.raises(ApiError) as e:
+        res.associate(ev.id, "SCRIPT", "s-1")
+    assert e.value.status == status
+
+
+def test_already_present_reads_the_whole_body_not_the_truncated_message(fake, res):
+    """The 'already' can sit past the first 300 characters, which is all an
+    ApiError's message keeps."""
+    ev = fake.add_evidence("EVD-A")
+    fake.fail_route("POST", r"/evidence/[^/]+/associate", 400, "x" * 400 + " already connected")
+    res.associate(ev.id, "SCRIPT", "s-1")  # no raise
+
+
+def test_a_create_that_returns_no_id_fails_that_action(fake, res):
+    fake.fail_route("POST", "/scripts", 201, "{}")
+    with pytest.raises(ApiError, match="returned no id") as e:
+        res.create_script("n", "d", "code")
+    assert not e.value.fatal

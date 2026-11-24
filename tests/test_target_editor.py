@@ -112,7 +112,9 @@ def _fanout_manifest(tmp_path: Path):
 
 
 async def _open_targets(app, pilot):
-    await pilot.press("2")          # manifest tab
+    await pilot.press("1")          # Fetchers tab
+    await pilot.pause()
+    await pilot.press("tab")  # from the catalog to the manifest list
     await pilot.pause()
     await pilot.press("t")
     await pilot.pause()
@@ -213,7 +215,9 @@ def test_the_entry_editor_says_where_targets_are_edited(tmp_path, run_tui):
     manifest, name, fields = _fanout_manifest(tmp_path)
 
     async def body(app, pilot):
-        await pilot.press("2")
+        await pilot.press("1")
+        await pilot.pause()
+        await pilot.press("tab")  # from the catalog to the manifest list
         await pilot.pause()
         await pilot.press("e")
         await pilot.pause()
@@ -221,8 +225,8 @@ def test_the_entry_editor_says_where_targets_are_edited(tmp_path, run_tui):
         return app.screen._title, app.screen._subtitle
 
     title, subtitle = run_tui(body, manifest)
-    assert "entry config and secrets" in title
-    assert "'t'" in subtitle
+    assert title == f"Edit {name}"
+    assert subtitle == "Targets are edited with t."
     # short enough to survive the card width — a clipped subtitle takes the
     # pointer with it, which is the half that matters here
     assert len(subtitle) <= 66
@@ -256,7 +260,9 @@ def _duplicate_fanout_manifest(tmp_path: Path):
 
 
 async def _select_second_entry(app, pilot):
-    await pilot.press("2")
+    await pilot.press("1")
+    await pilot.pause()
+    await pilot.press("tab")  # from the catalog to the manifest list
     await pilot.pause()
     await pilot.press("down")
     await pilot.pause()

@@ -53,10 +53,20 @@ Button.-error {
     color: $text-error;
 }
 
+/* Tables sit on the page: the panel border is the only outline. */
+DataTable {
+    background: transparent;
+}
 DataTable > .datatable--header {
     background: transparent;
     color: $text-muted;
     text-style: bold;
+}
+/* Only the list that has focus shows the bright cursor. */
+DataTable:blur > .datatable--cursor {
+    background: $panel;
+    color: $text;
+    text-style: none;
 }
 
 RichLog {
@@ -75,7 +85,7 @@ RichLog:focus {
     padding: 0 1;
 }
 #app-header-left { width: auto; }
-#app-header-crumb { width: 1fr; text-align: center; color: #7DCFFF; }
+#app-header-crumb { width: 1fr; min-width: 6; height: 1; text-wrap: nowrap; text-overflow: ellipsis; text-align: center; color: #7DCFFF; }
 #app-header-clock { width: auto; color: $text-muted; }
 
 #app-footer {
@@ -89,10 +99,10 @@ TabbedContent {
 }
 
 /* A titled box whose border highlights when it (or a child) holds focus.
-   Titles live in the border (border_title, set by each screen) — dim border
-   at rest, full accent + bold title when focused, the Posting .section look. */
+   Titles live in the border (border_title, set by each screen) — a gray
+   border at rest, so only the focused panel has the accent and a bold title. */
 .panel {
-    border: round $primary 40%;
+    border: round $foreground 18%;
     border-title-color: $text-muted;
     border-title-align: right;
     padding: 0 1;
@@ -133,12 +143,35 @@ CatalogPanel { height: 1fr; padding: 1 1 0 1; }
 #catalog-search { margin: 1 0; }
 #catalog-tree {
     height: 1fr;
-    background: $background;
+    background: transparent;
 }
 #catalog-tree > .tree--cursor { background: $primary; color: $background; text-style: bold; }
+#catalog-tree:blur > .tree--cursor { background: $panel; color: $text; text-style: none; }
+/* While the filter has focus, up/down and enter drive the tree cursor, so it
+   stays bright as long as focus is anywhere in the catalog. */
+#catalog-left:focus-within #catalog-tree > .tree--cursor { background: $primary; color: $background; text-style: bold; }
 #catalog-tree > .tree--guides { color: $panel; }
 
 #catalog-detail-scroll { width: 1fr; margin-left: 1; }
+
+/* ---- Fetchers: catalog and detail on top, the manifest across the bottom ---- */
+FetchersPage { height: 1fr; padding: 1 1 0 1; }
+#fetchers-top { height: 1fr; min-height: 8; }
+#catalog-panel { width: 45%; height: 1fr; padding: 0; }
+#catalog-panel #catalog-left { width: 1fr; }
+#fetchers-detail-scroll { width: 1fr; margin-left: 1; }
+/* Its height is set from the row count (FetchersPage._fit_manifest). */
+#manifest-panel { height: 16; }
+#manifest-panel #manifest-top { padding: 1 0 0 0; }
+#manifest-panel #manifest-body { padding: 0; }
+/* Buttons fit their labels, so the output dir keeps room to show a path. */
+#manifest-panel #manifest-top Button { width: auto; min-width: 7; }
+#manifest-panel #manifest-output-dir { min-width: 16; }
+/* A short page drops its blank rows, so the catalog and the manifest
+   keep more of their rows (FetchersPage.SHORT_PAGE). */
+FetchersPage.short #catalog-search { margin: 0; }
+FetchersPage.short #manifest-panel #manifest-top { padding: 0; }
+FetchersPage.short #manifest-empty-hint { padding: 0 4; }
 
 /* Manifest editor */
 ManifestPanel {
@@ -156,8 +189,14 @@ ManifestPanel {
     padding: 0 1 0 0;
 }
 
+/* One column: the row holds stack, owner, frequency and env and still fits 120. */
 #manifest-top .after-button {
-    margin-left: 2;
+    margin-left: 1;
+}
+
+/* The env button while a required variable has no value. */
+#manifest-top Button.env-missing {
+    color: $text-warning;
 }
 
 #manifest-output-dir {
@@ -184,6 +223,8 @@ ManifestPanel.no-detail #manifest-entries-panel { width: 1fr; }
 
 #manifest-issues {
     height: auto;
+    text-wrap: nowrap;  /* a wrapped line takes a row from the catalog */
+    text-overflow: ellipsis;
     border-top: solid $panel;
     padding: 0 1;
 }
@@ -244,54 +285,71 @@ EvidencePage {
 
 #evidence-runs, #evidence-files { height: 1fr; }
 
-/* Upload */
-UploadPage {
-    height: 1fr;
-}
-
-/* Paramify tab: evidence + issue-report + scripts panels over a shared log. */
-#evidence-panel { height: auto; margin: 1 1 0 1; }
-#evidence-summary { height: auto; }
-/* Preflight errors and warnings: prose that wraps, under the summary table. */
+/* Prose that wraps under a summary table (the Pipelines send panel's
+   preflight errors and warnings). */
 .panel-notes { height: auto; padding: 0 1; }
-#evidence-actions { height: auto; align: left middle; padding-top: 1; }
 
-/* Sized to content like the evidence panel: for a run with no issue reports it
+/* Pipelines send panel: sized to content, so a run with no scan reports
    collapses to a single "collected none" line instead of holding open space. */
 #issues-panel { height: auto; margin: 1 1 0 1; }
 #issues-summary { height: auto; }
 #issues-actions { height: auto; align: left middle; padding-top: 1; }
 #issues-actions Button { width: 24; }
 
-/* Scripts and log split what the two auto-height panels leave. Each keeps a
-   floor, so neither collapses to its border on a 50-row terminal: the scripts
-   panel needs header, summary, a plan row and the action row (8 with border). */
-#scripts-panel { height: 1fr; min-height: 8; margin: 1 1 0 1; }
-#scripts-header { height: auto; }
-#scripts-plan-summary { height: auto; color: $text-muted; }
-#scripts-plan { height: 1fr; min-height: 2; }
-#scripts-actions { height: auto; align: left middle; padding-top: 1; }
-/* Uniform SIZE across the whole action row. Buttons and checkboxes size to their
-   text by default (mismatched widths), and Checkbox keeps its 3-row bordered box
-   while Button is flattened to 1 row (mismatched heights). Pin both to one width
-   (fits the longest label, "reassociate") and flatten the checkbox to 1 row so
-   the row reads as a single band of equal controls. */
-#scripts-actions Button { margin-right: 1; width: 20; }
-#scripts-actions Checkbox,
-#scripts-actions Checkbox:focus,
-#scripts-actions Checkbox:hover {
-    margin-right: 1;
-    width: 20;
-    height: 1;
-    border: none;
-    padding: 0 1;
-    background: $panel;
+/* Paramify: a setup grid of what each manifest fetcher has in Paramify. The grid
+   takes the free height; the row under it (the detail, or an action's log) is
+   sized from Python, and gives way on a short terminal. */
+ParamifyPage { height: 1fr; padding: 0 1; }
+#pf-summary { height: auto; padding: 0 1; margin-top: 1; }
+#pf-summary.problem { color: $warning; border-left: tall $warning; }
+#pf-activity-panel { height: 13; margin-top: 1; }
+#pf-log { height: 1fr; }
+#pf-lens-tabs { margin-top: 1; }
+#pf-lens { height: 1fr; }
+#pf-by-fetcher, #pf-by-capability { height: 1fr; }
+#pf-grid-panel { height: 1fr; min-height: 8; }
+#pf-filter { margin-bottom: 1; }
+#pf-grid { height: 1fr; }
+#pf-totals { height: 2; padding: 0 1; border-top: solid $panel; }
+#pf-detail { height: 13; margin-top: 1; }
+#pf-set-panel { width: 46%; }
+#pf-caps-panel { width: 1fr; margin-left: 1; }
+#pf-caps { height: 1fr; }
+.panel.empty > #pf-totals, .panel.empty > #pf-filter { display: none; }
+#pf-cap-panel { height: 1fr; min-height: 8; }
+#pf-cap-filter { margin-bottom: 1; }
+#pf-cap-grid { height: 1fr; }
+#pf-cap-error { height: 1fr; padding: 1 2; }
+#pf-cap-hint { height: auto; padding: 0 1; }
+#pf-pairs-panel { height: 8; margin-top: 1; }
+#pf-pairs { height: 1fr; }
+/* A short terminal drops the blank rows, so the list keeps its rows (the row
+   under it gives way, sized from Python). */
+ParamifyPage.short #pf-summary, ParamifyPage.short #pf-lens-tabs { margin-top: 0; }
+ParamifyPage.short #pf-filter { margin-bottom: 0; }
+ParamifyPage.short #pf-totals { height: 1; border-top: none; }
+ParamifyPage.short #pf-detail, ParamifyPage.short #pf-activity-panel { margin-top: 0; }
+ParamifyPage.short #pf-grid-panel { min-height: 0; }
+/* The view bar gives its two rows to the list; [ and ] still switch views,
+   and the list's title says which one shows. */
+ParamifyPage.short #pf-lens-tabs { display: none; }
+ParamifyPage.short #pf-cap-filter { margin-bottom: 0; }
+ParamifyPage.short #pf-pairs-panel { margin-top: 0; }
+ParamifyPage.short #pf-cap-panel { min-height: 0; }
+
+/* Pipelines: the scan-report fetchers, the send panel and its log. */
+PipelinesPage {
+    height: 1fr;
 }
-
-#upload-log-panel { height: 1fr; min-height: 6; margin: 1 1 0 1; }
-#upload-log { height: 1fr; }
-
-#upload-banner {
+#pipelines-fetchers-panel { height: auto; max-height: 12; margin: 1 1 0 1; }
+#pipelines-fetchers { height: auto; max-height: 10; }
+#pipelines-log-panel { height: 1fr; min-height: 6; margin: 1 1 0 1; }
+#pipelines-log { height: 1fr; }
+/* No scan-report fetchers: only the send panel's one-line note shows. */
+PipelinesPage.no-scans #pipelines-fetchers-panel,
+PipelinesPage.no-scans #pipelines-log-panel,
+PipelinesPage.no-scans #issues-actions { display: none; }
+#pipelines-banner {
     height: auto;
     padding: 0 1;
 }
@@ -328,14 +386,6 @@ ModalScreen {
     height: 85%;
 }
 
-/* The multi-select add-fetcher modal gets a roomier default than .wide so the
-   checkbox list + live selection sit side by side comfortably. */
-#modal-card.multi-pick {
-    width: 90%;
-    max-width: 100%;
-    height: 85%;
-}
-
 #modal-title {
     text-style: bold;
 }
@@ -345,8 +395,9 @@ ModalScreen {
     padding-bottom: 1;
 }
 
-/* Why a picker's list is short: no token, an API error. */
-#picker-notice {
+/* Why a picker's list is short: no token, an API error. Why the
+   environment view opened on its own: a run that stopped. */
+#picker-notice, #env-notice {
     color: $warning;
     border-left: tall $warning;
     padding: 0 1;
@@ -378,12 +429,37 @@ ModalScreen {
     padding-top: 1;
 }
 
-#targets-keys {
+#targets-keys, #env-keys {
     color: $text-muted;
+}
+
+/* Environment view: the variables a run reads, sized to them up to a cap,
+   with the count above and the key legend pinned under. */
+#modal-card.env {
+    width: 76;
+    max-width: 95%;
+    max-height: 95%;
+}
+
+#modal-card.env #modal-body {
+    max-height: 45vh;
+    padding: 0;
+    margin: 1 0;
+}
+
+#env-unmapped, #env-others {
+    padding-bottom: 1;
 }
 
 #preview-text {
     width: 1fr;
+}
+
+/* ReportModal: the question under what will be sent. */
+#report-question {
+    width: 100%;
+    padding-top: 1;
+    text-style: bold;
 }
 
 #modal-buttons {
@@ -431,28 +507,23 @@ ModalScreen {
     margin-top: 0;
 }
 
-/* Multi-select add-fetcher modal: checkbox list (left) + live picked list
-   (right), inside the .wide card. */
-#multi-pick-split {
-    height: 1fr;
-    padding-top: 1;
+/* ---- update: the quiet notice, and the screen that applies it ---- */
+UpdateNotice {
+    width: auto;
+    height: 1;
+    padding: 0 1;
+    text-wrap: nowrap;
 }
-#multi-pick-left {
-    width: 2fr;
-    padding-right: 2;
-}
-#multi-pick-tree {
-    height: 1fr;
-    margin-top: 1;
-    background: $background;
-}
-#multi-pick-tree > .tree--cursor { background: $primary; color: $background; text-style: bold; }
-#multi-pick-tree > .tree--guides { color: $panel; }
-#multi-pick-right {
-    width: 1fr;
-    border-left: round $panel;
-    padding-left: 2;
-}
-#multi-pick-chosen {
-    padding-top: 1;
-}
+#welcome-update { width: 100%; text-align: center; padding: 0; }
+
+#update-root { padding: 1 2; }
+#update-title { padding-bottom: 1; }
+#update-body { height: 1fr; }
+#update-header { padding-bottom: 1; }
+#update-check { height: auto; padding-bottom: 1; }
+.update-heading { height: auto; }
+#update-fetchers { height: auto; max-height: 10; margin-bottom: 1; }
+#update-breaking, #update-new, #update-rest { height: auto; padding-bottom: 1; }
+#update-result { height: auto; padding-top: 1; }
+#update-buttons { height: auto; padding-top: 1; }
+#update-buttons Button { margin-right: 2; }

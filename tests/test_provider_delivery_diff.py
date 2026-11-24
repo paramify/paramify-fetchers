@@ -1,11 +1,12 @@
 """delivery provider, plan side: routing (stack, channel, artifact request), batch
-attribution from artifact notes, and the WAF pre-check. One test per row of the
+attribution from artifact notes, and which files are sent. One test per row of the
 spec's delivery diff tables, plus observe against the in-process fake API."""
 from __future__ import annotations
 
 import importlib.util
 import json
 import sys
+from dataclasses import replace
 from datetime import date
 from pathlib import Path
 from typing import Optional
@@ -25,8 +26,7 @@ from framework.paramify.resources import (
 )
 from framework.paramify.version import FLAG_OFF, Capability
 from framework.sync.model import UNKNOWN, Plan, Ref, SyncContext
-from framework.sync.providers import waf
-from framework.sync.providers.delivery import DeliveryProvider, EntryObserved
+from framework.sync.providers.delivery import DIRECT, DeliveryProvider, EntryObserved
 from framework.sync.providers.delivery_routing import (
     DirectRoute,
     Refusal,
@@ -66,6 +66,10 @@ def evidence(*channels: Channel) -> EvidenceSet:
     return EvidenceSet("ev-1", "EVD-12", "Set 12", "SUBMISSION", tuple(channels))
 
 
+def ev_with_channel(approval="SUBMISSION", validators=()) -> EvidenceSet:
+    return EvidenceSet("ev-1", "EVD-12", "Set 12", approval, (CH_P,), tuple(validators))
+
+
 def note(use="aws_x", run_id="R1", entry: Optional[str] = None) -> str:
     parts = [f"fetcher={use}", "version=0.1.0", f"run_id={run_id}", "status=success"]
     if entry:
@@ -73,21 +77,23 @@ def note(use="aws_x", run_id="R1", entry: Optional[str] = None) -> str:
     return "; ".join(parts)
 
 
-def write_file(tmp_path: Path, name: str, payload=None, skip: Optional[str] = None, key="aws_x") -> DeliveryFile:
+def write_file(tmp_path: Path, name: str, payload=None, skip: Optional[str] = None, key="aws_x",
+               skip_reason: Optional[str] = None) -> DeliveryFile:
     body = {"schema_version": "1.0", "metadata": {"fetcher_name": "aws_x"}, "payload": payload or {"k": 1}}
     path = tmp_path / name
     path.write_text(json.dumps(body))
-    return DeliveryFile(path, name, f"Set 12 - {name}", note(entry=key), "evidence", skip)
+    return DeliveryFile(path, name, f"Set 12 - {name}", note(entry=key), "evidence", skip or skip_reason)
 
 
 def entry(tmp_path, key="aws_x", use="aws_x", *, files=("a.json", "b.json"), stack=None, stack_name=None,
           no_request="refuse", recorded=None, run_id="R1", ref="EVD-12", delivery="auto",
-          owner=None) -> EntryDesired:
+          owner=None, pipeline=None, approval="SUBMISSION_WITH_PASSING_VALIDATORS") -> EntryDesired:
     built = tuple(f if isinstance(f, DeliveryFile) else write_file(tmp_path, f, key=key) for f in files)
     return EntryDesired(
         entry_key=key, use=use, run_id=run_id, reference_id=ref, evidence_set={"reference_id": ref, "name": "Set 12"},
-        category="aws", approval="SUBMISSION_WITH_PASSING_VALIDATORS", stack=stack, stack_name=stack_name,
+        category="aws", approval=approval, stack=stack, stack_name=stack_name,
         no_request=no_request, files=built, recorded_batch_id=recorded, delivery=delivery, owner=owner,
+        pipeline=pipeline,
     )
 
 
@@ -588,42 +594,13 @@ def test_files_zero_sendable_files_plans_no_batch(tmp_path):
     assert a.summary == "nothing to send: 1 file skipped"
 
 
-def test_files_waf_match_dropped(tmp_path):
-    bad = write_file(tmp_path, "bad.json", payload={"cmd": "cd ../etc"})
+def test_files_holding_waf_strings_are_sent(tmp_path):
+    # CVE text often holds these; the upload routes are exempt from the WAF's body rules,
+    # so the plan sends the file and only a real 403 drops it.
+    bad = write_file(tmp_path, "cve.json", payload={"desc": "cd ../etc; /bin/bash; /etc/passwd; <script>x</script>"})
     a = plan_one(entry(tmp_path, files=("a.json", bad)), observed(evidence()))
-    assert a.verb == "deliver"
-    assert [f["original_file_name"] for f in a.payload["files"]] == ["a.json"]
-    [drop] = a.payload["dropped"]
-    assert drop["original_file_name"] == "bad.json"
-    assert drop["reason"].startswith("blocked by the production WAF") and "'../'" in drop["reason"]
-
-
-def test_all_files_dropped_creates_no_batch(tmp_path):
-    bad = write_file(tmp_path, "bad.json", payload={"html": "<script>x</script>"})
-    a = plan_one(entry(tmp_path, files=(bad,)), observed(evidence(CH_P)))
-    assert a.verb == "refuse" and a.summary == "every file was dropped"
-    assert a.fix and len(a.payload["dropped"]) == 1
-
-
-def test_waf_in_payload_mode_scans_only_the_payload(tmp_path):
-    body = {"schema_version": "1.0", "metadata": {"fetcher_name": "aws_x", "src": "/bin/sh"}, "payload": {"k": 1}}
-    (tmp_path / "m.json").write_text(json.dumps(body))
-    f = DeliveryFile(tmp_path / "m.json", "m.json", "t", note(entry="aws_x"), "evidence", None)
-    p = provider()
-    assert p.desired(SyncContext(None, {"artifact_payload": "payload"})) == []
-    [a] = p.diff([entry(tmp_path, files=(f,))], {"aws_x": observed(evidence())})
-    assert a.payload["dropped"] == []
-    [b] = provider().diff([entry(tmp_path, files=(f,))], {"aws_x": observed(evidence())})
-    assert b.verb == "refuse"
-
-
-def test_waf_scan_signatures_and_note():
-    assert [s for s, _ in waf.SIGNATURES] == ["../", "/etc/passwd", "/bin/sh", "/bin/bash", "<script"]
-    assert all(rule for _, rule in waf.SIGNATURES)
-    assert waf.scan(b'{"a": "/bin/bash -c x; /bin/sh"}', "fetcher=x") == ["/bin/sh", "/bin/bash"]
-    assert waf.scan(b"{}", "target=../x") == ["../"]
-    assert waf.scan(b"{}", "", title="a<script") == ["<script"]
-    assert waf.scan(b"$( && rm -rf <b>", "") == []
+    assert a.verb == "deliver" and "dropped" not in a.payload
+    assert [f["original_file_name"] for f in a.payload["files"]] == ["a.json", "cve.json"]
 
 
 # ---- a set created in this run ----------------------------------------------
@@ -641,22 +618,20 @@ def test_set_created_in_same_run_targets_ref(tmp_path):
 # ---- offline ----------------------------------------------------------------
 
 def test_offline_plan_has_unknown_routing(tmp_path):
-    bad = write_file(tmp_path, "bad.json", payload={"p": "/etc/passwd"})
     skipped = write_file(tmp_path, "c.json", skip="not envelope-wrapped")
-    e = entry(tmp_path, files=("a.json", bad, skipped))
+    e = entry(tmp_path, files=("a.json", "b.json", skipped))
     p = provider()
     obs = p.observe([e], None)
     assert obs == {"aws_x": UNKNOWN}
     [a] = p.diff([e], obs)
     assert a.verb == "deliver"
     assert a.changes == {"stack": UNKNOWN, "channel": UNKNOWN, "target": UNKNOWN}
-    assert [f["original_file_name"] for f in a.payload["files"]] == ["a.json"]
-    assert [d["original_file_name"] for d in a.payload["dropped"]] == ["bad.json"]
+    assert [f["original_file_name"] for f in a.payload["files"]] == ["a.json", "b.json"]
     assert [s["original_file_name"] for s in a.payload["skipped"]] == ["c.json"]
     json.dumps(Plan([a]).to_json())
-    all_bad = entry(tmp_path, key="k2", use="k2", files=(bad,))
-    [r] = p.diff([all_bad], {"k2": UNKNOWN})
-    assert r.verb == "refuse"
+    all_skipped = entry(tmp_path, key="k2", use="k2", files=(skipped,))
+    [r] = p.diff([all_skipped], {"k2": UNKNOWN})
+    assert r.verb == "noop"
 
 
 # ---- observe against the fake API -------------------------------------------
@@ -844,11 +819,12 @@ def test_observe_stale_recorded_batch_is_ignored(tmp_path):
     assert a.verb == "deliver" and a.payload["resume_batch_id"] is None
 
 
-@pytest.mark.parametrize("bad", ["../", "/etc/passwd", "/bin/sh", "/bin/bash", "<script"])
-def test_every_signature_drops(tmp_path, bad):
-    f = write_file(tmp_path, "x.json", payload={"v": f"a {bad} b"})
+@pytest.mark.parametrize("text", ["../", "/etc/passwd", "/bin/sh", "/bin/bash", "<script"])
+def test_former_waf_signatures_are_sent(tmp_path, text):
+    # These used to be dropped before the upload; the WAF exempts the upload routes.
+    f = write_file(tmp_path, "x.json", payload={"v": f"a {text} b"})
     a = plan_one(entry(tmp_path, files=("a.json", f)), observed(evidence()))
-    assert [d["original_file_name"] for d in a.payload["dropped"]] == ["x.json"]
+    assert [f["original_file_name"] for f in a.payload["files"]] == ["a.json", "x.json"]
 
 
 # ---- direct delivery --------------------------------------------------------
@@ -1002,3 +978,151 @@ def test_direct_entry_without_a_batch_of_this_run_has_no_open_batch_warning(tmp_
     other_run = artifact("a.json", bid="bt-9", note_text=note(run_id="R0", entry="aws_x"))
     a = plan_one(entry(tmp_path), observed(evidence(CH_P), found=[other_run]), BATCHES_OFF)
     assert a.verb == "deliver" and a.warnings == []
+
+
+# -- pipeline entries ------------------------------------------------------ #
+INV = {"type": "inventory", "id_scheme": "x-id"}
+
+
+def test_pipeline_entry_with_no_request_goes_in_an_evidence_batch(tmp_path):
+    a = plan_one(entry(tmp_path, pipeline=INV, no_request="evidence"), observed(ev_with_channel(), requests=(), current=()))
+    assert a.verb == "deliver" and a.payload["target"] == "EVIDENCE"
+
+
+def test_pipeline_entry_refuses_delivery_direct(tmp_path):
+    a = plan_one(entry(tmp_path, pipeline=INV, delivery="direct"), observed(ev_with_channel()))
+    assert a.verb == "refuse" and "never goes direct" in a.summary
+
+
+def test_pipeline_entry_refuses_no_request_direct(tmp_path):
+    a = plan_one(entry(tmp_path, pipeline=INV, no_request="direct"), observed(ev_with_channel(), requests=(), current=()))
+    assert a.verb == "refuse"
+
+
+def test_pipeline_entry_goes_direct_with_a_note_when_batches_are_off(tmp_path):
+    a = plan_one(entry(tmp_path, pipeline=INV, no_request="evidence"), observed(ev_with_channel()), BATCHES_OFF)
+    assert a.payload["target"] == DIRECT and any("no batches" in w for w in a.warnings)
+
+
+def test_manual_set_does_not_warn_when_the_new_batch_approves_on_submit(tmp_path):
+    # A new batch takes the entry's approval, not the set's.
+    a = plan_one(entry(tmp_path, pipeline=INV, no_request="evidence", approval="SUBMISSION"),
+                 observed(ev_with_channel(approval="MANUAL")))
+    assert a.verb == "deliver" and not any("approves MANUAL" in w for w in a.warnings)
+    assert a.summary.endswith("→ pipeline runs")
+
+
+def test_manual_entry_approval_warns(tmp_path):
+    a = plan_one(entry(tmp_path, pipeline=INV, no_request="evidence", approval="MANUAL"), observed(ev_with_channel()))
+    assert any(w.startswith("the new batch approves MANUAL") for w in a.warnings)
+    assert not a.summary.endswith("pipeline runs")
+
+
+def test_resumed_manual_batch_warns_even_when_the_entry_approves_on_submit(tmp_path):
+    # A resumed batch keeps the approval it was created with.
+    b = replace(batch(status="OPEN"), when_to_approve="MANUAL")
+    a = plan_one(entry(tmp_path, pipeline=INV, no_request="evidence", approval="SUBMISSION"),
+                 observed(evidence(CH_P), batches=[b], artifacts={b.id: [artifact("a.json")]}))
+    assert a.verb == "deliver" and "resume BCH-12" in a.summary
+    assert any(w.startswith("BCH-12 approves MANUAL") for w in a.warnings)
+
+
+def test_manual_entry_does_not_warn_when_batches_are_off(tmp_path):
+    a = plan_one(entry(tmp_path, pipeline=INV, no_request="evidence", approval="MANUAL"), observed(ev_with_channel()),
+                 BATCHES_OFF)
+    assert a.payload["target"] == DIRECT
+    assert not any("approves MANUAL" in w for w in a.warnings)
+
+
+def test_manual_approval_on_a_new_set_warns(tmp_path):
+    a = plan_one(entry(tmp_path, pipeline=INV, no_request="evidence", approval="MANUAL"), observed(None))
+    assert any("approves MANUAL" in w for w in a.warnings)
+
+
+def test_set_with_validators_refuses(tmp_path):
+    a = plan_one(entry(tmp_path, pipeline=INV, no_request="evidence"), observed(ev_with_channel(validators=("VAL-1",))))
+    assert a.verb == "refuse" and "VAL-1" in a.summary and "never approve" in a.summary
+
+
+def test_incomplete_inventory_on_a_set_with_validators_is_noop(tmp_path):
+    skipped = write_file(tmp_path, "a.json", key="aws_x", skip_reason="incomplete inventory not sent: x")
+    a = plan_one(entry(tmp_path, pipeline=INV, files=(skipped,)), observed(ev_with_channel(validators=("VAL-1",))))
+    assert a.verb == "noop"
+
+
+def test_deliver_summary_says_the_pipeline_runs(tmp_path):
+    a = plan_one(entry(tmp_path, pipeline=INV, no_request="evidence"), observed(ev_with_channel()))
+    assert a.summary.endswith("(approved when its validators pass) → pipeline runs")
+
+
+def test_ordinary_evidence_with_no_request_still_goes_direct(tmp_path):
+    a = plan_one(entry(tmp_path, no_request="direct"), observed(ev_with_channel(), requests=(), current=()))
+    assert a.payload["target"] == DIRECT
+
+
+# -- pipeline entries: files of this run that went direct before batches ---- #
+RESEND = "{n} file(s) of this run went direct before; sending them again in a batch so the pipeline runs"
+
+
+def test_pipeline_entry_resends_files_sent_direct_before_batches(tmp_path):
+    on_set = [artifact("a.json", bid=None), artifact("b.json", bid=None)]
+    obs = observed(ev_with_channel(), requests=(), current=(), found=on_set)
+    obs.before_batches = ["a.json", "b.json"]  # as observe reads them: no batch
+    a = plan_one(entry(tmp_path, pipeline=INV, no_request="evidence"), obs)
+    assert a.verb == "deliver" and a.payload["target"] == "EVIDENCE"
+    assert [f["original_file_name"] for f in a.payload["files"]] == ["a.json", "b.json"]
+    assert "before_batches" not in a.payload
+    assert RESEND.format(n=2) in a.warnings
+    assert a.summary.startswith("deliver 2 files to EVD-12 (evidence level): new batch")
+
+
+def test_pipeline_entry_resends_only_the_files_its_open_batch_lacks(tmp_path):
+    # a.json went direct before; b.json is already in this run's open batch.
+    found = [artifact("a.json", bid=None), artifact("b.json", bid="bt-12")]
+    obs = observed(ev_with_channel(), requests=(), current=(), found=found,
+                   batches=[batch(ar=None)], artifacts={"bt-12": [found[1]]})
+    obs.before_batches = ["a.json"]
+    a = plan_one(entry(tmp_path, pipeline=INV, no_request="evidence"), obs)
+    assert a.verb == "deliver" and a.payload["resume_batch_id"] == "bt-12"
+    assert [f["original_file_name"] for f in a.payload["files"]] == ["a.json"]
+    assert RESEND.format(n=1) in a.warnings
+
+
+def test_pipeline_entry_with_batches_off_still_counts_files_sent_direct(tmp_path):
+    on_set = [artifact("a.json", bid=None), artifact("b.json", bid=None)]
+    obs = observed(ev_with_channel(), found=on_set)
+    obs.before_batches = ["a.json", "b.json"]
+    a = plan_one(entry(tmp_path, pipeline=INV, no_request="evidence"), obs, BATCHES_OFF)
+    assert a.verb == "noop" and a.payload["target"] == DIRECT and a.summary == "already delivered (2 files)"
+    assert not any("sending them again" in w for w in a.warnings)
+
+
+def test_ordinary_entry_still_skips_files_sent_before_batches(tmp_path):
+    found = [artifact("a.json", bid=None)]
+    obs = observed(evidence(CH_P), found=found)
+    obs.before_batches = ["a.json"]
+    a = plan_one(entry(tmp_path), obs)
+    assert a.verb == "deliver" and a.payload["before_batches"] == ["a.json"]
+    assert [f["original_file_name"] for f in a.payload["files"]] == ["b.json"]
+    assert not any("sending them again" in w for w in a.warnings)
+    obs.before_batches = ["a.json", "b.json"]
+    obs.found = [artifact("a.json", bid=None), artifact("b.json", bid=None)]
+    a = plan_one(entry(tmp_path), obs)
+    assert a.verb == "noop" and a.summary == "already delivered before batches (2 files)"
+
+
+def test_already_delivered_pipeline_run_with_a_new_validator_is_noop(tmp_path):
+    done = batch(status="APPROVED", ar=None)
+    arts = [artifact("a.json", bid="bt-12"), artifact("b.json", bid="bt-12")]
+    obs = observed(ev_with_channel(validators=("VAL-1",)), requests=(), current=(), found=arts,
+                   batches=[done], artifacts={"bt-12": arts})
+    a = plan_one(entry(tmp_path, pipeline=INV, no_request="evidence"), obs)
+    assert a.verb == "noop" and a.summary == "already delivered in BCH-12"
+
+
+def test_open_pipeline_batch_on_a_set_with_a_new_validator_still_refuses(tmp_path):
+    arts = [artifact("a.json", bid="bt-12")]
+    obs = observed(ev_with_channel(validators=("VAL-1",)), requests=(), current=(), found=arts,
+                   batches=[batch(ar=None)], artifacts={"bt-12": arts})
+    a = plan_one(entry(tmp_path, pipeline=INV, no_request="evidence"), obs)
+    assert a.verb == "refuse" and "VAL-1" in a.summary

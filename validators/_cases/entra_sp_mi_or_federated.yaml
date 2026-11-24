@@ -1,0 +1,268 @@
+validator: entra_sp_mi_or_federated
+cases:
+  - name: no_live_sign_in_credentials
+    expect: PASS
+    note: 'SAML signing keys, a token-encryption cert, an expired secret and a disabled app are not live sign-in credentials'
+    artifact: '{"schema_version":"1.0","metadata":{"exit_code":0,"status":"success","evidence_set":{"reference_id":"EVD-AZURE-ENTRA-SERVICE-PRINCIPALS"}},"payload":{"metadata":{"partial_failure":false,"api_failures":[]},"results":{"service_principals":[{"id":"11111111-1111-1111-1111-111111111111","app_id":"22222222-2222-2222-2222-222222222222","display_name":"deploy","service_principal_type":"Application","account_enabled":true,"ownership":"this_tenant","is_managed_identity":false,"credentials":[],"federated_identity_credentials":[{"name":"gh","issuer":"https://token.actions.githubusercontent.com","subject":"repo:o/r:ref:refs/heads/main","audiences":["api://AzureADTokenExchange"]}],"credential_count":0,"federated_identity_credential_count":1,"uses_managed_identity":false,"uses_federated_credential":true,"uses_certificate":false,"uses_secret":false},{"id":"11111111-1111-1111-1111-111111111111","app_id":"22222222-2222-2222-2222-222222222222","display_name":"mi","service_principal_type":"ManagedIdentity","account_enabled":true,"ownership":"managed_identity","is_managed_identity":true,"credentials":[{"credential_type":"certificate","held_on":"service_principal","platform_managed":true,"display_name":null,"usage":"Verify","expired":false,"has_expiry":true}],"federated_identity_credentials":[],"credential_count":0,"federated_identity_credential_count":0,"uses_managed_identity":true,"uses_federated_credential":false,"uses_certificate":false,"uses_secret":false},{"id":"11111111-1111-1111-1111-111111111111","app_id":"22222222-2222-2222-2222-222222222222","display_name":"Microsoft Graph","service_principal_type":"Application","account_enabled":true,"ownership":"microsoft_first_party","is_managed_identity":false,"credentials":[],"federated_identity_credentials":[],"credential_count":0,"federated_identity_credential_count":0,"uses_managed_identity":false,"uses_federated_credential":false,"uses_certificate":false,"uses_secret":false},{"id":"11111111-1111-1111-1111-111111111111","app_id":"22222222-2222-2222-2222-222222222222","display_name":"saml sso","service_principal_type":"Application","account_enabled":true,"ownership":"this_tenant","is_managed_identity":false,"credentials":[{"credential_type":"certificate","held_on":"service_principal","platform_managed":false,"display_name":null,"usage":"Sign","expired":false,"has_expiry":true},{"credential_type":"certificate","held_on":"service_principal","platform_managed":false,"display_name":null,"usage":"Verify","expired":false,"has_expiry":true},{"credential_type":"password","held_on":"service_principal","platform_managed":false,"display_name":"CN=Microsoft Azure Federated SSO Certificate","usage":null,"expired":false,"has_expiry":true}],"federated_identity_credentials":[],"credential_count":3,"federated_identity_credential_count":0,"uses_managed_identity":false,"uses_federated_credential":false,"uses_certificate":true,"uses_secret":true},{"id":"11111111-1111-1111-1111-111111111111","app_id":"22222222-2222-2222-2222-222222222222","display_name":"token encryption","service_principal_type":"Application","account_enabled":true,"ownership":"this_tenant","is_managed_identity":false,"credentials":[{"credential_type":"certificate","held_on":"application","platform_managed":false,"display_name":null,"usage":"Encrypt","expired":false,"has_expiry":true}],"federated_identity_credentials":[],"credential_count":1,"federated_identity_credential_count":0,"uses_managed_identity":false,"uses_federated_credential":false,"uses_certificate":true,"uses_secret":false},{"id":"11111111-1111-1111-1111-111111111111","app_id":"22222222-2222-2222-2222-222222222222","display_name":"old job","service_principal_type":"Application","account_enabled":true,"ownership":"this_tenant","is_managed_identity":false,"credentials":[{"credential_type":"password","held_on":"application","platform_managed":false,"display_name":null,"usage":null,"expired":true,"has_expiry":true}],"federated_identity_credentials":[],"credential_count":1,"federated_identity_credential_count":0,"uses_managed_identity":false,"uses_federated_credential":false,"uses_certificate":false,"uses_secret":true},{"id":"11111111-1111-1111-1111-111111111111","app_id":"22222222-2222-2222-2222-222222222222","display_name":"batch job","service_principal_type":"Application","account_enabled":false,"ownership":"this_tenant","is_managed_identity":false,"credentials":[{"credential_type":"password","held_on":"application","platform_managed":false,"display_name":"prod {primary}","usage":null,"expired":false,"has_expiry":true}],"federated_identity_credentials":[],"credential_count":1,"federated_identity_credential_count":0,"uses_managed_identity":false,"uses_federated_credential":false,"uses_certificate":false,"uses_secret":true}],"applications_without_service_principal":[]},"summary":{"total_service_principals":7}}}'
+
+  - name: pretty_printed
+    expect: PASS
+    artifact: |
+      {
+        "metadata": {
+          "evidence_set": {
+            "reference_id": "EVD-AZURE-ENTRA-SERVICE-PRINCIPALS"
+          },
+          "exit_code": 0,
+          "status": "success"
+        },
+        "payload": {
+          "metadata": {
+            "api_failures": [],
+            "partial_failure": false
+          },
+          "results": {
+            "applications_without_service_principal": [],
+            "service_principals": [
+              {
+                "account_enabled": true,
+                "app_id": "22222222-2222-2222-2222-222222222222",
+                "credential_count": 0,
+                "credentials": [],
+                "display_name": "deploy",
+                "federated_identity_credential_count": 1,
+                "federated_identity_credentials": [
+                  {
+                    "audiences": [
+                      "api://AzureADTokenExchange"
+                    ],
+                    "issuer": "https://token.actions.githubusercontent.com",
+                    "name": "gh",
+                    "subject": "repo:o/r:ref:refs/heads/main"
+                  }
+                ],
+                "id": "11111111-1111-1111-1111-111111111111",
+                "is_managed_identity": false,
+                "ownership": "this_tenant",
+                "service_principal_type": "Application",
+                "uses_certificate": false,
+                "uses_federated_credential": true,
+                "uses_managed_identity": false,
+                "uses_secret": false
+              },
+              {
+                "account_enabled": true,
+                "app_id": "22222222-2222-2222-2222-222222222222",
+                "credential_count": 0,
+                "credentials": [
+                  {
+                    "credential_type": "certificate",
+                    "display_name": null,
+                    "expired": false,
+                    "has_expiry": true,
+                    "held_on": "service_principal",
+                    "platform_managed": true,
+                    "usage": "Verify"
+                  }
+                ],
+                "display_name": "mi",
+                "federated_identity_credential_count": 0,
+                "federated_identity_credentials": [],
+                "id": "11111111-1111-1111-1111-111111111111",
+                "is_managed_identity": true,
+                "ownership": "managed_identity",
+                "service_principal_type": "ManagedIdentity",
+                "uses_certificate": false,
+                "uses_federated_credential": false,
+                "uses_managed_identity": true,
+                "uses_secret": false
+              },
+              {
+                "account_enabled": true,
+                "app_id": "22222222-2222-2222-2222-222222222222",
+                "credential_count": 0,
+                "credentials": [],
+                "display_name": "Microsoft Graph",
+                "federated_identity_credential_count": 0,
+                "federated_identity_credentials": [],
+                "id": "11111111-1111-1111-1111-111111111111",
+                "is_managed_identity": false,
+                "ownership": "microsoft_first_party",
+                "service_principal_type": "Application",
+                "uses_certificate": false,
+                "uses_federated_credential": false,
+                "uses_managed_identity": false,
+                "uses_secret": false
+              },
+              {
+                "account_enabled": true,
+                "app_id": "22222222-2222-2222-2222-222222222222",
+                "credential_count": 3,
+                "credentials": [
+                  {
+                    "credential_type": "certificate",
+                    "display_name": null,
+                    "expired": false,
+                    "has_expiry": true,
+                    "held_on": "service_principal",
+                    "platform_managed": false,
+                    "usage": "Sign"
+                  },
+                  {
+                    "credential_type": "certificate",
+                    "display_name": null,
+                    "expired": false,
+                    "has_expiry": true,
+                    "held_on": "service_principal",
+                    "platform_managed": false,
+                    "usage": "Verify"
+                  },
+                  {
+                    "credential_type": "password",
+                    "display_name": "CN=Microsoft Azure Federated SSO Certificate",
+                    "expired": false,
+                    "has_expiry": true,
+                    "held_on": "service_principal",
+                    "platform_managed": false,
+                    "usage": null
+                  }
+                ],
+                "display_name": "saml sso",
+                "federated_identity_credential_count": 0,
+                "federated_identity_credentials": [],
+                "id": "11111111-1111-1111-1111-111111111111",
+                "is_managed_identity": false,
+                "ownership": "this_tenant",
+                "service_principal_type": "Application",
+                "uses_certificate": true,
+                "uses_federated_credential": false,
+                "uses_managed_identity": false,
+                "uses_secret": true
+              },
+              {
+                "account_enabled": true,
+                "app_id": "22222222-2222-2222-2222-222222222222",
+                "credential_count": 1,
+                "credentials": [
+                  {
+                    "credential_type": "certificate",
+                    "display_name": null,
+                    "expired": false,
+                    "has_expiry": true,
+                    "held_on": "application",
+                    "platform_managed": false,
+                    "usage": "Encrypt"
+                  }
+                ],
+                "display_name": "token encryption",
+                "federated_identity_credential_count": 0,
+                "federated_identity_credentials": [],
+                "id": "11111111-1111-1111-1111-111111111111",
+                "is_managed_identity": false,
+                "ownership": "this_tenant",
+                "service_principal_type": "Application",
+                "uses_certificate": true,
+                "uses_federated_credential": false,
+                "uses_managed_identity": false,
+                "uses_secret": false
+              },
+              {
+                "account_enabled": true,
+                "app_id": "22222222-2222-2222-2222-222222222222",
+                "credential_count": 1,
+                "credentials": [
+                  {
+                    "credential_type": "password",
+                    "display_name": null,
+                    "expired": true,
+                    "has_expiry": true,
+                    "held_on": "application",
+                    "platform_managed": false,
+                    "usage": null
+                  }
+                ],
+                "display_name": "old job",
+                "federated_identity_credential_count": 0,
+                "federated_identity_credentials": [],
+                "id": "11111111-1111-1111-1111-111111111111",
+                "is_managed_identity": false,
+                "ownership": "this_tenant",
+                "service_principal_type": "Application",
+                "uses_certificate": false,
+                "uses_federated_credential": false,
+                "uses_managed_identity": false,
+                "uses_secret": true
+              },
+              {
+                "account_enabled": false,
+                "app_id": "22222222-2222-2222-2222-222222222222",
+                "credential_count": 1,
+                "credentials": [
+                  {
+                    "credential_type": "password",
+                    "display_name": "prod {primary}",
+                    "expired": false,
+                    "has_expiry": true,
+                    "held_on": "application",
+                    "platform_managed": false,
+                    "usage": null
+                  }
+                ],
+                "display_name": "batch job",
+                "federated_identity_credential_count": 0,
+                "federated_identity_credentials": [],
+                "id": "11111111-1111-1111-1111-111111111111",
+                "is_managed_identity": false,
+                "ownership": "this_tenant",
+                "service_principal_type": "Application",
+                "uses_certificate": false,
+                "uses_federated_credential": false,
+                "uses_managed_identity": false,
+                "uses_secret": true
+              }
+            ]
+          },
+          "summary": {
+            "total_service_principals": 7
+          }
+        },
+        "schema_version": "1.0"
+      }
+
+  - name: secret_beside_federation
+    expect: PASS
+    note: 'uses federation; the leftover secret is for entra_sp_no_live_client_secrets to catch'
+    artifact: '{"schema_version":"1.0","metadata":{"exit_code":0,"status":"success","evidence_set":{"reference_id":"EVD-AZURE-ENTRA-SERVICE-PRINCIPALS"}},"payload":{"metadata":{"partial_failure":false,"api_failures":[]},"results":{"service_principals":[{"id":"11111111-1111-1111-1111-111111111111","app_id":"22222222-2222-2222-2222-222222222222","display_name":"deploy","service_principal_type":"Application","account_enabled":true,"ownership":"this_tenant","is_managed_identity":false,"credentials":[{"credential_type":"password","held_on":"application","platform_managed":false,"display_name":null,"usage":null,"expired":false,"has_expiry":true}],"federated_identity_credentials":[{"name":"gh","issuer":"https://token.actions.githubusercontent.com","subject":"repo:o/r:ref:refs/heads/main","audiences":["api://AzureADTokenExchange"]}],"credential_count":0,"federated_identity_credential_count":1,"uses_managed_identity":false,"uses_federated_credential":true,"uses_certificate":false,"uses_secret":true}],"applications_without_service_principal":[]},"summary":{"total_service_principals":1}}}'
+
+  - name: app_secret_no_federation
+    expect: FAIL
+    note: 'a brace in the secret name must not hide it'
+    artifact: '{"schema_version":"1.0","metadata":{"exit_code":0,"status":"success","evidence_set":{"reference_id":"EVD-AZURE-ENTRA-SERVICE-PRINCIPALS"}},"payload":{"metadata":{"partial_failure":false,"api_failures":[]},"results":{"service_principals":[{"id":"11111111-1111-1111-1111-111111111111","app_id":"22222222-2222-2222-2222-222222222222","display_name":"deploy","service_principal_type":"Application","account_enabled":true,"ownership":"this_tenant","is_managed_identity":false,"credentials":[],"federated_identity_credentials":[{"name":"gh","issuer":"https://token.actions.githubusercontent.com","subject":"repo:o/r:ref:refs/heads/main","audiences":["api://AzureADTokenExchange"]}],"credential_count":0,"federated_identity_credential_count":1,"uses_managed_identity":false,"uses_federated_credential":true,"uses_certificate":false,"uses_secret":false},{"id":"11111111-1111-1111-1111-111111111111","app_id":"22222222-2222-2222-2222-222222222222","display_name":"mi","service_principal_type":"ManagedIdentity","account_enabled":true,"ownership":"managed_identity","is_managed_identity":true,"credentials":[{"credential_type":"certificate","held_on":"service_principal","platform_managed":true,"display_name":null,"usage":"Verify","expired":false,"has_expiry":true}],"federated_identity_credentials":[],"credential_count":0,"federated_identity_credential_count":0,"uses_managed_identity":true,"uses_federated_credential":false,"uses_certificate":false,"uses_secret":false},{"id":"11111111-1111-1111-1111-111111111111","app_id":"22222222-2222-2222-2222-222222222222","display_name":"Microsoft Graph","service_principal_type":"Application","account_enabled":true,"ownership":"microsoft_first_party","is_managed_identity":false,"credentials":[],"federated_identity_credentials":[],"credential_count":0,"federated_identity_credential_count":0,"uses_managed_identity":false,"uses_federated_credential":false,"uses_certificate":false,"uses_secret":false},{"id":"11111111-1111-1111-1111-111111111111","app_id":"22222222-2222-2222-2222-222222222222","display_name":"saml sso","service_principal_type":"Application","account_enabled":true,"ownership":"this_tenant","is_managed_identity":false,"credentials":[{"credential_type":"certificate","held_on":"service_principal","platform_managed":false,"display_name":null,"usage":"Sign","expired":false,"has_expiry":true},{"credential_type":"certificate","held_on":"service_principal","platform_managed":false,"display_name":null,"usage":"Verify","expired":false,"has_expiry":true},{"credential_type":"password","held_on":"service_principal","platform_managed":false,"display_name":"CN=Microsoft Azure Federated SSO Certificate","usage":null,"expired":false,"has_expiry":true}],"federated_identity_credentials":[],"credential_count":3,"federated_identity_credential_count":0,"uses_managed_identity":false,"uses_federated_credential":false,"uses_certificate":true,"uses_secret":true},{"id":"11111111-1111-1111-1111-111111111111","app_id":"22222222-2222-2222-2222-222222222222","display_name":"token encryption","service_principal_type":"Application","account_enabled":true,"ownership":"this_tenant","is_managed_identity":false,"credentials":[{"credential_type":"certificate","held_on":"application","platform_managed":false,"display_name":null,"usage":"Encrypt","expired":false,"has_expiry":true}],"federated_identity_credentials":[],"credential_count":1,"federated_identity_credential_count":0,"uses_managed_identity":false,"uses_federated_credential":false,"uses_certificate":true,"uses_secret":false},{"id":"11111111-1111-1111-1111-111111111111","app_id":"22222222-2222-2222-2222-222222222222","display_name":"old job","service_principal_type":"Application","account_enabled":true,"ownership":"this_tenant","is_managed_identity":false,"credentials":[{"credential_type":"password","held_on":"application","platform_managed":false,"display_name":null,"usage":null,"expired":true,"has_expiry":true}],"federated_identity_credentials":[],"credential_count":1,"federated_identity_credential_count":0,"uses_managed_identity":false,"uses_federated_credential":false,"uses_certificate":false,"uses_secret":true},{"id":"11111111-1111-1111-1111-111111111111","app_id":"22222222-2222-2222-2222-222222222222","display_name":"batch job","service_principal_type":"Application","account_enabled":false,"ownership":"this_tenant","is_managed_identity":false,"credentials":[{"credential_type":"password","held_on":"application","platform_managed":false,"display_name":"prod {primary}","usage":null,"expired":false,"has_expiry":true}],"federated_identity_credentials":[],"credential_count":1,"federated_identity_credential_count":0,"uses_managed_identity":false,"uses_federated_credential":false,"uses_certificate":false,"uses_secret":true},{"id":"11111111-1111-1111-1111-111111111111","app_id":"22222222-2222-2222-2222-222222222222","display_name":"batch job","service_principal_type":"Application","account_enabled":true,"ownership":"this_tenant","is_managed_identity":false,"credentials":[{"credential_type":"password","held_on":"application","platform_managed":false,"display_name":"prod {primary}","usage":null,"expired":false,"has_expiry":true}],"federated_identity_credentials":[],"credential_count":1,"federated_identity_credential_count":0,"uses_managed_identity":false,"uses_federated_credential":false,"uses_certificate":false,"uses_secret":true}],"applications_without_service_principal":[]},"summary":{"total_service_principals":8}}}'
+
+  - name: app_certificate_no_federation
+    expect: FAIL
+    artifact: '{"schema_version":"1.0","metadata":{"exit_code":0,"status":"success","evidence_set":{"reference_id":"EVD-AZURE-ENTRA-SERVICE-PRINCIPALS"}},"payload":{"metadata":{"partial_failure":false,"api_failures":[]},"results":{"service_principals":[{"id":"11111111-1111-1111-1111-111111111111","app_id":"22222222-2222-2222-2222-222222222222","display_name":"deploy","service_principal_type":"Application","account_enabled":true,"ownership":"this_tenant","is_managed_identity":false,"credentials":[],"federated_identity_credentials":[{"name":"gh","issuer":"https://token.actions.githubusercontent.com","subject":"repo:o/r:ref:refs/heads/main","audiences":["api://AzureADTokenExchange"]}],"credential_count":0,"federated_identity_credential_count":1,"uses_managed_identity":false,"uses_federated_credential":true,"uses_certificate":false,"uses_secret":false},{"id":"11111111-1111-1111-1111-111111111111","app_id":"22222222-2222-2222-2222-222222222222","display_name":"mi","service_principal_type":"ManagedIdentity","account_enabled":true,"ownership":"managed_identity","is_managed_identity":true,"credentials":[{"credential_type":"certificate","held_on":"service_principal","platform_managed":true,"display_name":null,"usage":"Verify","expired":false,"has_expiry":true}],"federated_identity_credentials":[],"credential_count":0,"federated_identity_credential_count":0,"uses_managed_identity":true,"uses_federated_credential":false,"uses_certificate":false,"uses_secret":false},{"id":"11111111-1111-1111-1111-111111111111","app_id":"22222222-2222-2222-2222-222222222222","display_name":"Microsoft Graph","service_principal_type":"Application","account_enabled":true,"ownership":"microsoft_first_party","is_managed_identity":false,"credentials":[],"federated_identity_credentials":[],"credential_count":0,"federated_identity_credential_count":0,"uses_managed_identity":false,"uses_federated_credential":false,"uses_certificate":false,"uses_secret":false},{"id":"11111111-1111-1111-1111-111111111111","app_id":"22222222-2222-2222-2222-222222222222","display_name":"saml sso","service_principal_type":"Application","account_enabled":true,"ownership":"this_tenant","is_managed_identity":false,"credentials":[{"credential_type":"certificate","held_on":"service_principal","platform_managed":false,"display_name":null,"usage":"Sign","expired":false,"has_expiry":true},{"credential_type":"certificate","held_on":"service_principal","platform_managed":false,"display_name":null,"usage":"Verify","expired":false,"has_expiry":true},{"credential_type":"password","held_on":"service_principal","platform_managed":false,"display_name":"CN=Microsoft Azure Federated SSO Certificate","usage":null,"expired":false,"has_expiry":true}],"federated_identity_credentials":[],"credential_count":3,"federated_identity_credential_count":0,"uses_managed_identity":false,"uses_federated_credential":false,"uses_certificate":true,"uses_secret":true},{"id":"11111111-1111-1111-1111-111111111111","app_id":"22222222-2222-2222-2222-222222222222","display_name":"token encryption","service_principal_type":"Application","account_enabled":true,"ownership":"this_tenant","is_managed_identity":false,"credentials":[{"credential_type":"certificate","held_on":"application","platform_managed":false,"display_name":null,"usage":"Encrypt","expired":false,"has_expiry":true}],"federated_identity_credentials":[],"credential_count":1,"federated_identity_credential_count":0,"uses_managed_identity":false,"uses_federated_credential":false,"uses_certificate":true,"uses_secret":false},{"id":"11111111-1111-1111-1111-111111111111","app_id":"22222222-2222-2222-2222-222222222222","display_name":"old job","service_principal_type":"Application","account_enabled":true,"ownership":"this_tenant","is_managed_identity":false,"credentials":[{"credential_type":"password","held_on":"application","platform_managed":false,"display_name":null,"usage":null,"expired":true,"has_expiry":true}],"federated_identity_credentials":[],"credential_count":1,"federated_identity_credential_count":0,"uses_managed_identity":false,"uses_federated_credential":false,"uses_certificate":false,"uses_secret":true},{"id":"11111111-1111-1111-1111-111111111111","app_id":"22222222-2222-2222-2222-222222222222","display_name":"batch job","service_principal_type":"Application","account_enabled":false,"ownership":"this_tenant","is_managed_identity":false,"credentials":[{"credential_type":"password","held_on":"application","platform_managed":false,"display_name":"prod {primary}","usage":null,"expired":false,"has_expiry":true}],"federated_identity_credentials":[],"credential_count":1,"federated_identity_credential_count":0,"uses_managed_identity":false,"uses_federated_credential":false,"uses_certificate":false,"uses_secret":true},{"id":"11111111-1111-1111-1111-111111111111","app_id":"22222222-2222-2222-2222-222222222222","display_name":"cert job","service_principal_type":"Application","account_enabled":true,"ownership":"this_tenant","is_managed_identity":false,"credentials":[{"credential_type":"certificate","held_on":"application","platform_managed":false,"display_name":null,"usage":"Verify","expired":false,"has_expiry":true}],"federated_identity_credentials":[],"credential_count":1,"federated_identity_credential_count":0,"uses_managed_identity":false,"uses_federated_credential":false,"uses_certificate":true,"uses_secret":false}],"applications_without_service_principal":[]},"summary":{"total_service_principals":8}}}'
+
+  - name: sp_held_secret_other_tenant_app
+    expect: FAIL
+    note: 'a secret on the service principal itself signs in to this tenant whoever owns the app'
+    artifact: '{"schema_version":"1.0","metadata":{"exit_code":0,"status":"success","evidence_set":{"reference_id":"EVD-AZURE-ENTRA-SERVICE-PRINCIPALS"}},"payload":{"metadata":{"partial_failure":false,"api_failures":[]},"results":{"service_principals":[{"id":"11111111-1111-1111-1111-111111111111","app_id":"22222222-2222-2222-2222-222222222222","display_name":"deploy","service_principal_type":"Application","account_enabled":true,"ownership":"this_tenant","is_managed_identity":false,"credentials":[],"federated_identity_credentials":[{"name":"gh","issuer":"https://token.actions.githubusercontent.com","subject":"repo:o/r:ref:refs/heads/main","audiences":["api://AzureADTokenExchange"]}],"credential_count":0,"federated_identity_credential_count":1,"uses_managed_identity":false,"uses_federated_credential":true,"uses_certificate":false,"uses_secret":false},{"id":"11111111-1111-1111-1111-111111111111","app_id":"22222222-2222-2222-2222-222222222222","display_name":"mi","service_principal_type":"ManagedIdentity","account_enabled":true,"ownership":"managed_identity","is_managed_identity":true,"credentials":[{"credential_type":"certificate","held_on":"service_principal","platform_managed":true,"display_name":null,"usage":"Verify","expired":false,"has_expiry":true}],"federated_identity_credentials":[],"credential_count":0,"federated_identity_credential_count":0,"uses_managed_identity":true,"uses_federated_credential":false,"uses_certificate":false,"uses_secret":false},{"id":"11111111-1111-1111-1111-111111111111","app_id":"22222222-2222-2222-2222-222222222222","display_name":"Microsoft Graph","service_principal_type":"Application","account_enabled":true,"ownership":"microsoft_first_party","is_managed_identity":false,"credentials":[],"federated_identity_credentials":[],"credential_count":0,"federated_identity_credential_count":0,"uses_managed_identity":false,"uses_federated_credential":false,"uses_certificate":false,"uses_secret":false},{"id":"11111111-1111-1111-1111-111111111111","app_id":"22222222-2222-2222-2222-222222222222","display_name":"saml sso","service_principal_type":"Application","account_enabled":true,"ownership":"this_tenant","is_managed_identity":false,"credentials":[{"credential_type":"certificate","held_on":"service_principal","platform_managed":false,"display_name":null,"usage":"Sign","expired":false,"has_expiry":true},{"credential_type":"certificate","held_on":"service_principal","platform_managed":false,"display_name":null,"usage":"Verify","expired":false,"has_expiry":true},{"credential_type":"password","held_on":"service_principal","platform_managed":false,"display_name":"CN=Microsoft Azure Federated SSO Certificate","usage":null,"expired":false,"has_expiry":true}],"federated_identity_credentials":[],"credential_count":3,"federated_identity_credential_count":0,"uses_managed_identity":false,"uses_federated_credential":false,"uses_certificate":true,"uses_secret":true},{"id":"11111111-1111-1111-1111-111111111111","app_id":"22222222-2222-2222-2222-222222222222","display_name":"token encryption","service_principal_type":"Application","account_enabled":true,"ownership":"this_tenant","is_managed_identity":false,"credentials":[{"credential_type":"certificate","held_on":"application","platform_managed":false,"display_name":null,"usage":"Encrypt","expired":false,"has_expiry":true}],"federated_identity_credentials":[],"credential_count":1,"federated_identity_credential_count":0,"uses_managed_identity":false,"uses_federated_credential":false,"uses_certificate":true,"uses_secret":false},{"id":"11111111-1111-1111-1111-111111111111","app_id":"22222222-2222-2222-2222-222222222222","display_name":"old job","service_principal_type":"Application","account_enabled":true,"ownership":"this_tenant","is_managed_identity":false,"credentials":[{"credential_type":"password","held_on":"application","platform_managed":false,"display_name":null,"usage":null,"expired":true,"has_expiry":true}],"federated_identity_credentials":[],"credential_count":1,"federated_identity_credential_count":0,"uses_managed_identity":false,"uses_federated_credential":false,"uses_certificate":false,"uses_secret":true},{"id":"11111111-1111-1111-1111-111111111111","app_id":"22222222-2222-2222-2222-222222222222","display_name":"batch job","service_principal_type":"Application","account_enabled":false,"ownership":"this_tenant","is_managed_identity":false,"credentials":[{"credential_type":"password","held_on":"application","platform_managed":false,"display_name":"prod {primary}","usage":null,"expired":false,"has_expiry":true}],"federated_identity_credentials":[],"credential_count":1,"federated_identity_credential_count":0,"uses_managed_identity":false,"uses_federated_credential":false,"uses_certificate":false,"uses_secret":true},{"id":"11111111-1111-1111-1111-111111111111","app_id":"22222222-2222-2222-2222-222222222222","display_name":"vendor","service_principal_type":"Application","account_enabled":true,"ownership":"other_tenant","is_managed_identity":false,"credentials":[{"credential_type":"password","held_on":"service_principal","platform_managed":false,"display_name":null,"usage":null,"expired":false,"has_expiry":true}],"federated_identity_credentials":[],"credential_count":0,"federated_identity_credential_count":0,"uses_managed_identity":false,"uses_federated_credential":false,"uses_certificate":false,"uses_secret":true}],"applications_without_service_principal":[]},"summary":{"total_service_principals":8}}}'
+
+  - name: sp_held_verify_certificate
+    expect: FAIL
+    artifact: '{"schema_version":"1.0","metadata":{"exit_code":0,"status":"success","evidence_set":{"reference_id":"EVD-AZURE-ENTRA-SERVICE-PRINCIPALS"}},"payload":{"metadata":{"partial_failure":false,"api_failures":[]},"results":{"service_principals":[{"id":"11111111-1111-1111-1111-111111111111","app_id":"22222222-2222-2222-2222-222222222222","display_name":"deploy","service_principal_type":"Application","account_enabled":true,"ownership":"this_tenant","is_managed_identity":false,"credentials":[],"federated_identity_credentials":[{"name":"gh","issuer":"https://token.actions.githubusercontent.com","subject":"repo:o/r:ref:refs/heads/main","audiences":["api://AzureADTokenExchange"]}],"credential_count":0,"federated_identity_credential_count":1,"uses_managed_identity":false,"uses_federated_credential":true,"uses_certificate":false,"uses_secret":false},{"id":"11111111-1111-1111-1111-111111111111","app_id":"22222222-2222-2222-2222-222222222222","display_name":"mi","service_principal_type":"ManagedIdentity","account_enabled":true,"ownership":"managed_identity","is_managed_identity":true,"credentials":[{"credential_type":"certificate","held_on":"service_principal","platform_managed":true,"display_name":null,"usage":"Verify","expired":false,"has_expiry":true}],"federated_identity_credentials":[],"credential_count":0,"federated_identity_credential_count":0,"uses_managed_identity":true,"uses_federated_credential":false,"uses_certificate":false,"uses_secret":false},{"id":"11111111-1111-1111-1111-111111111111","app_id":"22222222-2222-2222-2222-222222222222","display_name":"Microsoft Graph","service_principal_type":"Application","account_enabled":true,"ownership":"microsoft_first_party","is_managed_identity":false,"credentials":[],"federated_identity_credentials":[],"credential_count":0,"federated_identity_credential_count":0,"uses_managed_identity":false,"uses_federated_credential":false,"uses_certificate":false,"uses_secret":false},{"id":"11111111-1111-1111-1111-111111111111","app_id":"22222222-2222-2222-2222-222222222222","display_name":"saml sso","service_principal_type":"Application","account_enabled":true,"ownership":"this_tenant","is_managed_identity":false,"credentials":[{"credential_type":"certificate","held_on":"service_principal","platform_managed":false,"display_name":null,"usage":"Sign","expired":false,"has_expiry":true},{"credential_type":"certificate","held_on":"service_principal","platform_managed":false,"display_name":null,"usage":"Verify","expired":false,"has_expiry":true},{"credential_type":"password","held_on":"service_principal","platform_managed":false,"display_name":"CN=Microsoft Azure Federated SSO Certificate","usage":null,"expired":false,"has_expiry":true}],"federated_identity_credentials":[],"credential_count":3,"federated_identity_credential_count":0,"uses_managed_identity":false,"uses_federated_credential":false,"uses_certificate":true,"uses_secret":true},{"id":"11111111-1111-1111-1111-111111111111","app_id":"22222222-2222-2222-2222-222222222222","display_name":"token encryption","service_principal_type":"Application","account_enabled":true,"ownership":"this_tenant","is_managed_identity":false,"credentials":[{"credential_type":"certificate","held_on":"application","platform_managed":false,"display_name":null,"usage":"Encrypt","expired":false,"has_expiry":true}],"federated_identity_credentials":[],"credential_count":1,"federated_identity_credential_count":0,"uses_managed_identity":false,"uses_federated_credential":false,"uses_certificate":true,"uses_secret":false},{"id":"11111111-1111-1111-1111-111111111111","app_id":"22222222-2222-2222-2222-222222222222","display_name":"old job","service_principal_type":"Application","account_enabled":true,"ownership":"this_tenant","is_managed_identity":false,"credentials":[{"credential_type":"password","held_on":"application","platform_managed":false,"display_name":null,"usage":null,"expired":true,"has_expiry":true}],"federated_identity_credentials":[],"credential_count":1,"federated_identity_credential_count":0,"uses_managed_identity":false,"uses_federated_credential":false,"uses_certificate":false,"uses_secret":true},{"id":"11111111-1111-1111-1111-111111111111","app_id":"22222222-2222-2222-2222-222222222222","display_name":"batch job","service_principal_type":"Application","account_enabled":false,"ownership":"this_tenant","is_managed_identity":false,"credentials":[{"credential_type":"password","held_on":"application","platform_managed":false,"display_name":"prod {primary}","usage":null,"expired":false,"has_expiry":true}],"federated_identity_credentials":[],"credential_count":1,"federated_identity_credential_count":0,"uses_managed_identity":false,"uses_federated_credential":false,"uses_certificate":false,"uses_secret":true},{"id":"11111111-1111-1111-1111-111111111111","app_id":"22222222-2222-2222-2222-222222222222","display_name":"sp cert","service_principal_type":"Application","account_enabled":true,"ownership":"this_tenant","is_managed_identity":false,"credentials":[{"credential_type":"certificate","held_on":"service_principal","platform_managed":false,"display_name":null,"usage":"Verify","expired":false,"has_expiry":true}],"federated_identity_credentials":[],"credential_count":1,"federated_identity_credential_count":0,"uses_managed_identity":false,"uses_federated_credential":false,"uses_certificate":true,"uses_secret":false}],"applications_without_service_principal":[]},"summary":{"total_service_principals":8}}}'
+
+  - name: saml_app_with_app_secret
+    expect: FAIL
+    note: 'the SAML signing-key exemption covers service-principal keys only'
+    artifact: '{"schema_version":"1.0","metadata":{"exit_code":0,"status":"success","evidence_set":{"reference_id":"EVD-AZURE-ENTRA-SERVICE-PRINCIPALS"}},"payload":{"metadata":{"partial_failure":false,"api_failures":[]},"results":{"service_principals":[{"id":"11111111-1111-1111-1111-111111111111","app_id":"22222222-2222-2222-2222-222222222222","display_name":"deploy","service_principal_type":"Application","account_enabled":true,"ownership":"this_tenant","is_managed_identity":false,"credentials":[],"federated_identity_credentials":[{"name":"gh","issuer":"https://token.actions.githubusercontent.com","subject":"repo:o/r:ref:refs/heads/main","audiences":["api://AzureADTokenExchange"]}],"credential_count":0,"federated_identity_credential_count":1,"uses_managed_identity":false,"uses_federated_credential":true,"uses_certificate":false,"uses_secret":false},{"id":"11111111-1111-1111-1111-111111111111","app_id":"22222222-2222-2222-2222-222222222222","display_name":"mi","service_principal_type":"ManagedIdentity","account_enabled":true,"ownership":"managed_identity","is_managed_identity":true,"credentials":[{"credential_type":"certificate","held_on":"service_principal","platform_managed":true,"display_name":null,"usage":"Verify","expired":false,"has_expiry":true}],"federated_identity_credentials":[],"credential_count":0,"federated_identity_credential_count":0,"uses_managed_identity":true,"uses_federated_credential":false,"uses_certificate":false,"uses_secret":false},{"id":"11111111-1111-1111-1111-111111111111","app_id":"22222222-2222-2222-2222-222222222222","display_name":"Microsoft Graph","service_principal_type":"Application","account_enabled":true,"ownership":"microsoft_first_party","is_managed_identity":false,"credentials":[],"federated_identity_credentials":[],"credential_count":0,"federated_identity_credential_count":0,"uses_managed_identity":false,"uses_federated_credential":false,"uses_certificate":false,"uses_secret":false},{"id":"11111111-1111-1111-1111-111111111111","app_id":"22222222-2222-2222-2222-222222222222","display_name":"saml sso","service_principal_type":"Application","account_enabled":true,"ownership":"this_tenant","is_managed_identity":false,"credentials":[{"credential_type":"certificate","held_on":"service_principal","platform_managed":false,"display_name":null,"usage":"Sign","expired":false,"has_expiry":true},{"credential_type":"certificate","held_on":"service_principal","platform_managed":false,"display_name":null,"usage":"Verify","expired":false,"has_expiry":true},{"credential_type":"password","held_on":"service_principal","platform_managed":false,"display_name":"CN=Microsoft Azure Federated SSO Certificate","usage":null,"expired":false,"has_expiry":true}],"federated_identity_credentials":[],"credential_count":3,"federated_identity_credential_count":0,"uses_managed_identity":false,"uses_federated_credential":false,"uses_certificate":true,"uses_secret":true},{"id":"11111111-1111-1111-1111-111111111111","app_id":"22222222-2222-2222-2222-222222222222","display_name":"token encryption","service_principal_type":"Application","account_enabled":true,"ownership":"this_tenant","is_managed_identity":false,"credentials":[{"credential_type":"certificate","held_on":"application","platform_managed":false,"display_name":null,"usage":"Encrypt","expired":false,"has_expiry":true}],"federated_identity_credentials":[],"credential_count":1,"federated_identity_credential_count":0,"uses_managed_identity":false,"uses_federated_credential":false,"uses_certificate":true,"uses_secret":false},{"id":"11111111-1111-1111-1111-111111111111","app_id":"22222222-2222-2222-2222-222222222222","display_name":"old job","service_principal_type":"Application","account_enabled":true,"ownership":"this_tenant","is_managed_identity":false,"credentials":[{"credential_type":"password","held_on":"application","platform_managed":false,"display_name":null,"usage":null,"expired":true,"has_expiry":true}],"federated_identity_credentials":[],"credential_count":1,"federated_identity_credential_count":0,"uses_managed_identity":false,"uses_federated_credential":false,"uses_certificate":false,"uses_secret":true},{"id":"11111111-1111-1111-1111-111111111111","app_id":"22222222-2222-2222-2222-222222222222","display_name":"batch job","service_principal_type":"Application","account_enabled":false,"ownership":"this_tenant","is_managed_identity":false,"credentials":[{"credential_type":"password","held_on":"application","platform_managed":false,"display_name":"prod {primary}","usage":null,"expired":false,"has_expiry":true}],"federated_identity_credentials":[],"credential_count":1,"federated_identity_credential_count":0,"uses_managed_identity":false,"uses_federated_credential":false,"uses_certificate":false,"uses_secret":true},{"id":"11111111-1111-1111-1111-111111111111","app_id":"22222222-2222-2222-2222-222222222222","display_name":"saml sso","service_principal_type":"Application","account_enabled":true,"ownership":"this_tenant","is_managed_identity":false,"credentials":[{"credential_type":"certificate","held_on":"service_principal","platform_managed":false,"display_name":null,"usage":"Sign","expired":false,"has_expiry":true},{"credential_type":"certificate","held_on":"service_principal","platform_managed":false,"display_name":null,"usage":"Verify","expired":false,"has_expiry":true},{"credential_type":"password","held_on":"service_principal","platform_managed":false,"display_name":"CN=Microsoft Azure Federated SSO Certificate","usage":null,"expired":false,"has_expiry":true},{"credential_type":"password","held_on":"application","platform_managed":false,"display_name":null,"usage":null,"expired":false,"has_expiry":true}],"federated_identity_credentials":[],"credential_count":3,"federated_identity_credential_count":0,"uses_managed_identity":false,"uses_federated_credential":false,"uses_certificate":true,"uses_secret":true}],"applications_without_service_principal":[]},"summary":{"total_service_principals":8}}}'
+
+  - name: saml_app_with_separate_sp_secret
+    expect: FAIL
+    note: 'only the signing key''s CN= password is exempt'
+    artifact: '{"schema_version":"1.0","metadata":{"exit_code":0,"status":"success","evidence_set":{"reference_id":"EVD-AZURE-ENTRA-SERVICE-PRINCIPALS"}},"payload":{"metadata":{"partial_failure":false,"api_failures":[]},"results":{"service_principals":[{"id":"11111111-1111-1111-1111-111111111111","app_id":"22222222-2222-2222-2222-222222222222","display_name":"deploy","service_principal_type":"Application","account_enabled":true,"ownership":"this_tenant","is_managed_identity":false,"credentials":[],"federated_identity_credentials":[{"name":"gh","issuer":"https://token.actions.githubusercontent.com","subject":"repo:o/r:ref:refs/heads/main","audiences":["api://AzureADTokenExchange"]}],"credential_count":0,"federated_identity_credential_count":1,"uses_managed_identity":false,"uses_federated_credential":true,"uses_certificate":false,"uses_secret":false},{"id":"11111111-1111-1111-1111-111111111111","app_id":"22222222-2222-2222-2222-222222222222","display_name":"mi","service_principal_type":"ManagedIdentity","account_enabled":true,"ownership":"managed_identity","is_managed_identity":true,"credentials":[{"credential_type":"certificate","held_on":"service_principal","platform_managed":true,"display_name":null,"usage":"Verify","expired":false,"has_expiry":true}],"federated_identity_credentials":[],"credential_count":0,"federated_identity_credential_count":0,"uses_managed_identity":true,"uses_federated_credential":false,"uses_certificate":false,"uses_secret":false},{"id":"11111111-1111-1111-1111-111111111111","app_id":"22222222-2222-2222-2222-222222222222","display_name":"Microsoft Graph","service_principal_type":"Application","account_enabled":true,"ownership":"microsoft_first_party","is_managed_identity":false,"credentials":[],"federated_identity_credentials":[],"credential_count":0,"federated_identity_credential_count":0,"uses_managed_identity":false,"uses_federated_credential":false,"uses_certificate":false,"uses_secret":false},{"id":"11111111-1111-1111-1111-111111111111","app_id":"22222222-2222-2222-2222-222222222222","display_name":"saml sso","service_principal_type":"Application","account_enabled":true,"ownership":"this_tenant","is_managed_identity":false,"credentials":[{"credential_type":"certificate","held_on":"service_principal","platform_managed":false,"display_name":null,"usage":"Sign","expired":false,"has_expiry":true},{"credential_type":"certificate","held_on":"service_principal","platform_managed":false,"display_name":null,"usage":"Verify","expired":false,"has_expiry":true},{"credential_type":"password","held_on":"service_principal","platform_managed":false,"display_name":"CN=Microsoft Azure Federated SSO Certificate","usage":null,"expired":false,"has_expiry":true}],"federated_identity_credentials":[],"credential_count":3,"federated_identity_credential_count":0,"uses_managed_identity":false,"uses_federated_credential":false,"uses_certificate":true,"uses_secret":true},{"id":"11111111-1111-1111-1111-111111111111","app_id":"22222222-2222-2222-2222-222222222222","display_name":"token encryption","service_principal_type":"Application","account_enabled":true,"ownership":"this_tenant","is_managed_identity":false,"credentials":[{"credential_type":"certificate","held_on":"application","platform_managed":false,"display_name":null,"usage":"Encrypt","expired":false,"has_expiry":true}],"federated_identity_credentials":[],"credential_count":1,"federated_identity_credential_count":0,"uses_managed_identity":false,"uses_federated_credential":false,"uses_certificate":true,"uses_secret":false},{"id":"11111111-1111-1111-1111-111111111111","app_id":"22222222-2222-2222-2222-222222222222","display_name":"old job","service_principal_type":"Application","account_enabled":true,"ownership":"this_tenant","is_managed_identity":false,"credentials":[{"credential_type":"password","held_on":"application","platform_managed":false,"display_name":null,"usage":null,"expired":true,"has_expiry":true}],"federated_identity_credentials":[],"credential_count":1,"federated_identity_credential_count":0,"uses_managed_identity":false,"uses_federated_credential":false,"uses_certificate":false,"uses_secret":true},{"id":"11111111-1111-1111-1111-111111111111","app_id":"22222222-2222-2222-2222-222222222222","display_name":"batch job","service_principal_type":"Application","account_enabled":false,"ownership":"this_tenant","is_managed_identity":false,"credentials":[{"credential_type":"password","held_on":"application","platform_managed":false,"display_name":"prod {primary}","usage":null,"expired":false,"has_expiry":true}],"federated_identity_credentials":[],"credential_count":1,"federated_identity_credential_count":0,"uses_managed_identity":false,"uses_federated_credential":false,"uses_certificate":false,"uses_secret":true},{"id":"11111111-1111-1111-1111-111111111111","app_id":"22222222-2222-2222-2222-222222222222","display_name":"saml sso","service_principal_type":"Application","account_enabled":true,"ownership":"this_tenant","is_managed_identity":false,"credentials":[{"credential_type":"certificate","held_on":"service_principal","platform_managed":false,"display_name":null,"usage":"Sign","expired":false,"has_expiry":true},{"credential_type":"certificate","held_on":"service_principal","platform_managed":false,"display_name":null,"usage":"Verify","expired":false,"has_expiry":true},{"credential_type":"password","held_on":"service_principal","platform_managed":false,"display_name":"CN=Microsoft Azure Federated SSO Certificate","usage":null,"expired":false,"has_expiry":true},{"credential_type":"password","held_on":"service_principal","platform_managed":false,"display_name":"automation","usage":null,"expired":false,"has_expiry":true}],"federated_identity_credentials":[],"credential_count":3,"federated_identity_credential_count":0,"uses_managed_identity":false,"uses_federated_credential":false,"uses_certificate":true,"uses_secret":true}],"applications_without_service_principal":[]},"summary":{"total_service_principals":8}}}'
+
+  - name: held_on_renamed_hides_violation
+    expect: PASS
+    note: 'ALONE this passes a payload hiding a secret-based app; the set case shows entra_sp_credential_fields_present failing it'
+    artifact: '{"schema_version":"1.0","metadata":{"exit_code":0,"status":"success","evidence_set":{"reference_id":"EVD-AZURE-ENTRA-SERVICE-PRINCIPALS"}},"payload":{"metadata":{"partial_failure":false,"api_failures":[]},"results":{"service_principals":[{"id":"11111111-1111-1111-1111-111111111111","app_id":"22222222-2222-2222-2222-222222222222","display_name":"deploy","service_principal_type":"Application","account_enabled":true,"ownership":"this_tenant","is_managed_identity":false,"credentials":[],"federated_identity_credentials":[{"name":"gh","issuer":"https://token.actions.githubusercontent.com","subject":"repo:o/r:ref:refs/heads/main","audiences":["api://AzureADTokenExchange"]}],"credential_count":0,"federated_identity_credential_count":1,"uses_managed_identity":false,"uses_federated_credential":true,"uses_certificate":false,"uses_secret":false},{"id":"11111111-1111-1111-1111-111111111111","app_id":"22222222-2222-2222-2222-222222222222","display_name":"mi","service_principal_type":"ManagedIdentity","account_enabled":true,"ownership":"managed_identity","is_managed_identity":true,"credentials":[{"credential_type":"certificate","location":"service_principal","platform_managed":true,"display_name":null,"usage":"Verify","expired":false,"has_expiry":true}],"federated_identity_credentials":[],"credential_count":0,"federated_identity_credential_count":0,"uses_managed_identity":true,"uses_federated_credential":false,"uses_certificate":false,"uses_secret":false},{"id":"11111111-1111-1111-1111-111111111111","app_id":"22222222-2222-2222-2222-222222222222","display_name":"batch job","service_principal_type":"Application","account_enabled":true,"ownership":"this_tenant","is_managed_identity":false,"credentials":[{"credential_type":"password","location":"application","platform_managed":false,"display_name":"prod {primary}","usage":null,"expired":false,"has_expiry":true}],"federated_identity_credentials":[],"credential_count":1,"federated_identity_credential_count":0,"uses_managed_identity":false,"uses_federated_credential":false,"uses_certificate":false,"uses_secret":true}],"applications_without_service_principal":[]},"summary":{"total_service_principals":3}}}'

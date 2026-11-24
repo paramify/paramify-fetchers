@@ -73,8 +73,9 @@ secrets:
     per_target: true
     required: false
     description: >-
-      Git only. Token for cloning a private repo over HTTPS; omit for public repos.
-      For Azure DevOps, a read-only PAT with Code (Read).
+      Git only. Token for cloning a private repo over HTTPS; omit for public repos. A
+      GitLab token with read_repository, a GitHub token with Contents: Read, or an Azure
+      DevOps PAT with Code (Read).
   - name: tfvc_token
     env: TFVC_TOKEN
     per_target: true

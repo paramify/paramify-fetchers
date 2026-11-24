@@ -1,0 +1,5 @@
+# What `paramify update` shows for changes on main since the last release.
+# Add a row in the pull request that makes the change, and only when it breaks
+# something or is worth announcing. Format and rules: releases/README.md.
+version: unreleased
+highlights: []

@@ -12,8 +12,10 @@ For each entry, in this order (the first refusal ends the entry):
    this run refuses the entry: a re-upload never resends what a person
    rejected. A file of this run that the pre-batch uploader already sent (an
    artifact with no batch) is left out; when every file was, the entry is a
-   no-op;
-4. WAF: a file the production WAF would block is dropped at plan time.
+   no-op. A pipeline entry sends such a file again in its batch, with a
+   warning: a direct upload built nothing. A pipeline entry on a set with
+   validators is refused, unless this run's batch is already submitted or
+   approved (then it is a no-op).
 
 An entry is sent direct (the route before batches: no batch, no submit) when
 the workspace has no batches or the entry says `delivery: direct`; then it
@@ -52,15 +54,16 @@ from framework.paramify.resources import (
 )
 from framework.paramify.version import Capability
 from framework.sync.model import UNKNOWN, Action, Outcome, Ref, SyncContext
-from framework.sync.providers import waf
 from framework.sync.providers.delivery_routing import (
     DONE,
+    PIPELINE_DIRECT,  # noqa: F401  (defined beside pipeline_refusal; re-exported here with the other copy)
     DirectRoute,
     Refusal,
     attribute,
     delivered_before_batches,
     delivered_files,
     own_batch_ids,
+    pipeline_refusal,
     rejected,
     resolve_channel,
     resolve_request,
@@ -79,7 +82,13 @@ from framework.sync.state import RunState
 EVIDENCE_LEVEL_WARNING = "evidence-level batch: does not count toward the solution capability"
 ALL_DROPPED = "every file was dropped"
 BEFORE_BATCHES = "already delivered before batches"
+PIPELINE_BATCHES_OFF = "this workspace has no batches, so the pipeline file goes direct, the pre-batch way"
+PIPELINE_MANUAL = "{batch} approves MANUAL; the {type} pipeline waits for someone to approve it"
+PIPELINE_VALIDATORS = "{ref} has {n} validator(s) ({names}); its batches will never approve"
+PIPELINE_RUNS = " → pipeline runs"
+PIPELINE_RESEND = "{n} file(s) of this run went direct before; sending them again in a batch so the pipeline runs"
 WAF_BLOCKED = "blocked by the production WAF"
+PIPELINE_DIRECT_SENT = "sent direct: this workspace has no batches; the pipeline runs the pre-batch way"
 BATCHES_OFF = "batches are off for this workspace"
 DELIVERY_DIRECT = "delivery: direct"
 DIRECT = "DIRECT"  # the payload target of an entry sent direct
@@ -150,14 +159,32 @@ class _Delivered:
     held: List[str] = field(default_factory=list)
     validators_failed: List[str] = field(default_factory=list)
     mode: Optional[str] = "batch"  # or "direct" (no batch, no submit), or None (never routed)
+    pipeline_type: Optional[str] = None  # set for a pipeline entry
 
     def result(self, state: str) -> Dict[str, Any]:
-        return {
+        out: Dict[str, Any] = {
             "state": state, "batch_id": self.batch_id, "batch_reference": self.batch_reference,
             "status": self.status, "uploaded": list(self.uploaded), "already_present": list(self.already_present),
             "dropped": [dict(d) for d in self.dropped], "validators_failed": list(self.validators_failed),
             "mode": self.mode,
         }
+        if self.pipeline_type:
+            # Direct: no batch, so "approved" does not apply (None, not False).
+            out["pipeline"] = {"type": self.pipeline_type,
+                               "approved": None if self.mode == "direct" else self._approved}
+        return out
+
+    @property
+    def _approved(self) -> bool:
+        """Whether the batch is approved, or will be with no one reviewing it.
+
+        A batch approved on submission can read back SUBMITTED for a moment after
+        the submit (see the read-back in apply); Paramify approves it on its own,
+        so the pipeline runs and no one needs telling to approve it.
+        """
+        if self.status == "APPROVED":
+            return True
+        return self.status == "SUBMITTED" and self.approval == "SUBMISSION" and not self.validators_failed
 
     @property
     def name(self) -> str:
@@ -235,9 +262,15 @@ def _run_batches(e: EntryDesired, obs: EntryObserved) -> List[str]:
             for i in ids if not (i in known and known[i].status in DONE)]
 
 
+def _delivered_run(e: EntryDesired, obs: EntryObserved) -> bool:
+    """This run's batch of the entry is submitted or approved: the run is delivered."""
+    mine = attribute(obs.batches, obs.artifacts, e).mine
+    return mine is not None and mine.status in DONE
+
+
 def _file_json(f: DeliveryFile) -> Dict[str, Any]:
     return {"path": str(f.path), "original_file_name": f.original_file_name, "title": f.title, "note": f.note,
-            "effective_date": f.effective_date}
+            "effective_date": f.effective_date, "pipeline": f.pipeline}
 
 
 def _utc_now() -> str:
@@ -308,7 +341,6 @@ class DeliveryProvider:
         self._today = today
         self._on_event = on_event
         self._payload_mode = "envelope"
-        self._waf_hits: Dict[Tuple[str, str], List[str]] = {}
         self.entries: Dict[str, EntryDesired] = {}  # by entry key, for apply's re-plan
 
     # -- desired ---------------------------------------------------------- #
@@ -324,52 +356,47 @@ class DeliveryProvider:
         self.entries = {e.entry_key: e for e in entries}
         return entries
 
-    def _content(self, path: Path) -> bytes:
-        """The bytes an upload of `path` sends, in this run's payload mode. Raises OSError."""
+    def _mode_for(self, pipeline: bool) -> str:
+        """A pipeline file is always the envelope: Paramify's pipeline reads `payload.data` from it."""
+        return "envelope" if pipeline else self._payload_mode
+
+    def _read(self, path: Path, pipeline: bool) -> bytes:
+        mode = self._mode_for(pipeline)
+        # The payload mode is `_content`'s default, so only an override is passed.
+        return self._content(path) if mode == self._payload_mode else self._content(path, mode)
+
+    def _content(self, path: Path, mode: Optional[str] = None) -> bytes:
+        """The bytes an upload of `path` sends, in `mode` (default: this run's payload mode). Raises OSError."""
+        mode = mode or self._payload_mode
         raw = path.read_bytes()
         try:
             envelope = json.loads(raw)
         except ValueError:
             return raw
-        return artifact_content(envelope, self._payload_mode) if is_enveloped(envelope) else raw
+        return artifact_content(envelope, mode) if is_enveloped(envelope) else raw
 
-    def _scan(self, f: DeliveryFile) -> List[str]:
-        """WAF signatures in what the upload of `f` would send: the bytes, the note and the title."""
-        key = (str(f.path), self._payload_mode)
-        if key not in self._waf_hits:
-            try:
-                content = self._content(f.path)
-            except OSError:
-                content = b""  # gone since desired(); apply reports it
-            self._waf_hits[key] = waf.scan(content, f.note, f.title)
-        return self._waf_hits[key]
+    def _split(self, entry: EntryDesired) -> Tuple[List[DeliveryFile], List[Dict[str, str]]]:
+        """(sendable files, skipped files).
 
-    def _split(self, entry: EntryDesired) -> Tuple[List[DeliveryFile], List[Dict[str, str]], List[Dict[str, str]]]:
-        """(sendable files, WAF drops, skipped files)."""
+        Every sendable file is sent. A file the production WAF refuses is
+        dropped when the upload gets the 403 (see `_send_files`), not guessed
+        at here: the upload routes are exempt from the WAF's body rules.
+        """
         files: List[DeliveryFile] = []
-        dropped: List[Dict[str, str]] = []
         skipped: List[Dict[str, str]] = []
         for f in entry.files:
             if f.skip_reason:
                 skipped.append({"original_file_name": f.original_file_name, "reason": f.skip_reason,
                                 "kind": f.skip_kind})
-                continue
-            hits = self._scan(f)
-            if hits:
-                found = ", ".join(f"'{s}' ({waf.RULES[s]})" for s in hits)
-                dropped.append({
-                    "original_file_name": f.original_file_name,
-                    "reason": f"blocked by the production WAF: {found}",
-                })
             else:
                 files.append(f)
-        return files, dropped, skipped
+        return files, skipped
 
     def _direct_reason(self, entry: EntryDesired) -> Optional[str]:
         """Why this entry is sent direct before any request routing, or None."""
         if self._capability is not None and not self._capability.batches:
             return BATCHES_OFF
-        if entry.delivery == "direct":
+        if entry.delivery == "direct" and not entry.pipeline:  # a pipeline entry is refused instead
             return DELIVERY_DIRECT
         return None
 
@@ -447,11 +474,12 @@ class DeliveryProvider:
         return [self._plan_entry(e, observed.get(e.entry_key, UNKNOWN), today) for e in desired]
 
     def _plan_entry(self, e: EntryDesired, obs: Any, today: date) -> Action:
-        files, dropped, skipped = self._split(e)
+        files, skipped = self._split(e)
         payload: Dict[str, Any] = {
             "entry_key": e.entry_key, "reference_id": e.reference_id, "evidence_id": None, "target": None, "artifact_request_id": None,
             "planned_current": False, "resume_batch_id": None,
-            "files": [_file_json(f) for f in files], "dropped": dropped, "skipped": skipped,
+            "files": [_file_json(f) for f in files], "skipped": skipped,
+            "pipeline": e.pipeline,
         }
 
         def action(verb: Any, summary: str, **kw: Any) -> Action:
@@ -459,11 +487,10 @@ class DeliveryProvider:
                           verb=verb, summary=summary, payload=payload, **kw)
 
         if not files:
-            if dropped:
-                return action("refuse", ALL_DROPPED, fix=(
-                    "remove the strings the production WAF blocks (named in each dropped file) "
-                    "from the evidence and collect again"))
             return action("noop", f"nothing to send: {_count(len(skipped), 'file')} skipped")
+        refusal = pipeline_refusal(e)
+        if refusal is not None:
+            return action("refuse", refusal.message, fix=refusal.fix)
         if obs is UNKNOWN:
             payload.update(evidence_id=UNKNOWN, target=UNKNOWN)
             return action(
@@ -471,15 +498,26 @@ class DeliveryProvider:
                 changes={"stack": UNKNOWN, "channel": UNKNOWN, "target": UNKNOWN},
             )
 
+        if e.pipeline and obs.evidence is not None and obs.evidence.validators and not _delivered_run(e, obs):
+            # A run already in a submitted or approved batch is a no-op below, validators or not.
+            v = obs.evidence.validators
+            return action("refuse", PIPELINE_VALIDATORS.format(ref=e.reference_id, n=len(v), names=", ".join(v)),
+                          fix=f"remove the validators from {e.reference_id} in the app")
         warnings = [w for w in (stack_drift(e, obs.stacks),) if w]
         sendable = len(files)
         direct = self._direct_reason(e)
+        if e.pipeline and direct == BATCHES_OFF:
+            warnings.append(PIPELINE_BATCHES_OFF)
         route = _route(e, obs, today, direct)
         # A direct entry counts the files sent before batches as on the set (below). A
         # batch entry leaves them out first, so the no-op comes ahead of a refusal.
+        # A pipeline entry sends them again in its batch: a direct upload built nothing.
         goes_direct = direct is not None or (not isinstance(route, Refusal) and route.direct_reason is not None)
         earlier = [f.original_file_name for f in files if f.original_file_name in obs.before_batches]
-        if earlier and not goes_direct:
+        resend: List[str] = []
+        if earlier and not goes_direct and e.pipeline:
+            resend = earlier
+        elif earlier and not goes_direct:
             payload["before_batches"] = earlier
             if len(earlier) == len(files):
                 return action("noop", f"{BEFORE_BATCHES} ({_count(len(files), 'file')})", warnings=warnings)
@@ -583,6 +621,9 @@ class DeliveryProvider:
             if missing:
                 summary += f"; not in it: {', '.join(f.original_file_name for f in missing)}"
             return action("noop", summary, changes=changes, warnings=warnings)
+        resent = [f for f in missing if f.original_file_name in resend]
+        if resent:
+            warnings.append(PIPELINE_RESEND.format(n=len(resent)))
         if mine is None:
             payload["when_to_approve"] = e.approval
             tail = f"new batch ({_APPROVAL_TEXT.get(e.approval, f'approval {e.approval}')})"
@@ -591,7 +632,18 @@ class DeliveryProvider:
             tail = f"resume {mine.reference_id} ({len(missing)} missing)" if missing \
                 else f"resume {mine.reference_id} (submit only)"
         n = _count(len(payload["files"]), "file")
-        return action("deliver", f"deliver {n} to {where}: {tail}", changes=changes, warnings=warnings)
+        summary = f"deliver {n} to {where}: {tail}"
+        if e.pipeline:
+            # A new batch takes the entry's approval; a resumed one keeps its own.
+            # The set's setting only matters on an API that cannot set a batch's
+            # approval, which apply reports when it happens.
+            approval = e.approval if mine is None else mine.when_to_approve
+            if approval == "MANUAL":
+                batch = "the new batch" if mine is None else mine.reference_id
+                warnings.append(PIPELINE_MANUAL.format(batch=batch, type=e.pipeline.get("type")))
+            else:
+                summary += PIPELINE_RUNS
+        return action("deliver", summary, changes=changes, warnings=warnings)
 
     # -- apply ------------------------------------------------------------ #
     def apply(self, action: Action, resources: Any, resolve: Callable[[Any], Any]) -> Outcome:
@@ -639,7 +691,8 @@ class DeliveryProvider:
 
     def _noop(self, action_id: str, p: Dict[str, Any], message: str) -> Outcome:
         done = _Delivered(p.get("batch_id"), p.get("batch_reference"), p.get("status"),
-                          already_present=list(p.get("before_batches") or []), mode=delivery_mode(p.get("target")))
+                          already_present=list(p.get("before_batches") or []), mode=delivery_mode(p.get("target")),
+                          pipeline_type=(p.get("pipeline") or {}).get("type"))
         if p.get("target") == DIRECT:
             # A direct no-op plans no files: each sendable file is on the set already.
             done.already_present = self._wanted(p)
@@ -660,10 +713,9 @@ class DeliveryProvider:
     def _started(self, p: Dict[str, Any], mode: str = "batch") -> _Delivered:
         # Files that are errors (unreadable, not evidence) show in the entry state
         # as drops, so a delivered entry that left some behind says so.
-        return _Delivered(mode=mode, dropped=[
-            {"name": d["original_file_name"], "reason": d["reason"]}
-            for d in [*(p.get("dropped") or []),
-                      *(s for s in p.get("skipped") or [] if s.get("kind") == "error")]])
+        return _Delivered(mode=mode, pipeline_type=(p.get("pipeline") or {}).get("type"), dropped=[
+            {"name": s["original_file_name"], "reason": s["reason"]}
+            for s in p.get("skipped") or [] if s.get("kind") == "error"])
 
     def _emit(self, action_id: str, name: str, outcome: str, n: Optional[int], of: int, size: int,
               reason: Optional[str] = None) -> None:
@@ -741,9 +793,15 @@ class DeliveryProvider:
             parts.append(f"{run.name} SUBMITTED: held because validators failed: {', '.join(run.validators_failed)}")
         elif run.status == "SUBMITTED" and run.approval == "SUBMISSION":
             # Paramify approves such a batch a moment after the submit answers; no one reviews it.
-            parts.append(f"{run.name} SUBMITTED: approved on submission; not approved yet when read back")
+            parts.append(f"{run.name} SUBMITTED: approved on submission; not approved yet when read back"
+                         + ("; the pipeline runs once Paramify approves it" if run.pipeline_type else ""))
+        elif run.status == "SUBMITTED" and run.pipeline_type:
+            parts.append(f"{run.name} SUBMITTED: waiting for approval; the pipeline has not run")
         elif run.status == "SUBMITTED":
             parts.append(f"{run.name} SUBMITTED: waiting for review (approval {run.approval or 'unknown'})")
+        elif run.status == "APPROVED" and run.pipeline_type:
+            where = "Monitoring → Inventory" if run.pipeline_type == "inventory" else "Monitoring → Issues"
+            parts.append(f"{run.name} APPROVED: pipeline runs now; check {where}")
         else:
             parts.append(f"{run.name} {run.status}")
         if run.dropped:
@@ -775,6 +833,8 @@ class DeliveryProvider:
             return Outcome(action_id, "failed", run.result("failed"), ALL_DROPPED)
         parts = [note] if note else []
         parts.append(f"{_count(len(run.uploaded), 'file')} sent direct")
+        if run.pipeline_type:
+            parts.append(PIPELINE_DIRECT_SENT)
         if run.dropped:
             parts.append(f"dropped {', '.join(d['name'] for d in run.dropped)}")
         return Outcome(action_id, "applied", run.result("delivered_with_drops" if run.dropped else "delivered"),
@@ -794,7 +854,7 @@ class DeliveryProvider:
         for n, f in enumerate(to_send, 1):
             name = f["original_file_name"]
             try:
-                content = self._content(Path(f["path"]))
+                content = self._read(Path(f["path"]), bool(f.get("pipeline")))
             except OSError as exc:
                 run.dropped.append({"name": name, "reason": f"cannot read {name}: {exc.strerror or exc}"})
                 # An unreadable file is an error, as it is at plan time; the rest still goes in.

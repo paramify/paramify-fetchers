@@ -257,9 +257,17 @@ def split_failover_groups(
     return kept, dropped
 
 
+def _if_listed(listed: bool, count: int):
+    return count if listed else None
+
+
 def summarize(
-    instances: list[dict], failover_groups: list[dict], failover_groups_collected: bool
+    instances: list[dict] | None, failover_groups: list[dict], failover_groups_collected: bool
 ) -> dict:
+    """`None` means the instance list was not read: every count is null, not 0. Counts built from a
+    database list or a failover group list that failed for some instance are null too."""
+    if instances is None:
+        return {k: None for k in summarize([], [], True)}
     databases = [d for i in instances for d in i["databases"] if not d["is_system_database"]]
     redundancy: dict[str, int] = {}
     for i in instances:
@@ -269,29 +277,34 @@ def summarize(
     return {
         "total_managed_instances": len(instances),
         "total_user_databases": len(databases) if all_listed else None,
-        "databases_retention_at_least_7_days": sum(
+        "databases_retention_at_least_7_days": _if_listed(all_listed, sum(
             1 for d in databases if d["short_term_retention_at_least_7_days"] is True
+        )),
+        "databases_retention_below_7_days": _if_listed(
+            all_listed, sum(i["databases_below_7_days"] or 0 for i in instances)
         ),
-        "databases_retention_below_7_days": sum(i["databases_below_7_days"] or 0 for i in instances),
-        "databases_missing_retention_policy": sum(
+        "databases_missing_retention_policy": _if_listed(all_listed, sum(
             1 for d in databases if d["short_term_retention_policy_found"] is False
-        ),
-        "databases_retention_unknown": sum(
+        )),
+        "databases_retention_unknown": _if_listed(all_listed, sum(
             1 for d in databases if d["short_term_retention_at_least_7_days"] is None
-        ),
-        "databases_with_long_term_retention": sum(
+        )),
+        "databases_with_long_term_retention": _if_listed(all_listed, sum(
             1 for d in databases if d["long_term_retention"]["configured"] is True
-        ),
-        "databases_long_term_retention_unknown": sum(
+        )),
+        "databases_long_term_retention_unknown": _if_listed(all_listed, sum(
             1 for d in databases if d["long_term_retention"]["configured"] is None
-        ),
+        )),
         "instances_by_current_backup_storage_redundancy": redundancy,
         "instances_backup_storage_zone_redundant": sum(
             1 for i in instances if i["backup_storage_zone_redundant"]
         ),
         "instances_stopped": sum(1 for i in instances if lower(i.get("state")) == "stopped"),
         "instances_zone_redundant": sum(1 for i in instances if i["zone_redundant"]),
-        "instances_in_failover_group": sum(1 for i in instances if i["in_failover_group"] is True),
+        "instances_in_failover_group": _if_listed(
+            all(i["in_failover_group"] is not None for i in instances),
+            sum(1 for i in instances if i["in_failover_group"] is True),
+        ),
         "instances_failover_group_unknown": sum(1 for i in instances if i["in_failover_group"] is None),
         "total_instance_failover_groups": len(failover_groups) if failover_groups_collected else None,
         "failover_groups_manual_policy": sum(
@@ -500,17 +513,20 @@ def list_failover_groups(client, group_name: str, location: str) -> list[dict]:
 
 
 def collect(subscription_id, cred, collector: Collector, exclusions: ResourceExclusions | None = None,
-            excluded: list | None = None) -> tuple[list[dict], list[dict], set]:
-    """Failover groups are listed and matched across every instance; excluded instances get no database reads."""
+            excluded: list | None = None) -> tuple[list[dict] | None, list[dict], set]:
+    """Failover groups are listed and matched across every instance; excluded instances get no database reads.
+    The instances are None when the instance list could not be read."""
     client = sql_client(subscription_id, cred, collector)
     if client is None:
         if exclusions is not None:
             exclusions.mark_unread()
-        return [], [], set()
+        return None, [], set()
     failures = len(collector.failures)
-    projected = list_instances(client, collector, project_instance)
+    projected = list_instances(client, collector, project_instance, unread=None)
     if exclusions is not None and len(collector.failures) > failures:
         exclusions.mark_unread()
+    if projected is None:
+        return None, [], set()
     in_scope, out = exclusions.split(projected, "managed_instance") if exclusions else (projected, [])
     in_scope_pairs = {(i["resource_group"], i.get("location")) for i in in_scope}
 
@@ -600,7 +616,7 @@ def main() -> int:
     subscription_id = sub["subscription_id"]
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
-    instances: list[dict] = []
+    instances: list[dict] | None = None
     groups: list[dict] = []
     unlisted: set = set()
     excluded: list[dict] = []
@@ -633,6 +649,9 @@ def main() -> int:
 
     window["days_requested"] = days_requested
     exclusions.record_invalid(collector)
+    listed = instances is not None
+    summary = summarize(instances, groups, not unlisted)
+    instances = instances or []
     failovers, out = attach_failovers(
         None if events is None else failover_records(events), instances, groups, excluded, exclusions)
     excluded += out
@@ -641,7 +660,8 @@ def main() -> int:
         exclusions.mark_unread()
     exclusions.warn_unmatched(logger)
     boundary = exclusions.summary(excluded, ("managed_instance", "instance_failover_group", "failover"), {
-        "managed_instances": len(instances), "instance_failover_groups": len(groups),
+        "managed_instances": len(instances) if listed else None,
+        "instance_failover_groups": len(groups) if listed and not unlisted else None,
         "failovers": None if failovers is None else len(failovers)})
     if failovers is None:
         # No failover was read, so none was tested against the patterns.
@@ -660,7 +680,7 @@ def main() -> int:
             "excluded": excluded,
         },
         summary={
-            **summarize(instances, groups, not unlisted),
+            **summary,
             **summarize_failovers(failovers, window, now),
             "provider_registration_status": registration,
             **boundary,

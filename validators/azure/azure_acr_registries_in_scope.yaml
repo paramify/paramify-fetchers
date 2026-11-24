@@ -1,0 +1,22 @@
+key: azure_acr_registries_in_scope
+name: 'Azure Container Registry: At Least One Registry in Scope'
+type: AUTOMATED
+role: completeness
+source: community
+statement: >
+  At least one container registry was read and is in scope (in_scope_registries is above 0). Fails
+  when there are none, resource_exclusions took out every registry, the registry list was not read,
+  or the count appears other than exactly once. Does not check whether the collection run succeeded.
+
+regex: '"in_scope_registries":\s*(?<in_scope_registries>\d+)'
+rules_summary: MATCH_COUNT EQUALS 1; MATCH_GROUP[1] GREATER_THAN 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "1" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # in_scope_registries
+    criteria: GREATER_THAN
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-ACR-CONFIG

@@ -9,6 +9,7 @@ from typing import Any, List, Optional, Sequence, Tuple
 
 TYPE = "patterns"
 SEPARATORS = re.compile(r"[\s,]+")
+WILDCARDS = re.compile(r"[*?]")
 ITEM_KEYS = ("pattern", "reason")
 ENV_REF_REFUSAL = "${env:} references aren't read for a pattern list; write its patterns in the manifest"
 
@@ -67,7 +68,7 @@ def parse(value: Any) -> Tuple[List[Item], List[str]]:
     return items, problems
 
 
-def check(items: Sequence[Item], prefixes: Sequence[str] = (), bare: bool = True) -> List[str]:
+def check(items: Sequence[Item], prefixes: Sequence[str] = (), bare: bool = True, globs: bool = True) -> List[str]:
     """Each pattern the field's grammar refuses; the fetcher would fail the run on it, or it would never match."""
     known = ", ".join(f"{p}:" for p in prefixes)
     problems: List[str] = []
@@ -86,18 +87,20 @@ def check(items: Sequence[Item], prefixes: Sequence[str] = (), bare: bool = True
             problems.append(f"pattern {p!r} has nothing after its prefix")
         elif not sep and not bare:
             problems.append(f"pattern {p!r} needs one of the prefixes {known}")
+        elif not globs and WILDCARDS.search(glob if sep else p):
+            problems.append(f"pattern {p!r} has a wildcard (* or ?); this field takes literal patterns only")
         elif p.lower() in seen:
             problems.append(f"pattern {p!r} is listed twice")
         seen.add(p.lower())
     return problems
 
 
-def problems(value: Any, prefixes: Sequence[str] = (), bare: bool = True) -> List[str]:
+def problems(value: Any, prefixes: Sequence[str] = (), bare: bool = True, globs: bool = True) -> List[str]:
     """Everything wrong with a manifest value for a patterns field; empty when the runner can hand it over."""
     if is_reference(value):
         return [ENV_REF_REFUSAL]
     items, shape = parse(value)
-    return shape + check(items, prefixes, bare)
+    return shape + check(items, prefixes, bare, globs)
 
 
 def is_reference(value: Any) -> bool:

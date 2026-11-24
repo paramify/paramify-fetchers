@@ -16,6 +16,7 @@ Read / discover:
   paramify manifests [--json]                  # discovered run manifests
   paramify runs [--output-dir DIR] [--json]    # past runs under an output dir
     paramify evidence <path> [--json]            # read one evidence file (or issue-report sidecar)
+    paramify preset <fetcher> [-f MANIFEST] [--output-dir DIR] [--json]  # settings for a pipeline's Paramify preset
     paramify samples status [--json]             # which fetchers have a committed evidence sample
     paramify samples show <fetcher> [--json]     # one fetcher's sample: one record + field coverage
     paramify samples backfill [--evidence DIR] [--fetcher NAME ...] [--scrub WORD ...]
@@ -62,6 +63,11 @@ Validate / run / launch:
   paramify issues close <assessment-id> [--yes] [--json]
   paramify tui [--manifest PATH] [--at ROOT]   # interactive terminal UI
 
+Upgrade (see docs/versioning_guide.md):
+  paramify update [--to main|vX.Y.Z-beta] [--yes] [--allow-breaking] [--json]
+  paramify update --check [--json]             # exit 0 up to date, 1 update waiting, 2 can't tell
+  paramify update --rollback [--yes] [--json]  # back to where you were before the last update
+
 Secrets are referenced as ${env:VAR} — set-secret / add-target take the ENV VAR
 NAME, never the secret value. The runner resolves refs from its own environment.
 Outputs land in <output_dir>/run-<timestamp>/ with a _run_metadata.json.
@@ -96,7 +102,7 @@ from framework.issue_reports import (
     ISSUE_REPORTS_DIR,
 )
 from framework.paramify.client import ApiError
-from framework.runner.executor import is_credential_env_name
+from framework.runner.executor import is_credential_env_name, sigterm_exits
 from framework.secret_resolver import (
     env_var_name,
     is_env_ref_attempt,
@@ -104,6 +110,8 @@ from framework.secret_resolver import (
 )
 from framework.sync.model import Outcome, Plan
 from framework.sync.render import render_outcomes, render_plan
+from framework.update_cli import maybe_notice as maybe_update_notice
+from framework.update_cli import update_cmd
 
 _DEFAULT_MANIFEST = "manifest.yaml"
 
@@ -194,6 +202,10 @@ def _root(ctx: typer.Context) -> None:
         ctx.color = False
     elif os.environ.get("FORCE_COLOR"):
         ctx.color = True
+    # The once-a-day "an update is waiting" line, printed after the command
+    # finishes. update_cli.maybe_notice decides whether it is due and stays
+    # silent under --json, in pipes, and inside the container.
+    ctx.call_on_close(lambda: maybe_update_notice(ctx.invoked_subcommand))
 
 
 # --------------------------------------------------------------------------- #
@@ -817,7 +829,7 @@ def describe_cmd(
                 var = f"  {style.dim('env=')}{style.env(fld['env'])}" if fld.get("env") else ""
                 if fld.get("type") == patterns.TYPE:
                     # Written in the manifest only; the env var is the runner's hand-off, not a user setting.
-                    takes = api.grammar_text(fld.get("prefixes") or (), fld.get("bare", True))
+                    takes = api.grammar_text(fld.get("prefixes") or (), fld.get("bare", True), fld.get("globs", True))
                     var = f"  {style.dim('takes=')}{style.env(takes)}"
                 typer.echo(
                     f"    - {style.env(fld['name'])} {style.dim('(' + fld['type'] + ',')} "
@@ -974,8 +986,8 @@ def doctor_cmd(
         else:
             typer.echo(
                 f"  {bad_mark} API token not set — "
-                f"{style.env(api.UPLOAD_TOKEN_ENV)} {style.dim('(or')} "
-                f"{style.env(api.READ_TOKEN_ENV)}{style.dim(')')}"
+                f"{style.env(paramify_auth.UPLOAD_TOKEN_ENV)} {style.dim('(or')} "
+                f"{style.env(paramify_auth.READ_TOKEN_ENV)}{style.dim(')')}"
             )
         # Shown whether or not the token resolved: the destination is the other
         # half of "am I about to do the right thing", and stage-vs-production is
@@ -1100,6 +1112,42 @@ def runs_cmd(
             f"{r['ok']}/{total} ok  {style.dim(str(len(r['files'])) + ' files')}"
             f"{style.warn(reports)}  [{tone(status)}]"
         )
+
+
+@app.command("preset")
+def preset_cmd(
+    fetcher: str = typer.Argument(..., help="A pipeline fetcher's name"),
+    file: Optional[str] = typer.Option(None, "-f", "--file", help="Manifest whose run.output_dir holds the runs"),
+    output_dir: Optional[str] = typer.Option(None, "-o", "--output-dir", help="Base dir to find the newest run in (default: the -f manifest's output_dir, else <repo>/evidence)"),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON"),
+):
+    """Print the settings to enter when building the Paramify preset for a pipeline fetcher."""
+    root = api.find_repo_root()
+    out = Path(output_dir) if output_dir else None
+    if out is None and file:
+        try:
+            manifest = api.read_manifest(api.resolve_manifest_path(root, file), must_exist=True)
+        except (api.ManifestNotFound, OSError, ValueError) as e:
+            _err(str(e))
+            raise typer.Exit(1)
+        configured = (manifest.get("run") or {}).get("output_dir")
+        out = Path(configured) if configured else None
+    try:
+        sheet = api.preset_sheet(root, fetcher, output_dir=out)
+    except KeyError:
+        names = list(api.discover_fetchers(root))
+        _err(f"Unknown fetcher: {fetcher}{api._did_you_mean(fetcher, names)}")
+        raise typer.Exit(2)
+    except ValueError as e:
+        if json_out:
+            typer.echo(json.dumps({"error": str(e)}, indent=2))
+        else:
+            _err(str(e))
+        raise typer.Exit(1)
+    if json_out:
+        typer.echo(json.dumps(sheet, indent=2))
+        return
+    typer.echo(api.render_preset_sheet(sheet))
 
 
 @app.command("evidence")
@@ -1351,6 +1399,62 @@ def validate_cmd(
         typer.echo(f"  {style.dim('NOTE')}   {note}")
 
 
+@app.command("env")
+def env_cmd(
+    manifest: Optional[str] = typer.Option(None, "--manifest", "-m", help=f"Manifest to read (default: {_DEFAULT_MANIFEST})"),
+    write: bool = typer.Option(False, "--write", help="For local testing: add the missing variables to .env (existing lines are never changed)"),
+    path: Optional[Path] = typer.Option(
+        None, "--path",
+        help="Another file to merge into (default: .env in the repo root, the one run and doctor read)"),
+    json_out: bool = typer.Option(False, "--json", help="Emit the variables as JSON (names, never values)"),
+):
+    """Print the environment variables a manifest needs, grouped by tool.
+
+    Only the variables a run reads: set them in your secret manager (--json
+    lists them for a script), or, for local testing, add them to .env with
+    --write (a value already there is never changed or shown). A run never
+    needs .env; the environment wins.
+    """
+    root = api.find_repo_root()
+    mpath = _resolve_manifest_arg(root, manifest or _DEFAULT_MANIFEST, json_out)
+    try:
+        data = api.read_manifest(mpath, must_exist=True)
+    except Exception as e:  # noqa: BLE001 — a setup error, reported as one line
+        _fail(mpath, f"could not read {mpath}: {e}", json_out)
+    res = api.generate_env(root, data, write=write, path=path)
+    if json_out:
+        doc = {k: v for k, v in res.items() if k != "text"}
+        typer.echo(json.dumps({"ok": True, "manifest": str(mpath), "written": write and bool(res["added"]), **doc},
+                              indent=2))
+        return
+    typer.echo(res["text"], nl=False)
+    if res["text"]:
+        typer.echo("")
+    if write:
+        typer.echo(f"Wrote {style.path(res['path'])}: {len(res['added'])} added, {len(res['already_set'])} already set.")
+    else:
+        typer.echo(f"Not written (add --write). {len(res['added'])} would be added, {len(res['already_set'])} already set in {style.path(res['path'])}.")
+    if res["missing_values"]:
+        typer.echo(style.warn("Still need a value: " + ", ".join(res["missing_values"])))
+    if res["unmapped"]:
+        typer.echo(style.warn("A run stops on these secrets whatever .env holds, until the manifest maps "
+                              "each one:"))
+        here = Path.cwd().resolve()
+        shown = mpath.resolve().relative_to(here) if mpath.resolve().is_relative_to(here) else mpath
+        for u in res["unmapped"]:
+            if u["malformed"]:
+                typer.echo(f"  {u['fetcher']} {u['secret']}: not a valid reference; write it as "
+                           f"${{env:{u['env']}}} (uppercase letters, digits and _) in {shown}")
+            elif not u["per_target"]:
+                typer.echo(f"  paramify manifest set-secret -f {shown} {u['fetcher']} {u['secret']} {u['env']}")
+            elif u["target"] is None:
+                typer.echo(f"  paramify manifest add-target -f {shown} {u['fetcher']} <field>=<value> ... "
+                           f"--secret {u['secret']}={u['env']}")
+            else:
+                typer.echo(f"  {u['fetcher']} target {u['target']}: add  {u['secret']}: ${{env:{u['env']}}}  "
+                           f"under its secrets: in {shown}")
+
+
 @app.command("run")
 def run_cmd(
     manifest: str = typer.Argument(..., help="Path to manifest yaml"),
@@ -1390,16 +1494,17 @@ def run_cmd(
         if not readiness["token_present"]:
             typer.echo(
                 f"Note: no Paramify API token set, so `paramify upload` will need one "
-                f"({api.UPLOAD_TOKEN_ENV}). Collecting anyway.\n",
+                f"({paramify_auth.UPLOAD_TOKEN_ENV}). Collecting anyway.\n",
                 err=print_run_dir,
             )
 
     try:
-        summary = api.run(
-            m, root,
-            on_event=None if json_out else _human_run_printer(err=print_run_dir),
-            manifest_path=mpath,
-        )
+        with sigterm_exits():
+            summary = api.run(
+                m, root,
+                on_event=None if json_out else _human_run_printer(err=print_run_dir),
+                manifest_path=mpath,
+            )
     except (ValueError, RuntimeError) as e:
         if json_out:
             typer.echo(json.dumps({"ok": False, "error": str(e)}, indent=2))
@@ -1430,6 +1535,7 @@ def upload_cmd(
     dry_run: bool = typer.Option(False, "--dry-run", help="Resolve and report what would upload; no API calls"),
     with_validators: bool = typer.Option(False, "--with-validators", help="Before delivery, sync validators for the sets this run produced (create-or-skip)"),
     no_tags: bool = typer.Option(False, "--no-tags", help="Skip the default custom tags for this run (PARAMIFY_CUSTOM_TAGS=off does the same from the environment)"),
+    no_waf_check: bool = typer.Option(False, "--no-waf-check", hidden=True, help="Does nothing: the upload no longer checks files for WAF strings"),
     plan: bool = typer.Option(False, "--plan", help="Read the workspace and print the plan; apply nothing"),
     stack: Optional[str] = typer.Option(None, "--stack", help="Paramify stack (id or name) for every entry in this upload, over the one the manifest recorded"),
     owner: Optional[str] = typer.Option(None, "--owner", help="Paramify username whose channel to use when a stack has one channel per owner, over the one the manifest recorded"),
@@ -1443,6 +1549,8 @@ def upload_cmd(
     """
     if plan and dry_run:
         raise typer.BadParameter("--plan reads the workspace and --dry-run makes no API calls; use one", param_hint="--plan")
+    if no_waf_check:
+        _err(f"  {style.mark('WARN')}  --no-waf-check does nothing now: the upload no longer checks files for WAF strings")
     _upload_stage(
         run_dir=run_dir,
         output_dir=output_dir,
@@ -1481,6 +1589,134 @@ def stacks_cmd(
     width = max(len(s["name"]) for s in stacks)
     for s in stacks:
         typer.echo(f"{s['name']:<{width}}  {style.dim(s['id'])}")
+
+
+_SCRIPT_LABELS = {"in_sync": "ok", "update": "update", "create": "create", "drift": "drift", "error": "error"}
+
+
+def _status_cells(row: dict, online: bool, errors: Optional[dict] = None) -> List[str]:
+    """One status row as text cells: fetcher, set, script, validators, capabilities, artifacts, ready.
+
+    Offline, a workspace cell is "-" (not read). Online, a cell whose read
+    failed is "?" (unknown), never a value that looks read.
+    """
+    errors = errors or {}
+    evidence_set = row["evidence_set"]
+    sets_unknown = evidence_set.get("exists") is None
+    validators = row["validators"]
+    paired = sum(v["paired"] is True for v in validators)
+    if not validators:
+        val = "none"
+    elif not online:
+        val = f"{len(validators)} in registry"
+    elif any(v["paired"] is None for v in validators):
+        val = f"?/{len(validators)}"
+    else:
+        val = f"{paired}/{len(validators)}"
+    caps = len({p["capability_id"] for p in row["pairs"]})
+    if not online:
+        set_cell, script, cap_cell, arts = "-", "-", "-", "-"
+    else:
+        set_cell = "?" if sets_unknown else ("ok" if evidence_set["exists"] else "create")
+        script = "?" if row["script"] is None and "scripts" in errors else _SCRIPT_LABELS.get(row["script"] or "", "-")
+        cap_cell = "?" if "capabilities" in errors or sets_unknown else (str(caps) if caps else "-")
+        arts = "?" if evidence_set["artifact_count"] is None else str(evidence_set["artifact_count"])
+    return [row["name"], set_cell, script, val, cap_cell, arts, "READY" if row["ready"] else ""]
+
+
+def status_totals(status: dict) -> str:
+    """The grid's totals line: how far each setup step has come, across the fetchers.
+
+    A count whose read failed is "?". Empty when nothing was read (no token):
+    0/n would look like a count.
+    """
+    if not status["workspace"]["token"]:
+        return ""
+    rows = status["fetchers"]
+    errors = status.get("errors") or {}
+    n = len(rows)
+    sets_known = "evidence_sets" not in errors
+
+    def count(known: bool, value: int) -> str:
+        return f"{value}/{n}" if known else f"?/{n}"
+
+    sets = sum(r["evidence_set"].get("exists") is True for r in rows)
+    scripts = sum(r["script"] == "in_sync" for r in rows)
+    validators = sum(all(v["paired"] is True for v in r["validators"]) for r in rows)
+    links = sum(len(r["pairs"]) for r in rows)
+    uploaded = sum((r["evidence_set"]["artifact_count"] or 0) > 0 for r in rows)
+    links_cell = f"{links}" if sets_known and "capabilities" not in errors else "?"
+    return (f"evidence sets {count(sets_known, sets)}  scripts {count('scripts' not in errors, scripts)}  "
+            f"validators {count(sets_known, validators)}  capabilities {links_cell} links  "
+            f"uploaded {count(sets_known, uploaded)}")
+
+
+def status_exit_code(status: dict) -> int:
+    """`paramify status`'s exit code: 0 ready, 1 not ready yet, 2 cannot tell.
+
+    2 is for what waiting will not fix, so a wait-until-ready loop stops on it:
+    no token, a failed read (an expired token is a 401), a manifest entry that
+    names no fetcher, or no evidence fetcher to check at all.
+    """
+    rows = status["fetchers"]
+    if not status["workspace"]["token"] or status.get("errors") or status.get("skipped") or not rows:
+        return 2
+    return 0 if all(r["ready"] for r in rows) else 1
+
+
+@app.command("status")
+def status_cmd(
+    manifest: str = typer.Argument(..., help="Manifest whose fetchers to check (path or bare name)"),
+    config: Optional[str] = typer.Option(None, "--config", help="Uploader config YAML"),
+    json_out: bool = typer.Option(False, "--json", help="Emit the status as JSON"),
+):
+    """What each manifest fetcher has in Paramify: evidence set, script,
+    validators, capabilities, artifacts. Read-only.
+
+    Exit 0 when every fetcher is ready, 1 when some are not yet, 2 when it
+    cannot tell: a setup error, no token, a failed read, an unknown fetcher,
+    or no evidence fetcher in the manifest.
+    """
+    try:
+        root = api.find_repo_root()
+        path = api.resolve_manifest_path(root, manifest)
+        status = api.paramify_status(root, path, Path(config).resolve() if config else None)
+    except Exception as e:  # noqa: BLE001 — a setup error, reported as one line
+        if json_out:
+            typer.echo(json.dumps({"ok": False, "errors": [str(e)]}, indent=2))
+        else:
+            _err(str(e))
+        raise typer.Exit(2)
+    code = status_exit_code(status)
+    if json_out:
+        typer.echo(json.dumps(status, indent=2))
+        raise typer.Exit(code)
+
+    ws = status["workspace"]
+    online = ws["token"]
+    errors = status["errors"]
+    typer.echo(f"{ws['base_url']}  " + (style.ok("token set") if online else style.warn("no API token")))
+    header = ["fetcher", "evidence set", "script", "validators", "capabilities", "artifacts", "ready"]
+    table = [header] + [_status_cells(r, online, errors) for r in status["fetchers"]]
+    widths = [max(len(row[i]) for row in table) for i in range(len(header))]
+    for i, cells in enumerate(table):
+        line = "  ".join(c.ljust(w) for c, w in zip(cells, widths)).rstrip()
+        typer.echo(style.head(line) if i == 0 else line)
+    totals = status_totals(status) if status["fetchers"] else ""
+    if totals:
+        typer.echo("")
+        typer.echo(totals)
+    if status["pipelines_count"]:
+        typer.echo(style.dim(f"{status['pipelines_count']} scan-report fetcher(s): see `paramify issues`"))
+    if not status["fetchers"]:
+        typer.echo(style.warn("no evidence fetchers in the manifest to check"))
+    for name in status["skipped"]:
+        typer.echo(style.warn(f"skipped {name}: no such fetcher"))
+    for part, message in errors.items():
+        typer.echo(style.warn(f"could not read {part.replace('_', ' ')}: {message}"))
+    if not online:
+        typer.echo(style.warn("Set PARAMIFY_UPLOAD_API_TOKEN (or PARAMIFY_API_TOKEN) to read the workspace."))
+    raise typer.Exit(code)
 
 
 @validators_app.command("check")
@@ -1627,9 +1863,14 @@ def scripts_sync_cmd(
     include = None
     if not all_fetchers:
         mpath = _resolve_optional_manifest(root, manifest, json_out) or (root / _DEFAULT_MANIFEST)
-        # The default manifest is allowed to be absent — an empty include set
-        # then means "every fetcher", which is what --all asks for anyway. A
-        # name the user actually typed has already had to resolve.
+        if not mpath.is_file():
+            # Read as empty, it would scope the sweep to nothing.
+            msg = f"no manifest at {mpath}: name one, or pass --all to sync every fetcher"
+            if json_out:
+                typer.echo(json.dumps({"ok": False, "errors": [msg]}, indent=2))
+            else:
+                _err(msg)
+            raise typer.Exit(1)
         m = api.read_manifest(mpath)
         entries = (m.get("run") or {}).get("fetchers") or []
         include = {e.get("use") for e in entries if e.get("use")}
@@ -2053,6 +2294,30 @@ def manifest_set_stack(
     if note and not json_out:
         _err(f"Note: {note}")
     _save_and_report(m, path, root, json_out, extra={"stack": stack_id, "stack_name": stack_name})
+
+
+@manifest_app.command("set-frequency")
+def manifest_set_frequency(
+    manifest: str = typer.Argument(..., help="Path to manifest yaml"),
+    frequency: str = typer.Argument(..., help="DAILY, THREE_DAY, WEEKLY, BIWEEKLY, MONTHLY, QUARTERLY, BIANNUAL or ANNUAL; an empty string removes it"),
+    fetcher: Optional[str] = typer.Option(None, "--fetcher", help="Set it for this fetcher entry only (a fetcher name or an entry key such as aws_iam_mfa#1)"),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON"),
+):
+    """Record how often evidence sets expect a new artifact.
+
+    Manifest-wide it is how often the manifest runs (run.schedule.every); with
+    --fetcher it overrides that for one entry. The next upload changes the
+    frequency on evidence sets that already exist. upload.yaml's per-fetcher
+    `frequency` and `defaults.frequency` sit between the two.
+    """
+    root = api.find_repo_root()
+    path = _resolve_manifest_arg(root, manifest, json_out)
+    m = _read_for_edit(path, json_out)
+    try:
+        api.set_frequency(m, frequency, use=fetcher)
+    except ValueError as e:
+        _fail(path, str(e), json_out)
+    _save_and_report(m, path, root, json_out, extra={"frequency": frequency.strip().upper() or None})
 
 
 @manifest_app.command("set-owner")
@@ -3098,6 +3363,9 @@ def issues_close_cmd(
     else:
         typer.echo(_job_line(job))
     raise typer.Exit(0 if ok else 1)
+
+
+app.command("update")(update_cmd)
 
 
 if __name__ == "__main__":

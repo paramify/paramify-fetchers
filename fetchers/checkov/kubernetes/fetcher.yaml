@@ -39,6 +39,11 @@ secrets:
   - name: clone_token
     env: GIT_CLONE_TOKEN
     per_target: true
+    required: false
+    description: >-
+      Token for cloning a private repo over HTTPS; omit for public repos. A GitLab token
+      with read_repository, a GitHub token with Contents: Read, or an Azure DevOps PAT
+      with Code (Read).
 
 config_schema:
   soft_fail:

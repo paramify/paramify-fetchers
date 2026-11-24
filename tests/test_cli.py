@@ -30,6 +30,7 @@ from typer.testing import CliRunner
 
 from framework import api, cli
 from framework.cli import app
+from tests.paramify_fake import reads_through
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 runner = CliRunner()
@@ -113,7 +114,7 @@ def test_workspace_lookups_read_token_from_dotenv(tmp_path, monkeypatch):
         os.environ["PARAMIFY_API_BASE_URL"] = "https://example.test/api/v0"
         return True
 
-    monkeypatch.setattr("dotenv.load_dotenv", fake_load_dotenv)
+    monkeypatch.setattr(api, "load_dotenv", fake_load_dotenv)
 
     seen: dict = {}
 
@@ -129,7 +130,7 @@ def test_workspace_lookups_read_token_from_dotenv(tmp_path, monkeypatch):
         seen["url"] = url
         return _Resp()
 
-    monkeypatch.setattr("requests.get", fake_get)
+    monkeypatch.setattr("framework.paramify.client.requests.Session", lambda: reads_through(fake_get))
     api.list_assessments()
     assert seen["auth"] == "Bearer from-dotenv"
     assert seen["url"].startswith("https://example.test/api/v0/")
@@ -348,7 +349,14 @@ def _tui_api_calls() -> set[str]:
 # by every command (repo discovery / manifest read+write plumbing) rather than
 # its own command. Keep this in sync with the TUI; the test below enforces it.
 API_TO_CLI = {
+    "paramify_status": "status",
+    "sync_validators": "validators sync",
+    "list_artifacts": "artifacts list",
     "find_repo_root": "<implicit: every command>",
+    "update_notice": "update",
+    "update_plan": "update",
+    "apply_update": "update",
+    "rollback_update": "update",
     "discover": "<implicit: one fetcher-tree scan shared across a redraw>",
     "catalog": "list / catalog / describe",
     "list_manifests": "manifests",
@@ -382,6 +390,14 @@ API_TO_CLI = {
     "list_stacks": "stacks",
     "set_stack": "manifest set-stack",
     "set_owner": "manifest set-owner",
+    "generate_env": "env",
+    "set_schedule": "manifest set-frequency",
+    "validator_results": "artifacts list",
+    "latest_validator_results": "<implicit: the newest result per validator, from artifacts list>",
+    "result_for": "<implicit: one validator's row of artifacts list>",
+    "newest_pipeline_files": "<implicit: the files a local validator test reads; paramify runs lists the runs>",
+    "entry_frequency": "<implicit: the entry detail's frequency row; upload --plan shows the result>",
+    "default_upload_values": "<implicit: the default upload.yaml the frequency row reads; upload reads it too>",
     "list_channel_owners": "manifest set-owner",  # and `validate --online`, and the TUI's owner picker
     "owner_notes": "validate",  # --online
     "manifest_owners": "validate",  # --online: only a manifest that sets an owner lists the owners
@@ -399,6 +415,8 @@ API_TO_CLI = {
     "set_assessment": "assessments select",
     "set_close_cycle": "assessments select",  # --close-cycle
     "issues_jobs": "issues jobs",
+    "preset_sheet": "preset",
+    "render_preset_sheet": "preset",
     "issues_job_action": "issues jobs",  # --retry / --cancel
     "issues_close": "issues close",
     "latest_run": "upload",  # and `issues upload`: the run picked with no run-dir
@@ -442,6 +460,8 @@ def test_parity_mapped_commands_actually_exist():
         "scripts": scripts,
         "assessments": _subcommands("assessments"),
         "issues": _subcommands("issues"),
+        "validators": _subcommands("validators"),
+        "artifacts": _subcommands("artifacts"),
     }
     for api_fn, where in API_TO_CLI.items():
         if where.startswith("<implicit"):
@@ -1674,7 +1694,10 @@ _CAPABILITY_PAYLOAD = {
                  "implementationStatus": "IMPLEMENTED"},
                 {"type": "END_USER", "name": "Core Process",
                  "narrative": "The role configures Log Management to include audit records.",
-                 "implementationStatus": "IMPLEMENTED"},
+                 "implementationStatus": "IMPLEMENTED",
+                 "validatorEvidencePairs": [
+                     {"validatorEvidencePairId": "p-1", "validatorId": "v-1", "evidenceId": "ev-1"},
+                 ]},
             ],
         }
     ]
@@ -1683,7 +1706,9 @@ _CAPABILITY_PAYLOAD = {
 _EVIDENCE_PAYLOAD = {
     "evidences": [
         {"id": "ev-1", "referenceId": "EVD-1", "name": "SSP", "description": "",
-         "instructions": "", "artifactCount": 1, "automated": False, "frequency": "ANNUAL"},
+         "instructions": "", "artifactCount": 1, "automated": False, "frequency": "ANNUAL",
+         "validators": [{"validatorEvidencePairId": "p-1", "id": "v-1", "name": "VAL-1",
+                         "type": "AUTOMATED"}]},
         {"id": "ev-2", "referenceId": "EVD-2", "name": "Empty set", "artifactCount": 0},
     ]
 }
@@ -1731,7 +1756,7 @@ def workspace_reads(monkeypatch):
             return _Resp(_ARTIFACT_PAYLOAD)
         raise AssertionError(f"unexpected GET {url}")
 
-    monkeypatch.setattr("requests.get", fake_get)
+    monkeypatch.setattr("framework.paramify.client.requests.Session", lambda: reads_through(fake_get))
     return seen
 
 
@@ -1755,6 +1780,24 @@ def test_list_capabilities_normalizes_and_keeps_only_written_narratives(workspac
     written = api.capability_narratives(cap)
     assert len(written) == 1                  # … but only one says anything
     assert written[0]["type"] == "END_USER"
+
+
+def test_list_evidence_sets_keeps_each_paired_validator(workspace_reads):
+    """The pair id is how a set's validators are told apart from the registry's:
+    `paramify status` reads it to say which registry validators are paired."""
+    sets = {s["reference_id"]: s for s in api.list_evidence_sets()}
+    assert sets["EVD-1"]["validators"] == [
+        {"pair_id": "p-1", "id": "v-1", "name": "VAL-1", "type": "AUTOMATED"}
+    ]
+    assert sets["EVD-2"]["validators"] == []
+
+
+def test_list_capabilities_keeps_each_functions_pairs(workspace_reads):
+    functions = {f["type"]: f for f in api.list_capabilities()[0]["functions"]}
+    assert functions["END_USER"]["pairs"] == [
+        {"pair_id": "p-1", "validator_id": "v-1", "evidence_id": "ev-1"}
+    ]
+    assert functions["PROVIDER"]["pairs"] == []
 
 
 def test_capabilities_show_prints_the_narrative(workspace_reads):
@@ -1788,7 +1831,8 @@ def test_artifacts_list_sorts_newest_first(workspace_reads):
     assert result.exit_code == 0, result.output
     artifacts = json.loads(result.output)["artifacts"]
     assert [a["title"] for a in artifacts] == ["Newer", "Older"]
-    assert artifacts[0]["validators"] == [{"name": "All encrypted", "result": "PASS"}]
+    # The validator id is kept (blank when the API leaves it out) so results match by id, then name.
+    assert artifacts[0]["validators"] == [{"id": "", "name": "All encrypted", "result": "PASS"}]
 
 
 def test_pull_artifact_does_not_send_the_api_token_to_s3(workspace_reads, tmp_path, monkeypatch):
@@ -1908,3 +1952,128 @@ def test_no_tags_flag_on_every_tagging_command(path):
         cmd = cmd.commands[part]
     opts = {opt for param in cmd.params for opt in getattr(param, "opts", [])}
     assert "--no-tags" in opts
+
+
+# ---- paramify status ------------------------------------------------------- #
+
+def _status_fixture(second_ready: bool = False) -> dict:
+    def row(name, ref, set_id, arts, script, validators, ready):
+        return {"name": name, "kind": "evidence",
+                "evidence_set": {"reference_id": ref, "name": name, "id": set_id,
+                                 "exists": set_id is not None, "artifact_count": arts},
+                "script": script, "validators": validators, "pairs": [], "ready": ready}
+    return {
+        "workspace": {"base_url": "https://app.paramify.com/api/v0", "base_url_source": "default", "token": True},
+        "fetchers": [
+            row("demo_hello", "EVD-DEMO-HELLO", "ev-1", 2, "in_sync",
+                [{"key": "k", "role": "completeness", "name": "K", "paired": True}], True),
+            row("demo_policy_check", "EVD-DEMO-POLICY-CHECK", None, 0, "create", [], second_ready),
+        ],
+        "capabilities": [], "pipelines_count": 0, "skipped": [], "errors": {},
+    }
+
+
+@pytest.fixture
+def status_manifest(tmp_path):
+    path = tmp_path / "status.yaml"
+    path.write_text("run:\n  fetchers:\n    - use: demo_hello\n")
+    return str(path)
+
+
+def test_status_json_prints_the_status(monkeypatch, status_manifest):
+    monkeypatch.setattr(api, "paramify_status", lambda *a, **k: _status_fixture())
+    result = runner.invoke(app, ["status", status_manifest, "--json"])
+    assert json.loads(result.output) == _status_fixture()
+
+
+def test_status_exit_codes(monkeypatch, status_manifest):
+    monkeypatch.setattr(api, "paramify_status", lambda *a, **k: _status_fixture(second_ready=True))
+    assert runner.invoke(app, ["status", status_manifest]).exit_code == 0
+    monkeypatch.setattr(api, "paramify_status", lambda *a, **k: _status_fixture())
+    assert runner.invoke(app, ["status", status_manifest]).exit_code == 1
+
+    def broken(*a, **k):
+        raise ValueError("validators/x/y.yaml: schema validation failed")
+
+    monkeypatch.setattr(api, "paramify_status", broken)
+    result = runner.invoke(app, ["status", status_manifest])
+    assert result.exit_code == 2 and "schema validation failed" in result.output
+
+
+def test_status_table_has_the_totals_line(monkeypatch, status_manifest):
+    monkeypatch.setattr(api, "paramify_status", lambda *a, **k: _status_fixture())
+    out = runner.invoke(app, ["status", status_manifest]).output
+    assert "demo_policy_check" in out
+    assert "scripts 1/2" in out and "uploaded 1/2" in out
+
+
+def test_status_exits_2_when_it_cannot_tell(monkeypatch, status_manifest):
+    """2 is what waiting will not fix, so a wait-until-ready loop stops on it."""
+    def status_with(**changes):
+        s = _status_fixture(second_ready=True)
+        for key, value in changes.items():
+            if key == "token":
+                s["workspace"]["token"] = value
+            else:
+                s[key] = value
+        return s
+
+    cases = {
+        "a 401 on a read": status_with(errors={"evidence_sets": "Paramify rejected the token (HTTP 401)"}),
+        "no token": status_with(token=False),
+        "only an unknown fetcher": status_with(fetchers=[], skipped=["no_such_fetcher"]),
+        "an unknown fetcher beside ready ones": status_with(skipped=["no_such_fetcher"]),
+        "only scan reports": status_with(fetchers=[], pipelines_count=2),
+        "nothing at all": status_with(fetchers=[]),
+    }
+    for case, status in cases.items():
+        monkeypatch.setattr(api, "paramify_status", lambda *a, _s=status, **k: _s)
+        for args in ([], ["--json"]):
+            result = runner.invoke(app, ["status", status_manifest, *args])
+            assert result.exit_code == 2, (case, args, result.output)
+
+
+def test_status_shows_an_unreadable_config(monkeypatch, status_manifest, tmp_path):
+    """`--config typo.yaml` is a setup error, shown, not a bare "no API token"."""
+    monkeypatch.setattr("dotenv.load_dotenv", lambda *a, **k: True)
+    result = runner.invoke(app, ["status", status_manifest, "--config", str(tmp_path / "typo.yaml")])
+    out = result.output + str(result.stderr_bytes or b"")
+    assert result.exit_code == 2
+    assert "Could not read uploader config" in out and "typo.yaml" in out
+
+
+def test_status_shows_unknown_when_the_evidence_read_failed(monkeypatch, status_manifest):
+    s = _status_fixture()
+    s["errors"] = {"evidence_sets": "HTTP 401"}
+    row = s["fetchers"][1]
+    row["evidence_set"].update(exists=None, artifact_count=None)
+    monkeypatch.setattr(api, "paramify_status", lambda *a, **k: s)
+    out = runner.invoke(app, ["status", status_manifest]).output
+    line = next(ln for ln in out.splitlines() if ln.startswith("demo_policy_check"))
+    assert line.split() == ["demo_policy_check", "?", "create", "none", "?", "?"]
+    assert "evidence sets ?/2" in out and "uploaded ?/2" in out
+
+
+def test_status_leaves_the_totals_out_offline(monkeypatch, status_manifest):
+    s = _status_fixture()
+    s["workspace"]["token"] = False
+    monkeypatch.setattr(api, "paramify_status", lambda *a, **k: s)
+    out = runner.invoke(app, ["status", status_manifest]).output
+    assert "evidence sets" not in out and "uploaded" not in out
+    assert "PARAMIFY_UPLOAD_API_TOKEN" in out
+
+
+def test_status_exits_2_for_a_manifest_that_does_not_exist(monkeypatch, tmp_path):
+    """A wait-until-ready loop must stop on a typo, not spin on exit 1."""
+    monkeypatch.setattr(api, "paramify_status", lambda *a, **k: pytest.fail("no manifest to read"))
+    result = runner.invoke(app, ["status", str(tmp_path / "no-such.yaml")])
+    assert result.exit_code == 2
+
+
+def test_scripts_sync_refuses_a_missing_default_manifest(tmp_path, monkeypatch):
+    """Read as empty, the default manifest scoped the sweep to nothing; the
+    message points at the way out instead."""
+    monkeypatch.setattr(api, "find_repo_root", lambda *a, **k: tmp_path)
+    result = runner.invoke(app, ["scripts", "sync", "--dry-run", "--json"])
+    assert result.exit_code == 1
+    assert "--all" in json.loads(result.output)["errors"][0]

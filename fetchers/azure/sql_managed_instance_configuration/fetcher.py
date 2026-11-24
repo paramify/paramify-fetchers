@@ -57,6 +57,8 @@ MANAGED_INSTANCE_DELEGATION = "microsoft.sql/managedinstances"
 ANY_ADDRESS = ("*", "0.0.0.0/0", "any", "internet")
 ALL_PORTS = ("*", "0-65535")
 INTERNET_DESTINATIONS = ("*", "0.0.0.0/0", "internet")
+# Sources that cover every address in the subnet.
+EVERY_SUBNET = ("*", "0.0.0.0/0", "virtualnetwork")
 SMB_PORT = 445
 # Private, shared (CGNAT), loopback and link-local space; a source reaching past these includes public addresses.
 NON_PUBLIC_RANGES = tuple(ipaddress.ip_network(n) for n in (
@@ -298,8 +300,28 @@ def allows_public_all_ports_inbound(rule: dict) -> bool:
     )
 
 
-# Same reading as azure_network_security_groups: the first all-port, all-protocol outbound rule to the Internet decides.
-def unrestricted_internet_outbound(group: dict) -> bool:
+# Same reading as azure_network_security_groups: the first all-port, all-protocol outbound rule to the Internet decides,
+# except that a Deny limited to some sources is skipped, since egress from the rest still flows.
+def _covers_subnet(sources: list, subnet_prefixes: list) -> bool:
+    """Whether a rule's sources cover every address in the subnet: a covering tag, or ranges that hold all of it."""
+    if any(lower(s) in EVERY_SUBNET for s in sources):
+        return True
+
+    def networks(values):
+        nets = []
+        for v in values:
+            try:
+                nets.append(ipaddress.ip_network(str(v).strip(), strict=False))
+            except ValueError:  # a service tag or application security group, not a range
+                continue
+        return nets
+
+    subnet_nets, source_nets = networks(subnet_prefixes), networks(sources)
+    merged = [n for version in (4, 6) for n in ipaddress.collapse_addresses(r for r in source_nets if r.version == version)]
+    return bool(subnet_nets) and all(any(s.version == r.version and s.subnet_of(r) for r in merged) for s in subnet_nets)
+
+
+def unrestricted_internet_outbound(group: dict, subnet_prefixes: list | None = None) -> bool:
     rules = sorted(
         (*group["security_rules"], *group["default_security_rules"]),
         key=lambda r: r["priority"] if isinstance(r.get("priority"), int) else 1 << 30,
@@ -308,13 +330,16 @@ def unrestricted_internet_outbound(group: dict) -> bool:
         if (
             lower(rule.get("direction")) == "outbound"
             and rule.get("protocol") == "*"
-            and "*" in _values(rule, "destination_port_range", "destination_port_ranges")
+            and any(str(p).strip() in ALL_PORTS for p in _values(rule, "destination_port_range", "destination_port_ranges"))
             and any(
                 lower(d) in INTERNET_DESTINATIONS
                 for d in _values(rule, "destination_address_prefix", "destination_address_prefixes")
             )
         ):
-            return lower(rule.get("access")) == "allow"
+            if lower(rule.get("access")) == "allow":
+                return True
+            if _covers_subnet(_values(rule, "source_address_prefix", "source_address_prefixes"), subnet_prefixes or []):
+                return False
     return False
 
 
@@ -354,7 +379,7 @@ def subnet_fields(subnet: dict | None, group: dict | None, table: dict | None) -
         "subnet_unrestricted_internet_outbound": (
             True if has_group is False
             else None if group is None
-            else unrestricted_internet_outbound(group)
+            else unrestricted_internet_outbound(group, subnet["address_prefixes"] if subnet else [])
         ),
         "subnet_smb_outbound_allow_rules": customer_rules(allows_smb_outbound),
         "subnet_public_all_ports_inbound_allow_rules": customer_rules(allows_public_all_ports_inbound),
@@ -592,17 +617,15 @@ def classify_databases(client, collector: Collector, instance: dict) -> list[dic
 
 
 def collect(subscription_id, cred, collector: Collector, exclusions: ResourceExclusions | None = None,
-            excluded: list | None = None) -> tuple[list[dict], str | None]:
-    """Instances the exclusions take out are appended to `excluded` and get none of the per-instance reads."""
+            excluded: list | None = None) -> tuple[list[dict] | None, str | None]:
+    """Instances the exclusions take out are appended to `excluded` and get none of the per-instance reads; None when
+    the instance list couldn't be read."""
     client = sql_client(subscription_id, cred, collector)
-    if client is None:
+    instances = None if client is None else list_instances(client, collector, project_instance, unread=None)
+    if instances is None:
         if exclusions is not None:
             exclusions.mark_unread()
-        return [], None
-    failures = len(collector.failures)
-    instances = list_instances(client, collector, project_instance)
-    if exclusions is not None and len(collector.failures) > failures:
-        exclusions.mark_unread()
+        return None, None
     if exclusions and excluded is not None:
         instances, out = exclusions.split(instances, "managed_instance")
         excluded += sorted(out, key=lambda e: e["id"] or "")
@@ -680,7 +703,7 @@ def main() -> int:
     subscription_id = sub["subscription_id"]
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
-    instances: list[dict] = []
+    instances: list[dict] | None = None
     excluded: list[dict] = []
     exclusions = ResourceExclusions.from_env()
     maintenance_registration = None
@@ -705,7 +728,9 @@ def main() -> int:
             ),
         )
 
-    if not (subscription_id and cred is not None):
+    listed = instances is not None
+    instances = instances or []
+    if not listed:
         exclusions.mark_unread()
     exclusions.record_invalid(collector)
     exclusions.warn_unmatched(logger)
@@ -723,7 +748,7 @@ def main() -> int:
         summary={
             **summarize(instances),
             "provider_registration_status": registration,
-            **exclusions.summary(excluded, ("managed_instance",), {"managed_instances": len(instances)}),
+            **exclusions.summary(excluded, ("managed_instance",), {"managed_instances": len(instances) if listed else None}),
         },
     )
 

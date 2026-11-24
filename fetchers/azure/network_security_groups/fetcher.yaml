@@ -1,5 +1,5 @@
 name: azure_network_security_groups
-version: 0.5.1
+version: 0.6.1
 description: >-
   Shows which security group rules expose admin ports or allow Internet egress, which subnets and network interfaces sit behind a group, and whether subnets are separated from each other.
 category: azure
@@ -89,12 +89,12 @@ evidence_set:
     Which resources are left out of scope?
     - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
     - resource_exclusion_patterns_unmatched — List of configured patterns that matched no network security group, virtual network, network interface or subnet a network interface sits in, such as a mistyped name; null when a list could not be read
-    - excluded_network_security_groups — Number of network security groups left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, and no other count includes it
-    - excluded_virtual_networks — Number of virtual networks left out of scope the same way; their subnets leave with them and no subnet count includes them
-    - excluded_network_interfaces — Number of network interfaces left out of scope the same way, or because a pattern matched the virtual network their subnets sit in or one of those subnets; each names that network or subnet in matched_id
-    - in_scope_network_security_groups — Number of network security groups read and in scope; 0 means none was read or the patterns took out every group
-    - in_scope_virtual_networks — Number of virtual networks read and in scope
-    - in_scope_network_interfaces — Number of network interfaces read and in scope
+    - excluded_network_security_groups — Number of network security groups left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern, and no other count includes it; null when the network security group list could not be read
+    - excluded_virtual_networks — Number of virtual networks left out of scope the same way; their subnets leave with them and no subnet count includes them; null when the virtual network list could not be read
+    - excluded_network_interfaces — Number of network interfaces left out of scope the same way, or because a pattern matched the virtual network their subnets sit in or one of those subnets; each names that network or subnet in matched_id; null when the network interface list could not be read
+    - in_scope_network_security_groups — Number of network security groups read and in scope; null when the network security group list could not be read; 0 means there are none or the patterns took out every group
+    - in_scope_virtual_networks — Number of virtual networks read and in scope; null when the virtual network list could not be read
+    - in_scope_network_interfaces — Number of network interfaces read and in scope; null when the network interface list could not be read
 
     Which groups and rules were checked?
     - total_network_security_groups — Number of in-scope network security groups
@@ -111,8 +111,8 @@ evidence_set:
     - outbound_allow_rules — Number of custom outbound rules whose access is Allow
     - outbound_deny_rules — Number of custom outbound rules whose access is Deny
     - internet_destined_allow_rules — Number of custom outbound Allow rules whose destination includes Internet, * or 0.0.0.0/0
-    - unrestricted_internet_outbound_groups — Number of groups that allow all-port Internet egress: the first catch-all rule toward the Internet (outbound, protocol * and port * written as *, destination Internet, * or 0.0.0.0/0, whatever its source), custom and default rules in priority order, is an Allow, which an untouched group's default AllowInternetOutBound is; a Deny on fewer ports or protocols, or on 0-65535 written as a range, does not count as an override
-    - restricted_internet_outbound_groups — Number of groups that are not in unrestricted_internet_outbound_groups: a catch-all Deny toward the Internet comes first, even one limited to a narrow source, or no catch-all rule toward it is found
+    - unrestricted_internet_outbound_groups — Number of groups that allow all-port Internet egress: the first catch-all rule toward the Internet (outbound, protocol *, port * or 0-65535, destination Internet, * or 0.0.0.0/0), custom and default rules in priority order, is an Allow, which an untouched group's default AllowInternetOutBound is; a Deny on fewer ports or protocols, or one limited to some sources (its source is not *, 0.0.0.0/0 or VirtualNetwork), does not count as an override, and the walk goes on to the next rule
+    - restricted_internet_outbound_groups — Number of groups that are not in unrestricted_internet_outbound_groups: a catch-all Deny toward the Internet whose source covers everything (*, 0.0.0.0/0 or VirtualNetwork) comes first, or no catch-all rule toward it is found
 
     Which virtual networks and subnets sit behind a group?
     - total_virtual_networks — Number of in-scope virtual networks

@@ -30,8 +30,17 @@ from datetime import datetime, timezone
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as pkg_version
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
-from urllib.parse import urlparse
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Mapping,
+    Optional,
+    Sequence,
+    Tuple,
+)
 
 import yaml
 from dotenv import load_dotenv
@@ -39,17 +48,20 @@ from packaging.requirements import Requirement
 from packaging.specifiers import SpecifierSet
 from packaging.utils import canonicalize_name
 
-from framework import patterns, yaml_io
+from framework import envgen, patterns, yaml_io
 from framework import samples as _samples
 from framework.config_loader import discover_fetchers, discover_platforms
 from framework.contract import (
+    SCHEDULE_FREQUENCIES,
     ConfigField,
+    Fetcher,
     ManifestEntry,
     PlatformConfig,
     Secret,
     TargetField,
     config_hint,
     effective_secrets,
+    pipeline_dict,
     platform_category,
     platform_for,
 )
@@ -65,15 +77,18 @@ from framework.issue_reports import (
 )
 from framework.issue_reports import read_index as read_issue_report_index
 from framework.issue_reports import record_outputs as record_issue_reports
-from framework.paramify.client import base_url_error
+from framework.paramify.client import ApiError
+from framework.paramify.connection import client_for, open_workspace
+from framework.paramify.connection import settings as paramify_settings
+from framework.paramify.pipelines import (
+    DEFAULT_WAIT_TIMEOUT,
+    Pipelines,
+    job_summary,
+    wait_for_job,
+)
+from framework.paramify.resources import Resources
 from framework.paramify_auth import (
-    BASE_URL_ENV,
-    READ_TOKEN_ENV,
-    UPLOAD_TOKEN_ENV,
     describe_base_url,
-    missing_token_error,
-    resolve_base_url,
-    resolve_upload_token,
 )
 from framework.probe import probe_categories
 from framework.run_files import is_evidence_file
@@ -85,8 +100,7 @@ from framework.secret_resolver import (
 )
 from framework.sync import upload as _sync_upload
 from framework.sync.model import Plan
-
-_missing_token_error = missing_token_error
+from framework.sync.providers.delivery_routing import PIPELINE_DIRECT
 
 _STDERR_TAIL_CHARS = 4000
 
@@ -106,6 +120,80 @@ def find_repo_root(start: Optional[Path] = None) -> Path:
     )
 
 
+def update_notice(root: Path) -> Optional[str]:
+    """The one line a front-end shows when an update is waiting, else None.
+
+    The `waiting` text of update.check_for_update ("12 new commits on main"),
+    so a front-end that only wants the notice need not read the dict.
+    """
+    from framework import update
+
+    info = update.check_for_update(root)
+    return info["waiting"] if info and info.get("update_available") else None
+
+
+def _run_update(root: Path, *flags: str) -> dict:
+    """Run `paramify update <flags>` in `root` as a subprocess and parse its JSON.
+
+    A subprocess, not an import: an update replaces the code on disk, and the
+    running TUI must not load half of it. Output that is not JSON becomes
+    {"ok": False, "errors": [<last line it printed>]}.
+    """
+    import json
+    import subprocess
+    import sys
+
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-m", "framework.cli", "update", *flags],
+            cwd=root, capture_output=True, text=True,  # no timeout: killing it mid-pip would leave a half install
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return {"ok": False, "errors": [str(exc)]}
+    try:
+        doc = json.loads(proc.stdout)
+        if isinstance(doc, dict):
+            return doc
+    except ValueError:
+        pass
+    lines = [ln.strip() for ln in (proc.stderr or "").splitlines() if ln.strip()]
+    lines = lines or [ln.strip() for ln in (proc.stdout or "").splitlines() if ln.strip()]
+    return {"ok": False, "errors": [lines[-1] if lines else f"paramify update exited {proc.returncode} without output"]}
+
+
+def update_plan(root: Path) -> dict:
+    """What `paramify update` would do, without doing it (it asks nothing and changes nothing).
+
+    The plan the CLI draws (framework.update.plan, as `--json` shows it), read
+    in this process: reading is safe here, only the move must be a subprocess.
+    {ok, errors, current, target, ...}, or {ok: False, errors} when update
+    refuses outright. Adds `can_roll_back`: whether `--rollback` would go back
+    from here (update.rollback_refusal).
+    """
+    from framework import update
+
+    try:
+        doc = {"ok": True, "errors": [], **update.public(update.plan(root))}
+    except update.UpdateError as e:
+        doc = {"ok": False, "errors": [str(e)]}
+    doc["can_roll_back"] = update.rollback_refusal(root) is None
+    return doc
+
+
+def apply_update(root: Path, expect: str, allow_breaking: bool = False) -> dict:
+    """Move to the commit a plan showed (`paramify update --yes --json --expect <sha>`),
+    in a subprocess, so the running process never loads half-replaced code. It
+    refuses if the target has moved since. Breaking changes that touch this
+    clone stop it unless allow_breaking. Returns the CLI's JSON document."""
+    flags = ["--yes", "--json", "--expect", expect] + (["--allow-breaking"] if allow_breaking else [])
+    return _run_update(root, *flags)
+
+
+def rollback_update(root: Path) -> dict:
+    """Return to where the clone was before the last update (`--rollback --yes --json`)."""
+    return _run_update(root, "--rollback", "--yes", "--json")
+
+
 # --------------------------------------------------------------------------- #
 # Catalog — discover + group + describe (powers the UI form and `catalog --json`)
 # --------------------------------------------------------------------------- #
@@ -121,7 +209,7 @@ def _config_descriptor(f: ConfigField) -> dict:
         "env": f.env,
     }
     if f.type == patterns.TYPE:
-        d.update(prefixes=list(f.prefixes), bare=f.bare)
+        d.update(prefixes=list(f.prefixes), bare=f.bare, globs=f.globs)
     return d
 
 
@@ -157,6 +245,7 @@ def _fetcher_descriptor(f, platform_spec=None) -> dict:
         "description": f.description,
         "category": f.category,
         "kind": f.kind,
+        "source": f.source,
         "supports_targets": f.supports_targets,
         "config": [_config_descriptor(c) for c in f.config_schema.values()],
         # Category-declared secrets are part of what this fetcher takes, so the
@@ -182,6 +271,8 @@ def _fetcher_descriptor(f, platform_spec=None) -> dict:
             "title": f.issue_report.title,
             "format": f.output_type,
         }
+    if f.pipeline is not None:
+        d["pipeline"] = pipeline_dict(f.pipeline)
     if f.is_comparator:
         d["depends_on"] = list(f.depends_on)
     return d
@@ -464,6 +555,7 @@ def doctor(
     that touches the network, and its results never gate `ok` — see
     framework/probe.py.
     """
+    refresh_env(root)  # judge secrets as `run` will see them, .env included
     py = sys.version_info
     python = {
         "version": f"{py.major}.{py.minor}.{py.micro}",
@@ -648,25 +740,15 @@ def upload_readiness(root: Path, config_path: Optional[Path] = None) -> dict:
                 "errors": [f"Could not read uploader config {config_path}: {exc}"],
             }
 
-    paramify_cfg = config.get("paramify") or {}
-    base_url, base_url_source = resolve_base_url(paramify_cfg.get("base_url"))
-    token, token_source = resolve_upload_token()
-
-    errors: List[str] = []
-    if not token:
-        errors.append(_missing_token_error())
-    if not base_url.lower().startswith("https://"):
-        errors.append(
-            f"{BASE_URL_ENV} must be https to protect the API token (got {base_url!r})"
-        )
-
+    resolved = paramify_settings(config)
+    errors = resolved.errors(need_token=True)
     return {
         "ok": not errors,
-        "token_present": bool(token),
-        "token_source": token_source,
-        "base_url": base_url,
-        "base_url_source": base_url_source,
-        "base_url_label": describe_base_url(base_url),
+        "token_present": bool(resolved.token),
+        "token_source": resolved.token_source,
+        "base_url": resolved.base_url,
+        "base_url_source": resolved.base_url_source,
+        "base_url_label": describe_base_url(resolved.base_url),
         "errors": errors,
     }
 
@@ -984,11 +1066,11 @@ def pick_pattern_field(fields: Mapping[str, ConfigField], pattern: str, field: O
     if field is not None:
         if field not in fields:
             raise ValueError(f"{field!r} is not a pattern list here; pattern lists: {', '.join(fields) or 'none'}")
-        problem = patterns.check([patterns.Item(pattern)], fields[field].prefixes, fields[field].bare)
+        problem = patterns.check([patterns.Item(pattern)], fields[field].prefixes, fields[field].bare, fields[field].globs)
         if problem:
             raise ValueError(f"{field}: {problem[0]}")
         return field
-    fits = [n for n, d in fields.items() if not patterns.check([patterns.Item(pattern)], d.prefixes, d.bare)]
+    fits = [n for n, d in fields.items() if not patterns.check([patterns.Item(pattern)], d.prefixes, d.bare, d.globs)]
     if len(fits) == 1:
         return fits[0]
     if fits:
@@ -996,17 +1078,19 @@ def pick_pattern_field(fields: Mapping[str, ConfigField], pattern: str, field: O
     kind, sep, _ = pattern.partition(":")
     owner = next((n for n, d in fields.items() if sep and kind.lower() in d.prefixes), None)
     if owner:
-        raise ValueError(f"{owner}: {patterns.check([patterns.Item(pattern)], fields[owner].prefixes, fields[owner].bare)[0]}")
-    takes = "; ".join(f"{n} takes {grammar_text(d.prefixes, d.bare)}" for n, d in fields.items())
+        found = patterns.check([patterns.Item(pattern)], fields[owner].prefixes, fields[owner].bare, fields[owner].globs)
+        raise ValueError(f"{owner}: {found[0]}")
+    takes = "; ".join(f"{n} takes {grammar_text(d.prefixes, d.bare, d.globs)}" for n, d in fields.items())
     raise ValueError(f"no pattern list here takes {pattern!r} ({takes or 'none declared'})")
 
 
-def grammar_text(prefixes, bare: bool = True) -> str:
+def grammar_text(prefixes, bare: bool = True, globs: bool = True) -> str:
     """What a patterns field takes, in words: "rg:, location: or id: patterns", "route: or unprefixed patterns"."""
     named = [f"{p}:" for p in prefixes] + (["unprefixed"] if bare else [])
     if not named:
         return "no patterns"
-    return (", ".join(named[:-1]) + " or " + named[-1] if len(named) > 1 else named[0]) + " patterns"
+    text = (", ".join(named[:-1]) + " or " + named[-1] if len(named) > 1 else named[0]) + " patterns"
+    return text if globs else text + " without wildcards"
 
 
 def _pattern_holder(m: dict, scope: str, target: str) -> dict:
@@ -1189,6 +1273,16 @@ def validate_notes(manifest: dict, root: Path, fetchers=None, platforms=None) ->
     if not UNKNOWN_CONFIG_KEYS_ARE_ERRORS:
         notes += unknown_config_keys(parsed, fetchers, platforms)
     notes += _duplicate_entry_notes(parsed, fetchers)
+    notes += _unused_concurrency_notes(parsed, fetchers)
+    for entry, key in zip(parsed.entries, manifest_loader.entry_keys(parsed.entries)):
+        f = fetchers.get(entry.use)
+        if f is None or not f.is_pipeline:
+            continue
+        if manifest_loader.resolved_paramify(parsed, entry, pipeline=True).get("approval") == "MANUAL":
+            notes.append(f"{key}: approval MANUAL on a pipeline fetcher; "
+                         f"the pipeline waits for someone to approve each batch")
+        notes += [f"{key}: ignores run.paramify {setting}: direct; pipeline files always go in a batch"
+                  for setting in manifest_loader.ignored_run_direct(parsed, entry)]
     return notes
 
 
@@ -1206,6 +1300,19 @@ def _duplicate_entry_notes(parsed, fetchers) -> List[str]:
         names = f"{', '.join(same[:-1])} and {same[-1]}"
         later = "the second entry's run fails" if len(same) == 2 else "every entry after the first fails"
         notes.append(f"entries {names} run the same fetcher with no targets; they write the same files, so {later}.")
+    return notes
+
+
+def _unused_concurrency_notes(parsed, fetchers) -> List[str]:
+    """Entries whose `concurrency` the runner ignores: only a fan-out of two or more targets runs at once."""
+    notes = []
+    for e, key in zip(parsed.entries, manifest_loader.entry_keys(parsed.entries)):
+        if e.concurrency <= 1 or e.use not in fetchers:
+            continue
+        if not fetchers[e.use].supports_targets:
+            notes.append(f"{key}: concurrency {e.concurrency} has no effect; the fetcher takes no targets")
+        elif len(e.targets) < 2:
+            notes.append(f"{key}: concurrency {e.concurrency} has no effect with fewer than two targets")
     return notes
 
 
@@ -1238,6 +1345,13 @@ def validate(manifest: dict, root: Path, fetchers=None, platforms=None) -> List[
         errors += unknown_config_keys(parsed, fetchers, platforms)
     # A bad category-wide pattern list is one mistake, reported once with the entries it reaches.
     shared: Dict[Tuple[Optional[str], str], List[str]] = {}
+
+    from framework.validators import (
+        discover_validators,
+        manifest_reference_ids,
+        pipeline_conflicts,
+        select_validators,
+    )
 
     # Each message names its entry by key (`x`, `x#1`), so a front-end can tell
     # which of two entries of one fetcher it is about.
@@ -1347,7 +1461,23 @@ def validate(manifest: dict, root: Path, fetchers=None, platforms=None) -> List[
                 if secret.name not in entry.secrets:
                     errors.append(f"{key}: missing secret '{secret.name}'")
 
+        # A pipeline file never goes direct (the upload engine refuses it too; this catches it before a run).
+        # A `direct` inherited from run.paramify is ignored (validate_notes says so); the entry's own is an error.
+        if fetcher.is_pipeline:
+            paramify = manifest_loader.resolved_paramify(parsed, entry, pipeline=True)
+            errors += [f"{key}: {setting}: direct is not allowed on a pipeline fetcher; {PIPELINE_DIRECT}"
+                       for setting in ("delivery", "no_request") if paramify.get(setting) == "direct"]
+
     errors += [f"platforms.{cat}.config: {problem} (for {', '.join(uses)})" for (cat, problem), uses in shared.items()]
+    # Validators on a pipeline set mean the batch never approves, so the pipeline never runs.
+    # Only manifests with a pipeline entry pay for loading the registry.
+    if any(e.use in fetchers and fetchers[e.use].is_pipeline for e in parsed.entries):
+        try:
+            scoped = select_validators(discover_validators(root).values(),
+                                       manifest_reference_ids(manifest, fetchers, include_pipeline=True))
+            errors += pipeline_conflicts(scoped, fetchers)
+        except ValueError as e:
+            errors.append(f"validator registry: {e}")
     return errors
 
 
@@ -1502,6 +1632,7 @@ def run(
     errs = manifest_loader.schema_errors(manifest, root)
     if errs:
         raise ValueError("manifest schema invalid:\n  " + "\n  ".join(errs))
+    refresh_env(root)  # a value kept in .env reaches ${env:...}, whoever started the run
 
     fetchers = discover_fetchers(root)
     platforms = discover_platforms(root)
@@ -1654,8 +1785,11 @@ def run(
         "started_at": started_at,
         "completed_at": completed_at,
         "invocations": [_invocation_record(r) for r in all_results],
+        # The upload reads `every` as the frequency of each set no entry or upload.yaml sets.
+        "schedule": dict(parsed.schedule),
         "paramify": {
-            keys[id(e)]: {"use": e.use, **manifest_loader.resolved_paramify(parsed, e)}
+            keys[id(e)]: {"use": e.use, **manifest_loader.resolved_paramify(
+                parsed, e, pipeline=e.use in fetchers and fetchers[e.use].is_pipeline)}
             for e in entries
         },
     }
@@ -1771,6 +1905,7 @@ def sync_validators(
     reference_ids=None,
     dry_run: bool = False,
     update: bool = False,
+    pair_existing: bool = False,
     lock_path: Optional[str] = None,
     on_event: Optional[Callable[[dict], None]] = None,
     custom_tags: bool = True,
@@ -1778,9 +1913,12 @@ def sync_validators(
     """Sync registry validators to Paramify and associate them to evidence sets.
 
     Scope precedence: explicit `reference_ids` > `manifest_path`'s fetchers'
-    sets > whole registry. Create-or-skip; associates on create only; `update`
-    opt-in patches existing. Fires sync_start / sync_validator / sync_complete.
-    Raises ValueError for setup errors; returns the syncer summary otherwise.
+    sets > whole registry. Create-or-skip; associates on create; `update`
+    opt-in patches an existing validator that differs; `pair_existing` opt-in
+    pairs an existing one with the in-scope sets it isn't paired with yet.
+    Fires sync_start / sync_validator / sync_complete.
+    Raises ValueError for setup errors. A rejected token mid-sweep stops it: the
+    summary's `stopped` says why, and the lock still records what was created.
     """
     syncer = _load_paramify_validator_syncer(root)
     validators = syncer.collect_validators(root, manifest_path, reference_ids)
@@ -1795,6 +1933,7 @@ def sync_validators(
         config=config,
         dry_run=dry_run,
         update=update,
+        pair_existing=pair_existing,
         lock_path=lock_path,
         on_event=on_event,
         display_names=category_display_names(root),
@@ -1812,9 +1951,7 @@ def upload_preflight(
     """Inspect upload readiness without making Paramify API calls."""
     load_dotenv()
     config_path = _upload_config(root, config_path)
-    config = _sync_upload.load_config(config_path)
-    paramify_cfg = config.get("paramify") or {}
-    base_url, base_url_source = resolve_base_url(paramify_cfg.get("base_url"))
+    resolved = paramify_settings(_sync_upload.load_config(config_path))
 
     run_path = Path(run_dir)
     errors: List[str] = []
@@ -1826,25 +1963,18 @@ def upload_preflight(
         if file_count == 0:
             errors.append(f"No evidence files found in {run_path}")
 
-    url_error = base_url_error(base_url)
-    if url_error:
-        errors.append(url_error)
-
-    token, token_source = resolve_upload_token()
-    token_present = bool(token)
-    if not token_present and not dry_run:
-        errors.append(_missing_token_error())
+    errors.extend(resolved.errors(need_token=not dry_run))
 
     return {
         "ok": not errors,
         "run_dir": str(run_path),
-        "base_url": base_url,
-        "base_url_source": base_url_source,
-        "base_url_label": describe_base_url(base_url),
+        "base_url": resolved.base_url,
+        "base_url_source": resolved.base_url_source,
+        "base_url_label": describe_base_url(resolved.base_url),
         "config_path": str(config_path) if config_path else None,
         "file_count": file_count,
-        "token_present": token_present,
-        "token_source": token_source,
+        "token_present": bool(resolved.token),
+        "token_source": resolved.token_source,
         "dry_run": dry_run,
         "errors": errors,
     }
@@ -1924,19 +2054,12 @@ def upload_run(
     )
 
 
-def _workspace(root: Optional[Path], config_path: Optional[Path]) -> Any:
+def _workspace(root: Optional[Path], config_path: Optional[Path]) -> Resources:
     """Resources for the configured workspace. Raises ValueError with no token or a bad base URL."""
     root = Path(root) if root is not None else find_repo_root()
-    load_dotenv()
-    config = _sync_upload.load_config(_upload_config(root, config_path))
-    base_url, _ = resolve_base_url((config.get("paramify") or {}).get("base_url"))
-    url_error = base_url_error(base_url)
-    if url_error:
-        raise ValueError(url_error)
-    token, _ = resolve_upload_token()
-    if not token:
-        raise ValueError(_missing_token_error())
-    return _sync_upload.Resources(_sync_upload.Client(token, base_url))
+    _, resources = open_workspace(_sync_upload.load_config(_upload_config(root, config_path)))
+    assert resources is not None  # a token is required, or open_workspace raised
+    return resources
 
 
 def list_stacks(root: Optional[Path] = None, config_path: Optional[Path] = None) -> List[dict]:
@@ -2079,6 +2202,73 @@ def set_owner(m: dict, owner: Optional[str], use: Optional[str] = None) -> dict:
     return m
 
 
+def set_schedule(m: dict, every: Optional[str], at: Optional[str] = None) -> dict:
+    """Record how often the manifest runs: `run.schedule: {every, at}`.
+
+    Each evidence set's frequency follows `every` unless the entry or upload.yaml
+    sets one. No `every` removes the schedule; no `at` runs at any time of day.
+    """
+    run = _run(m)
+    if not every:
+        run.pop("schedule", None)
+        return m
+    schedule: Dict[str, Any] = {"every": every}
+    if at:
+        schedule["at"] = at
+    run["schedule"] = schedule
+    return m
+
+
+def set_frequency(m: dict, frequency: Optional[str], use: Optional[str] = None) -> dict:
+    """Record how often evidence sets expect a new artifact: manifest-wide
+    (`run.schedule.every`, keeping any `at`), or with `use` for one fetcher entry
+    (its `paramify.frequency`, see _paramify_block). A blank `frequency` removes
+    it. Raises ValueError for a value that isn't one of SCHEDULE_FREQUENCIES:
+    NOT_SET is Paramify's, but a schedule always has a cadence.
+    """
+    value = (frequency or "").strip().upper()
+    if value and value not in SCHEDULE_FREQUENCIES:
+        raise ValueError(f"{frequency!r} isn't a frequency; use one of {', '.join(SCHEDULE_FREQUENCIES)}")
+    if use is None:
+        return set_schedule(m, value or None, (_run(m).get("schedule") or {}).get("at") if value else None)
+    block = _paramify_block(m, use)
+    if value:
+        block["frequency"] = value
+    else:
+        block.pop("frequency", None)
+    return m
+
+
+def default_upload_values(root: Path) -> dict:
+    """The default upload.yaml under `root`, parsed; {} when there is none or it can't
+    be read (a display value: the upload itself reports a bad config)."""
+    try:
+        path = default_upload_config(root)
+        cfg = (yaml_io.load_path(path) or {}) if path else {}
+    except Exception:  # noqa: BLE001
+        cfg = {}
+    return cfg if isinstance(cfg, dict) else {}
+
+
+def entry_frequency(m: dict, entry: Mapping[str, Any], declared: Optional[str], root: Path,
+                    upload_cfg: Optional[dict] = None) -> Tuple[str, str]:
+    """(frequency, source) for one manifest entry's evidence set, as an upload of a
+    run made now would resolve it (see desired.resolve_frequency). `upload_cfg` is
+    the parsed upload.yaml (a caller showing many entries reads it once); without
+    it, the default one under `root` is read. An upload with --config may differ."""
+    from framework.sync.providers.desired import resolve_frequency
+
+    cfg = upload_cfg if upload_cfg is not None else default_upload_values(root)
+    use = str(entry.get("use") or "")
+    return resolve_frequency(
+        declared,
+        entry=(entry.get("paramify") or {}).get("frequency"),
+        fetcher_override=((cfg.get("overrides") or {}).get(use) or {}).get("frequency"),
+        upload_default=(cfg.get("defaults") or {}).get("frequency"),
+        schedule_every=(_run(m).get("schedule") or {}).get("every"),
+    )
+
+
 # --------------------------------------------------------------------------- #
 # Issue reports — assessment-intake facade. Same three functions as the evidence
 # uploader above, against the other endpoint; see uploaders/paramify_issues/.
@@ -2157,11 +2347,10 @@ def issues_upload_preflight(
     files and sends the rest.
     """
     uploader = _load_paramify_issues_uploader(root)
-    uploader.load_dotenv()
+    load_dotenv()
     config_path = _upload_config(root, config_path)
-    config = uploader.load_config(str(config_path)) if config_path else {}
-    paramify_cfg = config.get("paramify") or {}
-    base_url, base_url_source = resolve_base_url(paramify_cfg.get("base_url"))
+    config = (yaml_io.load_path(Path(config_path)) or {}) if config_path else {}
+    resolved = paramify_settings(config)
 
     run_path = Path(run_dir)
     errors: List[str] = []
@@ -2232,28 +2421,21 @@ def issues_upload_preflight(
                     f"(fix: paramify assessments select {name})"
                 )
 
-    url_error = uploader._base_url_error(base_url)
-    if url_error:
-        errors.append(url_error)
-
-    token, token_source = resolve_upload_token()
-    token_present = bool(token)
-    if not token_present and not dry_run:
-        errors.append(_missing_token_error())
+    errors.extend(resolved.errors(need_token=not dry_run))
 
     return {
         "ok": not errors,
         "run_dir": str(run_path),
-        "base_url": base_url,
-        "base_url_source": base_url_source,
-        "base_url_label": describe_base_url(base_url),
+        "base_url": resolved.base_url,
+        "base_url_source": resolved.base_url_source,
+        "base_url_label": describe_base_url(resolved.base_url),
         "config_path": str(config_path) if config_path else None,
         "file_count": file_count,
         "missing_assessment": missing_assessment,
         "assessments": plan,
         "warnings": warnings,
-        "token_present": token_present,
-        "token_source": token_source,
+        "token_present": bool(resolved.token),
+        "token_source": resolved.token_source,
         "dry_run": dry_run,
         "errors": errors,
     }
@@ -2279,7 +2461,7 @@ def issues_upload_run(
     """
     uploader = _load_paramify_issues_uploader(root)
     config_path = _upload_config(root, config_path)
-    config = uploader.load_config(str(config_path)) if config_path else {}
+    config = (yaml_io.load_path(Path(config_path)) or {}) if config_path else {}
     try:
         index = read_issue_report_index(Path(run_dir))
     except ValueError:
@@ -2296,21 +2478,14 @@ def issues_upload_run(
     )
 
 
-def _issues_client(root: Path, config_path: Optional[Path] = None):
-    """(uploader module, client) for the pipeline commands that act on Paramify
-    directly rather than on a run: jobs, retry, cancel, close."""
-    uploader = _load_paramify_issues_uploader(root)
-    uploader.load_dotenv()
+def _pipelines(root: Path, config_path: Optional[Path] = None) -> Pipelines:
+    """The pipeline endpoints, for the commands that act on Paramify directly
+    rather than on a run: jobs, retry, cancel, close."""
     config_path = _upload_config(root, config_path)
-    config = uploader.load_config(str(config_path)) if config_path else {}
-    base_url, _ = resolve_base_url((config.get("paramify") or {}).get("base_url"))
-    url_error = uploader._base_url_error(base_url)
-    if url_error:
-        raise RuntimeError(url_error)
-    token, _ = resolve_upload_token()
-    if not token:
-        raise RuntimeError(_missing_token_error())
-    return uploader, uploader.ParamifyClient(token, base_url)
+    config = (yaml_io.load_path(Path(config_path)) or {}) if config_path else {}
+    _, pipelines = open_workspace(config, wrap=Pipelines)
+    assert pipelines is not None  # a token is required, or open_workspace raised
+    return pipelines
 
 
 def issues_jobs(
@@ -2322,16 +2497,16 @@ def issues_jobs(
     limit: int = 50,
 ) -> List[dict]:
     """Recent pipeline jobs, newest first, as job_summary dicts plus timestamps."""
-    uploader, client = _issues_client(root, config_path)
-    out = []
-    for job in client.list_jobs(assessment_id=assessment_id, status=status, limit=limit):
-        out.append({
-            **uploader.job_summary(job),
+    return [
+        {
+            **job_summary(job),
             "assessment_id": job.get("assessmentId"),
             "created_at": job.get("createdAt"),
             "completed_at": job.get("completedAt"),
-        })
-    return out
+        }
+        for job in _pipelines(root, config_path).list_jobs(
+            assessment_id=assessment_id, status=status, limit=limit)
+    ]
 
 
 def issues_job_action(
@@ -2339,14 +2514,11 @@ def issues_job_action(
 ) -> dict:
     """Retry or cancel one pipeline job. Cancelling also cancels every unfinished
     job queued behind it on the same assessment — that is Paramify's rule."""
-    uploader, client = _issues_client(root, config_path)
-    if action == "retry":
-        job = client.retry_job(job_id)
-    elif action == "cancel":
-        job = client.cancel_job(job_id)
-    else:
+    if action not in ("retry", "cancel"):
         raise ValueError(f"unknown job action {action!r}")
-    return uploader.job_summary(job)
+    pipelines = _pipelines(root, config_path)
+    job = pipelines.retry_job(job_id) if action == "retry" else pipelines.cancel_job(job_id)
+    return job_summary(job)
 
 
 def issues_close(
@@ -2364,16 +2536,15 @@ def issues_close(
     closing auto-closes every open issue the cycle never saw, so it belongs after
     the last file has landed, which only a person knows.
     """
-    uploader, client = _issues_client(root, config_path)
-    job = uploader.job_summary(client.close(assessment_id))
+    pipelines = _pipelines(root, config_path)
+    job = job_summary(pipelines.close(assessment_id))
     if on_event:
         on_event({"event": "job_queued", "assessment_id": assessment_id,
                   "job_id": job["job_id"], "operation": "CLOSE"})
     if not wait:
         return job
-    timeout = wait_timeout or uploader.DEFAULT_WAIT_TIMEOUT
-    final, timed_out = uploader.wait_for_job(client, job["job_id"], timeout=timeout)
-    result = uploader.job_summary(final)
+    final, timed_out = wait_for_job(pipelines, job["job_id"], timeout=wait_timeout or DEFAULT_WAIT_TIMEOUT)
+    result = job_summary(final)
     if timed_out:
         result["timed_out"] = True
     return result
@@ -2408,12 +2579,10 @@ def scripts_sync_preflight(
     ``include`` restricts the fetcher count to those names (a manifest's
     fetchers); ``None`` counts every discovered fetcher.
     """
-    uploader = _load_paramify_scripts_uploader(root)
-    uploader.load_dotenv()
+    load_dotenv()
     config_path = _upload_config(root, config_path)
-    config = uploader.load_config(str(config_path)) if config_path else {}
-    paramify_cfg = config.get("paramify") or {}
-    base_url, base_url_source = resolve_base_url(paramify_cfg.get("base_url"))
+    config = (yaml_io.load_path(Path(config_path)) or {}) if config_path else {}
+    resolved = paramify_settings(config)
 
     errors: List[str] = []
     fetcher_count = 0
@@ -2426,25 +2595,18 @@ def scripts_sync_preflight(
         scope = "in the manifest " if include is not None else ""
         errors.append(f"No fetchers {scope}with an evidence_set and a readable entry file to sync")
 
-    url_error = uploader._base_url_error(base_url)
-    if url_error:
-        errors.append(url_error)
-
-    token, token_source = resolve_upload_token()
-    token_present = bool(token)
     # A token is required to write; dry-run still wants one to diff the tenant,
     # but tolerates its absence (it then reports every fetcher as a create).
-    if not token_present and not dry_run:
-        errors.append(_missing_token_error())
+    errors.extend(resolved.errors(need_token=not dry_run))
 
     return {
         "ok": not errors,
-        "base_url": base_url,
-        "base_url_source": base_url_source,
-        "base_url_label": describe_base_url(base_url),
+        "base_url": resolved.base_url,
+        "base_url_source": resolved.base_url_source,
+        "base_url_label": describe_base_url(resolved.base_url),
         "fetcher_count": fetcher_count,
-        "token_present": token_present,
-        "token_source": token_source,
+        "token_present": bool(resolved.token),
+        "token_source": resolved.token_source,
         "dry_run": dry_run,
         "errors": errors,
     }
@@ -2464,14 +2626,16 @@ def scripts_sync(
     """Sync fetcher entry scripts to Paramify and associate them to evidence sets.
 
     Fires sync_start / sync_item / sync_complete so front-ends can render
-    progress. Raises ValueError for setup errors; returns the uploader summary.
+    progress. Raises ValueError for setup errors, and ApiError when the workspace's
+    scripts cannot be read at all; a rejected token mid-sweep stops it, with the
+    summary's `stopped` saying why.
 
     ``include`` restricts the sweep to those fetcher names (a manifest's
     fetchers); ``None`` syncs every discovered fetcher.
     """
     uploader = _load_paramify_scripts_uploader(root)
     config_path = _upload_config(root, config_path)
-    config = uploader.load_config(str(config_path)) if config_path else {}
+    config = (yaml_io.load_path(Path(config_path)) or {}) if config_path else {}
     return uploader.sync_scripts(
         root,
         config=config,
@@ -2619,6 +2783,123 @@ def latest_run(
     if kind is not None:
         runs = [r for r in runs if run_has(r, kind)]
     return runs[0] if runs else None
+
+
+def _read_envelope(path: Path) -> Optional[dict]:
+    """The JSON object in `path`, or None when it cannot be read as one."""
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def newest_pipeline_files(output_dir, fetcher: Fetcher) -> List[Tuple[Path, Optional[dict]]]:
+    """The fetcher's files in the newest run under output_dir that has any, with each one's
+    JSON (None: unreadable), sorted by name. [] when no run has one.
+
+    Runs come from list_runs: newest first, ghost runs skipped. A run's invocations
+    name the fetcher's outputs (`<stem>_<target>.json` for a per-target fetcher). A
+    run without them is searched for `<output_path stem>*.json` files whose envelope
+    names the fetcher; an unreadable one is kept, so the sheet can say so.
+    """
+    stem = Path(fetcher.output_path).stem
+    for run in list_runs(output_dir):
+        files = run.get("files") or []
+        recorded = sorted(Path(f["path"]) for f in files if f.get("fetcher") == fetcher.name)
+        found = [(p, _read_envelope(p)) for p in recorded if p.is_file()]
+        if not recorded:
+            for f in sorted(files, key=lambda f: f["name"]):
+                p = Path(f["path"])
+                if f.get("fetcher") is not None or p.suffix != ".json" or not p.name.startswith(stem):
+                    continue
+                env = _read_envelope(p)
+                if env is None or (env.get("metadata") or {}).get("fetcher_name") == fetcher.name:
+                    found.append((p, env))
+        if found:
+            return found
+    return []
+
+
+def _merged_asset_types(envelopes: List[dict]) -> Dict[str, int]:
+    """Each envelope's metadata.inventory.by_asset_type, summed: largest count first, then by name."""
+    total: Dict[str, int] = {}
+    for env in envelopes:
+        counts = ((env.get("metadata") or {}).get("inventory") or {}).get("by_asset_type")
+        if isinstance(counts, dict):
+            for k, v in counts.items():
+                if isinstance(v, int):
+                    total[k] = total.get(k, 0) + v
+    return dict(sorted(total.items(), key=lambda kv: (-kv[1], kv[0])))
+
+
+def preset_sheet(root: Path, name: str, output_dir: Optional[Path] = None) -> Dict[str, Any]:
+    """The settings to enter when building the Paramify preset for a pipeline fetcher.
+
+    Reads the fetcher's `pipeline:` block and its files in the newest run that
+    has any under output_dir (default <root>/evidence). With several target files
+    the sample is the first by name and `asset_types` sums them. `problem` names
+    a file that could not be read. Raises KeyError for an unknown fetcher and
+    ValueError for one with no `pipeline:` block.
+    """
+    fetchers = discover_fetchers(root)
+    if name not in fetchers:
+        raise KeyError(name)
+    f = fetchers[name]
+    pipe = f.pipeline
+    if pipe is None:
+        raise ValueError(f"{name} is not a pipeline fetcher")
+    inventory = pipe.type == "inventory"
+    out = Path(output_dir) if output_dir is not None else Path(root) / "evidence"
+    found = newest_pipeline_files(out, f)
+    sample = str(found[0][0]) if found else None
+    unreadable = [p for p, env in found if env is None]
+    problem = f"could not read {unreadable[0]}" if unreadable else None
+    asset_types = None
+    if inventory and found and not unreadable:
+        asset_types = _merged_asset_types([env for _p, env in found if env is not None])
+    return {
+        "fetcher": name,
+        "type": pipe.type,
+        "evidence_set": f.evidence_set.reference_id if f.evidence_set else None,
+        "sample": sample,
+        "problem": problem,
+        "data_path": "payload.data" if inventory else None,
+        "unique_id": "unique_asset_identifier" if inventory else None,
+        "id_scheme": pipe.id_scheme,
+        "asset_id_field": pipe.asset_id_field,
+        "asset_types": asset_types,
+        "linked": sorted(
+            n for n, o in fetchers.items()
+            if n != name and o.pipeline is not None and o.pipeline.id_scheme == pipe.id_scheme
+        ),
+    }
+
+
+def render_preset_sheet(sheet: Dict[str, Any]) -> str:
+    """The text of the preset sheet (spec section 5); the CLI and the TUI both show it."""
+    ref = sheet["evidence_set"] or sheet["fetcher"]
+    inventory = sheet["data_path"] is not None
+    rows = [("Sample file", sheet["sample"] or "none yet: run the fetcher first")]
+    if inventory:
+        rows.append(("Data path", sheet["data_path"]))
+        rows.append(("Unique ID", f"{sheet['unique_id']}   (scheme: {sheet['id_scheme']})"))
+        if sheet.get("problem"):
+            rows.append(("Parent component", f"derive from asset_type. {sheet['problem']}"))
+        elif sheet["asset_types"] is None:
+            rows.append(("Parent component", "derive from asset_type. The asset_type values need a run (run the fetcher first)"))
+        elif not sheet["asset_types"]:
+            rows.append(("Parent component", "derive from asset_type. The last run had no assets"))
+        else:
+            counts = " · ".join(f"{k} {v}" for k, v in sheet["asset_types"].items())
+            rows.append(("Parent component", f"derive from asset_type. Values in the last run:\n{' ' * 22}{counts}"))
+    else:
+        rows.append(("Asset ID field", f"{sheet['asset_id_field']}   (scheme: {sheet['id_scheme']})"))
+    rows.append(("Evidence set", "approval must be automatic; attach no validators"))
+    linked = ", ".join(sheet["linked"]) if sheet["linked"] else f"none in the catalog use {sheet['id_scheme']}"
+    rows.append(("Linked fetchers", linked))
+    head = f"{sheet['type'].capitalize()} pipeline for {ref}  (attach it to this set, not a new one)"
+    return "\n".join([head] + [f"  {k:<17} {v}" for k, v in rows])
 
 
 def read_evidence(path) -> dict:
@@ -2929,65 +3210,46 @@ def new_manifest_path(
 
 _PROGRAMS_PATH = "/projects"  # the UI's "programs" are the API's projects
 _ASSESSMENTS_PATH = "/assessment"
-_WORKSPACE_READ_TIMEOUT = 30
 
 
-def _workspace_get(path: str, params: Optional[Dict[str, Any]] = None) -> Any:
+def _workspace_get(
+    path: str, params: Optional[Dict[str, Any]] = None, *, base_url: Optional[str] = None,
+) -> Any:
     """GET a read-only workspace endpoint and return the decoded body.
 
-    The one place the read path resolves a token, enforces https, and turns a
-    transport or HTTP failure into a single actionable message. Shared by every
-    `api` function that reads live workspace state (programs, assessments) —
-    duplicating it is exactly the drift framework/paramify_auth.py exists to
-    prevent.
+    `base_url` is the instance to read; None resolves it from the environment.
+    A caller that has already resolved it with the uploader config (as
+    `paramify_status` does) passes it, so every call it makes goes to one host.
+    Reads prefer the read-scope token (PARAMIFY_API_TOKEN). A person is usually
+    waiting, so a failing read is reported at once, not retried.
 
     Raises RuntimeError with a message a CLI can print verbatim.
     """
-    import requests  # local: keeps `paramify list`/`tui` startup free of it
-    from dotenv import load_dotenv
-
-    # Same as the uploaders: a token in `.env` is a first-class source, not
-    # something you have to `export` first. Without this, `paramify upload`
-    # works from `.env` while `paramify assessments list` / `programs list`
-    # report the token as missing. override=False so a real shell export wins.
+    # A token in `.env` is a first-class source, as it is for the uploads.
+    # override=False so a real shell export wins.
     load_dotenv()
-
-    token = os.environ.get(READ_TOKEN_ENV) or os.environ.get(UPLOAD_TOKEN_ENV)
-    if not token:
-        raise RuntimeError(
-            f"No Paramify API token: set {READ_TOKEN_ENV} (or "
-            f"{UPLOAD_TOKEN_ENV}) to a token with read scope on the workspace"
-        )
-    base_url, _ = resolve_base_url()
-    # Same rule the uploader enforces (uploader._base_url_error): a Bearer token
-    # must not go out over plaintext. Localhost is exempt so a local stub works.
-    host = urlparse(base_url).hostname or ""
-    if urlparse(base_url).scheme != "https" and host not in ("localhost", "127.0.0.1", "::1"):
-        raise RuntimeError(
-            f"{BASE_URL_ENV} must be https to protect the API token (got {base_url!r}); "
-            "only localhost may use http"
-        )
-    url = f"{base_url.rstrip('/')}{path}"
+    resolved = paramify_settings(base_url=base_url, read=True)
+    problems = resolved.errors(need_token=True)
+    if problems:
+        raise RuntimeError(problems[0])
+    url = f"{resolved.base_url.rstrip('/')}{path}"
+    client = client_for(resolved, retry_budget_s=0)
     try:
-        resp = requests.get(
-            url,
-            headers={"Accept": "application/json", "Authorization": f"Bearer {token}"},
-            params=params or None,
-            timeout=_WORKSPACE_READ_TIMEOUT,
-        )
-    except Exception as e:  # noqa: BLE001 — transport errors become one clean message
-        raise RuntimeError(f"could not reach {url}: {e}") from e
-    if resp.status_code in (401, 403):
-        raise RuntimeError(
-            f"Paramify rejected the token (HTTP {resp.status_code}) for {url}; "
-            "check that it has read scope on this workspace"
-        )
-    if resp.status_code != 200:
-        raise RuntimeError(f"GET {url} failed (HTTP {resp.status_code}): {resp.text[:300]}")
-    try:
-        return resp.json()
-    except ValueError as e:
-        raise RuntimeError(f"GET {url} returned a non-JSON body: {resp.text[:200]}") from e
+        body = client.get(path, params or None)
+    except ApiError as e:
+        if e.status in (401, 403):
+            raise RuntimeError(
+                f"Paramify rejected the token (HTTP {e.status}) for {url}; "
+                "check that it has read scope on this workspace"
+            ) from e
+        if e.status is None:
+            raise RuntimeError(f"could not reach {url}: {e.message}") from e
+        if e.status < 400:
+            raise RuntimeError(f"GET {url} returned a non-JSON body: {e.body[:200]}") from e
+        raise RuntimeError(f"GET {url} failed (HTTP {e.status}): {e.body[:300]}") from e
+    if body is None:
+        raise RuntimeError(f"GET {url} returned a non-JSON body: (empty)")
+    return body
 
 
 def program_display_name(program: dict) -> str:
@@ -3324,19 +3586,23 @@ def capability_display_name(capability: dict) -> str:
     )
 
 
-def list_capabilities() -> List[dict]:
+def list_capabilities(base_url: Optional[str] = None) -> List[dict]:
     """Fetch the workspace's solution capabilities via GET /solution-capabilities.
 
     Returns [{"id", "name", "reference_id", "template_reference_id", "family",
     "subfamily", "risk", "risk_family", "implementation_status",
     "main_component", "functions"}] sorted by display name, where `functions` is
-    [{"type", "name", "narrative", "implementation_status"}] — the narratives
-    being the point of the call.
+    [{"type", "name", "narrative", "implementation_status", "pairs"}] — the
+    narratives being the point of the call. `pairs` is
+    [{"pair_id", "validator_id", "evidence_id"}]: the validator-evidence pairs
+    the function holds.
+
+    `base_url` is the instance to read; None resolves it from the environment.
 
     Raises RuntimeError with an actionable message on missing credentials, a
     non-https endpoint, or a transport/HTTP failure.
     """
-    payload = _workspace_get(_CAPABILITIES_PATH)
+    payload = _workspace_get(_CAPABILITIES_PATH, base_url=base_url)
     raw = payload.get("solutionCapabilities", []) if isinstance(payload, dict) else payload
 
     capabilities = []
@@ -3356,6 +3622,16 @@ def list_capabilities() -> List[dict]:
                 # verbatim: deciding whether it says anything is the reader's job.
                 "narrative": fn.get("narrative") or "",
                 "implementation_status": fn.get("implementationStatus") or "",
+                # Each pair is one validator on one evidence set; the function
+                # holds the pairs that prove it.
+                "pairs": [
+                    {
+                        "pair_id": p.get("validatorEvidencePairId") or "",
+                        "validator_id": p.get("validatorId") or "",
+                        "evidence_id": p.get("evidenceId") or "",
+                    }
+                    for p in fn.get("validatorEvidencePairs") or [] if isinstance(p, dict)
+                ],
             })
         capabilities.append({
             "id": c["id"],
@@ -3413,15 +3689,17 @@ def evidence_set_display_name(evidence_set: dict) -> str:
     )
 
 
-def list_evidence_sets() -> List[dict]:
+def list_evidence_sets(base_url: Optional[str] = None) -> List[dict]:
     """Fetch the workspace's evidence sets via GET /evidence.
 
     Returns [{"id", "reference_id", "name", "description", "instructions",
-    "artifact_count", "automated", "frequency"}] sorted by display name.
+    "artifact_count", "automated", "frequency", "validators"}] sorted by display
+    name, where `validators` is [{"pair_id", "id", "name", "type"}].
     `artifact_count` is what says whether there is anything here to author
-    against at all.
+    against at all. `base_url` is the instance to read; None resolves it from
+    the environment.
     """
-    payload = _workspace_get(_EVIDENCE_SETS_PATH)
+    payload = _workspace_get(_EVIDENCE_SETS_PATH, base_url=base_url)
     raw = payload.get("evidences", []) if isinstance(payload, dict) else payload
 
     sets = []
@@ -3438,6 +3716,16 @@ def list_evidence_sets() -> List[dict]:
             # Derived server-side from whether a validator is attached; read-only.
             "automated": bool(e.get("automated")),
             "frequency": e.get("frequency") or "",
+            # The validators paired with this set, each with its pair id.
+            "validators": [
+                {
+                    "pair_id": v.get("validatorEvidencePairId") or "",
+                    "id": v.get("id") or "",
+                    "name": v.get("name") or "",
+                    "type": v.get("type") or "",
+                }
+                for v in e.get("validators") or [] if isinstance(v, dict)
+            ],
         })
     sets.sort(key=lambda e: evidence_set_display_name(e).lower())
     return sets
@@ -3470,7 +3758,8 @@ def list_artifacts(evidence_set_id: str) -> List[dict]:
         validators = []
         for v in a.get("validators") or []:
             if isinstance(v, dict):
-                validators.append({"name": v.get("name") or "", "result": v.get("result") or ""})
+                validators.append({"id": v.get("id") or "", "name": v.get("name") or "",
+                                   "result": v.get("result") or ""})
         artifacts.append({
             "id": a["id"],
             "title": a.get("title") or "",
@@ -3487,6 +3776,69 @@ def list_artifacts(evidence_set_id: str) -> List[dict]:
         })
     artifacts.sort(key=lambda a: a.get("created_at") or "", reverse=True)
     return artifacts
+
+
+def latest_validator_results(artifacts: List[dict]) -> Dict[str, dict]:
+    """Each validator's latest result in Paramify, from one set's artifacts.
+
+    `artifacts` as list_artifacts returns them, newest first. Validation runs on
+    upload, so a validator's latest result is the one on the newest artifact that
+    has one (the reading `pfy validators failing` uses): an empty or NOT_SET
+    result is not one, so an older real verdict shows through it. Keyed by
+    Paramify validator id, and by name too for a validator with no id match:
+    {id or name: {"id", "name", "result", "at", "artifact"}}, where `result` is
+    PASS, FAIL or ERROR and `at` is the upload time ("2026-11-19 14:02"). A
+    validator no artifact has a real result for is absent (not run).
+    """
+    out: Dict[str, dict] = {}
+    for art in artifacts:
+        for v in art.get("validators") or []:
+            result = v.get("result") or ""
+            if result in ("", "NOT_SET"):
+                continue
+            found = {"id": v.get("id") or "", "name": v.get("name") or "",
+                     "result": result,
+                     "at": (art.get("created_at") or "")[:16].replace("T", " "),
+                     "artifact": art.get("title") or art.get("file_name") or ""}
+            for key in (found["id"], f"name:{found['name']}"):
+                if key and key != "name:" and key not in out:
+                    out[key] = found
+    return out
+
+
+def result_for(results: Dict[str, dict], paramify_id: Optional[str], name: str) -> Optional[dict]:
+    """One registry validator's entry in latest_validator_results: by its
+    Paramify id when known, else by name. None when it has no result."""
+    return (results.get(paramify_id) if paramify_id else None) or results.get(f"name:{name}")
+
+
+def validator_results(root: Path, reference_id: str, validators: Iterable,
+                      config_path: Optional[Path] = None) -> dict:
+    """The latest Paramify result of each registry validator on one evidence set.
+
+    Read-only: two GETs (the evidence sets, then this set's artifacts). Returns
+    {"state": "no_token" | "no_set" | "ok", "results": {registry key: entry}},
+    each entry as latest_validator_results gives it. A validator with no result
+    yet is absent. Matches by the `validators sync` lock's id, then by name, as
+    paramify_status pairs them. Raises RuntimeError when a read fails.
+    """
+    root = Path(root)
+    config_path = _upload_config(root, config_path)
+    readiness = upload_readiness(root, config_path=config_path)
+    if not readiness.get("token_present"):
+        return {"state": "no_token", "results": {}}
+    sets = {s["reference_id"]: s for s in list_evidence_sets(base_url=readiness.get("base_url"))}
+    found = sets.get(reference_id)
+    if found is None:
+        return {"state": "no_set", "results": {}}
+    latest = latest_validator_results(list_artifacts(found["id"]))
+    lock = _validator_lock(root, config_path)
+    results = {}
+    for v in validators:
+        entry = result_for(latest, lock.get(v.key), v.name)
+        if entry is not None:
+            results[v.key] = entry
+    return {"state": "ok", "results": results}
 
 
 def _artifact_filename(evidence_set: dict, artifact: dict) -> str:
@@ -3578,6 +3930,223 @@ def pull_artifact(evidence_set: dict, artifact: dict, dest_dir) -> dict:
         "artifact_id": artifact["id"],
         "evidence_set": evidence_set_display_name(evidence_set),
     }
+
+
+# --------------------------------------------------------------------------- #
+# Paramify workspace — setup status
+#
+# One read-only answer to "what does each of this manifest's fetchers have in
+# Paramify?": its evidence set, its script, its validators, the capabilities its
+# pairs prove, and its artifacts. Built from the same reads and the same scripts
+# dry run the syncs use, so the status and a sync never disagree.
+# --------------------------------------------------------------------------- #
+
+# The scripts dry run's item outcomes, as script states.
+_SCRIPT_STATES = {
+    "would_noop": "in_sync",
+    "would_update": "update",
+    "would_create": "create",
+    "would_drift": "drift",
+    "error": "error",
+}
+
+
+def _validator_lock(root: Path, config_path: Optional[Path]) -> Dict[str, str]:
+    """The customer-side {registry key: Paramify validator id} lock that
+    `validators sync` writes, or {} when it is absent or unreadable."""
+    try:
+        syncer = _load_paramify_validator_syncer(root)
+        config: dict = {}
+        if config_path:
+            loaded = yaml_io.load_path(Path(config_path))
+            config = loaded if isinstance(loaded, dict) else {}
+        # As given, like the syncer: a relative path is from the working
+        # directory, which is where `validators sync` wrote it.
+        lock_path = Path((config.get("validators") or {}).get("lock_path") or syncer.DEFAULT_LOCK_PATH)
+        lock = syncer.load_lock(lock_path)
+    except Exception:  # noqa: BLE001 — a missing or broken lock only loses the id match
+        return {}
+    return lock if isinstance(lock, dict) else {}
+
+
+def paramify_status(root: Path, manifest_path: Path, config_path: Optional[Path] = None) -> dict:
+    """What each of the manifest's evidence fetchers has in the Paramify workspace.
+
+    Read-only: it never writes to Paramify. Returns::
+
+        {"workspace": {"base_url", "base_url_source", "token"},
+         "fetchers": [{"name", "kind",
+                       "evidence_set": {"reference_id", "name", "id" | None,
+                                        "exists": bool | None, "artifact_count": int | None},
+                       "script": "in_sync" | "update" | "create" | "drift" | "error" | None,
+                       "validators": [{"key", "role", "name", "paired": bool | None,
+                                       "id": the Paramify id once read (None: not paired)}],
+                       "pairs": [{"pair_id", "validator_key", "capability_id", "function"}],
+                       "ready": bool}],
+         "capabilities": [{"id", "reference_id", "name",
+                           "functions": [{"type", "pairs": [{"pair_id", "validator_id", "evidence_id"}]}]}],
+         "pipelines_count": int, "skipped": [str], "errors": {part: message}}
+
+    None means unknown: the evidence sets were not read (no token) or the read
+    failed. Then `exists`, `artifact_count` and each validator's `paired` are
+    None, never a value that looks read; `exists` False with `artifact_count` 0
+    means the read found no such set. `script` is None when the dry run did not
+    report the fetcher. A row is `ready` only on known values.
+
+    Scan-report fetchers are only counted (they go to Pipelines); discovery
+    fetchers are left out; a fetcher named twice is one row; a name discovery
+    does not know is listed in `skipped`. Without a token nothing is read from
+    the workspace. Each workspace part (evidence sets, scripts, capabilities)
+    is read on its own: a failure sets `errors[part]` and leaves the rest.
+    Every read goes to the base URL `upload_readiness` resolves, with the
+    uploader config, which is the one the scripts dry run uses.
+    Raises ValueError for setup errors (an unreadable manifest, registry or
+    uploader config).
+    """
+    from framework import validators as _registry  # local: keeps CLI startup light
+
+    root = Path(root)
+    manifest = read_manifest(Path(manifest_path), must_exist=True)
+    discovered = discover_fetchers(root)
+    registry = list(_registry.discover_validators(root).values())
+    config_path = _upload_config(root, config_path)
+    readiness = upload_readiness(root, config_path=config_path)
+    if readiness.get("base_url") is None:
+        # Only an unreadable uploader config leaves it unresolved. Its base URL
+        # and overrides are unknown then, so nothing below would be right.
+        raise ValueError("; ".join(readiness.get("errors") or ["could not read the uploader config"]))
+    base_url = readiness["base_url"]
+    token = bool(readiness["token_present"])
+    # The uploader config can send a fetcher to another set (overrides.<name>);
+    # the scripts sync and the upload both follow it, so the status does too.
+    overrides: dict = {}
+    if config_path:
+        try:
+            loaded = yaml_io.load_path(Path(config_path))
+            overrides = (loaded.get("overrides") or {}) if isinstance(loaded, dict) else {}
+        except (OSError, yaml.YAMLError):
+            overrides = {}  # upload_readiness read it just now; a race at most
+
+    rows: List[dict] = []
+    seen: set = set()
+    skipped: List[str] = []
+    pipelines = 0
+    for entry in (manifest.get("run") or {}).get("fetchers") or []:
+        use = entry.get("use") if isinstance(entry, dict) else None
+        if not use or use in seen:
+            continue
+        seen.add(use)
+        fetcher = discovered.get(use)
+        if fetcher is None:
+            skipped.append(use)
+            continue
+        if fetcher.kind == "issue_report":
+            pipelines += 1
+            continue
+        if fetcher.evidence_set is None:
+            continue  # discovery: reports what exists, never uploaded
+        ref = fetcher.evidence_set.reference_id
+        found_override = overrides.get(use)
+        override: dict = found_override if isinstance(found_override, dict) else {}
+        rows.append({
+            "name": use,
+            "kind": fetcher.kind,
+            "evidence_set": {"reference_id": override.get("reference_id") or ref,
+                             "name": override.get("name") or fetcher.evidence_set.name,
+                             "id": None, "exists": None, "artifact_count": None},
+            "script": None,
+            "validators": [
+                {"key": v.key, "role": v.role or "", "name": v.name, "paired": None}
+                for v in _registry.tracked_for(entry, ref, registry)  # what the entry tracks
+            ],
+            "pairs": [],
+            "ready": False,
+        })
+
+    status: dict = {
+        "workspace": {"base_url": readiness.get("base_url"),
+                      "base_url_source": readiness.get("base_url_source"), "token": token},
+        "fetchers": rows,
+        "capabilities": [],
+        "pipelines_count": pipelines,
+        "skipped": skipped,
+        "errors": {},
+    }
+    if not token or not rows:
+        return status
+    errors = status["errors"]
+
+    sets: Optional[Dict[str, dict]] = None  # None: not read
+    try:
+        sets = {s["reference_id"]: s for s in list_evidence_sets(base_url=base_url)}
+    except Exception as exc:  # noqa: BLE001 — shown where the data would be
+        errors["evidence_sets"] = str(exc)
+
+    outcomes: Dict[str, str] = {}
+
+    def on_script(ev: dict) -> None:
+        if ev.get("event") == "sync_item" and ev.get("fetcher"):
+            outcomes[ev["fetcher"]] = ev.get("outcome") or ""
+
+    try:
+        scripts_sync(root, config_path, dry_run=True, include={r["name"] for r in rows}, on_event=on_script)
+    except Exception as exc:  # noqa: BLE001
+        errors["scripts"] = str(exc)
+
+    try:
+        capabilities = list_capabilities(base_url=base_url)
+    except Exception as exc:  # noqa: BLE001
+        errors["capabilities"] = str(exc)
+        capabilities = []
+    status["capabilities"] = [
+        {"id": c["id"], "reference_id": c.get("reference_id") or c.get("template_reference_id") or "",
+         "name": c.get("name") or "",
+         "functions": [{"type": f.get("type") or "", "pairs": list(f.get("pairs") or [])}
+                       for f in c.get("functions") or []]}
+        for c in capabilities
+    ]
+
+    lock = _validator_lock(root, config_path)
+    for row in rows:
+        if outcomes.get(row["name"]) is not None:
+            row["script"] = _SCRIPT_STATES.get(outcomes[row["name"]], "error")
+        if sets is None:
+            continue  # unknown: leave exists, artifact_count and paired None
+        found = sets.get(row["evidence_set"]["reference_id"])
+        row["evidence_set"]["exists"] = found is not None
+        if found is None:
+            row["evidence_set"]["artifact_count"] = 0
+            for v in row["validators"]:
+                v["paired"] = False
+            continue
+        row["evidence_set"]["id"] = found["id"]
+        row["evidence_set"]["artifact_count"] = found.get("artifact_count") or 0
+        paired = found.get("validators") or []
+        ids = {v["id"] for v in paired}
+        names = {v["name"]: v["id"] for v in paired}
+        key_by_id: Dict[str, str] = {}
+        for v in row["validators"]:
+            vid = lock.get(v["key"]) if lock.get(v["key"]) in ids else names.get(v["name"])
+            v["paired"] = vid is not None
+            v["id"] = vid  # its Paramify id, which its results are read by
+            if vid is not None:
+                key_by_id[vid] = v["key"]
+        for cap in status["capabilities"]:
+            for fn in cap["functions"]:
+                for pair in fn["pairs"]:
+                    if pair.get("evidence_id") == found["id"]:
+                        row["pairs"].append({
+                            "pair_id": pair.get("pair_id") or "",
+                            "validator_key": key_by_id.get(pair.get("validator_id") or ""),
+                            "capability_id": cap["id"],
+                            "function": fn["type"],
+                        })
+        row["ready"] = (
+            row["script"] == "in_sync"
+            and all(v["paired"] for v in row["validators"])
+            and row["evidence_set"]["artifact_count"] > 0
+        )
+    return status
 
 
 def effective_config(
@@ -3709,3 +4278,81 @@ def shared_config_state(
         "conflict": len(runtime) > 1,
         "missing": missing,
     }
+
+
+def env_file(root: Path) -> Path:
+    """The .env that `run` and `doctor` read, and `paramify env` writes by default."""
+    return Path(root) / ".env"
+
+
+def refresh_env(root: Path) -> List[str]:
+    """Copy into os.environ each `.env` value (env_file) whose variable is
+    unset or empty here. Returns the names it filled.
+
+    A run resolves ${env:...} from os.environ, so without this a value kept
+    only in `.env` (the file `paramify env --write` makes) reaches a run only
+    when something else happened to load it first. And `load_dotenv` never
+    overrides: a line still empty when it ran (`OKTA_API_TOKEN=`) leaves the
+    variable set to "", so a value typed in later would never be read. A
+    non-empty export always wins; an empty .env value is never copied; a value
+    this function set earlier is refreshed. Called by `run` and `doctor`
+    before they read anything.
+    """
+
+    path = env_file(root)
+    # The words python-dotenv (1.2) accepts in its private _load_dotenv_disabled; the demo's offline guard sets it.
+    disabled = os.environ.get("PYTHON_DOTENV_DISABLED", "").casefold() in {"1", "true", "t", "yes", "y"}
+    if disabled or not path.is_file():
+        return []
+    filled = []
+    for name, value in envgen.assigned(path.read_text()).items():
+        if value and (name in _FILLED_FROM_DOTENV or not (os.environ.get(name) or "").strip()):
+            os.environ[name] = value
+            _FILLED_FROM_DOTENV.add(name)
+            filled.append(name)
+    return filled
+
+
+# Names refresh_env set, as opposed to real exports: in a long-lived process (the TUI) they are
+# read again on every run, so a token rotated in .env is picked up.
+_FILLED_FROM_DOTENV: set = set()
+
+
+def generate_env(root: Path, manifest: Mapping[str, Any], write: bool = False, path: Optional[Path] = None,
+                 found: Optional[Mapping[str, Any]] = None) -> dict:
+    """The .env a manifest needs, merged with the one at `path` (default
+    env_file(root)) without changing anything already in it.
+
+    Returns {"text", "added", "already_set", "missing_values", "variables",
+    "unmapped", "path"}. `variables` is every variable the manifest needs:
+    {name, tool, required, default, note, fetchers (who reads it; empty for
+    Paramify's upload token), set (has a value in the file or environment)};
+    never a value. `text`
+    is what is added (the whole file when there was none), never existing
+    content, so printing it cannot leak a value. `missing_values` names required
+    variables that would still be empty: empty in the file and not exported
+    (non-empty) in this process's environment. `unmapped` names the required
+    secrets the manifest doesn't map yet ({fetcher, secret, env, per_target,
+    target}): the run
+    stops on those whatever .env holds. Writes only when `write` is set:
+    atomically, through a symlinked .env to its file, keeping CRLF line endings.
+    `found` is a discover(root) the caller already has (the TUI's rebuild).
+    """
+
+    path = Path(path) if path else env_file(root)
+    target = path.resolve() if path.is_symlink() else path
+    existing = ""
+    if target.is_file():
+        with target.open(newline="") as fh:
+            existing = fh.read()
+    found = found or discover(root)
+    groups, unmapped = envgen.env_groups(found["fetchers"], found["platforms"], manifest)
+    text, result = envgen.merged(existing, groups)
+    if write and result.text:
+        _atomic_write(target, text)
+    variables = [{"name": v.name, "tool": g.title, "required": v.required, "default": v.default, "note": v.note,
+                  "fetchers": list(v.fetchers), "set": v.name in result.has_value}
+                 for g in groups for v in g.vars]
+    return {"text": result.text, "added": result.added, "already_set": result.already_set,
+            "missing_values": result.missing, "path": str(path), "variables": variables,
+            "unmapped": [vars(u) for u in unmapped]}

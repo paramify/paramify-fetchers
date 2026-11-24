@@ -13,6 +13,8 @@ CONFIG = {
     "days_back": ("GITHUB_PR_DAYS_BACK", 30),
     "max_pull_requests": ("GITHUB_PR_MAX_PER_REPOSITORY", 2000),
     "max_commits": ("GITHUB_MAX_COMMITS_PER_REPOSITORY", 5000),
+    "include_titles": ("GITHUB_PR_INCLUDE_TITLES", True),
+    "include_commit_messages": ("GITHUB_PR_INCLUDE_COMMIT_MESSAGES", True),
 }
 REVIEWS_PAGE, CONTEXTS_PAGE, ASSOCIATED_PAGE = 50, 100, 5
 PULL_REQUESTS = """
@@ -343,10 +345,27 @@ def summarize(records):
     }
 
 
+def redact(records, config):
+    """Leave out PR titles and push commit messages when the settings say so.
+
+    The key is removed rather than set to null, so a reader never takes a left-out title for an empty one;
+    metadata.include_titles and metadata.include_commit_messages say what was left out. Nothing the summary or the
+    approval and check findings use depends on either field.
+    """
+    for record in records:
+        if not config["include_titles"]:
+            for pr in record.get("pull_requests") or []:
+                pr.pop("title", None)
+        if not config["include_commit_messages"]:
+            for push in record.get("direct_pushes") or []:
+                push.pop("message", None)
+
+
 def collect(client, org, repos, config):
     since_dt = datetime.now(timezone.utc) - timedelta(days=config["days_back"])
     since = since_dt.timestamp()
     records = [repo_record(client, org["login"], repo, since, config) for repo in repos]
+    redact(records, config)
     return {
         "metadata": {"window_start": iso(since)},
         "summary": summarize(records),

@@ -1,5 +1,5 @@
 name: azure_disk_encryption_status
-version: 0.2.1
+version: 0.3.0
 description: >-
   Shows which key encrypts each managed disk at rest, whether Azure Disk Encryption is on, whether the disk is attached, and how exposed its export path is.
 category: azure
@@ -84,12 +84,12 @@ evidence_set:
     - in_scope_disks — Number of disks read and in scope; null when the disk list could not be read; 0 means there are none or the patterns took out every disk, which a check can catch by requiring more than 0
 
     Which disks exist?
-    - total_disks — Number of in-scope managed disks, attached or not; reads 0, not null, when the disk list could not be read, so read it together with in_scope_disks
-    - attached_total_disks — Number of disks attached to a virtual machine (the disk names an owner or a shared-disk owner list)
-    - unattached_total_disks — Number of disks attached to no virtual machine; they still hold the data of the machine they were detached from
+    - total_disks — Number of in-scope managed disks, attached or not; null when the disk list could not be read, as is every count and percentage below
+    - attached_total_disks — Number of disks attached to a virtual machine (the disk names an owner or a shared-disk owner list); null when the disk list could not be read
+    - unattached_total_disks — Number of disks attached to no virtual machine; they still hold the data of the machine they were detached from; null when the disk list could not be read
     - provider_registration_status — Whether the Compute provider (Microsoft.Compute) is registered on the subscription: registered, not_registered or unknown
-    - os_disks — Number of disks that report an operating system type
-    - data_disks — Number of disks that report no operating system type
+    - os_disks — Number of disks that report an operating system type; null when the disk list could not be read
+    - data_disks — Number of disks that report no operating system type; null when the disk list could not be read
 
     Which key encrypts the disks at rest?
     - customer_managed_key_disks — Number of disks encrypted with a customer-managed key (an encryption type other than the platform key, held in a disk encryption set). Managed disks are always encrypted at rest, so this is what varies

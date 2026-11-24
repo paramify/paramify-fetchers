@@ -1,0 +1,36 @@
+validator: sqlmi_configuration_fields_present
+cases:
+  - name: all_three_keys_present
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"managed_instances":[{"minimal_tls_version":"1.0","azure_ad_only_authentication":false,"public_data_endpoint_enabled":true}]}}}'
+
+  - name: all_three_keys_present_as_null_pretty_printed
+    expect: PASS
+    artifact: |
+      {
+        "metadata": {"exit_code": 1},
+        "payload": {"results": {"managed_instances": [
+          {"azure_ad_only_authentication": null, "minimal_tls_version": null, "public_data_endpoint_enabled": null}
+        ]}}
+      }
+
+  - name: tls_key_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"managed_instances":[{"min_tls":"1.0","azure_ad_only_authentication":true,"public_data_endpoint_enabled":false}]}}}'
+
+  - name: entra_only_key_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"managed_instances":[{"minimal_tls_version":"1.2","entra_only_authentication":false,"public_data_endpoint_enabled":false}]}}}'
+
+  - name: public_endpoint_key_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"managed_instances":[{"minimal_tls_version":"1.2","azure_ad_only_authentication":true,"public_endpoint_enabled":true}]}}}'
+
+  - name: tls_recommended_flag_is_not_the_version
+    expect: FAIL
+    note: the derived minimal_tls_version_recommended key must not stand in for minimal_tls_version.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"managed_instances":[{"minimal_tls_version_recommended":true,"azure_ad_only_authentication":true,"public_data_endpoint_enabled":false}]}}}'
+
+  - name: no_instances
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"managed_instances":[]},"summary":{"total_managed_instances":0}}}'

@@ -1,0 +1,19 @@
+key: github_default_branches_no_always_bypass
+name: GitHub Default Branches Without Always Bypass
+type: AUTOMATED
+role: configuration
+source: community
+statement: >-
+  No ruleset enforced on a default branch lets an actor bypass it on every push. Passes only for the bypass
+  lists that were read; pair with GitHub Ruleset Bypass Lists Readable.
+regex: '"with_always_bypass":\s*\[\s*\]'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+- regexOperation:
+    type: MATCH_COUNT
+  criteria: NOT_EQUALS
+  value:
+    type: CUSTOM_TEXT
+    customText: '0'
+evidence_sets:
+- EVD-GITHUB-BRANCH-PROTECTION

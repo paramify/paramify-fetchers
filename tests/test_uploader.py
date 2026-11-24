@@ -19,6 +19,7 @@ from pathlib import Path
 
 import pytest
 
+from framework.paramify import connection as connection_mod
 from tests.test_api_upload_engine import fake, no_env  # noqa: F401  (fixtures)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -128,7 +129,6 @@ def test_missing_token_is_a_setup_error(no_env, tmp_path):  # noqa: F811
 
 
 def test_token_and_base_url_arguments_win_over_the_environment(no_env, tmp_path, monkeypatch):  # noqa: F811
-    from framework.sync import upload as upload_mod
 
     seen = {}
 
@@ -140,7 +140,7 @@ def test_token_and_base_url_arguments_win_over_the_environment(no_env, tmp_path,
         raise Stop
 
     monkeypatch.setenv("PARAMIFY_UPLOAD_API_TOKEN", "env-tok")
-    monkeypatch.setattr(upload_mod, "Client", spy)
+    monkeypatch.setattr(connection_mod, "Client", spy)
     with pytest.raises(Stop):
         uploader.upload_run(_run(tmp_path), token="arg-tok", base_url="https://arg.example.test")
     assert seen == {"token": "arg-tok", "base_url": "https://arg.example.test"}
@@ -206,9 +206,9 @@ def test_main_returns_1_on_a_setup_error(no_env, tmp_path):  # noqa: F811
 
 
 def test_main_returns_1_when_an_entry_is_refused(fake, tmp_path):  # noqa: F811
-    run_dir = _run(tmp_path)
-    (run_dir / "a.json").write_text((run_dir / "a.json").read_text().replace('"k": 1', '"k": "/bin/sh -c x"'))
-    assert uploader.main([str(run_dir)]) == 1
+    st1, st2 = fake.add_stack("Prod"), fake.add_stack("Gov")
+    fake.add_evidence("EVD-1", channels=[st1.id, st2.id])  # two channels and no stack: refused
+    assert uploader.main([str(_run(tmp_path))]) == 1
 
 
 def test_main_returns_1_when_a_file_is_not_an_envelope(fake, tmp_path):  # noqa: F811

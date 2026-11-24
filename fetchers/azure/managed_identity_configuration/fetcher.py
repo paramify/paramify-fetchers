@@ -7,6 +7,7 @@ import logging
 import os
 import sys
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from dotenv import load_dotenv
 
@@ -88,18 +89,37 @@ def scope_level(scope) -> str:
     return "root"
 
 
+def issuer_host(issuer) -> str:
+    """The lower-case host name of an issuer URL ("" when there is none).
+
+    A value with no scheme is read as a host, so "accounts.google.com" gives the
+    same host as "https://accounts.google.com".
+    """
+    value = str(issuer or "").strip()
+    if "://" not in value:
+        value = "https://" + value
+    try:
+        return (urlsplit(value).hostname or "").lower()
+    except ValueError:  # a malformed URL, for example a bad IPv6 literal
+        return ""
+
+
 def issuer_kind(issuer) -> str:
-    """A label for well-known federation issuers; the issuer itself is always kept."""
-    value = str(issuer or "").lower()
-    if "token.actions.githubusercontent.com" in value:
+    """A label for well-known federation issuers; the issuer itself is always kept.
+
+    The label comes from the host name only. A known host name in the path or
+    the query (https://example.com/accounts.google.com) does not match.
+    """
+    host = issuer_host(issuer)
+    if host == "token.actions.githubusercontent.com":
         return "github_actions"
-    if "vstoken.dev.azure.com" in value or "app.vstoken.visualstudio.com" in value:
+    if host in ("vstoken.dev.azure.com", "app.vstoken.visualstudio.com"):
         return "azure_devops"
-    if ".oic.prod-aks.azure.com" in value or "oidc.prod-aks.azure.com" in value:
+    if host.endswith(".oic.prod-aks.azure.com") or host == "oidc.prod-aks.azure.com":
         return "aks_workload_identity"
-    if "accounts.google.com" in value:
+    if host == "accounts.google.com":
         return "google"
-    if "amazonaws.com" in value or "cognito-identity" in value:
+    if host == "amazonaws.com" or host.endswith(".amazonaws.com"):
         return "aws"
     return "other"
 
@@ -275,7 +295,71 @@ def identity_record(identity: dict, roles_by_principal, graph_roles) -> dict:
     return record
 
 
-def summarize(user_assigned: list[dict], system_assigned: list[dict], graph_access: str) -> dict:
+USER_ASSIGNED_ONLY = (
+    "total_user_assigned_identities", "user_assigned_identities_no_resource_attached",
+    "unattached_identities_with_roles", "federated_only_identities_with_roles",
+    "user_assigned_identities_with_federated_credentials", "total_federated_credentials",
+    "federated_credentials_by_issuer_kind", "federated_credentials_broad_subject",
+    "federated_credentials_nonstandard_audience",
+)
+SYSTEM_ASSIGNED_ONLY = ("total_system_assigned_identities", "system_assigned_identities_by_resource_type")
+FEDERATED_COUNTS = (
+    "user_assigned_identities_with_federated_credentials", "total_federated_credentials",
+    "federated_credentials_by_issuer_kind", "federated_credentials_broad_subject",
+    "federated_credentials_nonstandard_audience",
+)
+# Counts built from each identity's role assignments, and from its Graph app role assignments.
+ROLE_COUNTS = (
+    "identities_with_broad_role", "identities_with_subscription_or_higher_role",
+    "identities_without_role_assignments", "role_assignments_unresolved_role",
+    *(f"identities_{cap}" for cap in CAPABILITIES),
+)
+GRAPH_COUNTS = ("identities_with_graph_roles", "identities_with_privileged_graph_roles")
+
+
+def unattached_status(identity: dict):
+    """unattached / federated_only / other, or None when a list the answer needs was not read."""
+    roles, attached, fics = identity["role_assignments"], identity["attached_resources"], identity["federated_credentials"]
+    if roles == [] or (attached is not None and attached != []):
+        return "other"
+    if roles is None or attached is None or fics is None:
+        return None
+    return "federated_only" if fics else "unattached"
+
+
+def summarize(user_assigned: list[dict] | None, system_assigned: list[dict] | None, graph_access: str | None) -> dict:
+    """A list that was not read (None) gives null for every count built from it."""
+    counts = identity_counts(user_assigned or [], system_assigned or [], graph_access)
+    for key in counts:
+        if key == "graph_access":
+            continue
+        ua_only, sa_only = key in USER_ASSIGNED_ONLY, key in SYSTEM_ASSIGNED_ONLY
+        unread = (
+            user_assigned is None if ua_only else system_assigned is None if sa_only
+            else user_assigned is None or system_assigned is None
+        )
+        if unread:
+            counts[key] = None
+    statuses = [unattached_status(i) for i in user_assigned or []]
+    if None in statuses:
+        counts["unattached_identities_with_roles"] = counts["federated_only_identities_with_roles"] = None
+    if any(i["attached_resources"] is None for i in user_assigned or []):
+        counts["user_assigned_identities_no_resource_attached"] = None
+    if any(i["federated_credentials"] is None for i in user_assigned or []):
+        for key in FEDERATED_COUNTS:
+            counts[key] = None
+    everyone = (user_assigned or []) + (system_assigned or [])
+    # An identity whose role or Graph assignments were not read could hold any role, so the count is unknown.
+    if any(i["role_assignments"] is None for i in everyone):
+        for key in ROLE_COUNTS:
+            counts[key] = None
+    if any(i["graph_app_roles"] is None for i in everyone):
+        for key in GRAPH_COUNTS:
+            counts[key] = None
+    return counts
+
+
+def identity_counts(user_assigned: list[dict], system_assigned: list[dict], graph_access: str | None) -> dict:
     everyone = user_assigned + system_assigned
     fics = [f for i in user_assigned for f in i["federated_credentials"] or []]
     assignments = [r for i in everyone for r in i["role_assignments"] or []]
@@ -296,12 +380,10 @@ def summarize(user_assigned: list[dict], system_assigned: list[dict], graph_acce
         # through federated credentials (GitHub Actions, AKS workload identity) is never attached to a
         # resource by design, so one with federated credentials is counted separately, not here.
         "unattached_identities_with_roles": count(
-            user_assigned,
-            lambda i: i["attached_resources"] == [] and bool(i["role_assignments"]) and not i["federated_credentials"],
+            user_assigned, lambda i: unattached_status(i) == "unattached" and bool(i["role_assignments"])
         ),
         "federated_only_identities_with_roles": count(
-            user_assigned,
-            lambda i: i["attached_resources"] == [] and bool(i["role_assignments"]) and bool(i["federated_credentials"]),
+            user_assigned, lambda i: unattached_status(i) == "federated_only" and bool(i["role_assignments"])
         ),
         "user_assigned_identities_with_federated_credentials": count(
             user_assigned, lambda i: i["federated_credentials"]
@@ -526,7 +608,9 @@ def collect(subscription_id, cred, collector: Collector, exclusions: ResourceExc
     if principal_ids:
         graph_roles, graph_access = asyncio.run(read_graph_roles(collector, cred, sorted(set(principal_ids))))
     else:
-        graph_roles, graph_access = {}, "not_read"  # no identities to look up: Graph was never called
+        graph_roles = {}
+        # Graph was never called: nothing to look up, or an identity list was not read
+        graph_access = None if not user_assigned_read or holders is None else "not_read"
 
     attached: dict = {}
     for holder in holders or []:
@@ -596,7 +680,7 @@ def main() -> int:
     system_assigned: list | None = None
     exclusions = ResourceExclusions.from_env()
     excluded: list[dict] = []
-    graph_access = "not_read"
+    graph_access = None
     registration = REGISTRATION_UNKNOWN
     if subscription_id and cred is not None:
         registration = provider_registration_status(collector, subscription_id, cred, "Microsoft.ManagedIdentity")
@@ -620,15 +704,13 @@ def main() -> int:
     exclusions.record_invalid(collector)
     in_scope = {"user_assigned_identities": None if user_assigned is None else len(user_assigned),
                 "system_assigned_identities": None if system_assigned is None else len(system_assigned)}
-    user_assigned, system_assigned = user_assigned or [], system_assigned or []
-
     evidence = build_payload(
         subscription_id=subscription_id,
         subscription_source=sub["subscription_source"],
         collector=collector,
         results={
-            "user_assigned_identities": user_assigned,
-            "system_assigned_identities": system_assigned,
+            "user_assigned_identities": user_assigned or [],
+            "system_assigned_identities": system_assigned or [],
             "provider_registration_status": registration,
             "excluded": excluded,
         },

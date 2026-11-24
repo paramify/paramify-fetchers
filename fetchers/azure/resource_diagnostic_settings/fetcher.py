@@ -603,6 +603,8 @@ def main() -> int:
     # The azure-* SDKs log every request header at INFO; warnings still get through.
     logging.getLogger("azure").setLevel(logging.WARNING)
     load_dotenv()
+    from azure_rest import target_subscription_scope
+    read_scope = target_subscription_scope()
 
     output_dir = Path(os.environ.get("EVIDENCE_DIR", "./evidence"))
     collector = Collector(logger)
@@ -651,7 +653,8 @@ def main() -> int:
             ),
         )
 
-    if inventory["total_records"] is None:
+    listed = inventory["total_records"] is not None
+    if not listed:
         exclusions.mark_unread()
     exclusions.warn_unmatched(logger)
     records = sorted((with_ingestion(r, workspaces, approved) for r in records), key=lambda r: (r["id"] or "").lower())
@@ -662,6 +665,7 @@ def main() -> int:
         collector=collector,
         results={
             "resources": records,
+            **({"read_scope": "target_subscription"} if read_scope else {}),
             "inventory_source": "azure_resource_graph",
             "query": INVENTORY_QUERY,
             "provider_registration_status": registration,
@@ -675,7 +679,7 @@ def main() -> int:
             **summarize(records, len(inventory["rows"]), inventory["total_records"], inventory["pages"]),
             "provider_registration_status": registration,
             **summarize_ingestion(records, destinations, days, hours, approved),
-            **exclusions.summary(excluded, ("resource",), {"resources": len(records)}),
+            **exclusions.summary(excluded, ("resource",), {"resources": len(records) if listed else None}),
         },
     )
 

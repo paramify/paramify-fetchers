@@ -1,0 +1,19 @@
+key: github_default_branches_require_approval
+name: GitHub Default Branches Require Approval
+type: AUTOMATED
+role: configuration
+source: community
+statement: >-
+  Every repository in scope requires a pull request with at least one approving review before a change
+  reaches its default branch. Does not assert who may bypass the rule; see the bypass validators.
+regex: '"without_approval":\s*\[\s*\]'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+- regexOperation:
+    type: MATCH_COUNT
+  criteria: NOT_EQUALS
+  value:
+    type: CUSTOM_TEXT
+    customText: '0'
+evidence_sets:
+- EVD-GITHUB-BRANCH-PROTECTION

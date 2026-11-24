@@ -12,8 +12,12 @@ as it did before batches. See
 
 **You need:** [the repo installed](../README.md#install) ·
 [a completed run](cli_guide.md#collect-then-upload) · a Paramify account that
-can create API keys. The TUI's **Paramify** tab does the same upload and script
-sync ([TUI walkthrough](https://support.paramify.com/hc/en-us/articles/55867428958355-Setup-Fetchers)).
+can create API keys. In the TUI, the **Paramify** tab shows what each fetcher in the
+manifest has in Paramify, the same table as
+[`paramify status`](cli_guide.md#check-the-setup-in-paramify). From there, `s`
+syncs the scripts, `v` syncs the validators and `u` uploads the newest run. The
+**Pipelines** tab sends scan reports
+([TUI walkthrough](https://support.paramify.com/hc/en-us/articles/55867428958355-Setup-Fetchers)).
 
 ---
 
@@ -78,47 +82,47 @@ overrides:
 ### Set the collection frequency
 
 The collection frequency is how often Paramify expects a new artifact on a set.
-It is not a count of your uploads. When the upload creates a set, it sets the
-frequency to `THREE_DAY` and starts the schedule on that day. To use a different
-frequency, add `frequency` to the fetcher in `upload.yaml`:
+It is not a count of your uploads. Say how often the manifest runs, and every
+set it uploads to follows it:
 
 ```yaml
-overrides:
-  aws_sqs_encryption_status:
-    frequency: DAILY
+run:
+  schedule:
+    every: DAILY
+    at: "02:00"   # optional, 24-hour
 ```
 
 The values are `DAILY`, `THREE_DAY`, `WEEKLY`, `BIWEEKLY`, `MONTHLY`,
-`QUARTERLY`, `BIANNUAL`, `ANNUAL` and `NOT_SET`. `DAILY` is the shortest, so use
-it when you upload more than once a day.
+`QUARTERLY`, `BIANNUAL` and `ANNUAL`. In the TUI, press the button after
+**frequency:** on the Fetchers tab.
 
-- **Only new sets get it.** The upload writes the frequency when it creates the
-  set. It never changes the frequency of a set that exists, so a change that you
-  make in the app stays.
-- **One entry for each fetcher.** No setting applies to all fetchers. To set
-  every fetcher to `DAILY`, add an `overrides` entry for each one.
-- **Check the key name.** The upload ignores an unknown key, for example
-  `frequncy`, and gives no warning.
+A set can differ from the schedule. The first of these that is set wins:
+
+1. The manifest entry's `paramify.frequency` (`e` on the entry in the TUI).
+2. `overrides.<fetcher>.frequency` in `upload.yaml`.
+3. `defaults.frequency` in `upload.yaml`, for every fetcher.
+4. The manifest's `run.schedule.every`.
+5. The fetcher's own default, `THREE_DAY` for most.
+
+A `frequency` that you write down beats the schedule, which only implies one.
+When two entries send to one set, a written frequency beats the schedule's, and
+between two of the same kind the set gets the shorter one. In `upload.yaml`,
+`daily` is read as `DAILY`. Any other value is refused in the plan, and that
+frequency isn't sent.
+
+- **Sets that exist change too.** The upload changes a set's frequency when one
+  of the first four chose a different one. It does this after it sends the
+  files. The confirm shows it as `~ EVD-X: frequency every 3 days → daily`. The fetcher's default never changes
+  a set that exists, so a change that you made in the app stays until you choose
+  a frequency here.
+- **A key without Write Evidences** can't change a set. The upload still sends
+  the files, leaves the frequency as it was, and says so. Any other failed
+  change is an error of the upload, after the files are sent.
+- **The run's schedule is used.** `paramify run` records the schedule and each
+  entry's settings. Run the manifest again after you change them. The plan
+  notes a frequency that the manifest now sets differently.
 - **Scheduled uploads need `--config`.** `deploy/run-and-upload.sh` does not read
   `upload.yaml` by default ([troubleshooting](#troubleshooting)).
-
-**To change sets that exist,** edit the frequency on each set in the app, or use
-the API. Each run's `upload_log.json` lists the sets that the upload used. This
-loop sets all of them to `DAILY`:
-
-```bash
-jq -r '.. | objects | select(has("evidence_id")) | .evidence_id' \
-  evidence/run-*/upload_log.json | sort -u |
-while read -r id; do
-  curl -s -X PATCH "${PARAMIFY_API_BASE_URL:-https://app.paramify.com/api/v0}/evidence/$id" \
-    -H "Authorization: Bearer $PARAMIFY_UPLOAD_API_TOKEN" \
-    -H "Content-Type: application/json" \
-    -d '{"frequency": "DAILY"}' -o /dev/null -w "$id %{http_code}\n"
-done
-```
-
-Each line shows a set ID and the HTTP status. `200` is a success. `403` means
-that the key does not have **Write Evidences**.
 
 ## 4. Upload
 
@@ -280,6 +284,11 @@ run:
         no_request: refuse  # refuse this entry instead
 ```
 
+A [pipeline fetcher](pipeline_fetchers_guide.md)'s entry ignores a `direct` it
+inherits from `run.paramify`: it uses `delivery: auto` and `no_request:
+evidence`, and `paramify validate` notes it. Set on the entry itself, `direct`
+is a validate error.
+
 | `no_request` | Result when the channel has no artifact request |
 |---|---|
 | `direct` (default) | Sends the entry direct, with a warning. |
@@ -436,9 +445,19 @@ results, see [verify validators](suggest_validator_guide.md#5-verify-in-paramify
 | `batches are off for this workspace (…); every entry is sent direct, as before batches` | This is a note, not an error. The workspace has no batches, so the upload sends every entry direct. |
 | An entry shows `held` | A temporary failure stopped the batch. Run the same upload again. |
 | `… was rejected in Paramify; collect again to send new evidence` | A person rejected this run's batch in the app. The upload does not send the same evidence again. Collect again: the new run makes a new batch. |
-| A file shows `blocked by the production WAF` | The evidence holds a string the WAF rejects (`../`, `/bin/sh`, `<script`). The upload sent the rest. Remove the string and collect again. |
+| A file shows `blocked by the production WAF` | Paramify's WAF refused the file (HTTP 403 with no request id). The upload sent the rest. Send the time of the upload and the file name to Paramify support, so they can find the rule in the WAF logs. |
 | Validators attach to `EVD-…`, not your remapped set | Validator sync uses the registry's reference IDs. Attach them on the set's **Validators** tab → **Manage Selection**. |
 | `No fetchers in the manifest …` from `scripts sync` | It found none in `manifest.yaml` at the repo root. Name your manifest, or pass `--all`. |
 | The run also collected scan reports | `paramify upload` sends evidence only. Send reports with the [issues uploader](../uploaders/paramify_issues/README.md). |
 
 **More detail:** [upload options](../uploaders/paramify_evidence/README.md#config---config-optional)
+
+**A pipeline file is the exception.** A file from a [pipeline
+fetcher](pipeline_fetchers_guide.md), such as an inventory, never goes direct
+while the workspace has batches: a direct upload is stored and builds nothing.
+With no artifact request it goes in an evidence-level batch on the set. A
+manifest entry with `delivery: direct` or `no_request: direct` on the entry itself
+is refused; the same setting inherited from `run.paramify` is ignored. When
+the workspace has no batches, the file is sent direct with the note `sent direct:
+this workspace has no batches; the pipeline runs the pre-batch way`, and `--json`
+shows `pipeline.approved: null`.

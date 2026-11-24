@@ -1,5 +1,5 @@
 name: azure_rbac_custom_roles
-version: 0.2.2
+version: 0.3.0
 description: >-
   Lists every custom Azure role in the subscription with its permissions, flagging wildcards and permissions that let a holder grant itself more access.
 category: azure
@@ -82,9 +82,9 @@ evidence_set:
     Summary fields:
 
     What was checked?
-    - total_role_definitions — Number of role definitions listed for the subscription, built-in, custom and excluded; 0 when the list could not be read
-    - builtin_role_definitions — Number of built-in role definitions; above 0 shows the list was read even when there are no custom roles; 0 when the list could not be read
-    - custom_role_definitions — Number of custom role definitions in scope; every count and percentage below covers only these, so when the role list could not be read this and every custom_roles_*, owner_equivalent_*, contributor_equivalent_* and least_privilege_* field below reads 0, and custom_roles_with_escalation_names is empty
+    - total_role_definitions — Number of role definitions listed for the subscription, built-in, custom and excluded; null when the list could not be read
+    - builtin_role_definitions — Number of built-in role definitions; above 0 shows the list was read even when there are no custom roles; null when the list could not be read
+    - custom_role_definitions — Number of custom role definitions in scope; every count and percentage below covers only these, so when the role list could not be read this and every custom_roles_*, owner_equivalent_*, contributor_equivalent_* and least_privilege_* field below is null
     - provider_registration_status — Whether Microsoft.Authorization is registered on the subscription: registered, not_registered or unknown
 
     Which custom roles are left out of scope?
@@ -97,7 +97,7 @@ evidence_set:
     - custom_roles_with_privilege_escalation — Number of custom roles that grant at least one escalation permission: writing role assignments, role definitions or deny assignments. A role grants a permission when one of its actions matches it, with * matching any text including / (so */write and Microsoft.Authorization/* both match), and no notAction in the same permission block removes it; data actions are not checked
     - custom_roles_that_can_assign_roles — Number of custom roles that grant Microsoft.Authorization/roleAssignments/write, so a holder can assign any role, Owner included, to anyone
     - custom_roles_that_can_write_role_definitions — Number of custom roles that grant Microsoft.Authorization/roleDefinitions/write, so a holder can rewrite a role it already holds
-    - custom_roles_with_escalation_names — List of the names of custom roles that grant an escalation permission
+    - custom_roles_with_escalation_names — List of the names of custom roles that grant an escalation permission; null when the role list could not be read
 
     How broad are custom roles?
     - custom_roles_with_wildcard_actions — Number of custom roles with * anywhere in an action or data action, such as *, */read or Microsoft.Compute/*

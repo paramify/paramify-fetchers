@@ -29,6 +29,7 @@ from azure_common import (  # noqa: E402
     REGISTRATION_UNKNOWN,
     Collector,
     arm_client_kwargs,
+    arm_endpoint,
     arm_id_key,
     build_payload,
     classify_failure_code,
@@ -63,10 +64,16 @@ ROTATE_ACTION = "rotate"
 SOURCE_DATA_PLANE = "data_plane"
 SOURCE_MANAGEMENT_PLANE = "management_plane"
 
-# Fallback host suffix, used only when ARM returned no `vault_uri`. Prowler
-# hardcodes this form; preferring `vault_uri` is what keeps this correct in the
-# sovereign clouds (vault.usgovcloudapi.net / vault.azure.cn).
+# Cloud-specific fallback, used only when ARM returned no `vault_uri`.
+# ARM-provided URI remains preferred; derive the fallback from the same authority
+# as the management client rather than sending sovereign reads to the public cloud.
 DEFAULT_VAULT_URI_SUFFIX = "vault.azure.net"
+_ARM_TO_VAULT_SUFFIX = {
+    "https://management.azure.com": DEFAULT_VAULT_URI_SUFFIX,
+    "https://management.usgovcloudapi.net": "vault.usgovcloudapi.net",
+    "https://management.chinacloudapi.cn": "vault.azure.cn",
+    "https://management.microsoftazure.de": "vault.microsoftazure.de",
+}
 
 # Certificates carry their own data-plane grant (an access policy can allow keys and not certificates).
 CERTIFICATES_ACCESSIBLE = "accessible"
@@ -717,17 +724,13 @@ def is_data_plane_inaccessible(exc: BaseException) -> bool:
 
 
 def vault_data_plane_uri(vault: dict) -> str | None:
-    """The vault's data-plane URL: `vault_uri` from ARM, else Prowler's form.
-
-    Prowler hardcodes f"https://{name}.vault.azure.net/"; preferring ARM's own
-    `vault_uri` is what keeps this correct in Azure Government / China
-    (vault.usgovcloudapi.net / vault.azure.cn).
-    """
+    """Prefer ARM's vault URI; otherwise derive its host in the selected cloud."""
     uri = vault.get("vault_uri")
     if uri:
         return uri
     name = vault.get("name")
-    return f"https://{name}.{DEFAULT_VAULT_URI_SUFFIX}/" if name else None
+    suffix = _ARM_TO_VAULT_SUFFIX[arm_endpoint()]
+    return f"https://{name}.{suffix}/" if name else None
 
 
 def collect_management_plane_keys(client, collector: Collector, group: str, name: str) -> list[dict]:
@@ -1089,20 +1092,34 @@ def main() -> int:
     app_service_certificates, excluded_certificates = exclusions.split(
         app_service_certificates, "app_service_certificate")
     excluded += excluded_certificates
-    lists_read = bool(subscription_id and cred is not None) and not any(
-        f["operation"] in UNREAD_LIST_OPERATIONS or f["operation"].split(" (")[0] in UNREAD_LIST_OPERATIONS
-        for f in collector.failures)
+    signed_in = bool(subscription_id and cred is not None)
+
+    def failed(*operations):
+        return any(f["operation"] in operations or f["operation"].split(" (")[0] in operations
+                   for f in collector.failures)
+
+    lists_read = signed_in and not failed(*UNREAD_LIST_OPERATIONS)
     if not lists_read:
         exclusions.mark_unread()
     exclusions.warn_unmatched(logger)
+    vaults_read = signed_in and not failed("keyvault.KeyVaultManagementClient (init)", "keyvault.vaults.list_by_subscription")
+    read = {
+        "key_vaults": vaults_read,
+        "keys": vaults_read and not failed("keyvault.keys.list"),
+        "secrets": vaults_read and not failed("keyvault.secrets.list"),
+        "certificates": vaults_read and not failed("keyvault.certificates.list_properties_of_certificates"),
+        "app_service_certificates": signed_in and not failed("web.WebSiteManagementClient (init)", "web.certificates.list"),
+    }
 
     results, summary = evidence_sections(vaults, registration, app_service_certificates, web_registration)
     results["excluded"] = excluded
-    summary.update(exclusions.summary(excluded, EXCLUSION_KINDS, {
+    counts = {
         "key_vaults": len(vaults),
         **{field: sum(len(v[field]) for v in vaults) for field, _ in VAULT_CHILD_KINDS},
         "app_service_certificates": len(app_service_certificates),
-    }))
+    }
+    summary.update(exclusions.summary(excluded, EXCLUSION_KINDS, {
+        name: n if read[name] else None for name, n in counts.items()}))
     evidence = build_payload(
         subscription_id=subscription_id,
         subscription_source=sub["subscription_source"],

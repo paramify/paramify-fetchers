@@ -10,7 +10,21 @@ schemas and the `paramify` CLI — not the internal code.
 
 ## [Unreleased]
 
+## [0.7.0-beta] - 2026-11-24
 ### Breaking
+
+- **`kind: inventory` requires a `pipeline:` block.** A `fetcher.yaml` with
+  `kind: inventory` and no `pipeline: {type: inventory, id_scheme: …}` fails the
+  schema, and a schema failure drops the fetcher from discovery. Migration: add
+  `pipeline: {type: inventory, id_scheme: <scheme>}` (the scheme list is in the
+  [pipeline fetchers guide](docs/pipeline_fetchers_guide.md)).
+
+- **Inventory records must carry `asset_type`.** Advanced config derives each
+  Inventory item's parent component from it, so a `kind: inventory` record
+  without a non-empty string `asset_type` now breaks the inventory contract
+  and the run is not sent. `metadata.inventory.by_asset_type` counts the
+  records per type (largest first). Migration: set a non-empty `asset_type`
+  (such as `endpoint`) on every record; `_template_inventory` already writes it.
 
 - **Datadog evidence: some fields are removed, renamed, or now mean something
   else.** Re-check any validator or query that reads these fields:
@@ -47,6 +61,298 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **Literal pattern lists.** A `type: patterns` field can declare `globs: false`; `validate`, the run and the TUI then
+  refuse a pattern holding `*` or `?`, and `describe` says the field takes patterns without wildcards.
+- **The TUI shows which environment variables a manifest is missing, and stops a run that would fail on them.**
+  - The manifest settings row has an `env` button (`✓ all set` or `✗ 2 missing`), each fetcher's status names what it
+    needs (`✗ needs OKTA_API_TOKEN`), and the line under the table splits what a run needs from what only an upload needs.
+  - The button (or `E`) opens a short list of just the missing variables and where to get each one, with a button that
+    adds them to `.env` as blank lines, as `paramify env --write` does.
+  - ctrl+r on the Run tab doesn't start while a variable a fetcher reads is empty, and says which.
+  - Only whether a variable has a value is ever checked. The TUI never shows, logs or takes a value.
+
+- **Evidence set frequency follows how often a manifest runs, and reaches sets that already exist.**
+  - The manifest settings row has a `frequency` button (daily, every 3 days, weekly, …), saved as `run.schedule.every`.
+    An entry can override it in its form (`e`). On the CLI: `paramify manifest set-frequency MANIFEST FREQUENCY
+    [--fetcher NAME]`.
+  - Order, highest first: the entry, a per-fetcher `frequency` in `upload.yaml`, `defaults.frequency` in `upload.yaml`
+    (now read), the manifest's frequency, the fetcher's own default (every 3 days).
+  - An upload now changes the frequency on an existing evidence set (`PATCH /evidence/{id}`) when one was chosen, and
+    the upload confirm shows it: `~ EVD-IAM-MFA: frequency every 3 days → daily`. A fetcher's default never changes an
+    existing set, and a key that can't edit sets skips the change, says so, and still uploads.
+  - The stack, owner, frequency and env buttons widen to fit a new value straight away. They used to keep their old
+    width and show `owner: t` until the window was resized.
+
+- **Validator results and a local test in the TUI (Validators tab).**
+  - Each validator shows PASS or FAIL from its latest result in Paramify, and the Paramify tab's validators cell
+    counts failures (`2/2 · 1 failing`).
+  - The validator window tests it against your last run with Node, as Paramify does, and shows each rule's mark and
+    the value it read, with a plain reason when it fails.
+  - On a failure, `a` asks Claude why (read-only `claude -p`, asked once per session before anything is sent). Any
+    regex it proposes is tested on the same files before it is shown, and `w` writes a passing one to the
+    validator's YAML after a confirm. Without Claude Code the key says so; `c` copies the same report to paste
+    anywhere. `PARAMIFY_ASK_CLAUDE=0` turns Ask Claude off.
+  - After `w` the window names the command that sends the new regex: `paramify validators sync -m MANIFEST --update`.
+    The Paramify tab's sync skips validators Paramify already has, so it doesn't send it.
+
+- **Choose the validators each fetcher tracks (TUI Validators tab, beta).** The tab lists the manifest's fetchers
+  and, for each, every registry validator for its evidence set in a Paramify section and a community section.
+  `space` tracks or untracks one and saves the manifest; `enter` shows the claim, regex, rules in plain words,
+  evidence sets and YAML file; `a` goes back to the defaults. The choice is saved as a `validators:` list on the
+  manifest entry. Validators gain an optional `source: paramify | community` field (absent = `paramify`);
+  community-made validators are tracked only when an entry lists them. Untracking never changes Paramify.
+- **Community-made fetchers are labelled in the TUI.** `fetcher.yaml` takes an optional
+  `source: paramify | community` (absent = `paramify`), also in `paramify catalog --json`. A community fetcher gets an
+  orange COMMUNITY label in the catalog, the manifest table and the Validators tab, and its detail says it was made
+  by the community and to read its code before giving it secrets.
+- **One-line install.** `curl -fsSL https://raw.githubusercontent.com/paramify/paramify-fetchers/main/install.sh |
+  bash` clones the repo to `~/paramify-fetchers`, installs the CLI and TUI into the clone's `.venv`, and links
+  `paramify` into `~/.local/bin`. In a terminal it shows a spinner and elapsed time for each step, offers to add
+  `~/.local/bin` to your shell profile and to open the TUI, and installs with uv when uv is on your `PATH`.
+  `PARAMIFY_DIR`, `PARAMIFY_REF`, `PARAMIFY_EXTRAS` and `PARAMIFY_REPO_URL` change the defaults. It finds a Python
+  3.11 or later even when `python3` is older (as on macOS), has uv provide one when none is installed, rebuilds a
+  `.venv` left on an older Python, names the install command for your OS when git or Python is missing, refuses a
+  directory that is not a clone, and leaves an existing clone's code alone. A CI job shellchecks it and runs it end to
+  end. The README's manual install now covers uv, choosing a Python 3.11+ explicitly, and the errors an older Python
+  causes.
+- **`paramify update`** brings a clone up to date: a clone on `main` is fast-forwarded to `origin/main`, a clone
+  pinned to a release moves to the newest release, and `--to main` / `--to vX.Y.Z-beta` switch between them. Before it
+  moves it runs the target's own `paramify validate` on each manifest in a temporary worktree and shows which of your
+  fetchers change (with versions), the breaking changes that touch this clone and a few highlights. It reinstalls only
+  when `pyproject.toml` changed. Also `--check` (exit 0/1/2), `--rollback`, `--yes`, `--allow-breaking`, `--json`, `--expect <sha>` (move
+  only to the commit a plan showed), and
+  a once-a-day notice (`PARAMIFY_NO_UPDATE_CHECK=1` turns it off). See `docs/versioning_guide.md`.
+- **The TUI shows when an update is waiting and applies it.** A quiet `↑ 12 new commits on main · press U` line
+  in the header and on the welcome screen (it gives way first when the header is short of room); `U` (or `u`,
+  except on the Paramify tab, where `u` is upload run) opens the plan
+  `paramify update` shows, with Apply (a second confirmation when breaking changes touch this clone) and Roll back.
+  The update runs as a subprocess, so the running TUI never loads half-replaced code.
+- **Update notes**, `releases/unreleased.yaml` and `releases/<version>.yaml`: the short rows `paramify update` shows
+  instead of the CHANGELOG. Add a row with the change; format in `releases/README.md`.
+- Manifest: `concurrency` on a fetcher entry (1 to 32, default 1) runs up to that many of its targets at once. Each
+  concurrent target writes to its own staging directory, moved into the run directory in target order, so results,
+  envelopes and `_run_metadata.json` keep target order and a file name two targets share still fails the later one
+  with `output_overwritten`. Live output lines start with the target. `paramify validate` notes a `concurrency` that
+  has no effect (a fetcher without targets, or fewer than two).
+- **`azure_endpoint_availability` fetcher.** Reads Application Insights availability tests and their hourly
+  results, and Standard load balancers' data-path (VipAvailability) and health-probe (DipAvailability)
+  availability with measurement coverage, each judged against an availability target once one is set (none by
+  default) and only when every hour was measured; items that cannot be judged are counted apart, so one new or
+  unread test never leaves the verdict on the others unknown. A load balancer's data path is read only when it has
+  load-balancing rules and its health probe only when it has probes, so outbound-only load balancers are counted
+  apart instead of reading as unmeasured. Reads classic ping test URLs from their XML, and honours location:
+  exclusions. Reports whether tests check the status code and content. Unread results leave verdicts null rather
+  than 0.
+- **Summary counts for database encryption, AKS autoscaling and node OS patching.**
+  `azure_postgresql_configuration` and `azure_mysql_configuration` 0.3.0 add `customer_managed_key_servers` and
+  `data_encryption_unknown_servers` from each server's data encryption type (AzureKeyVault or SystemManaged); a
+  server with no type is counted apart, never as platform-managed. `azure_aks_cluster_configuration` 0.6.0 adds
+  `autoscaling_agent_pools`, `node_os_auto_upgrade_clusters` (SecurityPatch or NodeImage),
+  `node_os_unmanaged_clusters` (Unmanaged, where the node OS may still install its own updates, counted apart) and
+  `node_os_upgrade_channel_unknown_clusters`, null like the other counts when the cluster list can't be read.
+- **`azure_flexible_server_backups` fetcher.** Reads Azure Database for PostgreSQL and MySQL flexible servers: each
+  server's newest completed automatic backup against a window (manual, on-demand backups reported apart, and backups
+  whose labels match no known value counted as unknown, never automatic), backup retention against an optional minimum
+  authorized period (unknown retention counted apart), geo-redundant backup, stopped servers, and servers created by point-in-time restore within an
+  optional restore-test interval. One API version that serves both the server and backup lists is used. Read replicas are counted, not judged. Unread
+  backup lists leave verdicts null rather than 0.
+- **`azure_velero_backups` fetcher.** Reads Velero backup storage locations in Azure Blob Storage, from Azure APIs
+  only: each backup's phase, schedule, completion time and expiry, missed runs of configured expected schedules,
+  schedules past the recovery point objective, each restore's result, and whether the backup
+  storage is geo-replicated and encrypted with a customer-managed key. Missed runs come from the gaps between
+  Completed backups, with 10% grace, and only over the part of the lookback the backups are kept for, so a backup
+  Velero deleted at the end of its retention is not a missed run. A listed schedule is judged against its own
+  interval. Failed backups, incomplete snapshots and restores with errors are counted in full and again as
+  current (unresolved) failures. A failed scheduled backup resolves through a later success of its schedule,
+  and any failure through its own retry (`<name><retry_suffix>`) when a retry suffix is set; a failed restore resolves
+  only through its own retry, since storage doesn't record which backup a restore used. No failure is excluded by
+  name or label, and labelled validation backups are counted, still judged. Blob reads go only
+  to endpoints Resource Manager returned for in-scope accounts in the target subscription, with redirects refused,
+  retry dropped connections, and parse XML with defusedxml. Unread locations leave counts null rather than 0.
+- **`wiz_inventory`**, the Wiz cloud resource inventory, as a pipeline fetcher (`kind: inventory`, `id_scheme:
+  wiz-resource-id`). One record per resource from `cloudResourcesV2` under `payload.data`, keyed by the Wiz resource
+  id, with its cloud ID (`external_id`), account, region, type, IPs, OS, image, environment and owner, and internet
+  exposure; `asset_type` is the Wiz resource type. The Wiz id is the `Asset ID` column of
+  `wiz_vulnerability_findings`, so a scan report can link to it. Other tags only with `include_tags`; a run with any
+  collection failure writes no records. Scoped by resource type, account and project; needs only `read:resources`. See
+  `fetchers/wiz/inventory/README.md`.
+- TUI: a pipeline fetcher's "sends to" cell ends in `· pipeline`, its detail pane names the pipeline type and ID
+  scheme, and its entry form hides `delivery` and offers `no_request` as `evidence` or `refuse` only. `P` on the
+  Manifest tab opens the preset sheet. The upload log flags a pipeline batch that is submitted but not yet approved.
+- `paramify preset <fetcher>` prints the settings to enter when building a pipeline's Paramify preset: sample file, data
+  path, unique ID and scheme, the `asset_type` values of the newest run, and the other fetchers that share the ID
+  scheme. `--json`, `-f` and `--output-dir` pick the output.
+- `paramify validate` refuses `delivery: direct` and `no_request: direct` on a pipeline fetcher entry, and notes
+  `approval: MANUAL` on one (the pipeline waits for someone to approve each batch). It also refuses a registry
+  validator that targets a pipeline evidence set, since a failing validator means the batch never approves.
+  Validator sync leaves pipeline sets out of an explicit `reference_ids` list.
+- **`paramify env`** prints what a manifest needs from the environment: only the variables it reads, grouped by
+  tool, each with a short note and whether it is required, Paramify's upload token first, so you know what to set in
+  your secret manager; `--json` lists them for a script (with the fetchers that read each, and whether it is set),
+  never a value. It lists what a run reads: the manifest's
+  `${env:}` references (a remapped secret, one token per target, a config value, `run.platforms`) and passthrough
+  variables; a required secret the manifest doesn't map yet is listed apart with the `set-secret` command that maps
+  it. For local testing, `--write` appends what `.env` (or `--path`) lacks and never
+  changes, reorders or prints an existing line; a CRLF file stays CRLF and a symlinked `.env` stays a link. It ends
+  with the required variables that still have no value. When a `.env` exists in the repo root, `run` and `doctor`
+  fill unset or empty variables from it; a variable set in the environment always wins, and a run never needs the
+  file. See [`docs/cli_guide.md`](docs/cli_guide.md#what-a-manifest-needs-paramify-env).
+
+- **TUI regression tests for batches, channels and stacks.** The `tui` job now
+  covers the stack and owner pickers (online, typed, a listing error, escape),
+  the entry editor's Paramify settings, and the upload plan in the confirm,
+  made by the real planner against the in-process Paramify fake: a new batch on
+  a channel's request, an evidence-level batch, direct delivery, batches off
+  (the workspace flag, or an API with no batch routes), an API that refuses a
+  batch's approval, the owner choosing a channel, the refusal without one, the
+  settings-changed note, an upload, its no-op, a held entry resuming its batch
+  and a dropped file. New snapshots show the stack picker, the owner picker and the upload
+  plan; a second end-to-end flow picks a stack and an owner, runs, and confirms
+  the plan. The smoke job's goldens add `manifest set-stack`, `set-owner` and
+  the dry-run note for settings changed after the run.
+- **NIST CMVP category: cryptographic module validation status.**
+  `nist_cmvp_module_validation_status` reads the public CMVP certificate page
+  for each certificate number in its `certificates` config and reports whether
+  the module is currently validated: the page is for that number, Status is
+  Active, the standard is FIPS 140-2 or FIPS 140-3, and the sunset date has not
+  passed. Anything else is not validated, with a reason (`historical`,
+  `revoked`, `sunset_passed`, `status_unknown` or `not_found`). A certificate
+  the run could not check (`parse_error` or `fetch_error`) has `validated:
+  null`, the summary's verdict counts are null, and the run exits 1. HTTP 429
+  is retried with `Retry-After` and reported as `rate_limited` if it persists.
+  Maps to KSI-SVC-SIN and KSI-SVC-VRI. No credential.
+
+- **`pipeline:` block in `fetcher.yaml`.** A fetcher whose output feeds a Paramify
+  pipeline declares `pipeline: {type, id_scheme}` (`asset_id_field` for a
+  scan-report pipeline). `kind: issue_report` may declare `vulnerability` or
+  `configuration`; evidence and discovery fetchers refuse it (for `kind:
+  inventory`, see **Breaking**). The envelope records it as `metadata.pipeline` and
+  `paramify describe` shows it. `github_repository_inventory` and
+  `sophos_endpoint_inventory` 0.2.0 declare it, and so does `aws_config_inventory`
+  (`id_scheme: aws-arn`).
+
+- **Pipeline files upload as the full envelope, and the result says whether the
+  pipeline ran.** `paramify upload` sends an inventory (or any pipeline) file as
+  the whole envelope even when `artifact_payload: payload` is set, because
+  Paramify's inventory pipeline reads `payload.data`. When the batch is approved on submit, the entry says `APPROVED: pipeline
+  runs now` and where to look (Monitoring → Inventory); when it waits for a
+  person it says `SUBMITTED: waiting for approval; the pipeline has not run`. The
+  entry result in `--json` gains `pipeline: {type, approved}`. A file sent direct
+  (the workspace has no batches) reports `approved: null`; `false` means a batch
+  is submitted and waiting for a person. `--plan` warns when
+  the batch will approve MANUAL: the entry's `approval: MANUAL` for a new batch
+  (each new batch takes the entry's approval, so a MANUAL set alone does not
+  hold it), or a resumed batch created MANUAL. There is no warning when the
+  workspace has no batches. A batch approved on submission that has not flipped
+  to APPROVED yet when read back counts as `approved: true`.
+- `azure_aks_cluster_configuration` 0.4.0 adds each cluster's
+  `configuration_observations`: SDK-projected RBAC, local-account, private-cluster
+  and authorized API-server IP-range values before normalization. Missing values
+  remain null, distinct from explicit false or empty lists. Existing normalized
+  flags and summary counts keep their meanings.
+
+- Selected-subscription collection now avoids cross-subscription discovery in
+  VNet egress, Private DNS, WAF policies and alert action-group references when
+  `AZURE_TARGET_SUBSCRIPTION_ONLY=true`. Foreign relationships remain unknown
+  rather than deleted. Resource diagnostic settings report the selected scope.
+  Sentinel data sources retain service-supplied last-data KQL without executing
+  it in this mode when its workspace/function scope cannot be established.
+  Default broad discovery remains unchanged.
+
+- **`azure_entra_privileged_roles` 0.3.0: an approved principals setting.** The
+  optional `approved_principal_ids` setting (`AZURE_ENTRA_APPROVED_PRINCIPAL_IDS`)
+  lists the object ids of the users, groups and service principals approved to
+  hold a privileged directory role, separated by commas, spaces or newlines.
+  `summary.approved_principals_configured` says whether a list is set, and
+  `summary.unapproved_privileged_principals` counts the distinct holders of a
+  privileged role whose object id isn't on it. Only active, tenant-wide holders
+  are read (a role scoped to an administrative unit isn't checked), and a group
+  is matched by its own id, not its members. The count is null with no
+  list, when an entry isn't an object id (the run then fails as `bad_config`), or
+  when the role list or a privileged role's members or service principals can't
+  be read. `results.unapproved_principals` lists those holders with the
+  privileged roles each holds, and `results.approved_principal_ids` the list they
+  were compared with. Without the setting the evidence is unchanged apart from
+  these four keys (false or null).
+
+- **`azure_devops_work_items` 0.3.0: approval from a person field, and types approved after the change.**
+  No new API calls: the field comes from the work item batch, when it was filled
+  from the updates already read, and which types define it from the type listing.
+  With no new setting, approval is read exactly as in 0.2.0.
+  - **`approval_field`** (`AZURE_DEVOPS_APPROVAL_FIELD`) names a person field's
+    reference name, such as `Custom.ChangeApprover`. Each item records whom it names
+    and since when (`field_approval`): from the last update that set it to that
+    person, so a change of person restarts it. The field is a name anyone with
+    edit rights can type, so the approval also records who made that update
+    (`set_by`), and the new `change_items_approval_field_set_by_someone_else`
+    lists the items where that wasn't the person named (`null` when who set one
+    is unknown). A display name is `bad_config`.
+  - **`approval_source`** (`AZURE_DEVOPS_APPROVAL_SOURCE`, `states_and_comments`
+    by default): `field` counts only a filled field as approval, `both` counts it
+    or a state or comment approval, whichever came first. Clearing the field
+    withdraws its approval; a move back or a rejection doesn't.
+  - **`approval_field_from`** (`AZURE_DEVOPS_APPROVAL_FIELD_FROM`, a date) and
+    **`approval_before_field`** (`AZURE_DEVOPS_APPROVAL_BEFORE_FIELD`,
+    `states_and_comments` by default): an item that finished before the date (by
+    its closed date, else its resolved date, else when it entered its current
+    state) is judged by states and comments, by `both`, or left out of every
+    approval figure (`exclude`); an open item follows `approval_source`. Each item records the route that judged it (`approval_route`).
+    `both` or `exclude` without a date is `bad_config`.
+  - **`emergency_types`** (`AZURE_DEVOPS_EMERGENCY_TYPES`, none by default):
+    types whose approval may come after the change, as the comparator's
+    setting of the same name. Their items still need an approval, but a
+    changeset made before it moves from `change_items_changed_before_approval`
+    to the new `emergency_items_approved_after_change`. Each item gains
+    `emergency_type`.
+  - **Summary.** The five settings, plus `change_items_approved_by_field`,
+    `change_items_left_out_of_approval` and `approval_field_types_missing` (the
+    approval types a project defines without the field, as after a misspelt
+    reference name). An approval whose time is unknown leaves the change-order
+    lists `null`, as an unread changeset does. With `approval_field_from` set,
+    each item also records `before_field_approval`, the approval its
+    `approval_before_field` route finds, for `azure_change_work_items` to judge a
+    change made before the date.
+
+- **`azure_change_work_items` 0.3.0: a record left out of approval judging isn't
+  read as unapproved.** When `azure_devops_work_items` left a record out
+  (`approval_route` `exclude`: finished before its `approval_field_from` while its
+  `approval_before_field` is `exclude`), the record's `approved` is `null`, its new
+  `approval_judged` is `false`, and a change it records reads `approved: null`,
+  neither approved nor unapproved, unless another record of it is judged and
+  unapproved. Such a change no longer adds to
+  `changes_recorded_without_approval` or `changes_without_approved_record`. The new
+  `summary.changes_recorded_approval_not_judged` counts these recorded changes
+  whose approval is unknown. Work items evidence from before
+  0.3.0 has no `approval_route`, so every record is judged as before.
+  A change made before a work items file's `approval_field_from` (read from its
+  `results.selection`, so there is no setting here to keep in step) is judged by
+  that file's `approval_before_field` route, from the record's
+  `before_field_approval`, not by the field. Each record on such a change has
+  `change_before_approval_field` `true`, and the new
+  `summary.changes_recorded_before_approval_field` counts these changes.
+
+- **`github_image_signing` 0.1.0 shows whether GitHub Actions signs and
+  verifies container images with cosign.** It reads the workflow files on
+  each default branch and records every `cosign sign` step with the kind of
+  key it uses (a key management service, keyless or other), whether the
+  command names the image by digest, whether it skips the transparency log,
+  and whether the step can be skipped or fail without failing the run
+  (an `if`, `continue-on-error`, or `|| true` in the script). It records
+  every `cosign verify` step and what it checks against, and lists the
+  verify steps that cannot fail the run. It lists the workflows that mention
+  cosign without a cosign command in the file, where signing happens
+  somewhere the file does not show, and the workflows that call a reusable
+  workflow, whose signing it does not read. For each workflow that signs, it
+  reads the runs in the window by outcome and the latest successful run,
+  leaving out pull request runs, which it counts apart. The summary lists the repositories that sign
+  without verifying. It needs Contents for the files and Actions for the
+  runs; with `include_runs: false` it reads the files only and every run
+  figure is null. It reads workflow files, not the registry, and copies no
+  script text into the evidence. KSI-SVC-VRI. Not yet run against a live
+  organization. The workflow file reader and the newest-first run walk moved
+  from `github_actions_security` and `github_workflow_runs` into the shared
+  GitHub client so that the three fetchers use one copy; their evidence is
+  unchanged.
 - **`wiz_vulnerability_findings` 0.4.0: SLA columns.** After the 43 legacy
   columns (unchanged, so existing intake presets keep mapping), the CSV adds the
   Wiz fields Paramify's remediation SLAs depend on: `Is Internet Reachable` and
@@ -62,6 +368,22 @@ schemas and the `paramify` CLI — not the internal code.
   read the legacy query is sent unchanged. The columns are listed in
   [the fetcher's README](fetchers/wiz/vulnerability_findings/README.md#columns).
 
+- **`azure_entra_pim_assignments` 0.2.0: an approved principals setting.** The
+  optional `approved_principal_ids` setting (`AZURE_ENTRA_APPROVED_PRINCIPAL_IDS`)
+  is the same one `azure_entra_privileged_roles` takes: object ids of the users,
+  groups and service principals approved to hold a privileged directory role,
+  separated by commas, spaces or newlines. `summary.approved_principals_configured`
+  says whether a list is set, and `summary.unapproved_eligible_privileged_principals`
+  counts the distinct users, groups and apps eligible for a privileged role
+  tenant-wide whose object id isn't on it. Direct eligible assignments only: a
+  group is matched by its own id, not its members. The count is null with no
+  list, when an entry isn't an object id (the run then fails as `bad_config`), or
+  when a privileged eligible assignment has no scope; like the other figures, it
+  is left out when a read fails. `results.unapproved_eligible_principals` lists
+  those principals with the privileged roles each is eligible for, and
+  `results.approved_principal_ids` the list they were compared with. Without the
+  setting the evidence is unchanged apart from these four keys (false or null).
+
 - **Optional selected-subscription reads for mixed Entra evidence.**
   `azure_entra_emergency_accounts` 0.2.0 and
   `azure_entra_dormant_identities` 0.3.0 accept `target_subscription_only`
@@ -72,6 +394,31 @@ schemas and the `paramify` CLI — not the internal code.
   Graph remains tenant-wide. Missing reads, licensing limits and unsupported APIs
   remain recorded failures or unknown values. No source access is changed.
 
+- **`paramify status <manifest>` shows what each fetcher has in Paramify.** For
+  each evidence fetcher in the manifest, it shows the evidence set, the script
+  state, the paired validators, the solution capabilities, the artifacts, and
+  whether the fetcher is ready. It changes nothing in the workspace. It exits 1
+  until every fetcher is ready, so a deployment can use it as a check, and 2
+  when it cannot tell: no token, a failed read such as an expired token, an
+  unreadable manifest or uploader config, an unknown fetcher, or no evidence
+  fetchers. A value it could not read shows as `?` (`null` in `--json`). Every
+  read goes to the uploader config's `paramify.base_url` when it sets one. The
+  evidence-set and capability reads now keep each validator pair.
+- **`azure_sentinel_analytics_rules` 0.4.0: alert connections the tenant
+  confirms.** The data connectors API doesn't list a tenant-based connector
+  (Defender for Cloud's, for one), so an incident-creation rule whose product
+  sent no alert read as not connected. The new optional
+  `confirmed_alert_connections` setting
+  (`SENTINEL_CONFIRMED_ALERT_CONNECTIONS`) lists connection kinds the tenant
+  confirms; a rule for such a product, with no connection read from the API,
+  reads as quiet. Its `enabled_rules_quiet` record carries
+  `confirmed_by_configuration: true` and a reason saying the connection is
+  confirmed by configuration, not read from the API, and the new
+  `enabled_rules_confirmed_quiet` count (per workspace and in the
+  summary) counts them. A connection of that kind the API does list, in any
+  alert state, wins over the setting, so one listed with alerts Disabled is
+  never confirmed. A kind that sends no product's alerts fails the run as
+  `bad_config`. Left empty, the evidence is unchanged.
 - **`aws_route53_resolver_dns_security`** (`EVD-R53-RESOLVER-DNS-SECURITY`) —
   one record per VPC in the region with its Route 53 Resolver DNSSEC validation
   status (`NOT_CONFIGURED` when the VPC has no DNSSEC config), its DNS Firewall
@@ -228,6 +575,20 @@ schemas and the `paramify` CLI — not the internal code.
   - Needs read on the workspace's logs (Reader, or a custom role with
     `workspaces/query/read` on the four tables, plus `IdentityInfo` when `groups`
     is set). Maps to KSI-IAM-APM, KSI-SVC-SIN, KSI-IAM-SNU and KSI-MLA-LET.
+- **`azure_aks_workload_security`** (`EVD-AZURE-AKS-WORKLOAD-SECURITY`): workload security
+  read from each AKS cluster's Kubernetes API with a Microsoft Entra token, with no
+  kubectl and no stored kubeconfig. For every workload (pods grouped by the Deployment,
+  StatefulSet, DaemonSet or Job that runs them) it records each container's effective
+  security context: non-root, privilege escalation, read-only root filesystem, dropped and
+  added capabilities, privileged, seccomp profile, plus host namespaces and host path
+  volumes. For every namespace it records the Pod Security Admission levels and network
+  policy coverage, including default-deny policies and workloads no policy selects, and
+  for the cluster whether a network policy engine enforces those policies at all.
+  System namespaces (`AKS_SYSTEM_NAMESPACES`) and Windows workloads are listed but not
+  judged. Needs Azure Kubernetes Service Cluster User Role and Azure Kubernetes Service
+  RBAC Reader on the cluster, Entra integration, and a network path to the API server; a
+  list that cannot be read leaves its counts null and fails the run. No environment
+  variables, images, secrets or logs are read.
 - **`checkov_bicep` 0.3.0: the TFVC source signs in with Entra when no token is set.**
   Before, `source_type: tfvc` authenticated only with the `tfvc_token` PAT.
   - With no `tfvc_token`, the fetcher gets an Entra token for Azure DevOps from
@@ -1643,6 +2004,219 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **`jira_site_inventory` 0.2.0: limit to named projects.** A new `projects` setting (`JIRA_PROJECTS`, project keys or
+  exact names) limits projects, issue types, statuses, service desks and issues to the named projects; the others are
+  only counted in `metadata.projects_left_out`. Statuses then come from each project's own status list. The issue
+  query is always limited to those projects, even when `jql` names others. A name that matches no visible project
+  fails as `bad_config`, and an unreadable project list collects nothing site-wide. Priorities stay site-wide. Off by
+  default.
+- **`paramify update` shows what changed by release.** The New section groups its highlights under the release that
+  shipped them, with the release date. Changes that are not in a release yet come first, under "unreleased". Each of
+  your fetchers shows its release notes, newest first, instead of a commit reason. The header counts the releases the
+  update crosses. The TUI update screen shows the newest note per fetcher, and the New list now holds up to ten
+  highlights.
+
+- **The TUI's validator sync (Paramify tab, `v`) now pairs and updates validators that already exist.** Before, it
+  created missing validators and paired only those, and told you to pair the rest in Paramify yourself. The preview
+  now lists three things and does them all on one yes:
+  - creates the missing validators and pairs them;
+  - pairs validators already in Paramify with the manifest's evidence sets they aren't paired with yet, and only
+    those sets, not every set the validator lists;
+  - updates validators whose content differs from your files, named in the confirm because it replaces edits made in
+    Paramify. One that matches is not sent. Paramify's default `disposition: PASS` and a trailing newline don't
+    count as a difference.
+  After `w` in the validator workbench, the hint points at `v` instead of `paramify validators sync --update`.
+  The CLI is unchanged, except that `--update` now skips a validator that already matches.
+- **`github_non_user_credentials` 0.3.0: limit to collected repositories.** A new `scope_to_repositories` setting
+  keeps apps, fine-grained tokens and organization Actions secrets only when they can reach a collected repository or
+  their reach is unknown, and marks each kept row with `reaches_collected_repositories`. Apps installed on selected
+  repositories stay as unknown, since GitHub shows that list only to the app itself, unless the organization's
+  confirmation is named in `apps_confirmed_reaching` or `apps_confirmed_not_reaching`; those apps carry
+  `reach_source: organization_confirmation` and are named in the metadata. Left-out and unknown counts are recorded.
+  Organization secret rows now carry `visibility`. Off by default.
+- **`github_workflow_runs` 0.3.0: scheduled-run actors.** Scheduled runs no longer name a user as `actor`, since GitHub
+  credits them to whoever last changed the schedule; `triggering_actor` is kept only on a re-run. A new
+  `include_actors` setting (default true) removes both fields from every run. The summary adds `runs_scheduled`.
+- **Plainer TUI wording.**
+  - Results read as sentences instead of key=value: "Uploaded 3 files, 1 already there.", not
+    `uploaded=3 duplicates=1 errors=0`.
+  - The upload confirm lists what is delivered where and anything refused, and leaves out no-op and tag steps.
+  - Counts use real plurals, messages name hosts instead of full API URLs, and `esc leave field` shows only while
+    you are typing.
+  - The Pipelines tab is one line when a manifest has nothing to send.
+  - Fixes: the Evidence tab sent you to tab 3 to run (it's 2), and the welcome screen said "1 fetchers".
+- **TUI tab keys: Validators is tab 4.** Paramify moves from `4` to `5` and Pipelines from `5` to `6`.
+- **`paramify validators sync -m` and the Paramify tab cover only the validators a manifest tracks.** Without a
+  `validators:` list an entry tracks every Paramify-made validator for its evidence set, which is every validator
+  the registry ships today, so nothing changes until an entry lists its own or a community validator is added.
+- **`aws_inspector_ecr_findings` and `aws_inspector_ecr_report` 0.3.0: image counts and an opt-in for an empty scope.**
+  - The evidence summary adds `repository_image_count`, every image in the selected repositories before tag,
+    push-date and usage filters, next to `image_count`, the images that match them. Both are logged. No new API calls.
+  - The report's "no images matched" and "missing coverage" refusals are now separate errors. No matched images is
+    `bad_config` and gives both counts; coverage gaps give the gap count and the first few image IDs.
+  - New report setting `allow_no_images` permits a scope that matches no images. It requires `allow_empty: true`, and
+    setting it alone fails before any AWS request.
+  - The report CSV adds a `Repository ARN` column after `Repository`, for matching findings to inventory. Update the
+    tenant's intake preset to map or ignore it.
+- **`azure_aks_cluster_configuration` 0.7.0: autoscaling for expected pools.** A new `expected_autoscaling_pools`
+  setting lists the node pools that must have the cluster autoscaler on, as `pool` (every cluster) or `cluster/pool`.
+  Missing pools and pools without the autoscaler are counted and named, a pool at zero nodes stays expected, and
+  `all_expected_pools_autoscaling` gives one verdict. Each pool now records `min_count`. Unset, the fields stay null.
+
+- **`azure_devops_work_items` 0.4.0: TFVC changeset inclusions.** A new `changeset_inclusions` pattern list
+  (`AZURE_DEVOPS_CHANGESET_INCLUSIONS`, `path:<TFVC server path>` patterns with a reason each, edited like the Front
+  Door and DNS lists) names the TFVC paths whose linked changesets are in scope. A pattern takes in its path and
+  everything under it, without regard to case. Paths are literal: `validate` and the run refuse `*` and `?`, since the
+  read check couldn't prove every path a wildcard covers. Set, each run first reads every included path's latest
+  changeset and fails, writing no evidence, if one is missing, empty or can't be read. A linked changeset is then in
+  scope only if a file it changed (or renamed from) is under an included path, read from the changeset read the
+  fetcher already makes and paged to the end of its change list when that read didn't list every file; one whose
+  changed files can't all be read stays in scope. Others are left out under `results.excluded`, as `not_included`,
+  or as `not_readable` when the identity can't read them (TF14098, 401 or 403), which no longer fails the run. After a
+  refused changeset, every included path is read again at the end of the changeset reads, and one that no longer reads
+  fails the run without evidence, so access lost mid-run can't pass as changesets outside the paths. Each entry names
+  the work items that link it. `changed_before_approval`, `approved_by_change_author` and `first_linked_change` use
+  in-scope changesets only; an item whose changesets were all left out has none to check, as an item linked to
+  nothing, and doesn't hold the summary's change-order lists unknown. Those lists can't cover a refused changeset, so
+  an item that links one reads `unreadable_linked_changesets: true` and is listed in
+  `change_items_with_unreadable_changesets`. New: `results.changeset_inclusion_checks`,
+  `results.changeset_inclusion_recheck`, `results.excluded`, `unreadable_linked_changesets` on each work item, and in
+  the summary `changeset_inclusion_patterns`, `in_scope_changesets` (null when a linked changeset couldn't be read),
+  `not_included_changesets`, `not_readable_changesets`, `changeset_inclusions_rechecked` and
+  `change_items_with_unreadable_changesets`. Unset, a refused changeset still fails the run and the evidence only gains
+  these keys.
+
+- **`paramify upload` no longer drops a file for holding `../`, `/etc/passwd`, `/bin/sh`, `/bin/bash` or
+  `<script`.** It checked every file for these strings and dropped a match before sending it, with `blocked by the
+  production WAF: '…'`. The WAF has exempted the upload routes from those rules since 2026-10-29, so the check only
+  dropped good files, often findings whose CVE text holds one of the strings. Every file is now sent. If the WAF does
+  refuse one (a 403 with no request id), the upload still drops only that file, names it `blocked by the production
+  WAF`, and sends the rest. `--no-waf-check`, added for this on 2026-11-17, is still accepted but does nothing, and
+  the upload says so.
+
+- **`aws_ecr_image_scanning` 0.4.0 runs on boto3.** One Python process replaces a shell script that started
+  the AWS CLI and several `jq` processes per repository. It reads eight repositories at a time and requests the
+  largest page each API allows, so an enhanced scan with many findings takes a tenth of the requests, and a BASIC
+  scan is read in one. The output, its file name and the IAM actions are unchanged. It needs the `aws` extra
+  (boto3), which the Docker image already installs.
+
+- `aws_ecr_image_scanning` 0.5.0 writes null, not `[]`, for what it could not read: `applied_scan_filters` when a
+  repository's effective scanning configuration was not read, `registry_scanning.rules` when the registry
+  configuration was not read, and `repositories` when the repository list was not read. An empty list now always
+  means AWS returned none. A missing boto3 fails as `bad_config` and names the install command, instead of
+  `partial_failure`. The run's failure message lists failures in repository order, so it no longer changes from run
+  to run.
+
+- `qualys_vmdr_vulnerability_findings` uses the v6 host detection and v4 KnowledgeBase endpoints in place of v2,
+  which Qualys has scheduled for end of life. Requests, parameters and the report columns are unchanged.
+
+- `qualys_vmdr_vulnerability_findings` reads QVS by change window instead of 25 CVEs per request. It walks
+  `qvs_last_modified_after`/`qvs_last_modified_before` windows newest first and keeps the CVEs it needs, so QVS
+  enrichment takes a few dozen requests regardless of how many CVEs the detections reference. Per-CVE lookups
+  could exceed the QVS hourly rate limit in large environments. Windows too large for one response are split; CVEs
+  the walk does not return are looked up individually, and a record outside its window fails the report. QVS
+  requests use the v3 endpoint.
+
+- `qualys_vmdr_vulnerability_findings` and `qualys_stig_compliance_report` failures caused by throttling name the
+  endpoint, HTTP status, Qualys code, requested wait and the numeric `X-RateLimit-*` / `X-Concurrency-Limit-*` header
+  values, so the limit that was hit is visible in the failure reason. Response bodies are still never reported.
+
+- **Checkov is installed in its own environment.** `requirements.txt`, the `checkov` extra and `all` no longer install
+  the `checkov` package, and the Docker image puts it in its own virtualenv with only the `checkov` executable on
+  `PATH`. Checkov pins exact versions of libraries other fetchers also use, such as boto3, so sharing an environment
+  held those back. Install it with `pipx install checkov`. The `checkov` extra still installs azure-identity for
+  `checkov_bicep`. `INSTALL_EXTRAS` without `checkov` still builds the image without it.
+
+- **`collection_succeeded` now covers two Entra evidence sets.** It is listed
+  against `EVD-AZURE-ENTRA-APP-CREDS` (`azure_entra_app_registrations`) and
+  `EVD-AZURE-ENTRA-SERVICE-PRINCIPALS` (`azure_entra_service_principals`), so a
+  failed run of either fetcher fails its evidence set. Consumers that keep their
+  own criteria for these sets get collection health from this registry file.
+
+- **`aws_inspector_ecr_findings` and `aws_inspector_ecr_report` 0.2.0: new scope settings, boto3 collection and a
+  smaller evidence format.**
+  - New scope settings, applied as Inspector filters so out-of-scope findings are never downloaded: `in_use_only`
+    (images running in ECS or EKS), `last_in_use_days`, `pushed_within_days` and `min_severity` (UNTRIAGED is always
+    kept). With a usage filter, an image that Inspector has no coverage record for is out of scope rather than a gap.
+  - Multi-architecture index digests (OCI image indexes, Docker manifest lists) are left out of the image inventory,
+    since Inspector scans the per-platform images they point to rather than the index; they are no longer reported as
+    coverage gaps. They are counted in `summary.index_digest_count`.
+  - `image_tags` selects the images a tagged index points to: the collector reads each tagged index's manifest with
+    ECR `BatchGetImage` (a new permission, needed only with `image_tags`) and queries those images' findings by
+    digest. Before, a tag filter matched only tagged images, so multi-architecture images were left out.
+  - AWS calls go through boto3 in one process instead of one `aws` CLI process per page, every paged API requests its
+    largest page, and up to eight repositories' images are listed concurrently. `boto3` is now in
+    `requirements.txt` and a new `aws` extra.
+  - Evidence format: fields shared by every finding of a vulnerability ID (description, CVSS, references, EPSS,
+    remediation and similar) are stored once under `results.vulnerabilities`; each finding keeps the rest, plus any
+    shared field whose value differs, and `absent_fields` for stored fields it lacks. Images keep only the ECR fields
+    used and a `resource_id`, and no longer embed their coverage record (it is in `results.coverage`). The JSON is
+    written compact. The CSV report's columns and values are unchanged.
+  - File names are unchanged for targets that do not use the new settings.
+
+- **The TUI shows the catalog and the manifest on one Fetchers page.** The
+  Catalog and Manifest tabs are now one tab, so the TUI has four tabs:
+  Fetchers, Run, Evidence and Paramify (keys `1` to `4`). The catalog and a
+  detail pane are at the top, and the manifest is across the full width below
+  them. The detail pane shows the item in the list that has focus. Press `a`, or enter, on a catalog
+  fetcher to add it to the manifest, and focus stays in the catalog. The
+  catalog shows `[x]` before each fetcher that is in the manifest and `[ ]`
+  before the rest, as the add-fetchers picker did. `a` on a fetcher that is
+  already in the manifest moves the manifest cursor to it, and `a` on the
+  manifest list moves to the catalog filter (its footer hint reads "find to
+  add"). Enter in the filter moves to the first fetcher it shows. Tab moves
+  from the catalog to the manifest list, the output dir, the stack, owner and
+  Save row, and the detail pane. Escape stays in the list you were in. The
+  footer shows the keys of the list that has focus. The manifest list shows
+  at least twelve rows on a tall terminal and at most 65% of the page. On a
+  short terminal, such as 80×24, the twelve-row floor gives way so the
+  catalog keeps half the page, and the blank rows around the filter and the
+  settings row are dropped. An empty manifest takes only the rows of its
+  hint. The add-fetchers picker is removed.
+- **The Paramify tab in the TUI can show the solution capabilities.** `[` and `]`
+  switch between the view by fetcher and the view by capability. The view by
+  capability lists each capability in the workspace with its validator
+  pairs and the fetchers they come from. The count includes pairs whose
+  evidence sets are not in the manifest, and the row says how many come from
+  other evidence sets. On a short terminal the view bar is hidden (`[` and
+  `]` still switch views) and the pairs pane gives way, as the fetcher
+  detail does, so the capability list keeps its rows. Under it, the highlighted capability shows each
+  pair: the fetcher, the function, and the validators in the pair. `/`
+  filters by capability id or name. If the token cannot read the
+  capabilities, the view tells you. The view by fetcher still works.
+- **The TUI's Paramify tab is a setup grid.** It has one row for each evidence
+  fetcher in the manifest: the evidence set, the script, the validators, the
+  linked solution capabilities, the artifacts, and whether the fetcher is
+  ready. Under the grid, a line counts each column. The highlighted fetcher
+  shows its validators and the capabilities that its validator pairs prove.
+  `/` filters the grid. `w` hides the fetchers that are ready, so the grid
+  lists only what needs work, and shows them again; the footer reads
+  `w hide ready` or `w show all`. The validators count is out of the
+  fetchers that have validators in the registry. `s` syncs the scripts, `v` syncs the validators and `u` uploads the newest run,
+  each after a preview and a confirm, and the grid then reads the workspace
+  again. Without an API token, a bar says how to set one, and the three keys
+  are off. A cell or count whose read failed shows `?`, as in `paramify
+  status`, and an uploader config that cannot be read shows in the bar. On a
+  short terminal, such as 80×24, the detail under the grid gives way so the
+  grid keeps its rows. The tab reads the workspace only when it shows. The scripts force
+  and reassociate options are no longer in the TUI; `paramify scripts sync`
+  keeps them.
+- **Scan reports are on their own Pipelines tab in the TUI.** The tabs are
+  Fetchers, Run, Evidence, Paramify and Pipelines (keys `1` to `5`). The
+  Pipelines tab lists the scan-report fetchers in the manifest, with the assessment
+  each one sends to and its close-cycle setting, read as the manifest list
+  reads them: an assessment set for the whole platform counts, and a close
+  policy that is not set reads "close unset". `i` sends the reports, `j`
+  lists the pipeline jobs and `C` closes a cycle, as before. The Paramify tab
+  keeps the evidence upload and the scripts sync. One Paramify operation
+  still runs at a time across both tabs: while an upload, sync, send or cycle
+  close runs, the other tab refuses to start another and says so. The tab's
+  label carries a `beta` tag.
+- **Only the TUI panel that has focus has a color.** The other panels have a
+  gray border, and the list in them has a gray cursor. The catalog's cursor
+  stays bright while its filter has focus, because up, down and enter in the
+  filter move and pick that cursor. Tables and the catalog tree have no fill
+  of their own, so the panel border is the only outline.
 - **Each batch the upload creates is approved on submission by default.** The
   upload now sends the entry's `approval` (default `SUBMISSION`) when it creates
   a batch. Before, a batch took the evidence set's mode, so a set made `MANUAL`
@@ -2375,6 +2949,98 @@ schemas and the `paramify` CLI — not the internal code.
   the CA counts are null when the CA read fails. `authentication_methods` now reads
   null, not an empty list, when the methods policy can't be read.
 
+- **`azure_sentinel_incidents` 0.2.0: response timeline, monthly metrics, rules
+  and entities.** Besides the latest SecurityIncident row per incident, which
+  still gives close times and now tasks, the fetcher reads every update row in
+  the lookback. Each incident gains:
+  - `acknowledged_time_utc` and `hours_to_acknowledge`: the first update by a
+    person that moves it to Active or Closed or gives it an owner or a different
+    one (by object id when both updates have one, so a renamed owner isn't a
+    different one), up to its first close, so a reopen never counts and removing an owner
+    doesn't either; a person creating it already Active or owned acknowledges
+    it at creation. Updates with no modifier, and those by automation rules,
+    playbooks, alert grouping, Fusion, incident creation or the Defender XDR
+    sync, don't count. Microsoft doesn't document what a person's update writes
+    as the modifier, so any other modifier counts as a person, an unlisted
+    system included. Known only when the creation row was read; a later row
+    missing doesn't undo one already found.
+  - `status_changes`, `owner_changes` and `severity_changes` (time, from, to and
+    who made it), and `tasks` with status and completion time. Owners compare
+    by object id when both updates have one, so a rename isn't an owner change,
+    and an owner known only by object id is named by it. Times are each
+    update's LastModifiedTime, and rows written at the same instant always sort
+    alike.
+  - `hours_to_detect` (first activity to creation), `comments_count`,
+    `classification_comment` and `related_analytic_rule_ids`.
+  - the `entities` on its alerts, as kind and identifier, from SecurityAlert
+    joined on the incident's alert ids: up to 25 of each kind, processes as image
+    name and process id, URLs as scheme and host only. Entities read
+    as `null` when the alerts can't be read.
+  - `provider_incident_id` and `provider_incident_url`: for an incident synced
+    from Defender XDR, its id and link there; Microsoft Graph alerts give the same
+    id as `incidentId`.
+  - `owner_object_id` and `owner_email`, beside the existing owner names. An
+    owner known only by email or object id is still an owner, in
+    `history_complete`, `open_new_unowned_history_incomplete` and the backlog
+    by owner.
+  - `history_complete`: whether every update was read: the incident was created
+    inside the history read, which starts at the lookback or SecurityIncident's
+    retention, whichever is later; its creation row was read; and a row tied for
+    the latest time read matches its current status, severity and owner (by
+    object id when both sides have one, else by name) and, if its
+    `lastModifiedTimeUtc` is within the last hour, is that recent. One already
+    acknowledged before its oldest update read has no acknowledgement time rather
+    than a late one. `updates_read` counts the update rows read for it.
+
+  Each workspace gains `monthly`: per calendar month of the lookback, MTTD by
+  month created, MTTA by month acknowledged and MTTR by month closed over the
+  in-scope incidents, and the open backlog at month end by severity and owner
+  over every incident, which is `null` for month ends older than
+  SecurityIncident's retention; its `updates_retained` is true when the whole
+  month is inside the history read. An older incident closed in the lookback leaves
+  the backlog without counting in that month's MTTR, so monthly MTTR may read
+  low. It also gains `recurring_titles`, `recurrence_by_title` and
+  `recurrence_by_rule` (two or more incidents created in the lookback),
+  `open_unacknowledged` (open, every update read, and no person has acknowledged
+  it), `open_new_unowned_history_incomplete` (open, still New with no owner, and
+  not every update read, so never counted in `open_unacknowledged`), and
+  `mttd_hours`, `mtta_hours` and `mttr_hours`. When the update history can't be
+  read, the timeline fields, `monthly`, `acknowledged_incidents` and
+  `open_unacknowledged` are `null` rather than empty. When close times can't be
+  read, `close_time_status` is `unknown` and the close-time counts are `null`,
+  rather than every closed incident counting as missing. A SecurityIncident
+  table the query can't find, in a workspace that lists an incident over an hour
+  old, is hidden by table-level access: the run records an access failure and
+  exits 1, and close times and history are unknown. In a workspace that lists
+  none, or only incidents under an hour old that may not be ingested yet, it
+  reads as empty, with a note. SecurityAlert is treated the same way when an
+  incident over an hour old has alerts. SecurityAlert is cut to the incidents'
+  alert ids before it is aggregated and joined, and a query whose result is too
+  large for one response (over 64 MB or 500,000 rows) is read again in halves
+  of the incidents, down to 64 shares, rather than failing the run.
+  The summary's counts, existing ones included, are `null` when any workspace's
+  incident list failed, the workspace list or a check for Sentinel failed, or a
+  workspace named in `SENTINEL_WORKSPACES` wasn't found, and the counts that
+  can be unknown are `null` when any workspace's value is; with no Sentinel
+  workspace found they are 0.
+  Each workspace also gains `limitations`: in a workspace connected to Defender
+  XDR, analysts usually work incidents in the Defender portal and
+  SecurityIncident shows mostly the XDR sync's updates, so those incidents read
+  as not acknowledged and an open one can count in `open_unacknowledged`; their
+  acknowledgement times would need Defender XDR's incident activity history,
+  which neither SecurityIncident nor Graph's `security/incidents` (its current
+  state and comments, but not when an incident was first activated or assigned)
+  provides.
+  Other existing fields are unchanged; KSI-PIY-RES is not mapped, since it isn't
+  evidenceable.
+
+### Deprecated
+
+- **`uploaders/paramify_evidence/uploader.py`.** It still works and keeps its
+  flags. It now hands the run to the same engine as `paramify upload`, prints a
+  deprecation notice, and writes the notice under `deprecations` in
+  `upload_log.json`. Use `paramify upload`.
+
 ### Removed
 
 - **Datadog evidence fields with no source in the API.**
@@ -2388,6 +3054,236 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- **In-scope counts read null, not 0, when their list couldn't be read.** A failed sign-in or list call left
+  `in_scope_*` at 0, as if the subscription had none. Each now reads null when the list it counts wasn't read, and 0
+  only when it was read and is empty; the matching `excluded_*` count is null with it.
+  `azure_network_security_groups` 0.6.1 (`in_scope_network_security_groups`, `in_scope_virtual_networks`,
+  `in_scope_network_interfaces`, each by its own list), `azure_resource_inventory` 0.4.2 and
+  `azure_resource_diagnostic_settings` 0.4.2 (`in_scope_resources`), `azure_private_dns_zone_configuration` 0.4.2
+  (`in_scope_private_dns_zones`), `azure_private_endpoint_configuration` 0.3.3 (`in_scope_private_endpoints`),
+  `azure_defender_assessments` 0.4.2 (`in_scope_assessments`, also null when the list stopped partway; still 0 when
+  Defender for Cloud isn't registered) and `azure_residual_resources` 0.3.2 (`in_scope_orphaned_resources` when any
+  list orphans are found from wasn't read, `in_scope_role_assignments` by its own list).
+- **Every secret has a description, and settings the fetcher defaults are no longer required.** 19 secret env vars
+  across datadog, crowdstrike, okta, knowbe4, sentinelone, github, gitlab, rippling, checkov, paramify and splunk
+  had no `description`, so `paramify describe` and the TUI said nothing about what they were or where to get them.
+  Each now says both, with the same wording wherever fetchers share a variable. Four were declared required though
+  the fetcher runs without them; they are now `required: false`, so `paramify validate` stops demanding them and the
+  runner skips them when a manifest leaves them out:
+  - Datadog `base_url` (`DATADOG_BASE_URL`, default `https://api.ddog-gov.com`) on all 13 fetchers.
+  - Datadog `incidents_lookback_days` (`DATADOG_INCIDENTS_LOOKBACK_DAYS`, default 90) on `datadog_incidents_list`
+    and `datadog_incident_timelines`, and `signals_lookback_days` (`DATADOG_SIGNALS_LOOKBACK_DAYS`, default 30) on
+    `datadog_siem_signals`. They stay under `secrets`, so manifests that map them keep working unchanged.
+  - Checkov `clone_token` (`GIT_CLONE_TOKEN`) on `checkov_terraform` and `checkov_kubernetes`, which clone a public
+    repo without it (`checkov_bicep` already declared it optional).
+
+  No fetcher's output changes, so no fetcher version moves.
+
+- **More in-scope counts read null, not 0, when their list couldn't be read.** Each `in_scope_*` count, and the
+  `excluded_*` count beside it, now reads null when the list it counts wasn't read, and 0 only when it was read and is
+  empty; each list is judged on its own. `azure_alert_rules` 0.3.2, `azure_app_service_backups` 0.3.3,
+  `azure_app_service_configuration` 0.5.2, `azure_app_service_deployments` 0.3.2 (and its `boundary_excluded_*`
+  counts), `azure_app_service_plans` 0.3.2, `azure_key_vault_key_rotation` 0.6.2, `azure_log_analytics_workspaces`
+  0.3.2, `azure_policy_compliance` 0.5.2 (still 0 with Microsoft.PolicyInsights unregistered),
+  `azure_sql_managed_instance_configuration` 0.5.1 and `azure_vnet_egress_routing` 0.3.2. `scope_exclusions` gains
+  the same unread state, so `azure_dns_configuration` 0.6.2 (`in_scope_record_sets`, also null while one zone's
+  record sets are unread) and `azure_front_door_tls`, `azure_front_door_waf_coverage` 0.6.2 and
+  `azure_front_door_origins` 0.8.2 (host, route and other counts) read null when the profile list wasn't read, and
+  their `scope_exclusion_patterns_unmatched` is null then too.
+
+- **`paramify run` stops its running fetchers on Ctrl-C or SIGTERM.** Each fetcher runs in its own session, so before,
+  an interrupted run left it running and writing into the run directory. The runner now kills the fetcher's process
+  group before exiting, and a run with `concurrency` starts none of its queued targets. `paramify run` turns SIGTERM
+  into exit code 143 so it reaches the same cleanup.
+
+- **Jira fetchers: a scoped API token sent to the site URL now gives the fix,
+  not a generic `auth_failed`.** Jira answers `401 Unauthorized; scope does not
+  match` on every call when a scoped token is used with
+  `JIRA_BASE_URL=https://<site>.atlassian.net`. The run now stops with
+  `bad_config` and names the gateway URL to use
+  (`https://api.atlassian.com/ex/jira/<cloudId>`, or the Government Cloud
+  gateway) and the site's `_edge/tenant_info` link that gives the cloudId.
+  Through the gateway, the same answer is reported as `not_authorized`, a
+  missing scope. `fetchers/jira/README.md` now lists all four Jira fetchers that
+  need no admin access. New sections say how to run without Jira admin access
+  and how to read this error.
+- **Disk, Key Vault, storage and SQL Managed Instance fetchers: an unread list
+  gives null counts, not 0.** When a list the run needs is refused (403),
+  throttled or times out, every total, count and percentage built from it is
+  null. Before, they read 0, which looked like "none found". Each run still
+  fails as `partial_failure`.
+  - `azure_disk_encryption_status` 0.3.0: when the disk list is not read, every
+    disk count and percentage is null (including `total_disks`).
+  - `azure_key_vault_configuration` 0.5.0: when the vault list is not read,
+    every count is null. When any vault's diagnostic settings are not read,
+    `vaults_with_diagnostic_settings`, `vaults_with_audit_logging`,
+    `vaults_without_audit_logging` and `audit_logging_percentage` are null too;
+    `vaults_audit_logging_unknown` still says how many.
+  - `azure_storage_encryption_status` 0.5.0: when the account list is not read,
+    every count is null (`total_storage_accounts` included). When any account's
+    container list is not read, the container counts and `in_scope_containers`
+    and `excluded_containers` are null; when any geo-redundant account's
+    replication status is not read, `geo_replication_live_accounts` and
+    `geo_failover_ready_accounts` are null. When any account's blob or file
+    service properties are not read, `blob_versioning_accounts`,
+    `container_soft_delete_accounts` (blob) and `share_soft_delete_accounts`
+    (file) are null; each account records `blob_properties_status` and
+    `file_service_properties_status` (collected, not_supported or failed).
+  - `azure_sql_managed_instance_encryption` 0.4.0: when the instance list is
+    not read, every count is null (`total_managed_instances` and
+    `in_scope_managed_instances` included). The key counts are null when any
+    instance's protector is not read, and the TDE counts when any instance's
+    database list is not read.
+  - `azure_sql_managed_instance_backups` 0.5.0: when the instance list is not
+    read, every instance, database and failover group count is null. The
+    database retention counts are null when any instance's database list is not
+    read, and `instances_in_failover_group` when any instance's failover group
+    membership is unknown.
+
+- **`azure_aks_cluster_configuration` 0.5.0, `azure_redis_cache_configuration`
+  0.3.0, `azure_managed_redis_configuration` 0.3.0 and
+  `azure_rbac_custom_roles` 0.3.0: a list that could not be read gives null
+  counts, not 0.**
+  - When the cluster, cache or role definition list is not read, every count,
+    percentage and list built from it in the summary is null (including
+    `total_clusters`, `total_caches`, `total_role_definitions` and
+    `custom_role_definitions`). Before they read 0 or empty. The run still
+    exits 1 as `partial_failure`.
+  - `azure_redis_cache_configuration`: the counts built from a per-cache read
+    (`access_policy_assignments`, `firewall_allows_all_ips_caches`,
+    `audit_logging_enabled_caches`, `maintenance_window_caches`,
+    `geo_replicated_caches`) are null while any cache's read failed. Before they
+    left that cache out.
+  - `azure_managed_redis_configuration`: the database counts and
+    `tls_only_clusters` (and its percentage) are null while any cluster's
+    database list could not be read. Before they left that cluster out.
+
+- **`azure_sql_managed_instance_configuration` 0.5.0: only a catch-all Internet
+  Deny that covers every source restricts the subnet's Internet egress.** Before,
+  any catch-all Deny toward the Internet counted, whatever its source, so a Deny
+  limited to one subnet's addresses marked the instance restricted. Now the Deny
+  must have a source of `*`, `0.0.0.0/0` or `VirtualNetwork`, or address ranges
+  that together hold the instance's whole subnet (its own range or a wider one);
+  a source-limited Deny is skipped and the walk goes on to the next rule. A port
+  range of `0-65535` now counts as `*`. Affects `subnet_unrestricted_internet_outbound`
+  and `instances_subnet_unrestricted_internet_outbound`.
+
+- **`paramify upload` no longer sends an inventory direct when its channel has
+  no artifact request.** A Paramify inventory pipeline runs only on a file in an
+  approved batch, so a direct upload was stored and built nothing. The file now
+  goes in an evidence-level batch. `delivery: direct` or `no_request: direct` on
+  an inventory entry is refused, and so is an evidence set with validators
+  attached (its batches never approve). `--plan` warns when the set approves
+  MANUAL or the workspace has no batches.
+
+- **Re-uploading an inventory that went direct before now runs the pipeline.**
+  When the workspace has batches, files of the run that an earlier upload sent
+  direct (with no batch) are sent again in a batch, with a plan warning, instead
+  of being reported as already delivered while Paramify built nothing. With
+  batches off nothing changes. A pipeline run already in a submitted or approved
+  batch is a no-op even if the set has since gained a validator, and a no-op
+  result carries `pipeline: {type, approved}` too.
+
+- **A run-level `delivery: direct` or `no_request: direct` no longer refuses
+  every inventory.** A pipeline entry ignores a `direct` it inherits from
+  `run.paramify` and uses `delivery: auto` and `no_request: evidence`;
+  `paramify validate` notes it, `paramify run` records those settings, and the
+  upload plan compares against them. `direct` on the entry itself is still a
+  validate error. A run recorded before this fix still refuses at upload; the
+  refusal now says to set `no_request: evidence` on the entry or remove
+  `direct` from `run.paramify`, then run again.
+
+- **`paramify preset` (and `P` in the TUI) finds the sample of a per-target
+  inventory.** It looked for `sophos_endpoint_inventory.json`, but the shipped
+  inventory fetchers write one file per tenant or org
+  (`sophos_endpoint_inventory_<tenant>.json`), so it never found one. It now takes
+  the fetcher's files from the run's invocations (else `<stem>*.json` files whose
+  envelope names the fetcher), skips ghost runs as `paramify runs` does, uses the
+  first file as the sample and sums `asset_type` counts across the files. An
+  unreadable file says `could not read <path>`; `--json` gains `problem`.
+
+- **Saving a pipeline entry's form in the TUI keeps its settings.** The form hid
+  `no_request` and `delivery`, and the save removed every key it did not show,
+  so `no_request: refuse` was lost. The form now offers `no_request` (`evidence`
+  or `refuse`) on a pipeline entry, still hides `delivery`, and a save touches
+  only the keys the form shows.
+- `azure_private_endpoint_configuration` 0.3.2 uses the existing native strict
+  subscription setting for related Resource Graph lookups and skips wider
+  visibility discovery in that mode. Foreign references remain unknown; an
+  invalid strict flag or missing explicit target stops before authentication. Scoped lookups
+  reject out-of-scope response rows. `results.lookup_scope` records the mode;
+  default broad discovery and exclusion behavior remain unchanged.
+
+- Azure Service Health uses API `2025-04-01` for Azure Government event
+  lists, individual events and both detail actions. Other clouds retain
+  `2025-05-01`; evidence fields and collection scope are unchanged.
+- Key Vault key rotation derives a missing ARM `vault_uri` from the selected
+  Azure cloud instead of defaulting sovereign-cloud reads to the public host.
+  ARM-provided URIs and rotation-policy configured/readability semantics are
+  unchanged.
+
+- **`azure_defender_plans` 0.3.1 preserves pricing observations.** Each plan
+  retains `observed_configuration` with the selected SDK-projected attributes,
+  including extension `additional_extension_properties` such as exclusions.
+  These are projected observations, not raw HTTP or proof of effective resource
+  coverage. Missing or unrecognized extension, enforcement and inheritance flags
+  stay `null` rather than `false`; extension summary counts include only flags
+  explicitly enabled. Existing security-contact reads and failure handling are
+  unchanged.
+
+- **`azure_policy_compliance` 0.6.0: unread reads give null counts, and an
+  unread remediation task can no longer read as complete.**
+  - `deployments_complete` could read true on a run that missed a task's
+    deployment list: a later task's read replaced the record of unread tasks.
+    A task whose deployments could not be listed now keeps it false.
+  - A remediation task at a scope the fetcher doesn't recognise now fails the
+    run, where before it was skipped with only a log line.
+  - When the compliance summary could not be read, `non_compliant_resources`,
+    `non_compliant_policies`, `compliant_resources`, `resources_evaluated`,
+    `resource_compliance_percentage`, `assignments_evaluated`,
+    `non_compliant_assignments` and `compliant_assignments` read null, not 0.
+    When the remediation task list could not be read, `remediation_tasks`,
+    `remediation_tasks_by_provisioning_state` and the two deployment totals
+    read null, not 0. `listed_non_compliant_states` and
+    `listed_distinct_non_compliant_resources` read null when the non-compliant
+    states query failed. With the provider not registered they still read 0.
+  - With a `resource_exclusions` pattern set and the summary unread,
+    `non_compliant_assignments` and `compliant_assignments` read null, not 0.
+  - When the task list or any task's deployment list was not read,
+    `remediation_deployments_listed`, `remediation_deployments_by_status` and
+    the `remediated_resources_*` counts (and
+    `succeeded_remediations_now_non_compliant`) read null, not counts over the
+    partial list.
+  - `resources_by_compliance_state` and `policies_by_compliance_state` read null,
+    not `{}`, when the compliance summary could not be read.
+    `non_compliant_states_truncated` reads null when the non-compliant states
+    query failed, and `remediation_deployments_truncated` reads null when the
+    task list or a task's deployment list was not read, not false.
+
+- **`azure_managed_identity_configuration` 0.3.0: an unread list gives null
+  counts, not 0, and an unread federated-credential list no longer counts an
+  identity as unattached.**
+  - When the user-assigned identity list or the resource list is not read,
+    every count built from it is null (the totals, the federated credential
+    counts, and the counts over both kinds of identity). Before they read 0.
+    The run still exits 1 as `partial_failure`.
+  - `graph_access` is null, not `not_read`, when an identity list was not read.
+    `not_read` now means both lists were read and held no identity to look up.
+  - Before, an identity whose federated credential list could not be read
+    counted in `unattached_identities_with_roles`. That count and
+    `federated_only_identities_with_roles` are now null while any identity's
+    role assignments, attachments or federated credentials are unread, and
+    `user_assigned_identities_no_resource_attached` and the federated credential
+    counts are null when their lists are unread for any identity.
+  - When any identity's role assignments are not read, the role counts
+    (`identities_with_broad_role`, `identities_with_subscription_or_higher_role`,
+    the four `identities_<capability>` counts,
+    `identities_without_role_assignments` and
+    `role_assignments_unresolved_role`) are null. When Microsoft Graph is not
+    read (`graph_access` `not_authorized` or `failed`),
+    `identities_with_graph_roles` and `identities_with_privileged_graph_roles`
+    are null. Before they read 0.
+
 - **`azure_entra_authentication_policy` no longer shows Microsoft's password
   defaults when the tenant's settings could not be read.** Before, a failed
   `/groupSettings` read fell back to the template, so `password_settings_source`
@@ -2395,11 +3291,47 @@ schemas and the `paramify` CLI — not the internal code.
   the defaults, though the tenant may have saved other values. The source and
   those fields are now null, and the failed read still fails the run. Version
   0.3.1.
+
+- **`azure_network_security_groups` 0.6.0: only a catch-all Internet Deny that
+  covers every source restricts Internet egress.** Before, any catch-all Deny
+  toward the Internet counted, whatever its source, so a Deny limited to one
+  subnet's addresses marked the group restricted. Now the Deny must have a
+  source of `*`, `0.0.0.0/0` or `VirtualNetwork`; a source-limited
+  Deny is skipped and the walk goes on to the next rule. A port range of
+  `0-65535` now counts as `*`. A group with no catch-all rule at all still reads
+  restricted. Affects `unrestricted_internet_outbound_groups` and
+  `restricted_internet_outbound_groups`.
+- **`azure_vpn_gateway_configuration` 0.3.0: `active_active_gateways` and
+  `p2s_enabled_gateways` count only Vpn-type gateways.** Before, an ExpressRoute
+  gateway could be counted too, so the figures could exceed `vpn_gateways`.
 - **`azure_app_gateway_waf` `total_waf_policies` is null when the WAF policy
   list could not be read.** Before, a failed
   `web_application_firewall_policies.list_all` left only the policies a gateway
   references, read one by one, so the total looked like a small number of
   policies. The failed list still fails the run. Version 0.2.2.
+
+- **`azure_network_flow_logs` 0.3.0: flow log counts are null when a flow-log
+  list was not read.** Before, a failed Network Watcher list read as 0 flow
+  logs and 0 watchers, and when one watcher's flow-log list failed the counts
+  covered only the watchers that were read. Now the Network Watcher list failing,
+  or any watcher's flow-log list failing, makes every flow-log count (totals,
+  target types, retention, Traffic Analytics, unattached and unknown targets),
+  `in_scope_flow_logs`, `excluded_flow_logs` and
+  `resource_exclusion_patterns_unmatched` null. When the watcher list failed,
+  `total_network_watchers`, `regions_with_virtual_networks_without_network_watcher`
+  and `regions_without_network_watcher_count` are null too (before: 0, [] and 0). With every list read the output is the same.
+
+- **`azure_data_services_configuration` 0.3.0: a service list that was not
+  read gives null counts, and a MongoDB cluster with public access Disabled
+  reads as disabled without its firewall rules.**
+  - Before, an unread MongoDB, Data Explorer or Event Hubs list left every
+    total and count built from it at 0, which looks like "nothing to check".
+    They are now null, so a check can't pass on an empty read. The run still
+    exits 1 as `partial_failure`.
+  - Before, a cluster whose public network access is Disabled had
+    `public_access` null when its firewall rule list failed, so
+    `mongo_clusters_public_access_unknown` counted it. It is now `disabled`.
+    Other clusters stay null. Each cluster's `firewall_rules` still reads null.
 - **`paramify doctor` and the note before `paramify run` find an upload token
   in `.env`.** So do `manifest set-stack` and the stack picker in the TUI.
   Before, only `paramify stacks` and `paramify upload` read `.env`, and the
@@ -2940,100 +3872,6 @@ schemas and the `paramify` CLI — not the internal code.
   Graph simply did not return (indexing lag, or a scope the credential cannot
   read) gives `null` with no failure entry. **Re-check any validator or query
   that expects `private_ip_addresses` to be a list.**
-
-### Changed
-
-- **`azure_sentinel_incidents` 0.2.0: response timeline, monthly metrics, rules
-  and entities.** Besides the latest SecurityIncident row per incident, which
-  still gives close times and now tasks, the fetcher reads every update row in
-  the lookback. Each incident gains:
-  - `acknowledged_time_utc` and `hours_to_acknowledge`: the first update by a
-    person that moves it to Active or Closed or gives it an owner or a different
-    one (by object id when both updates have one, so a renamed owner isn't a
-    different one), up to its first close, so a reopen never counts and removing an owner
-    doesn't either; a person creating it already Active or owned acknowledges
-    it at creation. Updates with no modifier, and those by automation rules,
-    playbooks, alert grouping, Fusion, incident creation or the Defender XDR
-    sync, don't count. Microsoft doesn't document what a person's update writes
-    as the modifier, so any other modifier counts as a person, an unlisted
-    system included. Known only when the creation row was read; a later row
-    missing doesn't undo one already found.
-  - `status_changes`, `owner_changes` and `severity_changes` (time, from, to and
-    who made it), and `tasks` with status and completion time. Owners compare
-    by object id when both updates have one, so a rename isn't an owner change,
-    and an owner known only by object id is named by it. Times are each
-    update's LastModifiedTime, and rows written at the same instant always sort
-    alike.
-  - `hours_to_detect` (first activity to creation), `comments_count`,
-    `classification_comment` and `related_analytic_rule_ids`.
-  - the `entities` on its alerts, as kind and identifier, from SecurityAlert
-    joined on the incident's alert ids: up to 25 of each kind, processes as image
-    name and process id, URLs as scheme and host only. Entities read
-    as `null` when the alerts can't be read.
-  - `provider_incident_id` and `provider_incident_url`: for an incident synced
-    from Defender XDR, its id and link there; Microsoft Graph alerts give the same
-    id as `incidentId`.
-  - `owner_object_id` and `owner_email`, beside the existing owner names. An
-    owner known only by email or object id is still an owner, in
-    `history_complete`, `open_new_unowned_history_incomplete` and the backlog
-    by owner.
-  - `history_complete`: whether every update was read: the incident was created
-    inside the history read, which starts at the lookback or SecurityIncident's
-    retention, whichever is later; its creation row was read; and a row tied for
-    the latest time read matches its current status, severity and owner (by
-    object id when both sides have one, else by name) and, if its
-    `lastModifiedTimeUtc` is within the last hour, is that recent. One already
-    acknowledged before its oldest update read has no acknowledgement time rather
-    than a late one. `updates_read` counts the update rows read for it.
-
-  Each workspace gains `monthly`: per calendar month of the lookback, MTTD by
-  month created, MTTA by month acknowledged and MTTR by month closed over the
-  in-scope incidents, and the open backlog at month end by severity and owner
-  over every incident, which is `null` for month ends older than
-  SecurityIncident's retention; its `updates_retained` is true when the whole
-  month is inside the history read. An older incident closed in the lookback leaves
-  the backlog without counting in that month's MTTR, so monthly MTTR may read
-  low. It also gains `recurring_titles`, `recurrence_by_title` and
-  `recurrence_by_rule` (two or more incidents created in the lookback),
-  `open_unacknowledged` (open, every update read, and no person has acknowledged
-  it), `open_new_unowned_history_incomplete` (open, still New with no owner, and
-  not every update read, so never counted in `open_unacknowledged`), and
-  `mttd_hours`, `mtta_hours` and `mttr_hours`. When the update history can't be
-  read, the timeline fields, `monthly`, `acknowledged_incidents` and
-  `open_unacknowledged` are `null` rather than empty. When close times can't be
-  read, `close_time_status` is `unknown` and the close-time counts are `null`,
-  rather than every closed incident counting as missing. A SecurityIncident
-  table the query can't find, in a workspace that lists an incident over an hour
-  old, is hidden by table-level access: the run records an access failure and
-  exits 1, and close times and history are unknown. In a workspace that lists
-  none, or only incidents under an hour old that may not be ingested yet, it
-  reads as empty, with a note. SecurityAlert is treated the same way when an
-  incident over an hour old has alerts. SecurityAlert is cut to the incidents'
-  alert ids before it is aggregated and joined, and a query whose result is too
-  large for one response (over 64 MB or 500,000 rows) is read again in halves
-  of the incidents, down to 64 shares, rather than failing the run.
-  The summary's counts, existing ones included, are `null` when any workspace's
-  incident list failed, the workspace list or a check for Sentinel failed, or a
-  workspace named in `SENTINEL_WORKSPACES` wasn't found, and the counts that
-  can be unknown are `null` when any workspace's value is; with no Sentinel
-  workspace found they are 0.
-  Each workspace also gains `limitations`: in a workspace connected to Defender
-  XDR, analysts usually work incidents in the Defender portal and
-  SecurityIncident shows mostly the XDR sync's updates, so those incidents read
-  as not acknowledged and an open one can count in `open_unacknowledged`; their
-  acknowledgement times would need Defender XDR's incident activity history,
-  which neither SecurityIncident nor Graph's `security/incidents` (its current
-  state and comments, but not when an incident was first activated or assigned)
-  provides.
-  Other existing fields are unchanged; KSI-PIY-RES is not mapped, since it isn't
-  evidenceable.
-
-### Deprecated
-
-- **`uploaders/paramify_evidence/uploader.py`.** It still works and keeps its
-  flags. It now hands the run to the same engine as `paramify upload`, prints a
-  deprecation notice, and writes the notice under `deprecations` in
-  `upload_log.json`. Use `paramify upload`.
 
 ## [0.6.0-beta] - 2026-10-23
 
@@ -5381,7 +6219,8 @@ change before 1.0 (see [`docs/versioning.md`](https://github.com/paramify/parami
 - TUI restyled — border titles, status pills, denser controls, and hatched empty
   states.
 
-[Unreleased]: https://github.com/paramify/paramify-fetchers/compare/v0.6.0-beta...HEAD
+[Unreleased]: https://github.com/paramify/paramify-fetchers/compare/v0.7.0-beta...HEAD
+[0.7.0-beta]: https://github.com/paramify/paramify-fetchers/compare/v0.6.0-beta...v0.7.0-beta
 [0.6.0-beta]: https://github.com/paramify/paramify-fetchers/compare/v0.5.1-beta...v0.6.0-beta
 [0.5.1-beta]: https://github.com/paramify/paramify-fetchers/compare/v0.5.0-beta...v0.5.1-beta
 [0.5.0-beta]: https://github.com/paramify/paramify-fetchers/compare/v0.4.0-beta...v0.5.0-beta

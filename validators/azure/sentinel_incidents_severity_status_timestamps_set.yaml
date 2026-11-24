@@ -1,0 +1,21 @@
+key: sentinel_incidents_severity_status_timestamps_set
+name: Azure Sentinel Incidents Severity Status Timestamps Set
+type: AUTOMATED
+role: configuration
+source: community
+statement: >
+  Every Sentinel incident in scope has a severity, a status, a created time and a last-modified
+  time. Supports KSI-INR-RIR (with sentinel_incidents_all_assigned for the owner and
+  sentinel_closed_incidents_have_close_time for the close time) and the status part of KSI-MLA-RVL.
+  Counts violations, so it relies on sentinel_incident_fields_present.
+
+# sentinel_incidents 0.2.0's task objects (the only objects with completed_time_utc) are skipped.
+regex: '(?<!"completed_time_utc":[^{}]*)"(?:severity|status|created_time_utc|last_modified_time_utc)":\s*null(?![^{}]*"completed_time_utc":)'
+rules_summary: MATCH_COUNT EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-SENTINEL-INCIDENTS

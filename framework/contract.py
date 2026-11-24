@@ -86,6 +86,15 @@ EVIDENCE_FREQUENCIES = (
     "MONTHLY", "QUARTERLY", "BIANNUAL", "ANNUAL",
 )
 DEFAULT_EVIDENCE_FREQUENCY = "THREE_DAY"
+# What a manifest can choose (run.schedule.every, an entry's paramify.frequency), shortest
+# first. NOT_SET is left out: a schedule always has a cadence.
+SCHEDULE_FREQUENCIES = tuple(f for f in EVIDENCE_FREQUENCIES if f != "NOT_SET")
+# Each value as a person says it, for messages and the TUI.
+FREQUENCY_WORDS = {
+    "NOT_SET": "not set", "DAILY": "daily", "THREE_DAY": "every 3 days", "WEEKLY": "weekly",
+    "BIWEEKLY": "every 2 weeks", "MONTHLY": "monthly", "QUARTERLY": "quarterly",
+    "BIANNUAL": "twice a year", "ANNUAL": "yearly",
+}
 
 
 @dataclass
@@ -101,6 +110,29 @@ class EvidenceSet:
     instructions: Optional[str] = None
     description: Optional[str] = None
     frequency: str = DEFAULT_EVIDENCE_FREQUENCY
+
+
+@dataclass
+class Pipeline:
+    """The Paramify pipeline a fetcher's output feeds (the `pipeline:` block).
+
+    `type` is inventory, vulnerability or configuration. `id_scheme` names the
+    kind of identifier the records carry, so a pipeline's runs can be matched to
+    one another. `asset_id_field` names the report column holding the asset's
+    identifier and applies only to a non-inventory pipeline (an inventory's ID is
+    always `unique_asset_identifier`).
+    """
+    type: str
+    id_scheme: str
+    asset_id_field: Optional[str] = None
+
+
+def pipeline_dict(p: Pipeline) -> Dict[str, str]:
+    """A Pipeline as the plain dict the envelope metadata and API descriptor carry."""
+    d = {"type": p.type, "id_scheme": p.id_scheme}
+    if p.asset_id_field:
+        d["asset_id_field"] = p.asset_id_field
+    return d
 
 
 @dataclass
@@ -142,6 +174,9 @@ class Validator:
     #: The registry directory the validator sits in (`validators/<category>/`),
     #: which is the service axis the uploaders tag it by.
     category: Optional[str] = None
+    #: Who made it: "paramify" or "community" (absent in the yaml = paramify).
+    #: Only Paramify-made validators are tracked by default.
+    source: str = "paramify"
 
 
 @dataclass
@@ -162,6 +197,8 @@ class ConfigField:
     #: For type `patterns`: the prefixes a pattern may start with (rg for rg:...), and whether one may have none.
     prefixes: Tuple[str, ...] = ()
     bare: bool = True
+    #: For type `patterns`: whether a pattern may hold the wildcards * and ?; False takes literal patterns only.
+    globs: bool = True
     #: For type `patterns`: whether `manifest exclude`/`unexclude` may change it. An allowlist sets False.
     exclusion: bool = True
 
@@ -186,7 +223,11 @@ class Fetcher:
     evidence_set: Optional["EvidenceSet"] = None
     ksis: List[str] = field(default_factory=list)
     kind: str = "evidence"
+    #: Who made it: "paramify" or "community" (absent in fetcher.yaml = paramify).
+    source: str = "paramify"
     issue_report: Optional["IssueReport"] = None
+    #: The Paramify pipeline this fetcher's output feeds. Required of an inventory.
+    pipeline: Optional["Pipeline"] = None
     #: The fetchers whose evidence from the same run this one reads. Non-empty
     #: makes it a comparator (comparators/<category>/<name>/).
     depends_on: List[str] = field(default_factory=list)
@@ -210,6 +251,11 @@ class Fetcher:
         can read that block without a second guard.
         """
         return self.kind == "issue_report"
+
+    @property
+    def is_pipeline(self) -> bool:
+        """True when this fetcher's output feeds a Paramify pipeline."""
+        return self.pipeline is not None
 
     @property
     def is_inventory(self) -> bool:
@@ -303,6 +349,7 @@ class ManifestEntry:
     secrets: Dict[str, str] = field(default_factory=dict)
     targets: List[TargetInstance] = field(default_factory=list)
     paramify: Dict[str, Any] = field(default_factory=dict)
+    concurrency: int = 1
 
 
 @dataclass
@@ -311,6 +358,8 @@ class Manifest:
     entries: List[ManifestEntry]
     platforms: Dict[str, PlatformConfig] = field(default_factory=dict)
     paramify: Dict[str, Any] = field(default_factory=dict)
+    # run.schedule: {"every": <frequency>, "at": "HH:MM"}; empty when the manifest sets none.
+    schedule: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass

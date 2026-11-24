@@ -5,9 +5,10 @@ read-only, memoizing view the planner uses, so a plan never asks twice.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from urllib.parse import urlencode
 
 from framework.paramify.client import ApiError, Client, ErrorKind
 from framework.paramify_responses import already_present
@@ -16,6 +17,26 @@ _PAGE_SIZE = 100
 # File names per artifacts read: the names go in the URL, so a big entry is
 # read in several requests rather than one URL the server may refuse.
 NAMES_PER_READ = 50
+# Encoded query bytes per artifacts read. The production WAF refuses a query
+# string over 2048 bytes with a bare 403, so long names split the read sooner.
+QUERY_BYTES_PER_READ = 1500
+
+
+def create_name_chunks(names: List[str], params: Dict[str, Any]) -> List[List[str]]:
+    base = len(urlencode(params, doseq=True))
+    chunks: List[List[str]] = []
+    chunk: List[str] = []
+    size = base
+    for name in names:
+        cost = len(urlencode({"originalFileName": name})) + 1  # and its "&"
+        if chunk and (len(chunk) == NAMES_PER_READ or size + cost > QUERY_BYTES_PER_READ):
+            chunks.append(chunk)
+            chunk, size = [], base
+        chunk.append(name)
+        size += cost
+    if chunk:
+        chunks.append(chunk)
+    return chunks or [[]]
 
 
 @dataclass(frozen=True)
@@ -41,6 +62,9 @@ class EvidenceSet:
     name: str
     approval: str
     channels: Tuple[Channel, ...]
+    # Names (else ids) of the validators paired with the set; empty when the API sends none.
+    validators: Tuple[str, ...] = ()
+    frequency: str = ""  # empty when the API sends none
 
 
 @dataclass(frozen=True)
@@ -62,6 +86,21 @@ class Batch:
     artifact_request_id: Optional[str]
     artifact_count: int
     when_to_approve: str
+
+
+@dataclass(frozen=True)
+class Script:
+    id: str
+    description: str
+
+
+@dataclass(frozen=True)
+class Validator:
+    id: str
+    name: str
+    #: The validator as the API returned it (statement, regex, rules, ...), so a
+    #: sync can tell whether the registry copy differs. Empty when not read.
+    content: Dict[str, Any] = field(default_factory=dict, compare=False)
 
 
 @dataclass(frozen=True)
@@ -90,6 +129,8 @@ def _evidence(d: Dict[str, Any]) -> EvidenceSet:
         name=d.get("name") or "",
         approval=d.get("whenToApproveArtifactRequest") or "",
         channels=tuple(_channel(c) for c in d.get("channels") or ()),
+        validators=tuple(v.get("name") or v.get("id") or "" for v in d.get("validators") or ()),
+        frequency=d.get("frequency") or "",
     )
 
 
@@ -196,15 +237,15 @@ class Resources:
 
         `original_file_names` and `created_on` are repeated parameters
         (`originalFileName`, `createdAt` as YYYY-MM-DD; any listed value
-        matches). The names go out `NAMES_PER_READ` to a request.
+        matches). The names go out at most `NAMES_PER_READ` to a request,
+        and fewer when the encoded query would pass `QUERY_BYTES_PER_READ`.
         """
         params: Dict[str, Any] = {}
         if batch_id:
             params["batchId"] = batch_id
         if created_on:
             params["createdAt"] = [d.isoformat() for d in created_on]
-        names = list(original_file_names or [])
-        chunks = [names[i:i + NAMES_PER_READ] for i in range(0, len(names), NAMES_PER_READ)] or [[]]
+        chunks = create_name_chunks(list(original_file_names or []), params)
         out: List[Artifact] = []
         seen: set = set()
         for chunk in chunks:
@@ -222,7 +263,7 @@ class Resources:
         try:
             return _evidence(self._client.post_json("/evidence", body))
         except ApiError as exc:
-            if exc.status is None or not already_present(exc.status, exc.message):
+            if exc.status is None or not already_present(exc.status, exc.body):
                 raise
         existing = self.evidence_by_reference([ref]).get(ref)
         if existing is None:
@@ -231,6 +272,10 @@ class Resources:
                 status=None, kind=ErrorKind.CONFLICT, method="POST", path="/evidence",
             )
         return existing
+
+    def update_evidence(self, evidence_id: str, body: Dict[str, Any]) -> None:
+        """PATCH /evidence/{id}: only the fields in `body` change."""
+        self._client.patch_json(f"/evidence/{evidence_id}", body)
 
     def create_batch(
         self, *, artifact_request_id: Optional[str] = None, evidence_id: Optional[str] = None,
@@ -260,6 +305,58 @@ class Resources:
 
     def add_tags(self, entity: str, entity_id: str, tags: List[str]) -> None:
         self._client.post_json(f"/custom-tags/{entity}/{entity_id}", {"names": list(tags)})
+
+    def associate(self, evidence_id: str, subject_type: str, subject_id: str) -> None:
+        """CONNECT a subject (SCRIPT, VALIDATOR, ...) to an evidence set.
+
+        The API has no read-back for associations, so asserting one means
+        CONNECTing again; a refusal that says it is already connected is the
+        state we wanted.
+        """
+        body = {"associationType": "CONNECT", "subjectType": subject_type, "subjectId": subject_id}
+        try:
+            self._client.post_json(f"/evidence/{evidence_id}/associate", body)
+        except ApiError as exc:
+            if exc.status is None or not already_present(exc.status, exc.body):
+                raise
+
+    def scripts(self) -> List[Script]:
+        """Every script in the workspace; the API offers no filter."""
+        body = self._client.get("/scripts") or {}
+        return [Script(id=s.get("id") or "", description=s.get("description") or "")
+                for s in body.get("scripts") or []]
+
+    def create_script(self, name: str, description: str, code: str) -> str:
+        made = self._client.post_json("/scripts", {"name": name, "description": description, "code": code})
+        return _created_id(made, "POST", "/scripts", name)
+
+    def update_script(self, script_id: str, name: str, description: str, code: str) -> None:
+        self._client.patch_json(f"/scripts/{script_id}", {"name": name, "description": description, "code": code})
+
+    def validators(self) -> List[Validator]:
+        """Every validator in the workspace; the API offers no name filter."""
+        body = self._client.get("/validators")
+        rows = body.get("validators") if isinstance(body, dict) else body
+        return [Validator(id=v.get("id") or "", name=v.get("name") or "", content=dict(v)) for v in rows or []]
+
+    def create_validator(self, payload: Dict[str, Any]) -> str:
+        made = self._client.post_json("/validators", payload)
+        return _created_id(made, "POST", "/validators", payload.get("name"))
+
+    def update_validator(self, validator_id: str, payload: Dict[str, Any]) -> None:
+        self._client.patch_json(f"/validators/{validator_id}", payload)
+
+
+def _created_id(made: Any, method: str, path: str, name: Any) -> str:
+    """The id of what a create returned. Without one the caller cannot connect or
+    record it, so the create fails that action instead of passing silently."""
+    made_id = made.get("id") if isinstance(made, dict) else None
+    if not made_id:
+        raise ApiError(
+            f"{method} {path} for {name!r} returned no id",
+            status=None, kind=ErrorKind.REJECTED, method=method, path=path,
+        )
+    return str(made_id)
 
 
 def _freeze(value: Any) -> Any:
