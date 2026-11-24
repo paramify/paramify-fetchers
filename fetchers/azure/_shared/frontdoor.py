@@ -439,11 +439,16 @@ def route_serving(endpoint: dict, route: dict) -> bool:
 
 # --- scope exclusions by host name, and by route name with a route: prefix ---
 
-def profile_scope(profile: dict, endpoints: List[dict], domains: List[dict], exclusions) -> dict:
+# The per-profile lists a route's scope is worked out from: its name, and the host names of what it serves.
+ROUTE_SCOPE_LISTS = frozenset({"endpoints", "routes", "custom_domains"})
+
+
+def profile_scope(profile: dict, endpoints: List[dict], domains: List[dict], exclusions, unread=frozenset()) -> dict:
     """The custom domains and endpoints whose host name matches a bare pattern (key -> pattern), the keys of the routes out
     of scope, and how many of each stay in scope.
 
-    A route is out of scope when its name matches a route: pattern, or when every host it serves is out.
+    A route is out of scope when its name matches a route: pattern, or when every host it serves is out. `unread` names
+    the profile's lists that weren't read (see read_lists); a count built from one is None.
     """
     domains_by_key = {arm_key(d["id"]): d for d in domains}
     host_patterns, excluded = {}, []
@@ -474,17 +479,25 @@ def profile_scope(profile: dict, endpoints: List[dict], domains: List[dict], exc
                 continue
             routes.add(arm_key(route["id"]))
     in_scope = {
-        "custom_domains": sum(1 for d in domains if arm_key(d["id"]) not in host_patterns),
-        "endpoints": sum(1 for e in endpoints if arm_key(e["id"]) not in host_patterns),
-        "routes": sum(1 for e in endpoints for r in e["routes"] if arm_key(r["id"]) not in routes),
+        "custom_domains": None if "custom_domains" in unread
+        else sum(1 for d in domains if arm_key(d["id"]) not in host_patterns),
+        "endpoints": None if "endpoints" in unread else sum(1 for e in endpoints if arm_key(e["id"]) not in host_patterns),
+        "routes": None if unread & ROUTE_SCOPE_LISTS
+        else sum(1 for e in endpoints for r in e["routes"] if arm_key(r["id"]) not in routes),
     }
     return {"hosts": host_patterns, "routes": routes, "excluded": excluded, "in_scope": in_scope}
 
 
+def total(counts) -> Optional[int]:
+    """The sum of per-profile counts; None when any is None, because a list in that profile wasn't read."""
+    counts = list(counts)
+    return None if None in counts else sum(counts)
+
+
 def in_scope_totals(scopes: List[dict]) -> dict:
     """Summed in-scope counts across profiles, with in_scope hosts (custom domains plus endpoints) first."""
-    totals = {name: sum(s[name] for s in scopes) for name in ("custom_domains", "endpoints", "routes")}
-    return {"hosts": totals["custom_domains"] + totals["endpoints"], **totals}
+    totals = {name: total(s[name] for s in scopes) for name in ("custom_domains", "endpoints", "routes")}
+    return {"hosts": total([totals["custom_domains"], totals["endpoints"]]), **totals}
 
 
 # --- rule sets: HTTP→HTTPS redirects and origin overrides ---
@@ -626,47 +639,69 @@ def front_door_profiles(cdn, collector: Collector) -> Tuple[Optional[List[dict]]
     return sorted(kept, key=lambda p: arm_key(p["id"])), skipped
 
 
-def endpoints_with_routes(cdn, collector: Collector, profile: dict) -> List[dict]:
+def endpoints_with_routes(cdn, collector: Collector, profile: dict) -> Optional[List[dict]]:
+    """The profile's endpoints with their routes; None when the endpoint list wasn't read, and an endpoint's routes None
+    when its route list wasn't."""
     rg, name = resource_group_from_id(profile["id"]), profile["name"]
     endpoints = collector.guard(
         f"cdn.afd_endpoints.list_by_profile({name})",
         lambda: [project_endpoint(e) for e in cdn.afd_endpoints.list_by_profile(rg, name)],
-        default=[],
     )
-    for endpoint in endpoints:
+    for endpoint in endpoints or []:
         endpoint["routes"] = collector.guard(
             f"cdn.routes.list_by_endpoint({name}/{endpoint['name']})",
             lambda: [project_route(r) for r in cdn.routes.list_by_endpoint(rg, name, endpoint["name"])],
-            default=[],
         )
     return endpoints
 
 
-def rule_sets_with_rules(cdn, collector: Collector, profile: dict) -> Dict[str, dict]:
-    """Every rule set in the profile with its rules in order, keyed by lower-cased id."""
+def rule_sets_with_rules(cdn, collector: Collector, profile: dict) -> Optional[Dict[str, dict]]:
+    """Every rule set in the profile with its rules in order, keyed by lower-cased id; None when the rule set list wasn't
+    read, and a rule set's rules None when they weren't."""
     rg, name = resource_group_from_id(profile["id"]), profile["name"]
     rule_sets = collector.guard(
         f"cdn.rule_sets.list_by_profile({name})",
         lambda: [{"id": model_attr(rs, "id"), "name": model_attr(rs, "name")} for rs in cdn.rule_sets.list_by_profile(rg, name)],
-        default=[],
     )
+    if rule_sets is None:
+        return None
     for rule_set in rule_sets:
         rules = collector.guard(
             f"cdn.rules.list_by_rule_set({name}/{rule_set['name']})",
             lambda: [project_rule(r) for r in cdn.rules.list_by_rule_set(rg, name, rule_set["name"])],
-            default=[],
         )
-        rule_set["rules"] = sorted(rules, key=lambda r: (r["order"] is None, r["order"] or 0))
+        rule_set["rules"] = None if rules is None else sorted(rules, key=lambda r: (r["order"] is None, r["order"] or 0))
     return {arm_key(rs["id"]): rs for rs in rule_sets}
 
 
-def custom_domains(cdn, collector: Collector, profile: dict) -> List[dict]:
+def custom_domains(cdn, collector: Collector, profile: dict) -> Optional[List[dict]]:
+    """None when the custom domain list wasn't read."""
     rg, name = resource_group_from_id(profile["id"]), profile["name"]
     return collector.guard(
         f"cdn.afd_custom_domains.list_by_profile({name})",
         lambda: [project_custom_domain(d) for d in cdn.afd_custom_domains.list_by_profile(rg, name)],
-        default=[],
     )
+
+
+def read_lists(collected: dict) -> dict:
+    """A profile's reads with each unread list empty, and the names of the unread ones in "unread".
+
+    An unread endpoint list leaves its routes unread too; an endpoint's unread route list counts as "routes", and a rule
+    set's unread rules as "rule_sets".
+    """
+    unread = {name for name, rows in collected.items() if rows is None}
+    endpoints = collected.get("endpoints") or []
+    if "endpoints" in unread or any(e["routes"] is None for e in endpoints):
+        unread.add("routes")
+    rule_sets = collected.get("rule_sets") or {}
+    if any(rs["rules"] is None for rs in rule_sets.values()):
+        unread.add("rule_sets")
+    result = {name: ({} if name == "rule_sets" else []) if rows is None else rows for name, rows in collected.items()}
+    if "endpoints" in result:
+        result["endpoints"] = [{**e, "routes": e["routes"] or []} for e in endpoints]
+    if "rule_sets" in result:
+        result["rule_sets"] = {k: {**rs, "rules": rs["rules"] or []} for k, rs in rule_sets.items()}
+    return {**result, "unread": frozenset(unread)}
 
 
 def collect_waf_policies(subscription_id: str, cred, collector: Collector) -> Tuple[Optional[List[dict]], dict]:

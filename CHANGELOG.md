@@ -40,6 +40,17 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- **Front Door in-scope counts read null when a list inside one profile wasn't read.** Before, a refused endpoint,
+  route, custom domain or secret list in one profile read as empty, so the in-scope counts came out short and
+  `scope_exclusion_patterns_unmatched` could name a pattern never compared with that profile's routes. Now each
+  in-scope count, and its `excluded_*` count, is null when any in-scope profile has an unread list it's built from,
+  and `scope_exclusion_patterns_unmatched` is null with it. `in_scope_custom_domains` needs the custom domain lists,
+  `in_scope_endpoints` the endpoint lists, `in_scope_hosts` both, and `in_scope_routes` the endpoint, route and
+  custom domain lists. `azure_front_door_tls` 0.6.3 (`in_scope_secrets` also needs the secret lists),
+  `azure_front_door_waf_coverage` 0.6.3 (`in_scope_host_routes` needs what `in_scope_routes` does) and
+  `azure_front_door_origins` 0.8.3 (`in_scope_origin_groups` also needs the rule set and origin group lists).
+  `azure_front_door_waf_policies` doesn't read these lists and is unchanged.
+
 - **In-scope counts read null, not 0, when their list couldn't be read.** A failed sign-in or list call left
   `in_scope_*` at 0, as if the subscription had none. Each now reads null when the list it counts wasn't read, and 0
   only when it was read and is empty; the matching `excluded_*` count is null with it.

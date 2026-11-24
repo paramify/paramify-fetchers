@@ -37,10 +37,12 @@ from frontdoor import (  # noqa: E402
     front_door_profiles,
     in_scope_totals,
     profile_scope,
+    read_lists,
     route_hosts,
     route_https,
     route_serving,
     rule_sets_with_rules,
+    total,
 )
 from resource_exclusions import ResourceExclusions  # noqa: E402
 from scope_exclusions import ScopeExclusions, excluded_item  # noqa: E402
@@ -194,7 +196,8 @@ def secrets_in_scope(profile: dict, secrets: list[dict], domains: list[dict], ex
 
 def tls_for_profile(collected: dict, now: datetime, exclusions: ScopeExclusions | None = None) -> dict:
     profile = collected["profile"]
-    scope = profile_scope(profile, collected["endpoints"], collected["custom_domains"], exclusions or ScopeExclusions())
+    unread = collected.get("unread", frozenset())
+    scope = profile_scope(profile, collected["endpoints"], collected["custom_domains"], exclusions or ScopeExclusions(), unread)
     domains_by_key = {arm_key(d["id"]): d for d in collected["custom_domains"]}
     secrets_by_key = {arm_key(s["id"]): s for s in collected["secrets"]}
     routes, routed, served = [], set(), set()
@@ -209,8 +212,10 @@ def tls_for_profile(collected: dict, now: datetime, exclusions: ScopeExclusions 
     domains = [domain_record(profile, d, secrets_by_key, routed, served, now)
                for d in collected["custom_domains"] if arm_key(d["id"]) not in scope["hosts"]]
     secrets, excluded_secrets = secrets_in_scope(profile, collected["secrets"], collected["custom_domains"], scope["hosts"])
+    # A secret leaves scope with the custom domains that use it, so its count needs the domain list too.
+    in_secrets = None if unread & {"secrets", "custom_domains"} else len(secrets)
     return {"routes": routes, "custom_domains": domains, "secrets": secrets, "excluded": scope["excluded"] + excluded_secrets,
-            "in_scope": scope["in_scope"]}
+            "in_scope": {**scope["in_scope"], "secrets": in_secrets}}
 
 
 def summarize(profiles: list[dict], skipped_by_sku: dict, routes: list[dict], domains: list[dict], secrets: list[dict]) -> dict:
@@ -275,7 +280,7 @@ def collect_profiles(subscription_id, cred, collector: Collector, exclusions: Re
     collected = []
     for profile in profiles:
         rg, name = resource_group_from_id(profile["id"]), profile["name"]
-        collected.append({
+        collected.append(read_lists({
             "profile": profile,
             "endpoints": endpoints_with_routes(cdn, collector, profile),
             "custom_domains": custom_domains(cdn, collector, profile),
@@ -283,9 +288,8 @@ def collect_profiles(subscription_id, cred, collector: Collector, exclusions: Re
             "secrets": collector.guard(
                 f"cdn.secrets.list_by_profile({name})",
                 lambda: [project_secret(s) for s in cdn.secrets.list_by_profile(rg, name)],
-                default=[],
             ),
-        })
+        }))
     return collected, skipped
 
 
@@ -366,7 +370,8 @@ def main() -> int:
             **summarize(profiles, skipped_by_sku, routes, domains, secrets),
             "provider_registration_status": registration,
             **exclusions.summary(excluded, EXCLUDED_KINDS, {
-                name: n if listed else None for name, n in {**in_scope_totals(scopes), "secrets": len(secrets)}.items()}),
+                name: n if listed else None
+                for name, n in {**in_scope_totals(scopes), "secrets": total(s["secrets"] for s in scopes)}.items()}),
             **resources.summary(excluded, ("profile",), {"profiles": len(profiles) if listed else None}),
         },
     )

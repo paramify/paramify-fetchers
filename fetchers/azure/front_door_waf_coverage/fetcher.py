@@ -29,6 +29,7 @@ from azure_common import (  # noqa: E402
     write_evidence,
 )
 from frontdoor import (  # noqa: E402
+    ROUTE_SCOPE_LISTS,
     SECURITY_POLICY_API_VERSION,
     arm_key,
     cdn_api_version,
@@ -41,8 +42,10 @@ from frontdoor import (  # noqa: E402
     in_scope_totals,
     profile_scope,
     project_reference,
+    read_lists,
     route_hosts,
     route_serving,
+    total,
     waf_policy_record,
     wire,
 )
@@ -248,7 +251,8 @@ def host_route_record(profile, endpoint, route, host, security_policies, waf_by_
 
 def coverage_for_profile(collected: dict, waf_by_key: dict, exclusions: ScopeExclusions | None = None) -> dict:
     profile, sps = collected["profile"], collected["security_policies"]
-    scope = profile_scope(profile, collected["endpoints"], collected["custom_domains"], exclusions or ScopeExclusions())
+    unread = collected.get("unread", frozenset())
+    scope = profile_scope(profile, collected["endpoints"], collected["custom_domains"], exclusions or ScopeExclusions(), unread)
     excluded_hosts, excluded_routes = scope["hosts"], scope["routes"]
     domains_by_key = {arm_key(d["id"]): d for d in collected["custom_domains"]}
     host_routes, endpoints_without_routes, routed, excluded = [], [], set(), list(scope["excluded"])
@@ -285,7 +289,7 @@ def coverage_for_profile(collected: dict, waf_by_key: dict, exclusions: ScopeExc
                               or any(arm_key(r["id"]) not in excluded_routes for r in e["routes"])),
         "route_count": sum(1 for e in collected["endpoints"] for r in e["routes"] if arm_key(r["id"]) not in excluded_routes),
         "custom_domain_count": len(domains),
-        "in_scope": scope["in_scope"],
+        "in_scope": {**scope["in_scope"], "host_routes": None if unread & ROUTE_SCOPE_LISTS else len(host_routes)},
     }
 
 
@@ -381,7 +385,7 @@ def collect_profiles(subscription_id, cred, collector: Collector, exclusions: Re
         rg, name = resource_group_from_id(profile["id"]), profile["name"]
         # The SDK substitutes resource_uri after a "/", so a leading slash would double it.
         uri = (profile["id"] or "").lstrip("/")
-        collected.append({
+        collected.append(read_lists({
             "profile": profile,
             "endpoints": endpoints_with_routes(cdn, collector, profile),
             "custom_domains": custom_domains(cdn, collector, profile),
@@ -400,7 +404,7 @@ def collect_profiles(subscription_id, cred, collector: Collector, exclusions: Re
                 lambda: [project_log_setting(s) for s in monitor.diagnostic_settings.list(resource_uri=uri)],
                 default=[],
             ),
-        })
+        }))
     return collected, skipped
 
 
@@ -489,7 +493,7 @@ def main() -> int:
             "provider_registration_status": registration,
             **exclusions.summary(excluded, EXCLUDED_KINDS, {
                 name: n if listed else None
-                for name, n in {**in_scope_totals(scopes), "host_routes": len(host_routes)}.items()}),
+                for name, n in {**in_scope_totals(scopes), "host_routes": total(s["host_routes"] for s in scopes)}.items()}),
             **resources.summary(excluded, ("profile",), {"profiles": len(profiles) if listed else None}),
         },
     )

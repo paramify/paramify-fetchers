@@ -32,6 +32,7 @@ from azure_common import (  # noqa: E402
 )
 from frontdoor import (  # noqa: E402
     DEFAULT_FORWARDING_PROTOCOL,
+    ROUTE_SCOPE_LISTS,
     arm_key,
     attached_rules,
     cdn_api_version,
@@ -41,9 +42,11 @@ from frontdoor import (  # noqa: E402
     front_door_profiles,
     in_scope_totals,
     profile_scope,
+    read_lists,
     route_https,
     route_serving,
     rule_sets_with_rules,
+    total,
     wire,
 )
 from resource_exclusions import ResourceExclusions  # noqa: E402
@@ -314,7 +317,8 @@ def profile_groups(collected: dict, regions_by_id: dict, regions_by_host: dict, 
     A group is out of scope when routes reach it and every one of them is; its record then keeps all its routes.
     """
     profile = collected["profile"]
-    scope = profile_scope(profile, collected["endpoints"], collected["custom_domains"], exclusions)
+    unread = collected.get("unread", frozenset())
+    scope = profile_scope(profile, collected["endpoints"], collected["custom_domains"], exclusions, unread)
     paths = origin_paths(profile, collected["endpoints"], collected["rule_sets"])
     in_scope = [p for p in paths if arm_key(p["route_id"]) not in scope["routes"]]
     records, excluded_groups, excluded = [], set(), list(scope["excluded"])
@@ -329,7 +333,10 @@ def profile_groups(collected: dict, regions_by_id: dict, regions_by_host: dict, 
             excluded.append(excluded_item("origin_group", g["name"], None, reason="only_excluded_routes", profile=profile["name"],
                                           id=g["id"], routes=sorted({p["route"] for p in reaching}),
                                           origins=[o["name"] for o in g["origins_projected"]]))
-    return {"groups": records, "excluded_groups": excluded_groups, "excluded": excluded, "in_scope": scope["in_scope"]}
+    # Which groups the routes reach also depends on the rule sets' origin overrides.
+    in_groups = None if unread & (ROUTE_SCOPE_LISTS | {"origin_groups", "rule_sets"}) else len(records) - len(excluded_groups)
+    return {"groups": records, "excluded_groups": excluded_groups, "excluded": excluded,
+            "in_scope": {**scope["in_scope"], "origin_groups": in_groups}}
 
 
 def summarize(profiles: list[dict], skipped_by_sku: dict, groups: list[dict]) -> dict:
@@ -1190,22 +1197,21 @@ def collect_profiles(subscription_id, cred, collector: Collector) -> tuple[list[
         groups = collector.guard(
             f"cdn.afd_origin_groups.list_by_profile({name})",
             lambda: [project_origin_group(g) for g in cdn_origins.afd_origin_groups.list_by_profile(rg, name)],
-            default=[],
         )
-        for group in groups:
+        for group in groups or []:
             group["origins_projected"] = collector.guard(
                 f"cdn.afd_origins.list_by_origin_group({name}/{group['name']})",
                 lambda: [project_origin(o) for o in cdn_origins.afd_origins.list_by_origin_group(rg, name, group["name"])],
                 default=[],
             )
-        collected.append({
+        collected.append(read_lists({
             "profile": profile,
             "endpoints": endpoints_with_routes(cdn, collector, profile),
             # Custom-domain host names only matter to scope exclusions and the in-scope host count.
             "custom_domains": custom_domains(cdn, collector, profile),
             "rule_sets": rule_sets_with_rules(cdn, collector, profile),
-            "origin_groups": sorted(groups, key=lambda g: arm_key(g["id"])),
-        })
+            "origin_groups": None if groups is None else sorted(groups, key=lambda g: arm_key(g["id"])),
+        }))
     return collected, skipped
 
 
@@ -1337,7 +1343,7 @@ def main() -> int:
                  **exclusions.summary(excluded, EXCLUDED_KINDS, {
                      **{name: n if listed else None for name, n in {
                          **in_scope_totals([sp["in_scope"] for sp in scoped_profiles]),
-                         "origin_groups": len(groups)}.items()},
+                         "origin_groups": total(sp["in_scope"]["origin_groups"] for sp in scoped_profiles)}.items()},
                      "apps": len(apps) if apps_listed else None}),
                  # in_scope_apps already counts the production apps left after both kinds of exclusion.
                  **resources.summary(excluded, RESOURCE_KINDS, {"profiles": len(profiles) if listed else None}),

@@ -729,3 +729,148 @@ def test_a_list_that_wasnt_read_leaves_its_exclusion_counts_null(run, unread, re
     assert {k: (summary.get(f"in_scope_{k}"), summary[f"excluded_{k}"]) for k in unread} == dict.fromkeys(
         unread, (None, None))
     assert all(isinstance(summary[f"in_scope_{k}"], int) and isinstance(summary[f"excluded_{k}"], int) for k in read)
+
+
+# --- a list read inside one profile that wasn't read leaves the in-scope counts built from it null ---
+
+def _serve_profile_reads(monkeypatch, module):
+    """_topologies() served through the real shared per-profile reads (endpoints, routes, custom domains, rule sets) and,
+    for front_door_origins, its real collect_profiles."""
+    _fake_cdn(monkeypatch, module, [])
+    by_rg_name = {(FD_GROUPS[c["profile"]["name"]], c["profile"]["name"]): c for c in _topologies()}
+
+    def endpoints(rg, name):
+        return [{k: v for k, v in e.items() if k != "routes"} for e in copy.deepcopy(by_rg_name[(rg, name)]["endpoints"])]
+
+    def routes(rg, name, endpoint):
+        return next(copy.deepcopy(e["routes"]) for e in by_rg_name[(rg, name)]["endpoints"] if e["name"] == endpoint)
+
+    def groups(rg, name):
+        return [{k: v for k, v in g.items() if k != "origins_projected"} for g in copy.deepcopy(by_rg_name[(rg, name)]["origin_groups"])]
+
+    def group_origins(rg, name, group):
+        return next(copy.deepcopy(g["origins_projected"]) for g in by_rg_name[(rg, name)]["origin_groups"] if g["name"] == group)
+
+    cdn = module.cdn_client()
+    for attr, value in {
+        "afd_endpoints": NS(list_by_profile=endpoints),
+        "routes": NS(list_by_endpoint=routes),
+        "afd_custom_domains": NS(list_by_profile=lambda rg, name: copy.deepcopy(by_rg_name[(rg, name)]["custom_domains"])),
+        "rule_sets": NS(list_by_profile=lambda rg, name: []),
+        "afd_origin_groups": NS(list_by_profile=groups),
+        "afd_origins": NS(list_by_origin_group=group_origins),
+        "profiles": NS(get=lambda rg, name: NS(properties=NS(front_door_id=by_rg_name[(rg, name)]["profile"]["front_door_id"]))),
+    }.items():
+        setattr(cdn, attr, value)
+    for name in ("project_endpoint", "project_route", "project_custom_domain"):
+        monkeypatch.setattr(fd, name, lambda x: x)
+    for name in ("endpoints_with_routes", "custom_domains", "rule_sets_with_rules"):
+        if hasattr(module, name):
+            monkeypatch.setattr(module, name, getattr(fd, name))
+    if module is origins:
+        for name in ("project_origin_group", "project_origin"):
+            monkeypatch.setattr(origins, name, lambda x: x)
+
+
+def _run_profile_reads(module, monkeypatch, tmp_path, refuse=None):
+    _serve_profile_reads(monkeypatch, module)
+    if refuse:
+        _refuse(monkeypatch, module, refuse)
+    scope = "route:nothing-*"
+    if module is tls:
+        return _run(tls, monkeypatch, tmp_path, "rg:rg-out", "azure_front_door_tls", scope)
+    if module is coverage:
+        return _run(coverage, monkeypatch, tmp_path, "rg:rg-out", "azure_front_door_waf_coverage", scope)
+    return run_origins(monkeypatch, tmp_path, "rg:rg-out", scope=scope, collect_profiles=REAL_ORIGIN_PROFILES)
+
+
+# The in-scope count each fetcher adds beyond hosts, custom domains, endpoints and routes.
+OWN_COUNT = {tls: "secrets", coverage: "host_routes", origins: "origin_groups"}
+ROUTES_REFUSED = "cdn.routes.list_by_endpoint(fd-in/e)"
+DOMAINS_REFUSED = "cdn.afd_custom_domains.list_by_profile(fd-in)"
+
+
+@pytest.mark.parametrize("module", [tls, coverage, origins], ids=["tls", "coverage", "origins"])
+@pytest.mark.parametrize("refuse, unread", [
+    (ROUTES_REFUSED, {"routes"}),
+    (DOMAINS_REFUSED, {"custom_domains", "hosts", "routes"}),
+    (None, set()),
+], ids=["routes", "custom_domains", "none"])
+def test_one_profiles_unread_list_nulls_the_in_scope_counts_built_from_it(module, refuse, unread, monkeypatch, tmp_path):
+    code, evidence = _run_profile_reads(module, monkeypatch, tmp_path, refuse)
+    summary = evidence["summary"]
+    own = OWN_COUNT[module]
+    # A secret's scope follows the domains that use it; host-routes and origin groups follow the routes.
+    if refuse and (own != "secrets" or refuse == DOMAINS_REFUSED):
+        unread = unread | {own}
+    kinds = {"hosts", "custom_domains", "endpoints", "routes", own}
+    counts = {k: summary[f"in_scope_{k}"] for k in kinds}
+    assert code == (1 if refuse else 0)
+    assert {k for k, n in counts.items() if n is None} == unread
+    assert all(summary[f"excluded_{k}"] is None for k in unread if f"excluded_{k}" in summary)
+    # fd-in and fd-named stay in scope, each with one custom domain, endpoint, route and origin group, and no secret.
+    assert {k: n for k, n in counts.items() if n is not None} == {
+        k: {"hosts": 4, "secrets": 0}.get(k, 2) for k in kinds - unread}
+    # A pattern can't be called unmatched against routes or host names that weren't read.
+    assert summary["scope_exclusion_patterns_unmatched"] == (None if refuse else ["route:nothing-*"])
+
+
+def test_a_refused_secret_list_nulls_only_the_secret_counts(monkeypatch, tmp_path):
+    code, evidence = _run_profile_reads(tls, monkeypatch, tmp_path, "cdn.secrets.list_by_profile(fd-named)")
+    summary = evidence["summary"]
+    assert code == 1
+    assert (summary["in_scope_secrets"], summary["excluded_secrets"]) == (None, None)
+    assert (summary["in_scope_routes"], summary["in_scope_hosts"]) == (2, 4)
+
+
+def test_origin_groups_in_scope_are_null_when_one_profiles_rule_sets_or_groups_are_unread(monkeypatch, tmp_path):
+    for refuse in ("cdn.rule_sets.list_by_profile(fd-in)", "cdn.afd_origin_groups.list_by_profile(fd-named)"):
+        code, evidence = _run_profile_reads(origins, monkeypatch, tmp_path, refuse)
+        summary = evidence["summary"]
+        assert code == 1 and summary["in_scope_origin_groups"] is None
+        assert (summary["in_scope_routes"], summary["in_scope_hosts"]) == (2, 4)
+
+
+def test_shared_reads_return_none_for_an_unread_list():
+    collector = Collector(logging.getLogger("frontdoor_reads_under_test"))
+    profile = {"id": f"{IN_RG}/providers/Microsoft.Cdn/profiles/fd", "name": "fd"}
+
+    def refuse(*args):
+        raise REFUSED
+
+    rule_set = NS(id=f"{profile['id']}/ruleSets/rs", name="rs")
+    cdn = NS(afd_endpoints=NS(list_by_profile=refuse), afd_custom_domains=NS(list_by_profile=refuse),
+             rule_sets=NS(list_by_profile=lambda rg, name: [rule_set]), rules=NS(list_by_rule_set=refuse))
+    assert fd.endpoints_with_routes(cdn, collector, profile) is None
+    assert fd.custom_domains(cdn, collector, profile) is None
+    [rs] = fd.rule_sets_with_rules(cdn, collector, profile).values()
+    assert rs["rules"] is None
+    cdn.rule_sets = NS(list_by_profile=refuse)
+    assert fd.rule_sets_with_rules(cdn, collector, profile) is None
+    assert len(collector.failures) == 4
+
+
+def test_read_lists_empties_unread_lists_and_names_them():
+    read = fd.read_lists({"profile": {}, "endpoints": [{"id": "e1", "routes": None}, {"id": "e2", "routes": [1]}],
+                          "custom_domains": None, "rule_sets": {"rs": {"rules": None}}, "secrets": []})
+    assert read["unread"] == {"routes", "custom_domains", "rule_sets"}
+    assert [e["routes"] for e in read["endpoints"]] == [[], [1]]
+    assert (read["custom_domains"], read["rule_sets"], read["secrets"]) == ([], {"rs": {"rules": []}}, [])
+    unread = fd.read_lists({"profile": {}, "endpoints": None, "rule_sets": None})
+    assert unread["unread"] == {"endpoints", "routes", "rule_sets"}
+    assert (unread["endpoints"], unread["rule_sets"]) == ([], {})
+
+
+def test_in_scope_totals_are_null_when_any_profile_count_is():
+    read = {"custom_domains": 1, "endpoints": 1, "routes": 1}
+    assert fd.in_scope_totals([read, read]) == {"hosts": 4, "custom_domains": 2, "endpoints": 2, "routes": 2}
+    assert fd.in_scope_totals([read, {**read, "routes": None}]) == {"hosts": 4, "custom_domains": 2, "endpoints": 2,
+                                                                    "routes": None}
+    assert fd.in_scope_totals([read, {**read, "endpoints": None}])["hosts"] is None
+    assert fd.in_scope_totals([]) == {"hosts": 0, "custom_domains": 0, "endpoints": 0, "routes": 0}
+
+
+def test_scope_exclusion_counts_use_the_kinds_plural():
+    summary = tls.ScopeExclusions().summary([{"kind": "policy"}], ("policy",), {"policies": 1})
+    assert (summary["excluded_policies"], summary["in_scope_policies"]) == (1, 1)
+    assert tls.ScopeExclusions().summary([], ("policy",), {"policies": None})["excluded_policies"] is None
