@@ -295,7 +295,7 @@ def test_which_breaking_rows_touch_this_clone():
 def test_span_counts_commits_and_days(main_repo):
     up.fetch(main_repo)
     assert up.span(main_repo, "HEAD", "origin/main")["commits"] == 1
-    assert up.span(main_repo, "origin/main", "HEAD") == {"commits": 0, "days": 0}
+    assert up.span(main_repo, "origin/main", "HEAD") == {"commits": 0, "days": 0, "releases": 0}
 
 
 def test_curated_rows_are_those_the_target_adds(repo):
@@ -881,11 +881,113 @@ def test_a_breaking_change_and_its_fix_wrap_instead_of_being_cut():
     assert all(len(ln) <= 60 and ln == ln.rstrip() for ln in lines)
 
 
+def test_breaking_names_the_release_each_row_came_from():
+    from framework import update_view as view
+    rows = [{"touches": True, "why": "everyone", "manifests": [], "title": "Python 3.11 or later",
+             "fix": None, "release": "0.8.0-beta"},
+            {"touches": True, "why": "custom", "manifests": [], "title": "Custom fetchers need a kind",
+             "fix": None, "release": None},
+            {"touches": False, "why": None, "manifests": [], "title": "Not mine", "fix": None, "release": "0.7.0-beta"}]
+    text = _render(view.breaking(rows), 100)
+    assert "everyone · 0.8.0-beta" in text
+    assert "your own fetchers · unreleased" in text
+    assert "Not mine" not in text
+
+
 def test_other_rows_are_still_one_row():
     from framework import update_view as view
     rows = [{"title": "A highlight", "detail": "word " * 40}]
     text = _render(view.whats_new(rows), 60)
-    assert len(text.splitlines()) == 3 and "…" in text
+    assert len(text.splitlines()) == 4 and "…" in text  # New, the group heading, the row, its detail
+
+
+def _hl(title, release):
+    return {"title": title, "detail": None, "release": release}
+
+
+def test_whats_new_groups_rows_under_their_release():
+    from framework import update_view as view
+    rows = [_hl("Eight A", "0.8.0-beta"), _hl("Eight B", "0.8.0-beta"), _hl("Seven A", "0.7.0-beta")]
+    releases = [{"version": "0.8.0-beta", "date": "2026-12-03"}, {"version": "0.7.0-beta", "date": None}]
+    text = _render(view.whats_new(rows, releases), 100)
+    assert text.index("0.8.0-beta · Dec 3") < text.index("Eight A") < text.index("Eight B") < text.index("0.7.0-beta")
+    assert text.index("0.7.0-beta") < text.index("Seven A")
+    assert "0.7.0-beta ·" not in text  # no date, no dot
+
+
+def test_whats_new_on_main_heads_rows_unreleased():
+    from framework import update_view as view
+    text = _render(view.whats_new([_hl("Fresh", "unreleased")], []), 100)
+    lines = [ln.strip() for ln in text.splitlines()]
+    assert lines.index("unreleased") < lines.index("+ Fresh")
+    both = _render(view.whats_new([_hl("Old", "0.8.0-beta"), _hl("Fresh", "unreleased")],
+                                  [{"version": "0.8.0-beta", "date": None}]), 100)
+    assert both.index("unreleased") < both.index("Fresh") < both.index("0.8.0-beta") < both.index("Old")
+
+
+def _yours(**over):
+    row = {"name": "demo_beta", "change": "changed", "manifests": ["m"], "from": "0.6.0", "to": "0.8.0",
+           "reason": "a commit reason", "more": 0, "notes": []}
+    row.update(over)
+    return {"yours": [row], "others": [], "added": [], "removed": []}
+
+
+def test_your_fetchers_lists_every_release_note_newest_first():
+    from framework import update_view as view
+    notes = [{"release": "0.8.0-beta", "version": "0.8.0", "note": "newest words"},
+             {"release": "0.7.0-beta", "version": "0.7.0", "note": "older words"}]
+    text = _render(view.your_fetchers(_yours(notes=notes), 3, []), 100)
+    lines = text.splitlines()
+    first = next(i for i, ln in enumerate(lines) if "0.8.0-beta" in ln)
+    assert lines[first].startswith("    0.8.0-beta") and lines[first].rstrip().endswith("newest words")
+    assert "0.7.0-beta" in lines[first + 1] and lines[first + 1].rstrip().endswith("older words")
+    assert "a commit reason" not in text
+
+
+def test_your_fetchers_caps_notes_at_three_and_counts_the_rest():
+    from framework import update_view as view
+    notes = [{"release": f"0.{n}.0-beta", "version": f"0.{n}.0", "note": f"n{n}"} for n in (9, 8, 7, 6, 5)]
+    text = _render(view.your_fetchers(_yours(notes=notes), 3, []), 100)
+    assert "n7" in text and "n6" not in text and "+2 earlier" in text
+
+
+def test_your_fetchers_without_notes_keeps_the_commit_reason():
+    from framework import update_view as view
+    lines = _render(view.your_fetchers(_yours(), 3, []), 100).splitlines()
+    assert len(lines) == 2 and "a commit reason" in lines[1] and "earlier" not in lines[1]
+
+
+def test_fetcher_note_shows_the_newest_note_and_counts_earlier():
+    from framework import update_view as view
+    notes = [{"release": "0.8.0-beta", "version": "0.8.0", "note": "newest"},
+             {"release": "0.7.0-beta", "version": "0.7.0", "note": "older"}]
+    assert view.fetcher_note(_yours(notes=notes)["yours"][0], []).plain == "0.8.0-beta  newest  +1 earlier"
+    assert view.fetcher_note(_yours(notes=notes[:1])["yours"][0], []).plain == "0.8.0-beta  newest"
+
+
+def test_header_counts_releases_only_when_more_than_one():
+    from framework import update_view as view
+    plan = {"direction": "forward", "current": {"label": "v0.6.0-beta"},
+            "target": {"label": "v0.8.0-beta", "channel": "tag"}}
+    for n, tail in ((2, "412 commits, 41 days, 2 releases"), (1, "412 commits, 41 days"), (0, "412 commits, 41 days")):
+        plan["span"] = {"commits": 412, "days": 41, "releases": n}
+        assert view.header(plan).plain.endswith(tail)
+
+
+@pytest.mark.parametrize("date", ["2026-12-03T10:00:00Z", "soon", "2026-13-45"])
+def test_a_malformed_release_date_falls_back_to_the_bare_version(date):
+    from framework import update_view as view
+    text = _render(view.whats_new([_hl("Row", "0.8.0-beta")], [{"version": "0.8.0-beta", "date": date}]), 100)
+    assert "0.8.0-beta" in text and "·" not in text and "Row" in text
+
+
+def test_a_long_note_on_a_breaking_fetcher_stays_within_100_columns():
+    from framework import update_view as view
+    notes = [{"release": "0.8.0-beta", "version": "0.8.0", "note": "word " * 30}]
+    row = _yours(notes=notes)
+    text = _render(view.your_fetchers(row, 3, [{"touches": True, "manifests": [{"fetchers": ["demo_*"]}]}]), 100)
+    assert "⚠ breaking" in text
+    assert all(len(ln) <= 100 for ln in text.splitlines())
 
 
 def test_piped_output_uses_the_full_width_cap():
@@ -1015,3 +1117,130 @@ def test_rollback_json_names_its_target_like_an_update(main_repo, stubs):
     result, doc = _run("--rollback", "--yes", "--json")
     assert result.exit_code == 0, result.stdout
     assert set(doc["target"]) >= {"sha", "branch", "label"} and doc["target"]["label"].startswith("main @ ")
+
+
+# --------------------------------------------------------------------------- #
+# Fetcher notes and release dates
+# --------------------------------------------------------------------------- #
+
+def _notes_file(version: str, date: str, fetcher_version: str, note: str) -> str:
+    return (f"version: {version}\ndate: {date}\nhighlights: []\nfetchers:\n"
+            f"  - {{name: demo_alpha, version: {fetcher_version}, note: \"{note}\"}}\n")
+
+
+@pytest.fixture
+def notes_repo(repo, tmp_path):
+    """The clone at v0.1.0-beta, whose origin also has v0.4.0-beta and v0.5.0-beta:
+    each bumps demo_alpha, carries a release file with a note for it, and has a date."""
+    upstream = tmp_path / "upstream"
+    for n in (4, 5):
+        v = f"0.{n}.0-beta"
+        _commit(upstream, {
+            "fetchers/demo/alpha/fetcher.yaml": f"name: demo_alpha\nversion: 0.{n}.0\n",
+            f"releases/{v}.yaml": _notes_file(v, f"2026-0{n}-01", f"0.{n}.0", f"alpha note 0.{n}.0"),
+        }, f"v0.{n}")
+        _git(upstream, "tag", f"v{v}")
+    _git(repo, "fetch", "-q", "--tags")
+    return repo
+
+
+def test_span_counts_releases_from_tags_alone(notes_repo, monkeypatch):
+    doc = up.span(notes_repo, "v0.3.0-beta", "v0.5.0-beta")
+    assert doc["releases"] == len(up.crossed_releases(notes_repo, "v0.3.0-beta", "v0.5.0-beta")) == 2
+    monkeypatch.setattr(up, "release_files", lambda *a: pytest.fail("span must not read release files"))
+    assert up.span(notes_repo, "v0.3.0-beta", "v0.5.0-beta")["releases"] == 2
+
+
+def test_span_returns_zeros_when_the_tag_listing_fails(notes_repo, monkeypatch):
+    real = up.git
+
+    def flaky(root, *args, **kw):
+        if args[:1] == ("tag",):
+            raise up.UpdateError("tag failed")
+        return real(root, *args, **kw)
+
+    monkeypatch.setattr(up, "git", flaky)
+    assert up.span(notes_repo, "v0.3.0-beta", "v0.5.0-beta") == {"commits": 0, "days": 0, "releases": 0}
+
+
+@pytest.mark.parametrize("raw,want", [("2026-04-01", "2026-04-01"), ("soon", None),
+                                      ("2026-04-01T10:00:00Z", None), ("04/01/2026", None)])
+def test_release_file_dates_are_only_day_strings(repo, tmp_path, raw, want):
+    upstream = tmp_path / "upstream"
+    _commit(upstream, {"releases/0.4.0-beta.yaml": f"version: 0.4.0-beta\ndate: \"{raw}\"\nhighlights: []\n"}, "r")
+    _git(upstream, "tag", "v0.4.0-beta")
+    _git(repo, "fetch", "-q", "--tags")
+    assert up.crossed_releases(repo, "v0.3.0-beta", "v0.4.0-beta") == [{"version": "0.4.0-beta", "date": want}]
+
+
+def test_an_unquoted_yaml_date_is_a_day(repo, tmp_path):
+    upstream = tmp_path / "upstream"
+    _commit(upstream, {"releases/0.4.0-beta.yaml": "version: 0.4.0-beta\ndate: 2026-04-01\nhighlights: []\n"}, "r")
+    _git(upstream, "tag", "v0.4.0-beta")
+    _git(repo, "fetch", "-q", "--tags")
+    assert up.crossed_releases(repo, "v0.3.0-beta", "v0.4.0-beta")[0]["date"] == "2026-04-01"
+
+
+def test_a_bad_file_date_falls_through_to_the_changelog_heading(repo, tmp_path):
+    upstream = tmp_path / "upstream"
+    _commit(upstream, {"releases/0.4.0-beta.yaml": "version: 0.4.0-beta\ndate: soon\nhighlights: []\n",
+                       "CHANGELOG.md": "## [0.4.0-beta] - 2026-04-09\n"}, "r")
+    _git(upstream, "tag", "v0.4.0-beta")
+    _git(repo, "fetch", "-q", "--tags")
+    assert up.crossed_releases(repo, "v0.3.0-beta", "v0.4.0-beta")[0]["date"] == "2026-04-09"
+
+
+def test_old_loader_still_sees_breaking_rows_in_a_file_with_fetchers(repo, tmp_path):
+    upstream = tmp_path / "upstream"
+    _commit(upstream, {"releases/0.9.0-beta.yaml": (
+        "version: 0.9.0-beta\ndate: 2026-09-01\n"
+        "highlights:\n  - {tag: breaking, title: Big change, fix: do it, draft: true}\n"
+        "fetchers:\n  - {name: demo_alpha, version: 0.9.0, note: hi, draft: true}\n")}, "notes")
+    _git(upstream, "tag", "v0.9.0-beta")
+    _git(repo, "fetch", "-q", "--tags")
+    rows = up._highlight_files(repo, "v0.9.0-beta")["0.9.0-beta"]
+    assert [r["title"] for r in rows] == ["Big change"]
+
+
+def test_fetcher_notes_from_every_release_crossed_newest_first(notes_repo):
+    notes = up.fetcher_notes(notes_repo, "v0.3.0-beta", "v0.5.0-beta")
+    assert [n["release"] for n in notes["demo_alpha"]] == ["0.5.0-beta", "0.4.0-beta"]
+    assert notes["demo_alpha"][0] == {"release": "0.5.0-beta", "version": "0.5.0", "note": "alpha note 0.5.0"}
+
+
+def test_fetcher_notes_skip_releases_head_contains(notes_repo):
+    notes = up.fetcher_notes(notes_repo, "v0.4.0-beta", "v0.5.0-beta")
+    assert [n["release"] for n in notes["demo_alpha"]] == ["0.5.0-beta"]
+
+
+def test_fetcher_notes_ignore_unreleased(notes_repo, tmp_path):
+    upstream = tmp_path / "upstream"
+    _commit(upstream, {"releases/unreleased.yaml": (
+        "version: unreleased\nhighlights: []\nfetchers:\n  - {name: demo_beta, version: 1.0.0, note: soon}\n")}, "wip")
+    assert up.fetcher_notes(notes_repo, "v0.3.0-beta", "origin/main").get("demo_beta") is None
+
+
+def test_crossed_releases_with_dates_newest_first(notes_repo):
+    assert up.crossed_releases(notes_repo, "v0.1.0-beta", "v0.5.0-beta") == [
+        {"version": "0.5.0-beta", "date": "2026-05-01"},
+        {"version": "0.4.0-beta", "date": "2026-04-01"},
+        {"version": "0.3.0-beta", "date": "2026-03-01"},
+        {"version": "0.2.0-beta", "date": "2026-02-01"},  # no release file: the CHANGELOG heading
+    ]
+    assert up.span(notes_repo, "v0.3.0-beta", "v0.5.0-beta")["releases"] == 2
+    assert up.span(notes_repo, "v0.5.0-beta", "v0.3.0-beta")["releases"] == 0
+
+
+def test_assess_puts_notes_on_your_fetchers(notes_repo, stubs):
+    plan = up.plan(notes_repo)
+    alpha = next(r for r in plan["fetchers"]["yours"] if r["name"] == "demo_alpha")
+    assert [n["release"] for n in alpha["notes"]] == ["0.5.0-beta", "0.4.0-beta"]
+    assert [r["version"] for r in plan["releases"]][:2] == ["0.5.0-beta", "0.4.0-beta"]
+    json.dumps(up.public(plan))
+
+
+def test_assess_on_main_has_no_notes(main_repo, stubs):
+    plan = up.plan(main_repo)
+    assert plan["releases"] == []
+    assert all(r["notes"] == [] for r in plan["fetchers"]["yours"])
+    assert any(r.get("reason") for r in plan["fetchers"]["yours"])

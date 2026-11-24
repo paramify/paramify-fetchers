@@ -9,7 +9,7 @@ from fnmatch import fnmatchcase
 from typing import Iterable, Optional
 
 from azure_common import resource_group_from_id
-from scope_exclusions import excluded_item, parse_patterns
+from scope_exclusions import excluded_item, parse_patterns, plural
 
 ENV = "AZURE_RESOURCE_EXCLUSIONS"
 KINDS = ("rg", "location", "id")
@@ -25,10 +25,6 @@ def _split(pattern: str) -> tuple[Optional[str], str]:
     kind, sep, glob = pattern.partition(":")
     kind = kind.strip().lower()
     return (kind, _key(kind, glob)) if sep else (None, _key(None, pattern))
-
-
-def plural(kind: str) -> str:
-    return kind[:-1] + "ies" if kind.endswith("y") and kind[-2:-1] not in "aeiou" else kind + "s"
 
 
 def _id_and_parents(resource_id: str) -> list[str]:

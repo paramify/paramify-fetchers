@@ -5,7 +5,7 @@ read-only, memoizing view the planner uses, so a plan never asks twice.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 from urllib.parse import urlencode
@@ -64,6 +64,7 @@ class EvidenceSet:
     channels: Tuple[Channel, ...]
     # Names (else ids) of the validators paired with the set; empty when the API sends none.
     validators: Tuple[str, ...] = ()
+    frequency: str = ""  # empty when the API sends none
 
 
 @dataclass(frozen=True)
@@ -97,6 +98,9 @@ class Script:
 class Validator:
     id: str
     name: str
+    #: The validator as the API returned it (statement, regex, rules, ...), so a
+    #: sync can tell whether the registry copy differs. Empty when not read.
+    content: Dict[str, Any] = field(default_factory=dict, compare=False)
 
 
 @dataclass(frozen=True)
@@ -126,6 +130,7 @@ def _evidence(d: Dict[str, Any]) -> EvidenceSet:
         approval=d.get("whenToApproveArtifactRequest") or "",
         channels=tuple(_channel(c) for c in d.get("channels") or ()),
         validators=tuple(v.get("name") or v.get("id") or "" for v in d.get("validators") or ()),
+        frequency=d.get("frequency") or "",
     )
 
 
@@ -268,6 +273,10 @@ class Resources:
             )
         return existing
 
+    def update_evidence(self, evidence_id: str, body: Dict[str, Any]) -> None:
+        """PATCH /evidence/{id}: only the fields in `body` change."""
+        self._client.patch_json(f"/evidence/{evidence_id}", body)
+
     def create_batch(
         self, *, artifact_request_id: Optional[str] = None, evidence_id: Optional[str] = None,
         when_to_approve: Optional[str] = None,
@@ -328,7 +337,7 @@ class Resources:
         """Every validator in the workspace; the API offers no name filter."""
         body = self._client.get("/validators")
         rows = body.get("validators") if isinstance(body, dict) else body
-        return [Validator(id=v.get("id") or "", name=v.get("name") or "") for v in rows or []]
+        return [Validator(id=v.get("id") or "", name=v.get("name") or "", content=dict(v)) for v in rows or []]
 
     def create_validator(self, payload: Dict[str, Any]) -> str:
         made = self._client.post_json("/validators", payload)

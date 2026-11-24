@@ -1,0 +1,13 @@
+validator: azure_ai_hub_workspaces_not_open_to_all_networks
+cases:
+  - name: compliant
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"workspaces_open_to_all_networks":0}}}'
+
+  - name: workspaces_open_to_all_networks_nonzero
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"workspaces_open_to_all_networks":1}}}'
+
+  - name: workspaces_open_to_all_networks_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"workspaces_open_to_all_networks_renamed":0}}}'

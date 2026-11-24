@@ -139,7 +139,7 @@ def test_evidence_file_preview(shot):
 
 def test_paramify_no_token(shot):
     """The demo workspace has no token: the page reads nothing and says why."""
-    assert shot("4")
+    assert shot("5")
 
 
 def _setup_status() -> dict:
@@ -189,17 +189,17 @@ def _setup_status() -> dict:
 def test_paramify_by_fetcher(shot, monkeypatch):
     monkeypatch.setattr(api, "paramify_status", lambda *a, **k: _setup_status())
     monkeypatch.setattr(api, "list_artifacts", lambda set_id: [])
-    assert shot("4")
+    assert shot("5")
 
 
 def test_paramify_by_capability(shot, monkeypatch):
     monkeypatch.setattr(api, "paramify_status", lambda *a, **k: _setup_status())
     monkeypatch.setattr(api, "list_artifacts", lambda set_id: [])
-    assert shot("4", "right_square_bracket")
+    assert shot("5", "right_square_bracket")
 
 
 def test_pipelines(shot):
-    assert shot("5")
+    assert shot("6")
 
 
 @pytest.fixture
@@ -247,5 +247,25 @@ def test_paramify_upload_plan(shot, workspace, demo_workspace, stub_paramify_sta
     }])
     status["workspace"]["base_url"] = "https://api.example.test"  # conftest.FAKE_PARAMIFY_URL
     monkeypatch.setattr(api, "list_artifacts", lambda set_id: [])
-    assert shot("4", "u")
+    assert shot("5", "u")
     assert not [c for c in workspace.calls if c[0] != "GET"]
+
+
+def _write_validator(root, key: str, name: str, source: str) -> None:
+    path = root / "validators" / "demo" / f"{key}.yaml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        f"key: {key}\nname: {name}\ntype: AUTOMATED\nrole: configuration\nsource: {source}\n"
+        f"statement: Every policy in the demo payload is enabled.\n"
+        "regex: '\"enabled\":\\s*(?<enabled>true|false)'\n"
+        "validation_rules:\n"
+        "  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }\n"
+        "    criteria: EQUALS\n"
+        "    value: { type: CUSTOM_TEXT, customText: \"true\" }\n"
+        "evidence_sets: [EVD-DEMO-HELLO]\n")
+
+
+def test_validators(shot, demo_workspace):
+    _write_validator(demo_workspace.root, "demo_policies_enabled", "Demo Policies Are Enabled", "paramify")
+    _write_validator(demo_workspace.root, "demo_mfa_everyone", "Demo MFA Covers Everyone", "community")
+    assert shot("4", "right")

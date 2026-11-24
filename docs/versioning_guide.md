@@ -33,10 +33,14 @@ In order, it:
    manifest that fails there and passes today **would break**.
 3. Shows what changes for you:
    - **Your fetchers:** each fetcher your manifests use that changed, with its
-     version before and after and, when a commit says so, why.
+     version before and after. If a release gave a note for the fetcher, you
+     see the notes, newest release first (three at most). If not, you see the
+     reason a commit gives.
    - **Breaking:** the breaking changes that touch this clone, each with its
      fix and the manifests it affects.
-   - **New:** up to five highlights.
+   - **New:** up to ten highlights, grouped under the release that shipped
+     them. Changes that are not in a release yet come first, under
+     "unreleased".
    - One line counting everything else, and a link to the full changelog.
 4. Asks before it changes anything (`[y/N]`).
 5. Fast-forwards your branch, or switches to the release tag.

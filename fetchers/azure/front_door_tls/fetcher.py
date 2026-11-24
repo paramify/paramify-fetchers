@@ -30,17 +30,22 @@ from azure_common import (  # noqa: E402
     write_evidence,
 )
 from frontdoor import (  # noqa: E402
+    ROUTE_SCOPE_LISTS,
     arm_key,
     cdn_client,
     custom_domains,
     endpoints_with_routes,
     front_door_profiles,
     in_scope_totals,
+    null_unread,
     profile_scope,
+    read_lists,
     route_hosts,
     route_https,
     route_serving,
     rule_sets_with_rules,
+    total,
+    unread_kinds,
 )
 from resource_exclusions import ResourceExclusions  # noqa: E402
 from scope_exclusions import ScopeExclusions, excluded_item  # noqa: E402
@@ -49,6 +54,27 @@ logger = logging.getLogger("azure_front_door_tls")
 
 SCOPE_EXCLUSIONS_ENV = "AZURE_FRONT_DOOR_SCOPE_EXCLUSIONS"
 EXCLUDED_KINDS = ("custom_domain", "endpoint", "route", "secret")
+# The per-profile lists this fetcher reads.
+PROFILE_LISTS = ("endpoints", "routes", "custom_domains", "rule_sets", "secrets")
+ROUTES = tuple(sorted(ROUTE_SCOPE_LISTS))
+HTTPS_BASES = ("https_only_protocols", "https_redirect", "rule_set_redirect")
+# Summary fields by the lists they are built from (the profile list too, always); each reads null when any in-scope
+# profile has one of those lists unread.
+FIELDS_BY_LISTS = (
+    (("profiles",), ("total_front_door_profiles", "premium_profiles", "standard_profiles", "skipped_profiles_by_sku")),
+    (ROUTES, ("total_routes", "serving_routes", "serving_routes_on_endpoint_default_domain")),
+    ((*ROUTES, "rule_sets"), ("serving_routes_https_only", "serving_routes_accepting_plain_http",
+                              *(f"serving_routes_{basis}" for basis in HTTPS_BASES))),
+    (("custom_domains",), ("total_custom_domains", "domains_by_cipher_suite_set", "domains_by_certificate_type")),
+    (ROUTES, ("served_custom_domains", "unrouted_custom_domains", "served_domains_below_tls12",
+              "served_domains_minimum_tls13", "served_domains_tls_floor_unknown",
+              "served_domains_validation_not_approved")),
+    ((*ROUTES, "secrets"), ("served_domains_certificate_missing", "served_domains_managed_certificate_without_secret",
+                            "served_domains_certificate_expired", "served_domains_certificate_expiring_soon",
+                            "served_domains_certificate_expiry_unknown")),
+    (("secrets", "custom_domains"), ("certificate_secrets",)),
+    ((), ("expiry_warning_days",)),
+)
 EXPIRY_WARNING_DAYS = 30
 # A predefined cipher-suite set fixes the floor; minimumTlsVersion applies only to Customized.
 CIPHER_SUITE_SET_FLOOR = {"TLS10_2019": "TLS10", "TLS12_2022": "TLS12", "TLS12_2023": "TLS12"}
@@ -124,7 +150,7 @@ def effective_minimum_tls(domain: dict) -> tuple[str | None, str]:
 
 
 def route_record(profile: dict, endpoint: dict, route: dict, domains_by_key: dict, rule_sets_by_key: dict,
-                 excluded_hosts=()) -> dict:
+                 excluded_hosts=(), rule_sets_read: bool = True) -> dict:
     hosts = [h for h in route_hosts(endpoint, route, domains_by_key) if arm_key(h["id"]) not in excluded_hosts]
     return {
         "profile": profile["name"],
@@ -142,7 +168,7 @@ def route_record(profile: dict, endpoint: dict, route: dict, domains_by_key: dic
         ],
         "hosts": [h["host_name"] for h in hosts],
         "serves_endpoint_default_domain": any(h["kind"] == "endpoint_default" for h in hosts),
-        **route_https(route, rule_sets_by_key),
+        **route_https(route, rule_sets_by_key, rule_sets_read),
     }
 
 
@@ -155,16 +181,19 @@ def certificate_status(certificate_type, secret) -> str:
     return "missing"
 
 
-def domain_record(profile: dict, domain: dict, secrets_by_key: dict, routed: set, served: set, now: datetime) -> dict:
+def domain_record(profile: dict, domain: dict, secrets_by_key: dict, routed: set | None, served: set | None,
+                  now: datetime, secrets_read: bool = True) -> dict:
+    """`routed` and `served` are None when the profile's routes weren't all read; a domain naming a secret then can't be
+    matched to it unless the secret list was read."""
     floor, basis = effective_minimum_tls(domain)
     secret = secrets_by_key.get(arm_key(domain["secret_id"])) if domain["secret_id"] else None
     key = arm_key(domain["id"])
-    return {
+    record = {
         "profile": profile["name"],
         "profile_sku": profile["sku"],
         **domain,
-        "routed": key in routed,
-        "served": key in served,
+        "routed": None if routed is None else key in routed,
+        "served": None if served is None else key in served,
         "effective_minimum_tls": floor,
         "effective_minimum_tls_basis": basis,
         "below_tls12": None if floor not in TLS_RANK else TLS_RANK[floor] < TLS_RANK["TLS12"],
@@ -172,6 +201,10 @@ def domain_record(profile: dict, domain: dict, secrets_by_key: dict, routed: set
         "certificate": secret,
         **certificate_expiry(secret["expiration_date"] if secret else None, now),
     }
+    if domain["secret_id"] and not secrets_read:
+        record.update(certificate_status=None, days_until_expiry=None, certificate_expired=None,
+                      certificate_expiring_soon=None)
+    return record
 
 
 def secrets_in_scope(profile: dict, secrets: list[dict], domains: list[dict], excluded_hosts: dict) -> tuple[list[dict], list[dict]]:
@@ -194,7 +227,8 @@ def secrets_in_scope(profile: dict, secrets: list[dict], domains: list[dict], ex
 
 def tls_for_profile(collected: dict, now: datetime, exclusions: ScopeExclusions | None = None) -> dict:
     profile = collected["profile"]
-    scope = profile_scope(profile, collected["endpoints"], collected["custom_domains"], exclusions or ScopeExclusions())
+    unread = collected.get("unread", frozenset())
+    scope = profile_scope(profile, collected["endpoints"], collected["custom_domains"], exclusions or ScopeExclusions(), unread)
     domains_by_key = {arm_key(d["id"]): d for d in collected["custom_domains"]}
     secrets_by_key = {arm_key(s["id"]): s for s in collected["secrets"]}
     routes, routed, served = [], set(), set()
@@ -205,22 +239,30 @@ def tls_for_profile(collected: dict, now: datetime, exclusions: ScopeExclusions 
             if route_serving(endpoint, route):
                 served |= keys
             if arm_key(route["id"]) not in scope["routes"]:
-                routes.append(route_record(profile, endpoint, route, domains_by_key, collected["rule_sets"], scope["hosts"]))
-    domains = [domain_record(profile, d, secrets_by_key, routed, served, now)
+                routes.append(route_record(profile, endpoint, route, domains_by_key, collected["rule_sets"], scope["hosts"],
+                                           "rule_sets" not in unread))
+    # A route that wasn't read may route or serve a domain.
+    routes_read = not unread & {"endpoints", "routes"}
+    domains = [domain_record(profile, d, secrets_by_key, routed if routes_read else None, served if routes_read else None,
+                             now, "secrets" not in unread)
                for d in collected["custom_domains"] if arm_key(d["id"]) not in scope["hosts"]]
     secrets, excluded_secrets = secrets_in_scope(profile, collected["secrets"], collected["custom_domains"], scope["hosts"])
+    # A secret leaves scope with the custom domains that use it, so its count needs the domain list too.
+    in_secrets = None if unread & {"secrets", "custom_domains"} else len(secrets)
     return {"routes": routes, "custom_domains": domains, "secrets": secrets, "excluded": scope["excluded"] + excluded_secrets,
-            "in_scope": scope["in_scope"]}
+            "in_scope": {**scope["in_scope"], "secrets": in_secrets}}
 
 
-def summarize(profiles: list[dict], skipped_by_sku: dict, routes: list[dict], domains: list[dict], secrets: list[dict]) -> dict:
+def summarize(profiles: list[dict], skipped_by_sku: dict, routes: list[dict], domains: list[dict], secrets: list[dict],
+              unread=frozenset()) -> dict:
+    """`unread` names the lists unread in any in-scope profile (see FIELDS_BY_LISTS)."""
     serving = [r for r in routes if r["serving"]]
     served = [d for d in domains if d["served"]]
 
     def count(items, pred) -> int:
         return sum(1 for i in items if pred(i))
 
-    return {
+    summary = {
         "total_front_door_profiles": len(profiles),
         "premium_profiles": count(profiles, lambda p: p["sku"] == "Premium_AzureFrontDoor"),
         "standard_profiles": count(profiles, lambda p: p["sku"] == "Standard_AzureFrontDoor"),
@@ -253,6 +295,7 @@ def summarize(profiles: list[dict], skipped_by_sku: dict, routes: list[dict], do
         "certificate_secrets": count(secrets, lambda s: s["type"] in CERTIFICATE_SECRET_TYPES),
         "expiry_warning_days": EXPIRY_WARNING_DAYS,
     }
+    return null_unread(summary, FIELDS_BY_LISTS, unread)
 
 
 # --- collection (lazy azure imports) ---
@@ -275,7 +318,7 @@ def collect_profiles(subscription_id, cred, collector: Collector, exclusions: Re
     collected = []
     for profile in profiles:
         rg, name = resource_group_from_id(profile["id"]), profile["name"]
-        collected.append({
+        collected.append(read_lists({
             "profile": profile,
             "endpoints": endpoints_with_routes(cdn, collector, profile),
             "custom_domains": custom_domains(cdn, collector, profile),
@@ -283,9 +326,8 @@ def collect_profiles(subscription_id, cred, collector: Collector, exclusions: Re
             "secrets": collector.guard(
                 f"cdn.secrets.list_by_profile({name})",
                 lambda: [project_secret(s) for s in cdn.secrets.list_by_profile(rg, name)],
-                default=[],
             ),
-        })
+        }))
     return collected, skipped
 
 
@@ -343,12 +385,13 @@ def main() -> int:
         domains += tls["custom_domains"]
         excluded += tls["excluded"]
         secrets += tls["secrets"]
+        unread = c.get("unread", frozenset())
         profiles.append({
             **c["profile"],
-            "route_count": len(tls["routes"]),
-            "custom_domain_count": len(tls["custom_domains"]),
-            "secret_count": len(tls["secrets"]),
-            "rule_set_count": len(c["rule_sets"]),
+            "route_count": None if unread & ROUTE_SCOPE_LISTS else len(tls["routes"]),
+            "custom_domain_count": None if "custom_domains" in unread else len(tls["custom_domains"]),
+            "secret_count": None if unread & {"secrets", "custom_domains"} else len(tls["secrets"]),
+            "rule_set_count": None if "rule_sets" in unread else len(c["rule_sets"]),
         })
 
     evidence = build_payload(
@@ -363,9 +406,11 @@ def main() -> int:
             "excluded": excluded,
         },
         summary={
-            **summarize(profiles, skipped_by_sku, routes, domains, secrets),
+            **summarize(profiles, skipped_by_sku, routes, domains, secrets, unread_kinds(collected, listed, PROFILE_LISTS)),
             "provider_registration_status": registration,
-            **exclusions.summary(excluded, EXCLUDED_KINDS, {**in_scope_totals(scopes), "secrets": len(secrets)}),
+            **exclusions.summary(excluded, EXCLUDED_KINDS, {
+                name: n if listed else None
+                for name, n in {**in_scope_totals(scopes), "secrets": total(s["secrets"] for s in scopes)}.items()}),
             **resources.summary(excluded, ("profile",), {"profiles": len(profiles) if listed else None}),
         },
     )

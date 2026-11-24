@@ -1,0 +1,19 @@
+key: github_no_workflows_failing_on_default_branch
+name: GitHub No Workflows Failing on Default Branch
+type: AUTOMATED
+role: configuration
+source: community
+statement: >-
+  No workflow's newest run on a default branch failed. Judges the newest run only, so an earlier failure
+  that a later run fixed passes. Does not assert what the workflows test.
+regex: '"workflows_failing_on_default_branch":\s*\[\s*\]'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+- regexOperation:
+    type: MATCH_COUNT
+  criteria: NOT_EQUALS
+  value:
+    type: CUSTOM_TEXT
+    customText: '0'
+evidence_sets:
+- EVD-GITHUB-WORKFLOW-RUNS

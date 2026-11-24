@@ -740,9 +740,27 @@ def test_health_data_counts_an_unresolved_region():
 
 
 def test_group_without_metrics_has_no_data():
-    [record], _ = origin_health([health_group()], {})
+    group = health_group()
+    [record], _ = origin_health([group], {origins.profile_key(group["id"]): {"health": [], "requests": []}})
     assert (record["has_health_data"], record["has_traffic"], record["all_regions_healthy_last_hour"]) == (
         False, False, None)
+
+
+def test_group_whose_metrics_werent_read_has_unknown_health_and_traffic():
+    group = health_group()
+    key = origins.profile_key(group["id"])
+    for metrics in ({}, {key: {"health": None, "requests": None}}):
+        [record], _ = origin_health([group], metrics)
+        assert (record["has_health_data"], record["has_traffic"], record["requests"]) == (None, None, None)
+    [record], _ = origin_health([group], {key: {"health": None, "requests": []}})
+    assert (record["has_health_data"], record["has_traffic"]) == (None, False)
+    # Each origin, region and hour leaves the unread metric unknown too, and keeps the read one.
+    [record], _ = origin_health([group], {key: {**failover_metrics(), "requests": None}})
+    assert (record["traffic_shift_count"], record["traffic_shifts"], record["regions_serving_last_hour"]) == (None, None, None)
+    rows = record["origins"] + record["regions"]
+    assert rows and {r["requests"] for r in rows} == {None} and {r["hours_serving"] for r in rows} == {None}
+    assert any(r["hours_with_health_data"] for r in rows)
+    assert {s["requests"] for h in record["hourly_by_region"] for s in h["regions"].values()} == {None}
 
 
 def test_health_summary():

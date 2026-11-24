@@ -1,0 +1,22 @@
+key: azure_frontdoor_origins_health_probes
+name: Front Door Serving Origin Groups Have Health Probes
+type: AUTOMATED
+role: configuration
+source: community
+statement: >
+  Every Front Door (Standard/Premium) origin group that serves traffic has a health probe
+  configured. Supports KSI-CNA-RVP for Front Door; single-origin groups are held to it too, though
+  Microsoft allows the probe off there. It does not assert the probe path, protocol or interval is
+  sensible, that origins are currently healthy, or that a second origin or region exists to fail
+  over to. Unused origin groups are not evaluated, and every serving group is treated as production.
+
+# Violation count (partner: azure_frontdoor_origin_group_probe_fields_present); "active_origins" starts each sorted group record, fencing a match to one group, and origin_health (0.3.0) or production_apps (0.2.0) fences the last.
+regex: '"health_probe_enabled":\s*false,(?:(?!"active_origins":|"origin_health":|"production_apps":)[\s\S])*?"serving":\s*true'
+rules_summary: MATCH_COUNT EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-FRONTDOOR-ORIGINS

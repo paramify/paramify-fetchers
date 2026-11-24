@@ -69,7 +69,7 @@ def test_j_lists_pipeline_jobs(tmp_path, monkeypatch, run_tui):
     monkeypatch.setattr(api, "issues_jobs", lambda root, **kw: jobs)
 
     async def body(app, pilot):
-        await pilot.press("5")
+        await pilot.press("6")
         await pilot.pause()
         await pilot.press("j")
         await _settle(app, pilot)
@@ -92,7 +92,7 @@ def test_a_failed_job_offers_retry_and_cancel_behind_a_confirm(tmp_path, monkeyp
     )
 
     async def body(app, pilot):
-        await pilot.press("5")
+        await pilot.press("6")
         await pilot.pause()
         await pilot.press("j")
         await _settle(app, pilot)
@@ -124,7 +124,7 @@ def test_shift_c_closes_a_manifest_assessment_after_a_warning(tmp_path, monkeypa
         app.manifest["run"]["fetchers"][0]["config"] = {
             "assessment_id": "A-1", "assessment_name": "Monthly Scan",
         }
-        await pilot.press("5")
+        await pilot.press("6")
         await pilot.pause()
         await pilot.press("C")
         await pilot.pause()
@@ -143,7 +143,7 @@ def test_shift_c_closes_a_manifest_assessment_after_a_warning(tmp_path, monkeypa
 
 def test_shift_c_with_no_assessment_says_so(tmp_path, run_tui):
     async def body(app, pilot):
-        await pilot.press("5")
+        await pilot.press("6")
         await pilot.pause()
         await pilot.press("C")
         await pilot.pause()
@@ -160,7 +160,7 @@ def test_run_console_points_at_waiting_issue_reports(tmp_path, run_tui):
         banner = page.query_one("#run-banner")
         rendered = banner.render()
         text = rendered.plain if isinstance(rendered, Text) else str(rendered)
-        assert "2 scan report(s) ready" in text
+        assert "2 scan reports to send on the Pipelines tab (i)" in text
 
     run_tui(body, _write_manifest(tmp_path))
 
@@ -175,7 +175,7 @@ def test_each_page_picks_the_newest_run_of_its_own_kind(tmp_path, run_tui):
 
     async def body(app, pilot):
         assert latest_run_scoped(app, "evidence")[0]["dir"] == str(evidence)
-        await pilot.press("5")
+        await pilot.press("6")
         await pilot.pause()
         assert app.screen.query_one(PipelinesPage)._issues_run_dir == str(scans)
 
@@ -216,7 +216,7 @@ def test_pipelines_keys_work_on_a_pipeline_only_manifest(tmp_path, monkeypatch, 
     monkeypatch.setenv("PARAMIFY_UPLOAD_API_TOKEN", "t")
 
     async def body(app, pilot):
-        await pilot.press("5")
+        await pilot.press("6")
         await pilot.pause()
         page = app.screen.query_one(PipelinesPage)
         assert app.focused is not None and app.focused in page.walk_children()
@@ -238,7 +238,7 @@ def test_pipelines_tab_lists_the_scan_report_fetchers(tmp_path, run_tui):
     async def body(app, pilot):
         from framework.tui.components.table import DataTable
 
-        await pilot.press("5")
+        await pilot.press("6")
         await pilot.pause()
         table = app.screen.query_one("#pipelines-fetchers", DataTable)
         return [str(table.get_row_at(i)[0]) for i in range(table.row_count)]
@@ -258,7 +258,7 @@ def _sends_to(tmp_path, run_tui, edit) -> list:
     async def body(app, pilot):
         from framework.tui.components.table import DataTable
 
-        await pilot.press("5")
+        await pilot.press("6")
         await pilot.pause()
         table = app.screen.query_one("#pipelines-fetchers", DataTable)
         return [str(table.get_row_at(i)[1]) for i in range(table.row_count)]
@@ -326,7 +326,7 @@ def test_focus_returns_to_the_pipelines_page_after_a_send(tmp_path, monkeypatch,
          "created_at": "", "counts": None, "blocked_by": None}])
 
     async def body(app, pilot):
-        await pilot.press("5")
+        await pilot.press("6")
         await pilot.pause()
         page = app.screen.query_one(PipelinesPage)
         await pilot.press("i")
@@ -428,7 +428,7 @@ def test_a_broken_catalog_does_not_stop_the_tui(tmp_path, monkeypatch, run_tui):
         from framework.tui.components.table import DataTable
         from framework.tui.screens.workspace import WorkspaceScreen
 
-        for key in ("5", "1", "5"):
+        for key in ("6", "1", "6"):
             await pilot.press(key)
             await pilot.pause()
         table = app.screen.query_one("#pipelines-fetchers", DataTable)
@@ -438,18 +438,18 @@ def test_a_broken_catalog_does_not_stop_the_tui(tmp_path, monkeypatch, run_tui):
     on_workspace, running, rows, notices = run_tui(body, path)
     assert on_workspace and running
     assert rows == 0
-    assert any("Could not load catalog" in n for n in notices), notices
+    assert any("Couldn't load the catalog" in n for n in notices), notices
 
 
 @pytest.mark.parametrize(
     "busy_page, busy_flag, tab, keys",
     [
-        (ParamifyPage, "_acting", "5", ("i",)),     # upload or sync running: no scan send
-        (ParamifyPage, "_acting", "5", ("C",)),     # ... and no cycle close
-        (ParamifyPage, "_planning", "5", ("i",)),   # a preview being planned: no scan send
-        (PipelinesPage, "_uploading", "4", ("u",)),  # scan send running: no evidence upload
-        (PipelinesPage, "_uploading", "4", ("s",)),  # ... no scripts preview
-        (PipelinesPage, "_uploading", "4", ("v",)),  # ... and no validators preview
+        (ParamifyPage, "_acting", "6", ("i",)),     # upload or sync running: no scan send
+        (ParamifyPage, "_acting", "6", ("C",)),     # ... and no cycle close
+        (ParamifyPage, "_planning", "6", ("i",)),   # a preview being planned: no scan send
+        (PipelinesPage, "_uploading", "5", ("u",)),  # scan send running: no evidence upload
+        (PipelinesPage, "_uploading", "5", ("s",)),  # ... no scripts preview
+        (PipelinesPage, "_uploading", "5", ("v",)),  # ... and no validators preview
     ],
     ids=["action-blocks-send", "action-blocks-close", "planning-blocks-send",
          "send-blocks-upload", "send-blocks-scripts", "send-blocks-validators"],
