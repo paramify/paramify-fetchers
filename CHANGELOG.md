@@ -12,6 +12,75 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`keycloak_service_accounts` fetcher.** Lists every Keycloak client with a service account, GET only with
+  view-clients and view-users: its authenticator (shared secret or signed key and certificate), the secret's age,
+  expiry and any rotated secret still valid, its owner from a configurable client attribute, other sign-in flows it
+  allows, and its effective realm and admin roles. Counts secrets older than `max_secret_age_days` and service
+  accounts without an owner only when those settings are set. An authenticator the fetcher doesn't recognize is never
+  assumed to have no secret: it is counted in `service_accounts_unrecognized_authenticator` and leaves the over-age
+  count null. Secrets and keys are never copied.
+- **`keycloak_users_and_roles` fetcher.** Lists every user in a Keycloak realm, GET only with view-users, view-clients
+  and view-events: enabled state, required actions, LDAP federation and linked identity providers, OTP and WebAuthn
+  authenticators, groups, and effective realm and admin roles through groups and composites. Counts privileged users
+  (realm-management admin roles, `manage-organizations` included, plus any realm roles set in `privileged_roles`), users
+  who can sign in with a Keycloak-checked credential (local, or brokered but still holding a local password) without a
+  second factor, and enabled accounts with no stored sign-in in `inactive_days` (default 90). Inactivity is judged only
+  when sign-ins are kept that long and a stored event predates the window, and stays null for an account with no
+  creation time. Service accounts are left out by their client link, not their username. The realm is named in the
+  summary, and the master realm is refused as `bad_config`. Email addresses, names, attributes and credential data are
+  never copied.
+- **`keycloak_admin_events` fetcher.** Reads the sign-in and admin events Keycloak has stored over a window (default 7
+  days), GET only with view-events: successful, failed and blocked sign-ins counted apart, brute-force lockouts, users
+  created and disabled, password resets, role grants and other privileged changes, and how recently events arrived,
+  leaving out the fetcher's own token requests. Usernames, IP addresses and changed objects are never copied. More
+  than 20,000 events in a window leaves counts null rather than undercounted. The window ends when the run starts, and
+  an event read twice while paging counts once. `newest_login_event` counts only `LOGIN` and `LOGIN_ERROR`.
+  `users_disabled` is null when admin event details are off or a user update has no changed object. Client scope
+  assignments count as privileged changes.
+- **`keycloak` category and `keycloak_realm_security` fetcher.** Reads a Keycloak realm through the Admin REST API with a
+  read-only service-account client: session and token lifetimes, brute-force lockout, password policy, the browser
+  and reset-credentials flows with each step's effective requirement (so a phishing-resistant authenticator counts
+  only when every sign-in must pass it), required actions such as terms and conditions, identity providers, user
+  federation, and login and admin event logging. Client secrets and bind credentials are never written to the
+  evidence, and an unreadable section leaves its fields null rather than empty. The local sign-in check leaves out
+  session reuse, the identity provider redirector and the Organization step that Keycloak 26 adds to new realms. A
+  refused call names the client that holds the missing role, `master-realm` when the realm read is `master`.
+- **`kubernetes_workload_resilience` fetcher and `kubernetes` category.** Reads any cluster's Kubernetes API (GET and
+  LIST only) through a kubeconfig, including AKS with kubelogin, or the in-cluster service account. For each Deployment
+  and StatefulSet: replicas with any autoscaler minimum, PodDisruptionBudget coverage and budgets that block node drains,
+  zone spread as configured and where ready pods actually run (the scheduler spreads by default, so placement decides),
+  and readiness and liveness probes. A workload's pods are the ones it owns, found through its ReplicaSets, not every
+  pod with matching labels. Each budget is judged once, over every pod it selects, with Kubernetes' rounding. When a
+  pod's zone or owner, or a budget's pod count, can't be found, the workload is listed as unknown and the matching list
+  is null, not empty. An API server that can't be reached is recorded as `target_unreachable`, and each call times
+  out. System namespaces are left out by default. The README has the least-privilege RBAC.
+- **`alertmanager_alert_delivery` fetcher and `alertmanager` category.** Reads Prometheus Alertmanager's v2 API and
+  metrics endpoint, GET only: the route tree and receivers (names and integration types only, never receiver
+  settings), active, silenced and inhibited alerts, silences, and the notifications started and the notifications that
+  failed after all their retries. Counts are per receiver when Alertmanager runs with receiver-name-in-metrics,
+  otherwise per integration type. Routes written with the older `match` and `match_re` keys show those as matchers.
+  Reports receivers and routes that deliver nowhere. The counts do not show that an integration accepted a
+  notification, or that a person received it. `counters_since` is when the counts started: the process start, or with
+  receiver names the last successful configuration reload, which also resets them. An unread endpoint, or a response
+  that is not the shape Alertmanager documents, is a failed read: its fields are null, not 0, and the run exits 1. This
+  includes a `/metrics` page without `alertmanager_build_info`, a missing notification counter, a counter value that
+  is not a number, and a status without its configuration.
+- **`istio_mesh_security` fetcher and `istio` category.** Reads an Istio mesh (1.22 or later) through the Kubernetes
+  API (GET and LIST only), with a kubeconfig (including AKS with kubelogin) or the in-cluster service account: mesh-wide
+  mTLS mode and weaker namespace, workload or port overrides; allow-nothing default-deny policies and allow-all rules;
+  plaintext and sub-TLS 1.2 gateway servers; DestinationRules turning TLS off; the outbound traffic policy; the root
+  certificate's expiry and istiod's workload certificate lifetime. A refused call names the permission it needs; the
+  README has the least-privilege RBAC.
+  - Judgments follow Istio's own rules. No mesh-wide policy means PERMISSIVE. When there are several, the oldest one
+    is in effect. A dry-run AuthorizationPolicy enforces nothing. A gateway server on any protocol but HTTPS or TLS is
+    plaintext unless it redirects to HTTPS. A DestinationRule subset can turn TLS off.
+  - Ambient namespaces count as in the mesh, as do sidecar-injected ones.
+  - Settings: `control_plane_namespace` (istiod, its ConfigMaps), `mesh_configmap` (`istio-<revision>` for a revisioned
+    install) and `root_namespace` (taken from the mesh config; the setting is a fallback).
+  - With more than one istiod revision, the longest workload certificate lifetime is reported.
+  - A ConfigMap that can't be parsed, or a call that times out, is a recorded failure that leaves only its own fields
+    null.
+
 - **Literal pattern lists.** A `type: patterns` field can declare `globs: false`; `validate`, the run and the TUI then
   refuse a pattern holding `*` or `?`, and `describe` says the field takes patterns without wildcards.
 
@@ -153,6 +222,12 @@ schemas and the `paramify` CLI — not the internal code.
   source, which can pick out one kind of line with a line filter; a quiet source without a heartbeat leaves the
   overall verdict null. Log lines and stream labels are never copied. The category sends `LOKI_TENANT_ID` as
   `X-Scope-OrgID` and an optional bearer token for a proxy.
+- **`openscap_benchmark_results` 0.1.0 and the `openscap` category: each target's latest OpenSCAP benchmark
+  result.** Reads XCCDF results and ARF reports written by `oscap xccdf eval`, gzipped or not, from an Azure Blob
+  Storage container (GET only, with the run's Azure identity) or a local directory. For each target's newest scan it
+  reports the profile, rule results, failed rules by severity, errors and waived rules. `expected_targets` and
+  `max_age_days` have no default, so their fields stay null until set. Rule text is never copied, and XML is parsed
+  with defusedxml.
 - **The TUI shows which environment variables a manifest is missing, and stops a run that would fail on them.**
   - The manifest settings row has an `env` button (`✓ all set` or `✗ 2 missing`), each fetcher's status names what it
     needs (`✗ needs OKTA_API_TOKEN`), and the line under the table splits what a run needs from what only an upload needs.

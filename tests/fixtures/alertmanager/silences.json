@@ -1,0 +1,1 @@
+[{"id":"00000000-0000-0000-0000-000000000001","status":{"state":"active"},"updatedAt":"2026-11-17T23:31:15.941Z","comment":"sandbox silence","createdBy":"sandbox","endsAt":"2026-11-18T01:31:15.000Z","matchers":[{"isEqual":true,"isRegex":false,"name":"alertname","value":"NoisyTest"}],"startsAt":"2026-11-17T23:31:15.941Z"}]

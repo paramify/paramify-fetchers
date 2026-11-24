@@ -1,0 +1,244 @@
+[
+  {
+    "id": "00000000-0000-0000-0000-000000000052",
+    "time": 1794961260223,
+    "realmId": "00000000-0000-0000-0000-000000000018",
+    "authDetails": {
+      "realmId": "00000000-0000-0000-0000-000000000059",
+      "clientId": "00000000-0000-0000-0000-000000000029",
+      "userId": "00000000-0000-0000-0000-000000000014",
+      "ipAddress": "127.0.0.1"
+    },
+    "operationType": "DELETE",
+    "resourceType": "CLIENT_ROLE_MAPPING",
+    "resourcePath": "users/00000000-0000-0000-0000-000000000011/role-mappings/clients/00000000-0000-0000-0000-000000000054",
+    "representation": "[{\"id\":\"00000000-0000-0000-0000-000000000058\",\"name\":\"view-identity-providers\",\"description\":\"${role_view-identity-providers}\",\"composite\":false,\"clientRole\":true,\"containerId\":\"00000000-0000-0000-0000-000000000054\",\"attributes\":{}}]"
+  },
+  {
+    "id": "00000000-0000-0000-0000-000000000031",
+    "time": 1794961260170,
+    "realmId": "00000000-0000-0000-0000-000000000018",
+    "authDetails": {
+      "realmId": "00000000-0000-0000-0000-000000000059",
+      "clientId": "00000000-0000-0000-0000-000000000029",
+      "userId": "00000000-0000-0000-0000-000000000014",
+      "ipAddress": "127.0.0.1"
+    },
+    "operationType": "DELETE",
+    "resourceType": "CLIENT_ROLE_MAPPING",
+    "resourcePath": "users/00000000-0000-0000-0000-000000000011/role-mappings/clients/00000000-0000-0000-0000-000000000054",
+    "representation": "[{\"id\":\"00000000-0000-0000-0000-000000000001\",\"name\":\"view-realm\",\"description\":\"${role_view-realm}\",\"composite\":false,\"clientRole\":true,\"containerId\":\"00000000-0000-0000-0000-000000000054\",\"attributes\":{}}]"
+  },
+  {
+    "id": "00000000-0000-0000-0000-000000000055",
+    "time": 1794961239164,
+    "realmId": "00000000-0000-0000-0000-000000000018",
+    "authDetails": {
+      "realmId": "00000000-0000-0000-0000-000000000059",
+      "clientId": "00000000-0000-0000-0000-000000000029",
+      "userId": "00000000-0000-0000-0000-000000000014",
+      "ipAddress": "127.0.0.1"
+    },
+    "operationType": "CREATE",
+    "resourceType": "CLIENT_ROLE_MAPPING",
+    "resourcePath": "users/00000000-0000-0000-0000-000000000011/role-mappings/clients/00000000-0000-0000-0000-000000000054",
+    "representation": "[{\"id\":\"00000000-0000-0000-0000-000000000058\",\"name\":\"view-identity-providers\",\"description\":\"${role_view-identity-providers}\",\"composite\":false,\"clientRole\":true,\"containerId\":\"00000000-0000-0000-0000-000000000054\",\"attributes\":{}}]"
+  },
+  {
+    "id": "00000000-0000-0000-0000-000000000036",
+    "time": 1794961238834,
+    "realmId": "00000000-0000-0000-0000-000000000018",
+    "authDetails": {
+      "realmId": "00000000-0000-0000-0000-000000000059",
+      "clientId": "00000000-0000-0000-0000-000000000029",
+      "userId": "00000000-0000-0000-0000-000000000014",
+      "ipAddress": "127.0.0.1"
+    },
+    "operationType": "CREATE",
+    "resourceType": "CLIENT_ROLE_MAPPING",
+    "resourcePath": "users/00000000-0000-0000-0000-000000000011/role-mappings/clients/00000000-0000-0000-0000-000000000054",
+    "representation": "[{\"id\":\"00000000-0000-0000-0000-000000000001\",\"name\":\"view-realm\",\"description\":\"${role_view-realm}\",\"composite\":false,\"clientRole\":true,\"containerId\":\"00000000-0000-0000-0000-000000000054\",\"attributes\":{}}]"
+  },
+  {
+    "id": "00000000-0000-0000-0000-000000000039",
+    "time": 1794961226508,
+    "realmId": "00000000-0000-0000-0000-000000000018",
+    "authDetails": {
+      "realmId": "00000000-0000-0000-0000-000000000059",
+      "clientId": "00000000-0000-0000-0000-000000000029",
+      "userId": "00000000-0000-0000-0000-000000000014",
+      "ipAddress": "127.0.0.1"
+    },
+    "operationType": "CREATE",
+    "resourceType": "CLIENT_SCOPE_CLIENT_MAPPING",
+    "resourcePath": "clients/00000000-0000-0000-0000-000000000022/default-client-scopes/00000000-0000-0000-0000-000000000051"
+  },
+  {
+    "id": "00000000-0000-0000-0000-000000000064",
+    "time": 1794961112559,
+    "realmId": "00000000-0000-0000-0000-000000000018",
+    "authDetails": {
+      "realmId": "00000000-0000-0000-0000-000000000059",
+      "clientId": "00000000-0000-0000-0000-000000000029",
+      "userId": "00000000-0000-0000-0000-000000000014",
+      "ipAddress": "127.0.0.1"
+    },
+    "operationType": "CREATE",
+    "resourceType": "REALM_ROLE_MAPPING",
+    "resourcePath": "users/00000000-0000-0000-0000-000000000004/role-mappings/realm",
+    "representation": "[{\"id\":\"00000000-0000-0000-0000-000000000040\",\"name\":\"app-admin\",\"composite\":false,\"clientRole\":false,\"containerId\":\"00000000-0000-0000-0000-000000000018\",\"attributes\":{}}]"
+  },
+  {
+    "id": "00000000-0000-0000-0000-000000000023",
+    "time": 1794961112490,
+    "realmId": "00000000-0000-0000-0000-000000000018",
+    "authDetails": {
+      "realmId": "00000000-0000-0000-0000-000000000059",
+      "clientId": "00000000-0000-0000-0000-000000000029",
+      "userId": "00000000-0000-0000-0000-000000000014",
+      "ipAddress": "127.0.0.1"
+    },
+    "operationType": "CREATE",
+    "resourceType": "REALM_ROLE",
+    "resourcePath": "roles/app-admin",
+    "representation": "{\"id\":\"00000000-0000-0000-0000-000000000040\",\"name\":\"app-admin\",\"composite\":false}"
+  },
+  {
+    "id": "00000000-0000-0000-0000-000000000037",
+    "time": 1794961112464,
+    "realmId": "00000000-0000-0000-0000-000000000018",
+    "authDetails": {
+      "realmId": "00000000-0000-0000-0000-000000000059",
+      "clientId": "00000000-0000-0000-0000-000000000029",
+      "userId": "00000000-0000-0000-0000-000000000014",
+      "ipAddress": "127.0.0.1"
+    },
+    "operationType": "ACTION",
+    "resourceType": "USER",
+    "resourcePath": "users/00000000-0000-0000-0000-000000000045/reset-password"
+  },
+  {
+    "id": "00000000-0000-0000-0000-000000000016",
+    "time": 1794961112370,
+    "realmId": "00000000-0000-0000-0000-000000000018",
+    "authDetails": {
+      "realmId": "00000000-0000-0000-0000-000000000059",
+      "clientId": "00000000-0000-0000-0000-000000000029",
+      "userId": "00000000-0000-0000-0000-000000000014",
+      "ipAddress": "127.0.0.1"
+    },
+    "operationType": "UPDATE",
+    "resourceType": "USER",
+    "resourcePath": "users/00000000-0000-0000-0000-000000000045",
+    "representation": "{\"enabled\":false}",
+    "details": {
+      "previous_enabled": "true",
+      "updated_enabled": "false"
+    }
+  },
+  {
+    "id": "00000000-0000-0000-0000-000000000043",
+    "time": 1794961112290,
+    "realmId": "00000000-0000-0000-0000-000000000018",
+    "authDetails": {
+      "realmId": "00000000-0000-0000-0000-000000000059",
+      "clientId": "00000000-0000-0000-0000-000000000029",
+      "userId": "00000000-0000-0000-0000-000000000014",
+      "ipAddress": "127.0.0.1"
+    },
+    "operationType": "CREATE",
+    "resourceType": "USER",
+    "resourcePath": "users/00000000-0000-0000-0000-000000000045",
+    "representation": "{\"username\":\"dave\",\"enabled\":true}"
+  },
+  {
+    "id": "00000000-0000-0000-0000-000000000047",
+    "time": 1794961111369,
+    "realmId": "00000000-0000-0000-0000-000000000018",
+    "authDetails": {
+      "realmId": "00000000-0000-0000-0000-000000000059",
+      "clientId": "00000000-0000-0000-0000-000000000029",
+      "userId": "00000000-0000-0000-0000-000000000014",
+      "ipAddress": "127.0.0.1"
+    },
+    "operationType": "CREATE",
+    "resourceType": "USER",
+    "resourcePath": "users/00000000-0000-0000-0000-000000000044",
+    "representation": "{\"username\":\"carol\",\"firstName\":\"Carol\",\"lastName\":\"Example\",\"email\":\"carol@example.com\",\"emailVerified\":true,\"enabled\":true}"
+  },
+  {
+    "id": "00000000-0000-0000-0000-000000000049",
+    "time": 1794961111268,
+    "realmId": "00000000-0000-0000-0000-000000000018",
+    "authDetails": {
+      "realmId": "00000000-0000-0000-0000-000000000059",
+      "clientId": "00000000-0000-0000-0000-000000000029",
+      "userId": "00000000-0000-0000-0000-000000000014",
+      "ipAddress": "127.0.0.1"
+    },
+    "operationType": "CREATE",
+    "resourceType": "USER",
+    "resourcePath": "users/00000000-0000-0000-0000-000000000004",
+    "representation": "{\"username\":\"alice\",\"firstName\":\"Alice\",\"lastName\":\"Example\",\"email\":\"alice@example.com\",\"emailVerified\":true,\"enabled\":true}"
+  },
+  {
+    "id": "00000000-0000-0000-0000-000000000041",
+    "time": 1794961111079,
+    "realmId": "00000000-0000-0000-0000-000000000018",
+    "authDetails": {
+      "realmId": "00000000-0000-0000-0000-000000000059",
+      "clientId": "00000000-0000-0000-0000-000000000029",
+      "userId": "00000000-0000-0000-0000-000000000014",
+      "ipAddress": "127.0.0.1"
+    },
+    "operationType": "CREATE",
+    "resourceType": "CLIENT",
+    "resourcePath": "clients/00000000-0000-0000-0000-000000000007",
+    "representation": "{\"id\":\"00000000-0000-0000-0000-000000000007\",\"clientId\":\"example-app\",\"directAccessGrantsEnabled\":true,\"publicClient\":true}"
+  },
+  {
+    "id": "00000000-0000-0000-0000-000000000012",
+    "time": 1794961111044,
+    "realmId": "00000000-0000-0000-0000-000000000018",
+    "authDetails": {
+      "realmId": "00000000-0000-0000-0000-000000000059",
+      "clientId": "00000000-0000-0000-0000-000000000029",
+      "userId": "00000000-0000-0000-0000-000000000014",
+      "ipAddress": "127.0.0.1"
+    },
+    "operationType": "CREATE",
+    "resourceType": "CLIENT_ROLE_MAPPING",
+    "resourcePath": "users/00000000-0000-0000-0000-000000000011/role-mappings/clients/00000000-0000-0000-0000-000000000054",
+    "representation": "[{\"id\":\"00000000-0000-0000-0000-000000000034\",\"name\":\"view-events\",\"description\":\"${role_view-events}\",\"composite\":false,\"clientRole\":true,\"containerId\":\"00000000-0000-0000-0000-000000000054\",\"attributes\":{}}]"
+  },
+  {
+    "id": "00000000-0000-0000-0000-000000000006",
+    "time": 1794961110699,
+    "realmId": "00000000-0000-0000-0000-000000000018",
+    "authDetails": {
+      "realmId": "00000000-0000-0000-0000-000000000059",
+      "clientId": "00000000-0000-0000-0000-000000000029",
+      "userId": "00000000-0000-0000-0000-000000000014",
+      "ipAddress": "127.0.0.1"
+    },
+    "operationType": "CREATE",
+    "resourceType": "CLIENT",
+    "resourcePath": "clients/00000000-0000-0000-0000-000000000022",
+    "representation": "{\"id\":\"00000000-0000-0000-0000-000000000022\",\"clientId\":\"paramify-reader\",\"secret\":\"**********\",\"standardFlowEnabled\":false,\"directAccessGrantsEnabled\":false,\"serviceAccountsEnabled\":true,\"publicClient\":false}"
+  },
+  {
+    "id": "00000000-0000-0000-0000-000000000056",
+    "time": 1794961110424,
+    "realmId": "00000000-0000-0000-0000-000000000018",
+    "authDetails": {
+      "realmId": "00000000-0000-0000-0000-000000000059",
+      "clientId": "00000000-0000-0000-0000-000000000029",
+      "userId": "00000000-0000-0000-0000-000000000014",
+      "ipAddress": "127.0.0.1"
+    },
+    "operationType": "UPDATE",
+    "resourceType": "REALM",
+    "resourcePath": "events/config",
+    "representation": "{\"eventsEnabled\":true,\"eventsExpiration\":7776000,\"eventsListeners\":[\"jboss-logging\"],\"adminEventsEnabled\":true,\"adminEventsDetailsEnabled\":true}"
+  }
+]
