@@ -17,7 +17,9 @@ schemas and the `paramify` CLI — not the internal code.
   and reset-credentials flows with each step's effective requirement (so a phishing-resistant authenticator counts
   only when every sign-in must pass it), required actions such as terms and conditions, identity providers, user
   federation, and login and admin event logging. Client secrets and bind credentials are never written to the
-  evidence, and an unreadable section leaves its fields null rather than empty.
+  evidence, and an unreadable section leaves its fields null rather than empty. The local sign-in check leaves out
+  session reuse, the identity provider redirector and the Organization step that Keycloak 26 adds to new realms. A
+  refused call names the client that holds the missing role, `master-realm` when the realm read is `master`.
 
 - **Literal pattern lists.** A `type: patterns` field can declare `globs: false`; `validate`, the run and the TUI then
   refuse a pattern holding `*` or `?`, and `describe` says the field takes patterns without wildcards.
