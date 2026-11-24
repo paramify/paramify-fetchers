@@ -680,7 +680,8 @@ def newest_since(client: GitHubClient, path: str, key: str, since: float, cap: i
 # --- the entry point ---------------------------------------------------------
 
 def run(name: str, collect: Callable[[GitHubClient, dict, List[dict], Dict[str, Any]], Optional[dict]],
-        config: Optional[Config] = None, inventory: bool = False) -> int:
+        config: Optional[Config] = None, inventory: bool = False,
+        check: Optional[Callable[[Dict[str, Any]], Optional[str]]] = None) -> int:
     """Run one fetcher against the organization in the environment and write its evidence. Returns the exit code.
 
     An inventory's `collect` returns its records under "data". Any failure withholds every record (`data: []`,
@@ -697,6 +698,11 @@ def run(name: str, collect: Callable[[GitHubClient, dict, List[dict], Dict[str, 
         settings = {key: _env_value(env, default) for key, (env, default) in (config or {}).items()}
     except ValueError as exc:
         report_failure(str(exc), "bad_config")
+        return 1
+    # Settings that conflict with each other fail before the first API call, like a value of the wrong type.
+    problem = check(settings) if check else None
+    if problem:
+        report_failure(problem, "bad_config")
         return 1
 
     filters_ignored = []

@@ -1,0 +1,17 @@
+validator: azure_vwan_all_links_ikev2
+cases:
+  - name: compliant
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"ikev2_link_connections":2,"total_vpn_link_connections":2}}}'
+
+  - name: ikev2_link_connections_short
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"ikev2_link_connections":1,"total_vpn_link_connections":2}}}'
+
+  - name: no_total_vpn_link_connections
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"ikev2_link_connections":0,"total_vpn_link_connections":0}}}'
+
+  - name: ikev2_link_connections_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"ikev2_link_connections_renamed":2,"total_vpn_link_connections":2}}}'

@@ -9,9 +9,11 @@ intersect the sets a manifest produces, and for each one:
      cached id (the lock file) or, failing that, by matching `name`,
   2. **creates it only if absent** (`POST /validators`); an existing validator is
      never patched unless `--update` is passed, so customer tuning survives,
-  3. **associates on create only** — after creating, CONNECTs the validator to
-     each of its evidence sets (`POST /evidence/{id}/associate`); it never
-     re-asserts wiring on a validator that already existed,
+  3. **associates on create** — after creating, CONNECTs the validator to
+     each of its evidence sets (`POST /evidence/{id}/associate`). A validator
+     that already existed is paired only with `pair_existing` (the TUI's sync
+     asks for it), and then only with the in-scope sets it isn't paired with
+     yet; the CLI leaves existing wiring alone,
   4. puts the default custom tags on it — provenance + the registry category's
      display name — additively, on every run, created or not
      (framework/custom_tags.py).
@@ -73,6 +75,46 @@ def build_payload(v: Dict) -> Dict:
     return payload
 
 
+# What the API fills in on a rule the registry leaves it out of. A remote rule
+# that only adds these still matches the registry's.
+_RULE_DEFAULTS = {"disposition": "PASS"}
+
+
+def _norm(value):
+    if isinstance(value, str):
+        return value.strip()  # the API may append a newline to text it stores
+    if isinstance(value, list):
+        return [_norm(x) for x in value]
+    if isinstance(value, dict):
+        return {k: _norm(x) for k, x in value.items() if x is not None}
+    return value
+
+
+def _rule_matches(local: Dict, remote: Dict) -> bool:
+    local, remote = _norm(local), _norm(remote)
+    extra = {k: v for k, v in remote.items() if k not in local}
+    return all(remote.get(k) == v for k, v in local.items()) and all(
+        _RULE_DEFAULTS.get(k) == v for k, v in extra.items())
+
+
+def differs(payload: Dict, remote: Dict) -> Optional[bool]:
+    """Whether Paramify's copy of a validator differs from the registry payload:
+    True or False, or None when the remote content was not read."""
+    if not remote:
+        return None
+    for k, v in payload.items():
+        if k in ("validationRules", "attestationRules"):
+            theirs = remote.get(k) or []
+            mine = v or []
+            if not isinstance(theirs, list) or len(theirs) != len(mine):
+                return True
+            if not all(isinstance(t, dict) and _rule_matches(m, t) for m, t in zip(mine, theirs)):
+                return True
+        elif _norm(v) != _norm(remote.get(k)):
+            return True
+    return False
+
+
 def load_lock(lock_path: Path) -> Dict[str, str]:
     """Read the customer-side {key: paramify_id} lock, or {} if absent/unreadable."""
     try:
@@ -112,6 +154,7 @@ def sync_validators(
     base_url: Optional[str] = None,
     dry_run: bool = False,
     update: bool = False,
+    pair_existing: bool = False,
     lock_path: Optional[str] = None,
     on_event: Optional[Callable[[dict], None]] = None,
     config: Optional[Dict] = None,
@@ -120,10 +163,13 @@ def sync_validators(
 ) -> Dict:
     """Reconcile a list of registry validator dicts against Paramify.
 
-    Create-or-skip; associate on create only; `update` opt-in patches existing;
-    `dry_run` performs no writes (reads only, to report accurately, when a client
-    is available). Returns a summary dict; never raises for per-validator errors
-    (those are isolated and counted), only for setup errors.
+    Create-or-skip; associate on create; `update` opt-in patches an existing
+    validator whose content differs (or can't be read); `pair_existing` opt-in
+    pairs an existing validator with the in-scope sets (`pair_sets`, else
+    `evidence_sets`) it isn't paired with yet. `dry_run` performs no writes
+    (reads only, to report accurately, when a client is available). Returns a
+    summary dict; never raises for per-validator errors (those are isolated and
+    counted), only for setup errors.
     """
     config = config or {}
     base_url, resources = open_workspace(config, base_url=base_url, token=token, client=client,
@@ -158,11 +204,13 @@ def sync_validators(
         "base_url": base_url,
         "dry_run": dry_run,
         "update": update,
+        "pair_existing": pair_existing,
         "validators": len(validators),
         "lock_path": str(lock_file),
     })
 
     _name_index: Optional[Dict[str, str]] = None
+    _content: Dict[str, Dict] = {}
 
     def name_index() -> Dict[str, str]:
         nonlocal _name_index
@@ -175,14 +223,18 @@ def sync_validators(
                 # isolated), so a transient failure cannot leave reconcile blind
                 # and create duplicates. Fail closed.
                 index: Dict[str, str] = {}
+                content: Dict[str, Dict] = {}
                 for ex in resources.validators():
                     if ex.name and ex.id:
                         index.setdefault(ex.name, ex.id)
+                        content[ex.id] = dict(getattr(ex, "content", None) or {})
+                _content.update(content)
                 _name_index = index
         return _name_index
 
     results: List[Dict] = []
     created = updated = skipped = associated = set_not_found = errors = assoc_errors = 0
+    paired_existing = 0
 
     def add_result(r: Dict) -> None:
         results.append(r)
@@ -194,6 +246,39 @@ def sync_validators(
         nonlocal stopped
         stopped = str(e)[:300]
         logger.error("stopping the sweep: %s", stopped)
+
+    def connect(key: str, vid: str, refs: List[str], name: Optional[str] = None) -> Dict[str, List[str]]:
+        """CONNECT `vid` to each set in `refs`, isolating each failure. With `name`
+        (an existing validator), a set it is already paired with is left alone,
+        and a dry run only reports what it would pair."""
+        nonlocal associated, set_not_found, assoc_errors, paired_existing
+        assert resources is not None
+        out: Dict[str, List[str]] = {"paired": [], "already_paired": [], "set_not_found": [],
+                                     "associate_failed": []}
+        for ref in refs:
+            try:
+                found = resources.evidence_by_reference([ref]).get(ref)
+                if not found:
+                    out["set_not_found"].append(ref)
+                    set_not_found += 1
+                    continue
+                if name is not None and (vid in found.validators or name in found.validators):
+                    out["already_paired"].append(ref)
+                    continue
+                if not dry_run:
+                    resources.associate(found.id, "VALIDATOR", vid)
+                    associated += 1
+                if name is not None:
+                    paired_existing += 1
+                out["paired"].append(ref)
+            except Exception as ae:
+                out["associate_failed"].append(ref)
+                assoc_errors += 1
+                logger.error("%s: associate to %s failed: %s", key, ref, ae)
+                if isinstance(ae, ApiError) and ae.fatal:
+                    stop(ae)  # the validator exists and is locked; record it, then stop
+                    break
+        return out
 
     for v in validators:
         if stopped:
@@ -228,41 +313,40 @@ def sync_validators(
                 tags = _tag(vid, category)
                 # A failed association must NOT undo/duplicate the created validator
                 # nor mark the whole validator an error — isolate per set.
-                assoc, missing, failed = [], [], []
-                for ref in refs:
-                    try:
-                        found = resources.evidence_by_reference([ref]).get(ref)
-                        if found:
-                            resources.associate(found.id, "VALIDATOR", vid)
-                            assoc.append(ref)
-                            associated += 1
-                        else:
-                            missing.append(ref)
-                            set_not_found += 1
-                    except Exception as ae:
-                        failed.append(ref)
-                        assoc_errors += 1
-                        logger.error("%s: associate to %s failed: %s", key, ref, ae)
-                        if isinstance(ae, ApiError) and ae.fatal:
-                            stop(ae)  # the validator exists and is locked; record it, then stop
-                            break
+                done = connect(key, vid, refs)
                 result = {
                     "key": key, "outcome": "created", "validator_id": vid,
-                    "associated": assoc, "set_not_found": missing, "tags": tags,
+                    "associated": done["paired"], "set_not_found": done["set_not_found"], "tags": tags,
                 }
-                if failed:
-                    result["associate_failed"] = failed
+                if done["associate_failed"]:
+                    result["associate_failed"] = done["associate_failed"]
                 add_result(result)
                 continue
 
-            if update:
+            # An existing validator. Read the workspace's copy (the name index
+            # holds it) only when it decides something: an update or a preview.
+            changed: Optional[bool] = None
+            if resources is not None and (update or dry_run):
+                name_index()
+                changed = differs(payload, _content.get(existing_id) or {})
+            wiring: Dict[str, List[str]] = {}
+            if pair_existing and resources is not None:
+                wiring = connect(key, existing_id, v.get("pair_sets") or refs, name=v["name"])
+            extra: Dict = {"differs": changed}
+            if wiring.get("paired"):
+                extra["would_pair" if dry_run else "paired"] = wiring["paired"]
+            for field in ("set_not_found", "associate_failed"):
+                if wiring.get(field):
+                    extra[field] = wiring[field]
+
+            if update and changed is not False:
                 if dry_run:
-                    add_result({"key": key, "outcome": "would_update", "validator_id": existing_id})
+                    add_result({"key": key, "outcome": "would_update", "validator_id": existing_id, **extra})
                 else:
                     assert resources is not None  # not dry_run => a client, or connect() raised
                     resources.update_validator(existing_id, payload)
                     add_result({"key": key, "outcome": "updated", "validator_id": existing_id,
-                                "tags": _tag(existing_id, category)})
+                                "tags": _tag(existing_id, category), **extra})
                 updated += 1
                 continue
 
@@ -273,6 +357,7 @@ def sync_validators(
                 "validator_id": existing_id,
                 "adopted": adopted,
                 "tags": _tag(existing_id, category),
+                **extra,
             })
         except Exception as e:  # noqa: BLE001
             logger.error("%s: sync failed: %s", key, e)
@@ -289,11 +374,13 @@ def sync_validators(
         "base_url": base_url,
         "dry_run": dry_run,
         "update": update,
+        "pair_existing": pair_existing,
         "validators": len(validators),
         "created": created,
         "updated": updated,
         "skipped": skipped,
         "associated": associated,
+        "paired_existing": paired_existing,
         "set_not_found": set_not_found,
         "errors": errors,
         "associate_errors": assoc_errors,
@@ -349,26 +436,33 @@ def collect_validators(
         select_validators,
     )
 
-    from framework.validators import manifest_tracked
+    from framework.validators import manifest_tracked_sets
 
     registry = discover_validators(root)
+    # key -> the manifest sets that track it, when a manifest scopes the run.
+    # Pairing an existing validator stays inside these, not every set it lists.
+    scope: Optional[Dict[str, List[str]]] = None
     if reference_ids is not None and manifest_path is not None:
         # A manifest's selection applies to an explicit set list too.
         fetchers = discover_fetchers(root)
         pipeline = pipeline_reference_ids(fetchers)
-        selected = manifest_tracked(api.read_manifest(manifest_path), fetchers, registry.values(),
-                                    set(reference_ids) - pipeline)
+        scope = manifest_tracked_sets(api.read_manifest(manifest_path), fetchers, registry.values(),
+                                      set(reference_ids) - pipeline)
     elif reference_ids is not None:
         pipeline = pipeline_reference_ids(discover_fetchers(root))
-        selected = select_validators(registry.values(), set(reference_ids) - pipeline)
+        wanted = set(reference_ids) - pipeline
+        selected = select_validators(registry.values(), wanted)
+        return [dict(_validator_to_dict(v), pair_sets=[r for r in v.evidence_sets if r in wanted])
+                for v in selected]
     elif manifest_path is not None:
         fetchers = discover_fetchers(root)
         manifest = api.read_manifest(manifest_path)
         # Only what the manifest tracks, not every validator for its sets.
-        selected = manifest_tracked(manifest, fetchers, registry.values())
-    else:
-        selected = list(registry.values())
-    return [_validator_to_dict(v) for v in selected]
+        scope = manifest_tracked_sets(manifest, fetchers, registry.values())
+    if scope is None:
+        return [_validator_to_dict(v) for v in registry.values()]
+    by_key = {v.key: v for v in registry.values()}
+    return [dict(_validator_to_dict(by_key[k]), pair_sets=sets) for k, sets in scope.items()]
 
 
 # --------------------------------------------------------------------------- #

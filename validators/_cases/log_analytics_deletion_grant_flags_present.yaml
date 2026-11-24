@@ -1,0 +1,17 @@
+validator: log_analytics_deletion_grant_flags_present
+cases:
+  - name: grants_present
+    expect: PASS
+    artifact: '{"metadata": {"exit_code": 0,"status": "success"},"payload": {"results": {"workspaces": [{"deletion_grants": [{"assignment_type": "active","can_delete_data": false,"can_delete_workspace": false,"can_purge": false,"can_shorten_retention": true,"condition": null,"eligibility_end": null,"granted": {},"principal_id": "p","principal_type": "User","role_name": "Monitoring Contributor","scope": "/subscriptions/s","scope_level": "subscription"}],"name": "law-a","principals_with_deletion_rights": 1}]},"summary": {"max_principals_with_deletion_rights": 1,"workspaces_collected": 1}}}'
+
+  - name: purge_flag_renamed
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0,"status": "success"},"payload": {"results": {"workspaces": [{"deletion_grants": [{"assignment_type": "active","can_delete_data": true,"can_delete_workspace": true,"can_shorten_retention": true,"condition": null,"eligibility_end": null,"granted": {"purge": {"kind": "explicit","via": "x"}},"principal_id": "p","principal_type": "User","purge_allowed": true,"role_name": "Data Purger","scope": "/subscriptions/s","scope_level": "subscription"}],"name": "law-a","principals_with_deletion_rights": 1}]},"summary": {"max_principals_with_deletion_rights": 1,"workspaces_collected": 1}}}'
+
+  - name: delete_data_flag_renamed
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0,"status": "success"},"payload": {"results": {"workspaces": [{"deletion_grants": [{"assignment_type": "active","can_delete_workspace": true,"can_purge": true,"can_shorten_retention": true,"condition": null,"delete_data_allowed": true,"eligibility_end": null,"granted": {"purge": {"kind": "explicit","via": "x"}},"principal_id": "p","principal_type": "User","role_name": "Data Purger","scope": "/subscriptions/s","scope_level": "subscription"}],"name": "law-a","principals_with_deletion_rights": 1}]},"summary": {"max_principals_with_deletion_rights": 1,"workspaces_collected": 1}}}'
+
+  - name: grants_not_collected
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0,"status": "success"},"payload": {"results": {"workspaces": [{"deletion_grants": null}]},"summary": {}}}'

@@ -878,7 +878,9 @@ def main() -> int:
     in_scope_names = {z["name"].lower() for z in zones}
     duplicates = [d for d in duplicates if d["name"] in in_scope_names]
     unread_ops = ("privatedns.PrivateDnsManagementClient (init)", "privatedns.private_zones.list")
-    if not (subscription_id and cred is not None) or any(f["operation"].startswith(unread_ops) for f in collector.failures):
+    listed = bool(subscription_id and cred is not None) and not any(
+        f["operation"].startswith(unread_ops) for f in collector.failures)
+    if not listed:
         exclusions.mark_unread()
     exclusions.warn_unmatched(logger)
 
@@ -890,7 +892,7 @@ def main() -> int:
         summary={
             **summarize(zones, duplicates, duplicates_scope),
             "provider_registration_status": registration,
-            **exclusions.summary(excluded, ("private_dns_zone",), {"private_dns_zones": len(zones)}),
+            **exclusions.summary(excluded, ("private_dns_zone",), {"private_dns_zones": len(zones) if listed else None}),
         },
     )
     filename = f"azure_private_dns_zone_configuration_{sanitize_for_filename(subscription_id or 'unknown')}.json"

@@ -206,8 +206,9 @@ def summarize(plans: list[dict]) -> dict:
 # --- collection (lazy azure imports) ---
 
 def collect_plans(subscription_id, cred, collector: Collector,
-                  exclusions: ResourceExclusions | None = None) -> tuple[list[dict], list[dict]]:
-    """app_service_plans.list(detailed=True), then web_apps.list() for the join: (plans, sites), projected.
+                  exclusions: ResourceExclusions | None = None) -> tuple[list[dict] | None, list[dict] | None]:
+    """app_service_plans.list(detailed=True), then web_apps.list() for the join: (plans, sites), projected; a list
+    that couldn't be read is None.
 
     Both are ItemPaged, so the SDK follows nextLink itself. `web_apps.list()` returns
     web apps AND function apps; both run on a plan, so neither is filtered out. If the
@@ -224,7 +225,7 @@ def collect_plans(subscription_id, cred, collector: Collector,
     if client is None:
         if exclusions is not None:
             exclusions.mark_unread()
-        return [], []
+        return None, None
 
     raw_plans = collector.guard(
         "web.app_service_plans.list",
@@ -238,7 +239,7 @@ def collect_plans(subscription_id, cred, collector: Collector,
     )
     if (raw_plans is None or raw_sites is None) and exclusions is not None:
         exclusions.mark_unread()
-    return raw_plans or [], raw_sites or []
+    return raw_plans, raw_sites
 
 
 def main() -> int:
@@ -258,8 +259,8 @@ def main() -> int:
     subscription_id = sub["subscription_id"]
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
-    raw_plans: list[dict] = []
-    raw_sites: list[dict] = []
+    raw_plans: list[dict] | None = None
+    raw_sites: list[dict] | None = None
     exclusions = ResourceExclusions.from_env()
     registration = REGISTRATION_UNKNOWN
     if subscription_id and cred is not None:
@@ -285,8 +286,9 @@ def main() -> int:
         )
 
     exclusions.record_invalid(collector)
-    plans, excluded = plan_records(raw_plans, raw_sites, exclusions)
-    if not (subscription_id and cred is not None):
+    plans_read, sites_read = raw_plans is not None, raw_sites is not None
+    plans, excluded = plan_records(raw_plans or [], raw_sites or [], exclusions)
+    if not (plans_read and sites_read):
         exclusions.mark_unread()
     exclusions.warn_unmatched(logger)
     summary = summarize(plans)
@@ -304,7 +306,8 @@ def main() -> int:
             **summary,
             "provider_registration_status": registration,
             **exclusions.summary(excluded, (PLAN_KIND, SITE_KIND), {
-                "app_service_plans": len(plans), "sites": summary["total_sites"]}),
+                "app_service_plans": len(plans) if plans_read else None,
+                "sites": summary["total_sites"] if sites_read else None}),
         },
     )
 

@@ -536,7 +536,8 @@ def test_v_previews_validators(tmp_path, monkeypatch, run_tui):
         return confirm
 
     confirm = run_tui(body, _manifest(tmp_path))
-    assert "Create 1 validator in" in confirm and "1 already exists" in confirm
+    assert "Create 1 validator and pair it with its evidence sets: k1." in confirm
+    assert "1 already matches and is paired." in confirm
     assert runs == [True], "a declined confirm still synced"
 
 
@@ -884,7 +885,7 @@ def test_a_validators_preview_that_errors_is_a_failure(tmp_path, monkeypatch, ru
 
     screen, banner, log = run_tui(body, _manifest(tmp_path))
     assert screen == "WorkspaceScreen"
-    assert banner.plain.startswith("Validators: the preview failed for 1 validator, so nothing was created")
+    assert banner.plain.startswith("Validators: the preview failed for 1 validator, so nothing was changed")
     assert banner.style == palette.FAIL
     assert "[error] k0  set lookup failed" in log
 
@@ -905,23 +906,67 @@ def test_v_says_when_sets_do_not_exist_yet(tmp_path, monkeypatch, run_tui):
 
     confirm = run_tui(body, _manifest(tmp_path))
     assert "1 evidence set doesn't exist yet" in confirm and "press s first" in confirm
-    assert "and pair each one with its evidence sets" not in confirm
 
 
-def test_v_says_how_to_pair_validators_that_exist(tmp_path, monkeypatch, run_tui):
-    _stub(monkeypatch, _status())   # bravo has an unpaired validator that already exists
-    monkeypatch.setattr(api, "sync_validators", lambda root, manifest_path=None, config_path=None, *, dry_run=False,
-                        on_event=None, **kw: on_event({"event": "sync_validator", "key": "k1",
-                                                       "outcome": "would_skip_exists"}) or {"ok": True})
+def test_v_pairs_and_updates_validators_that_exist(tmp_path, monkeypatch, run_tui):
+    from framework.tui.modals import ConfirmModal
+
+    _stub(monkeypatch, _status())
+    runs = []
+
+    def sync_validators(root, manifest_path=None, config_path=None, *, dry_run=False, on_event=None, **kw):
+        runs.append((dry_run, kw.get("update"), kw.get("pair_existing")))
+        if dry_run:
+            on_event({"event": "sync_validator", "key": "k1", "outcome": "would_skip_exists",
+                      "would_pair": ["EVD-B"], "differs": False})
+            on_event({"event": "sync_validator", "key": "k2", "outcome": "would_update", "differs": True})
+            on_event({"event": "sync_validator", "key": "k3", "outcome": "would_skip_exists", "differs": False})
+        else:
+            on_event({"event": "sync_validator", "key": "k1", "outcome": "skipped_exists", "paired": ["EVD-B"]})
+            on_event({"event": "sync_validator", "key": "k2", "outcome": "updated"})
+            on_event({"event": "sync_complete", "ok": True, "created": 0, "updated": 1, "associated": 1})
+        return {"ok": True}
+
+    monkeypatch.setattr(api, "sync_validators", sync_validators)
 
     async def body(app, pilot):
         page = await _open(app, pilot)
         await pilot.press("v")
         await _settle(app, pilot)
-        return _text(page.query_one("#pf-activity", Static).content)
+        confirm = str(app.screen._message) if isinstance(app.screen, ConfirmModal) else ""
+        await pilot.press("y")
+        await _settle(app, pilot)
+        log = "\n".join(line.text for line in page.query_one("#pf-log").lines)
+        return confirm, _text(page.query_one("#pf-activity", Static).content), log
 
-    activity = run_tui(body, _manifest(tmp_path))
-    assert "1 validator exists but isn't paired" in activity and "in Paramify" in activity
+    confirm, activity, log = run_tui(body, _manifest(tmp_path))
+    assert "Pair 1 validator already in Paramify with 1 more evidence set: k1." in confirm
+    assert "Update 1 validator to match your files: k2." in confirm and "replaces any edits" in confirm
+    assert "1 already matches and is paired." in confirm
+    assert "in Paramify." not in activity  # no "do it yourself"
+    assert runs == [(True, True, True), (False, True, True)]
+    assert "[paired] k1  → EVD-B" in log and "[updated] k2" in log
+    assert activity.startswith("Validators: 0 created, 1 updated, 1 pairing made.")
+
+
+def test_v_says_when_every_validator_is_in_place(tmp_path, monkeypatch, run_tui):
+    stat = _status()
+    stat["fetchers"] = [r for r in stat["fetchers"] if r["evidence_set"].get("exists") is not False]
+    _stub(monkeypatch, stat)
+    monkeypatch.setattr(api, "sync_validators", lambda root, manifest_path=None, config_path=None, *, dry_run=False,
+                        on_event=None, **kw: on_event({"event": "sync_validator", "key": "k1",
+                                                       "outcome": "would_skip_exists", "differs": False})
+                        or {"ok": True})
+
+    async def body(app, pilot):
+        page = await _open(app, pilot)
+        await pilot.press("v")
+        await _settle(app, pilot)
+        return type(app.screen).__name__, _text(page.query_one("#pf-activity", Static).content)
+
+    screen, activity = run_tui(body, _manifest(tmp_path))
+    assert screen == "WorkspaceScreen"
+    assert "all 1 are in Paramify, paired, and match your files" in activity
 
 
 def test_coming_back_on_the_capability_view_focuses_it(tmp_path, monkeypatch, run_tui):
