@@ -59,6 +59,7 @@ def _environment(m, monkeypatch, tmp_path, patterns):
     monkeypatch.setattr(m, "credential", lambda: object())
     monkeypatch.setattr(m, "provider_registration_status", lambda *a: "registered")
     monkeypatch.setenv("EVIDENCE_DIR", str(tmp_path))
+    monkeypatch.delenv(listeners.EXPECTED_ENV, raising=False)
     if patterns is None:
         monkeypatch.delenv(ENV, raising=False)
     else:
@@ -167,6 +168,7 @@ def test_tls_listeners_without_patterns_adds_only_empty_exclusion_fields(monkeyp
     assert_summary_documented("azure/app_gateway_tls_listeners", evidence["summary"])
     assert evidence["summary"] == {
         **listeners.summarize(results["application_gateways"], results["listeners"]),
+        "expected_listeners": None, "expected_listeners_missing": None, "expected_listeners_missing_patterns": None,
         "completeness_match": True, "provider_registration_status": "registered",
         **_added({"application_gateways": 3, "listeners": 3}, ("application_gateways",)),
     }
@@ -831,3 +833,51 @@ def test_active_active_and_p2s_count_only_vpn_gateways():
     summary = vpn.summarize(gateways, [], [])
     assert (summary["total_gateways"], summary["vpn_gateways"]) == (3, 2)
     assert (summary["active_active_gateways"], summary["p2s_enabled_gateways"]) == (1, 1)
+
+
+# --- expected listeners ---
+
+def _expected_run(monkeypatch, tmp_path, expected, exclusions=None, gateways=None):
+    _environment(ag, monkeypatch, tmp_path, exclusions)
+    monkeypatch.setenv(listeners.EXPECTED_ENV, expected)
+    gateways = [_gateway("agw-in", NET_IN, "regionwest", listener_names=("sso-https", "registry-https")),
+                _gateway("agw-out", NET_OUT, "regionwest", listener_names=("cat-https",))] if gateways is None else gateways
+    monkeypatch.setattr(ag, "list_gateways", lambda *a: gateways)
+    monkeypatch.setattr(ag, "resource_graph_gateway_count", lambda *a: len(gateways))
+    code = listeners.run_fetcher("azure_app_gateway_tls_listeners", listeners.logger, listeners.build)
+    return code, _read(tmp_path, "azure_app_gateway_tls_listeners")
+
+
+def test_expected_listeners_all_present(monkeypatch, tmp_path, assert_summary_documented):
+    code, evidence = _expected_run(monkeypatch, tmp_path, "name:SSO-*, name:registry-https, name:cat-https")
+    summary = evidence["summary"]
+    assert code == 0
+    assert_summary_documented("azure/app_gateway_tls_listeners", summary)
+    assert summary["expected_listeners"] == ["name:SSO-*", "name:registry-https", "name:cat-https"]
+    assert (summary["expected_listeners_missing"], summary["expected_listeners_missing_patterns"]) == (0, [])
+
+
+def test_expected_listener_on_an_excluded_gateway_is_missing(monkeypatch, tmp_path):
+    code, evidence = _expected_run(monkeypatch, tmp_path, "name:sso-https, name:cat-https", exclusions="rg:rg-out")
+    assert code == 0
+    assert evidence["summary"]["expected_listeners_missing"] == 1
+    assert evidence["summary"]["expected_listeners_missing_patterns"] == ["name:cat-https"]
+
+
+def test_expected_listeners_with_no_gateways_are_all_missing(monkeypatch, tmp_path):
+    code, evidence = _expected_run(monkeypatch, tmp_path, "name:sso-https, host:*.example.com", gateways=[])
+    assert code == 0
+    assert evidence["summary"]["expected_listeners_missing"] == 2
+
+
+def test_invalid_expected_listener_entry_fails_the_run_and_leaves_missing_null(monkeypatch, tmp_path):
+    code, evidence = _expected_run(monkeypatch, tmp_path, "name:sso-https, sso-https, host:")
+    summary = evidence["summary"]
+    assert code != 0
+    assert summary["expected_listeners"] == ["name:sso-https"]
+    assert (summary["expected_listeners_missing"], summary["expected_listeners_missing_patterns"]) == (None, None)
+    failures = evidence["metadata"]["api_failures"]
+    assert sorted(f["message"] for f in failures if "EXPECTED_LISTENERS" in f["operation"]) == [
+        "'host:' is not name:<listener name glob> or host:<host name glob>",
+        "'sso-https' is not name:<listener name glob> or host:<host name glob>",
+    ]
