@@ -12,6 +12,14 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`keycloak` category and `keycloak_realm_security` fetcher.** Reads a Keycloak realm through the Admin REST API with a
+  read-only service-account client: session and token lifetimes, brute-force lockout, password policy, the browser
+  and reset-credentials flows with each step's effective requirement (so a phishing-resistant authenticator counts
+  only when every sign-in must pass it), required actions such as terms and conditions, identity providers, user
+  federation, and login and admin event logging. Client secrets and bind credentials are never written to the
+  evidence, and an unreadable section leaves its fields null rather than empty. The local sign-in check leaves out
+  session reuse, the identity provider redirector and the Organization step that Keycloak 26 adds to new realms. A
+  refused call names the client that holds the missing role, `master-realm` when the realm read is `master`.
 - **`kubernetes_workload_resilience` fetcher and `kubernetes` category.** Reads any cluster's Kubernetes API (GET and
   LIST only) through a kubeconfig, including AKS with kubelogin, or the in-cluster service account. For each Deployment
   and StatefulSet: replicas with any autoscaler minimum, PodDisruptionBudget coverage and budgets that block node drains,

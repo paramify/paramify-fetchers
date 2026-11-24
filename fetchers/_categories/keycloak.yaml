@@ -1,0 +1,46 @@
+display_name: Keycloak
+description: >-
+  Keycloak identity provider, read through the Keycloak Admin REST API. Realm sign-in, session, lockout,
+  password and event settings, authentication flows, required actions, and federation. One service-account
+  client per Keycloak instance.
+
+requires:
+  python_packages:
+    - requests
+    - python-dotenv
+
+# Shared by every keycloak fetcher. The runner injects these env vars for any fetcher with category: keycloak.
+config_schema:
+  base_url:
+    type: string
+    required: true
+    env: KEYCLOAK_BASE_URL
+    description: >-
+      Keycloak base URL, such as https://keycloak.admin.example.com. Include the /auth path for Keycloak
+      versions that still serve it.
+  realm:
+    type: string
+    required: true
+    env: KEYCLOAK_REALM
+    description: >-
+      The realm to read. Required, with no default, so the evidence always names a realm someone chose; a missing
+      realm fails the run as bad_config.
+  auth_realm:
+    type: string
+    env: KEYCLOAK_AUTH_REALM
+    description: >-
+      The realm that holds the service-account client, when it is not the realm being read (for example master).
+      Defaults to realm.
+
+secrets:
+  - name: client_id
+    env: KEYCLOAK_CLIENT_ID
+    description: >-
+      Client ID of a confidential client with service accounts enabled. Its service account needs the roles
+      view-realm, view-identity-providers and view-events, and nothing else. For a client in master, they come from
+      the <realm>-realm client in master (master-realm to read master itself). Otherwise they come from
+      realm-management in the realm being read. On Keycloak 26.8.2 and later, also assign the built-in kc-admin-api
+      client scope to the client as a default scope.
+  - name: client_secret
+    env: KEYCLOAK_CLIENT_SECRET
+    description: Client secret of that client.
