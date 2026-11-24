@@ -1,6 +1,8 @@
 # Schedule for the scheduler service. Times are UTC (container clock).
 # SHELL+BASH_ENV make each job a bash shell that restores the container env
-# (cron strips it); >/proc/1/fd/{1,2} sends output to `docker logs`.
+# (Debian's cron strips it); >/proc/1/fd/{1,2} sends output to `docker logs`.
+# The Wolfi image runs this file with supercronic, which keeps the env, so
+# there BASH_ENV names no file and bash ignores it.
 SHELL=/bin/bash
 BASH_ENV=/tmp/container-env.sh
 

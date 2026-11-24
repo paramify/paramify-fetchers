@@ -29,13 +29,14 @@ FROM cgr.dev/chainguard/wolfi-base:latest@sha256:be019c1c74fe69204a42c4e10bc4d88
 #   and the bash fetchers were written against the GNU versions.
 # aws-cli-2: the current AWS CLI v2. (The `aws-cli-v2` package is an old build.)
 # kubectl-latest: the newest kubectl, as the old curl from stable.txt gave.
-# cronie: the cron daemon for the `scheduler` mode (see entrypoint.sh).
+# supercronic: the scheduler for `scheduler` mode (see entrypoint.sh). It runs as
+#   a non-root user and passes the container's environment to each job.
 RUN apk add --no-cache \
         python-3.14 py3.14-pip \
         bash coreutils grep sed gawk findutils tzdata \
         git curl jq \
         aws-cli-2 kubectl-latest \
-        tini cronie
+        tini supercronic
 
 # NOTE: one fetcher references `terraform`. Checkov *scans* terraform source
 # statically and does not need the binary; add the Wolfi `terraform` package
@@ -84,6 +85,16 @@ VOLUME ["/app/evidence"]
 
 COPY deploy/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh /app/deploy/run-and-upload.sh || true
+
+# Run as wolfi-base's `nonroot` user, not root. The code in /app stays owned by
+# root and read-only to it. The user can write only where the tool writes:
+# evidence/ (run output) and manifests/ (what `paramify tui` saves).
+# The UID is numeric so that Kubernetes `runAsNonRoot` can verify it.
+# A host folder mounted on /app/evidence must be writable by UID 65532; see
+# deploy/README.md.
+RUN mkdir -p /app/evidence /app/manifests \
+    && chown -R 65532:65532 /app/evidence /app/manifests
+USER 65532:65532
 
 # tini = clean PID-1 signal handling (matters for the cron scheduler mode).
 # Exec-form resolves `tini` via PATH, so it works wherever the package installs it.

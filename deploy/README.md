@@ -72,9 +72,10 @@ Three options, in order of preference:
 3. **Plain values in `deploy/.env`** — fine for local dev; not for production.
 
 > Caveats for the long-running `scheduler`: SM is read once at container start, so
-> rotated secrets need a restart; and the cron env-snapshot writes secrets to a
-> file inside the container (`/tmp`). Both are reasons to prefer option 2 for
-> production.
+> rotated secrets need a restart; and on the Debian image the cron env-snapshot
+> writes secrets to a file inside the container (`/tmp`). Both are reasons to
+> prefer option 2 for production. The Wolfi image writes no snapshot (see
+> [Two images](#two-images-debian-and-wolfi)).
 
 ## 2. Build
 
@@ -91,13 +92,16 @@ docker compose -f deploy/docker-compose.yml build --build-arg INSTALL_EXTRAS=tui
 
 ### Two images: Debian and Wolfi
 
-There are two Dockerfiles. They install the same tools and give the same image
-to use:
+There are two Dockerfiles. They install the same tools, and you use them with
+the same commands:
 
-| File | Base | Notes |
+| | `Dockerfile` | `Dockerfile.wolfi` |
 |---|---|---|
-| `Dockerfile` | `python:3.14-slim` (Debian) | The default. |
-| `Dockerfile.wolfi` | Chainguard `wolfi-base` | Far fewer known CVEs. Python 3.14 and the tools come from the Wolfi package repo. |
+| Base | `python:3.14-slim` (Debian) | Chainguard `wolfi-base` |
+| Known CVEs | Many | Far fewer |
+| Runs as | root | `nonroot` (UID 65532) |
+| Scheduler | Debian `cron`, with an env snapshot in `/tmp` | `supercronic`, which passes the env to each job |
+| Status | The default | Planned to replace `Dockerfile` |
 
 To build the Wolfi image, set `PARAMIFY_DOCKERFILE` before you build:
 
@@ -109,6 +113,18 @@ You can also put `PARAMIFY_DOCKERFILE=Dockerfile.wolfi` in `deploy/.env`. Both
 images get the tag `paramify-fetchers:beta`, so the last build is the one that
 runs. The Wolfi image is planned to become the only image, and then
 `Dockerfile` will be removed.
+
+The Wolfi image can write only to `/app/evidence` and `/app/manifests`. When you
+mount a host folder on `/app/evidence`, that folder keeps its host owner:
+
+- **Docker Desktop (macOS, Windows):** no action. Docker Desktop lets the
+  container write to the folder.
+- **Linux host:** give the folder to UID 65532 before the first run:
+  `sudo chown -R 65532:65532 ./evidence`. If the folder is not writable, the
+  entrypoint prints a warning when the container starts.
+
+supercronic does not start a job again while the last run of that job is still
+running. Debian's cron starts it again.
 
 ## 3. Play with it
 
@@ -235,8 +251,9 @@ You don't SSH in — use Docker:
 
 - **System binaries** — `pip` only installs Python deps; the `Dockerfile` adds
   `jq`/`aws`/`kubectl`/`git`/`checkov` that the fetchers shell out to.
-- **cron strips the environment** — `entrypoint.sh` snapshots it and `crontab`
-  restores it per-job via `BASH_ENV`, with output sent to `docker logs`.
+- **cron strips the environment** — on the Debian image, `entrypoint.sh`
+  snapshots it and `crontab` restores it per-job via `BASH_ENV`. On the Wolfi
+  image, supercronic keeps it. Both send job output to `docker logs`.
 - **Ephemeral filesystem** — evidence is written to a mounted volume, and
   `run-and-upload.sh` ships it to Paramify so nothing is lost when the run ends.
 - **cwd matters** — jobs `cd /app` so the tool can find its root.

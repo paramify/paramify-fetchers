@@ -5,8 +5,21 @@
 #      (also: bash, paramify tui, python ..., anything). This is the default.
 #   2. Scheduler            — `... scheduler` runs cron on the schedule in crontab.
 #
+# Two images use this file: deploy/Dockerfile (Debian, runs as root, Debian cron)
+# and deploy/Dockerfile.wolfi (runs as UID 65532, supercronic).
+#
 set -euo pipefail
 cd /app
+
+# The Wolfi image runs as a non-root user. A host folder mounted on the evidence
+# directory keeps its host owner, and on a Linux host that owner is usually not
+# this user. Say so now, not when the first run fails to write its output.
+_evidence_dir="${EVIDENCE_DIR:-/app/evidence}"
+if [ -d "$_evidence_dir" ] && [ ! -w "$_evidence_dir" ]; then
+  echo "[entrypoint] WARNING: $_evidence_dir is not writable by UID $(id -u)." >&2
+  echo "[entrypoint]   Runs cannot save evidence. On the host, run: sudo chown -R $(id -u):$(id -g) ./evidence" >&2
+fi
+unset _evidence_dir
 
 # Default upload host if the caller didn't set one. Must be https (the uploader
 # refuses to send the bearer token over cleartext to a non-loopback host).
@@ -57,18 +70,23 @@ fi
 case "${1:-}" in
   scheduler)
     echo "[entrypoint] starting cron scheduler (times are UTC inside the container)"
-    # cron does NOT inherit the container's environment. Snapshot it so each job
-    # can restore it via BASH_ENV (see deploy/crontab). NOTE: values containing
+    # Wolfi image: supercronic runs as this user, reads deploy/crontab directly,
+    # and passes this environment (with any secrets loaded above) to each job.
+    # It writes no env snapshot, so BASH_ENV in the crontab names a file that
+    # does not exist, and bash ignores it.
+    if command -v supercronic >/dev/null 2>&1; then
+      echo "[entrypoint] schedule (deploy/crontab):"
+      grep -Ev '^[[:space:]]*(#|$)' /app/deploy/crontab | sed 's/^/    /'
+      # -no-reap: tini is PID 1 and reaps child processes.
+      exec supercronic -no-reap /app/deploy/crontab
+    fi
+    # Debian image: cron does NOT inherit the container's environment. Snapshot
+    # it so each job can restore it via BASH_ENV (see deploy/crontab). NOTE: values containing
     # single quotes won't survive this simple snapshot — fine for typical tokens.
     printenv | sed -E "s/^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/export \1='\2'/" > /tmp/container-env.sh
     crontab /app/deploy/crontab
     echo "[entrypoint] installed crontab:"
     crontab -l | sed 's/^/    /'
-    # Debian's cron (deploy/Dockerfile) is `cron -f`; cronie on Wolfi
-    # (deploy/Dockerfile.wolfi) is `crond -n`. Both stay in the foreground under tini.
-    if command -v crond >/dev/null 2>&1; then
-      exec crond -n
-    fi
     exec cron -f
     ;;
   ""|-h|--help)
