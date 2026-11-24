@@ -1,0 +1,43 @@
+{
+  "apiVersion": "networking.istio.io/v1",
+  "items": [
+    {
+      "apiVersion": "networking.istio.io/v1",
+      "kind": "DestinationRule",
+      "metadata": {
+        "name": "legacy-db",
+        "namespace": "legacy",
+        "uid": "00000000-0000-0000-0000-000000000023"
+      },
+      "spec": {
+        "host": "db.legacy.svc.cluster.local",
+        "trafficPolicy": {
+          "tls": {
+            "mode": "DISABLE"
+          }
+        }
+      }
+    },
+    {
+      "apiVersion": "networking.istio.io/v1",
+      "kind": "DestinationRule",
+      "metadata": {
+        "name": "ledger",
+        "namespace": "payments",
+        "uid": "00000000-0000-0000-0000-000000000024"
+      },
+      "spec": {
+        "host": "ledger",
+        "trafficPolicy": {
+          "tls": {
+            "mode": "ISTIO_MUTUAL"
+          }
+        }
+      }
+    }
+  ],
+  "kind": "DestinationRuleList",
+  "metadata": {
+    "continue": ""
+  }
+}

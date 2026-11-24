@@ -1,0 +1,86 @@
+name: keycloak_service_accounts
+version: 0.1.0
+description: >-
+  Lists every Keycloak client that signs in as a service account, with how it authenticates, its secret's age and expiry, its owner and the roles it holds.
+category: keycloak
+source: community
+
+supports_targets: false
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: keycloak_service_accounts.json
+
+config_schema:
+  max_secret_age_days:
+    type: integer
+    required: false
+    env: KEYCLOAK_MAX_SECRET_AGE_DAYS
+    description: >
+      The adopted maximum age of a service account's shared secret, in days. There is no default: while it is unset,
+      service_account_secrets_over_max_age is null rather than judged against an age nobody adopted, and each secret's
+      age is still reported. A value that is not a whole number from 1 to 3650 fails the run as bad_config.
+  owner_attribute:
+    type: string
+    required: false
+    env: KEYCLOAK_OWNER_ATTRIBUTE
+    description: >
+      The client attribute that records who owns a service account, such as owner. There is no default: while it is
+      unset, service_accounts_without_owner is null.
+
+secrets: []          # client_id and client_secret come from the category (fetchers/_categories/keycloak.yaml)
+
+evidence_set:
+  reference_id: EVD-KEYCLOAK-SERVICE-ACCOUNTS
+  name: Keycloak Service Accounts
+  description: >-
+    Every Keycloak service-account client: how it authenticates, its secret's age and expiry, its owner, other
+    sign-in flows it allows, and its effective roles, without any secret.
+  instructions: |
+    Script: keycloak/service_accounts/fetcher.py
+
+    Access: A Keycloak client with service accounts enabled whose service account holds the realm-management client roles view-clients and view-users, and nothing else, reached from a network that can call the Keycloak admin endpoint. On Keycloak 26.8.2 and later, the client also needs the built-in kc-admin-api client scope as a default scope, or every call is refused with 401. A per-client call refused for a missing role records that role in api_failures, is not repeated for the other clients, and leaves what depends on it null.
+
+    Commands Executed:
+    - POST /realms/{auth realm}/protocol/openid-connect/token — a client-credentials token for the service account (no role)
+    - GET /admin/realms/{realm}/clients — every client with its authenticator, flows and attributes, page by page (view-clients)
+    - GET /admin/realms/{realm}/clients/{id}/service-account-user — the user each service-account client signs in as (view-clients)
+    - GET /admin/realms/{realm}/users/{id}/role-mappings/realm/composite — that user's effective realm roles (view-users)
+    - GET /admin/realms/{realm}/users/{id}/role-mappings/clients/{realm-management id}/composite — that user's effective admin roles (view-users)
+
+    Output: keycloak_service_accounts.json — each service-account client's client ID, enabled state, authenticator, whether it rests on a shared secret (null for an authenticator this fetcher doesn't recognize), the secret's creation and expiry times and age, whether a rotated secret is still valid, its owner, other sign-in flows it allows, and its effective realm and admin roles. Client secrets, rotated secrets and keys are never copied. This fetcher's own client is one of the service accounts listed.
+
+    Summary fields:
+
+    Which clients were read?
+    - clients_read — True if the client list was read; false if it could not be, and every count below is null
+    - clients_total — Number of clients in the realm, Keycloak's built-in clients included
+    - confidential_clients — Number of clients that authenticate (neither public nor bearer-only)
+    - service_account_clients — Number of enabled clients with a service account; every count below is over these
+    - service_account_clients_disabled — Number of disabled clients with a service account, left out of the counts below
+
+    How do they authenticate?
+    - service_accounts_by_authenticator — Map of each client authenticator to its count: client-secret, client-secret-jwt (a shared secret), client-jwt (a signed key) or client-x509 (a certificate)
+    - service_accounts_using_shared_secret — Number using client-secret or client-secret-jwt, a secret Keycloak also holds (a service account with an unrecognized authenticator counts in neither)
+    - service_accounts_using_key_or_certificate — Number using client-jwt or client-x509, a private key or certificate only the client holds
+    - service_accounts_unrecognized_authenticator — Number using an authenticator this fetcher doesn't know, such as a newer or custom one; each is never assumed to have no shared secret, and while any is present service_account_secrets_over_max_age is null
+
+    How old are the secrets?
+    - max_secret_age_days — The max_secret_age_days setting; null when unset
+    - service_account_secrets_age_unknown — Number of shared secrets without a creation time recorded, such as one set before Keycloak recorded it
+    - oldest_service_account_secret_days — Age in days of the oldest shared secret whose creation time is known; null if there is none
+    - service_account_secrets_over_max_age — Number of shared secrets older than max_secret_age_days; null when it is unset, any secret's age is unknown, or any service account uses an unrecognized authenticator
+    - service_account_secrets_expiring — Number of shared secrets with an expiry time set, as a client secret rotation policy sets
+
+    Who owns them?
+    - owner_attribute — The owner_attribute setting; null when unset
+    - service_accounts_without_owner — Number with no value in owner_attribute; null when it is unset
+
+    What can they do?
+    - service_accounts_with_other_flows — Number that also allow a person to sign in through them, by the standard, implicit or direct access grant (password) flow
+    - privileged_service_accounts — Number holding, directly, through a group or through a composite role, a realm-management admin role (realm-admin, a manage-* role, impersonation or create-client); null if any one's roles could not be read
+    - service_accounts_with_realm_admin — Number holding realm-admin, full control of the realm; null if any one's roles could not be read

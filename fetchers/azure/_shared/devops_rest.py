@@ -81,10 +81,15 @@ class DevOpsCollector(Collector):
         super().__init__(logger)
         self.codes: List[str] = []
         self.auth_mode = "pat"
+        self.withheld: Optional[str] = None
 
     def record(self, operation: str, exc: BaseException) -> None:
         super().record(operation, exc)
         self.codes.append(failure_code(exc))
+
+    def withhold(self, why: str) -> None:
+        """No evidence is written for this run, as with a failed scope read; a recorded failure fails it."""
+        self.withheld = why
 
     def failure_code(self) -> str:
         return self.codes[0] if len(set(self.codes)) == 1 else "partial_failure"
@@ -377,6 +382,11 @@ def run_org(*, fetcher: str, logger: logging.Logger, collect: Collect, session: 
         except Exception as exc:  # noqa: BLE001 - an unexpected answer must still leave evidence and a reason
             logger.exception("collection failed")
             collector.record("collect", exc)
+
+    if collector.withheld and not collector.ok:
+        logger.error("evidence not written: %s", collector.withheld)
+        report_failure(failure_reason(collector.failures), collector.failure_code())
+        return 1
 
     evidence = {
         "metadata": {

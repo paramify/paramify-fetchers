@@ -1,0 +1,73 @@
+name: tenable_vuln_scan
+version: 0.2.0
+description: Exports the newest completed run of one Tenable.io scan as an unmodified .nessus file for Paramify assessment intake.
+category: tenable
+
+kind: issue_report
+
+supports_targets: true
+
+target_schema:
+  scan_id:
+    type: string
+    required: true
+    env: TENABLE_SCAN_ID
+    description: >-
+      Numeric Tenable.io scan ID to export, e.g. "12345". The fetcher refuses
+      any other value before it sends a request.
+
+runtime:
+  type: python
+  entry: fetcher.py
+  # export_wait_seconds is at most 2400; the rest is for history, retries and the download.
+  timeout: 3600
+
+output:
+  type: nessus
+  path: tenable_vuln_scan.nessus
+
+secrets:
+  - name: access_key
+    env: TENABLE_ACCESS_KEY
+    description: Tenable.io API access key of a user with at least Can View on the scans.
+  - name: secret_key
+    env: TENABLE_SECRET_KEY
+    description: The matching Tenable.io API secret key.
+
+config_schema:
+  api_base_url:
+    type: string
+    required: false
+    env: TENABLE_API_BASE_URL
+    default: "https://cloud.tenable.com"
+    description: >-
+      Tenable Vulnerability Management (Tenable.io) API base URL. Must be
+      https://. Tenable.sc (Security Center) has a different API and is not
+      supported.
+  max_scan_age_days:
+    type: string
+    required: false
+    env: TENABLE_MAX_SCAN_AGE_DAYS
+    default: "35"
+    description: >-
+      Fail if the scan's newest completed run ended more than this many days
+      ago. The default suits a monthly scan; set it lower for a weekly one.
+  export_wait_seconds:
+    type: string
+    required: false
+    env: TENABLE_EXPORT_WAIT_SECONDS
+    default: "600"
+    description: >-
+      How long to wait for Tenable to prepare the export, at most 2400. Raise
+      it for very large scans.
+  allow_empty:
+    type: string
+    required: false
+    env: TENABLE_ALLOW_EMPTY
+    description: >-
+      "true" to accept a report with no hosts. Off by default: an empty report
+      processed with a cycle close resolves every open issue.
+
+issue_report:
+  assessment_type: VULNERABILITY
+  title: Tenable Vulnerability Scan

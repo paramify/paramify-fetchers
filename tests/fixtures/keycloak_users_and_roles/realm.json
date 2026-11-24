@@ -1,0 +1,540 @@
+{
+ "/clients": [
+  {
+   "bearerOnly": true,
+   "clientId": "realm-management",
+   "id": "rm-client-id"
+  }
+ ],
+ "/events": [
+  {
+   "clientId": "account-console",
+   "details": {
+    "auth_method": "openid-connect",
+    "username": "someone"
+   },
+   "id": "ev-6-1",
+   "ipAddress": "203.0.113.7",
+   "realmId": "realm-id",
+   "sessionId": "sess",
+   "time": 1795089600000,
+   "type": "LOGIN",
+   "userId": "00000000-0000-0000-0000-000000000006"
+  },
+  {
+   "clientId": "account-console",
+   "details": {
+    "auth_method": "openid-connect",
+    "username": "someone"
+   },
+   "id": "ev-1-2",
+   "ipAddress": "203.0.113.7",
+   "realmId": "realm-id",
+   "sessionId": "sess",
+   "time": 1795003200000,
+   "type": "LOGIN",
+   "userId": "00000000-0000-0000-0000-000000000001"
+  },
+  {
+   "clientId": "account-console",
+   "details": {
+    "auth_method": "openid-connect",
+    "username": "someone"
+   },
+   "id": "ev-1-30",
+   "ipAddress": "203.0.113.7",
+   "realmId": "realm-id",
+   "sessionId": "sess",
+   "time": 1792584000000,
+   "type": "LOGIN",
+   "userId": "00000000-0000-0000-0000-000000000001"
+  },
+  {
+   "clientId": "account-console",
+   "details": {
+    "auth_method": "openid-connect",
+    "username": "someone"
+   },
+   "id": "ev-3-5",
+   "ipAddress": "203.0.113.7",
+   "realmId": "realm-id",
+   "sessionId": "sess",
+   "time": 1794744000000,
+   "type": "LOGIN",
+   "userId": "00000000-0000-0000-0000-000000000003"
+  },
+  {
+   "clientId": "account-console",
+   "details": {
+    "auth_method": "openid-connect",
+    "username": "someone"
+   },
+   "id": "ev-7-60",
+   "ipAddress": "203.0.113.7",
+   "realmId": "realm-id",
+   "sessionId": "sess",
+   "time": 1789992000000,
+   "type": "LOGIN",
+   "userId": "00000000-0000-0000-0000-000000000007"
+  },
+  {
+   "clientId": "account-console",
+   "details": {
+    "auth_method": "openid-connect",
+    "username": "someone"
+   },
+   "id": "ev-2-120",
+   "ipAddress": "203.0.113.7",
+   "realmId": "realm-id",
+   "sessionId": "sess",
+   "time": 1784808000000,
+   "type": "LOGIN",
+   "userId": "00000000-0000-0000-0000-000000000002"
+  }
+ ],
+ "/events/config": {
+  "adminEventsDetailsEnabled": false,
+  "adminEventsEnabled": true,
+  "enabledEventTypes": [
+   "LOGIN",
+   "LOGIN_ERROR",
+   "LOGOUT"
+  ],
+  "eventsEnabled": true,
+  "eventsExpiration": 15552000,
+  "eventsListeners": [
+   "jboss-logging"
+  ]
+ },
+ "/users": [
+  {
+   "access": {
+    "manage": true
+   },
+   "attributes": {
+    "department": [
+     "engineering"
+    ]
+   },
+   "createdTimestamp": 1760616000000,
+   "disableableCredentialTypes": [],
+   "email": "alice@example.com",
+   "emailVerified": true,
+   "enabled": true,
+   "firstName": "Alice",
+   "id": "00000000-0000-0000-0000-000000000001",
+   "lastName": "Example",
+   "notBefore": 0,
+   "requiredActions": [],
+   "totp": false,
+   "username": "alice"
+  },
+  {
+   "access": {
+    "manage": true
+   },
+   "attributes": {
+    "department": [
+     "engineering"
+    ]
+   },
+   "createdTimestamp": 1760616000000,
+   "disableableCredentialTypes": [],
+   "email": "bob@example.com",
+   "emailVerified": true,
+   "enabled": true,
+   "firstName": "Bob",
+   "id": "00000000-0000-0000-0000-000000000002",
+   "lastName": "Example",
+   "notBefore": 0,
+   "requiredActions": [],
+   "totp": false,
+   "username": "bob"
+  },
+  {
+   "access": {
+    "manage": true
+   },
+   "attributes": {
+    "department": [
+     "engineering"
+    ]
+   },
+   "createdTimestamp": 1760616000000,
+   "disableableCredentialTypes": [],
+   "email": "carol@example.com",
+   "emailVerified": true,
+   "enabled": true,
+   "firstName": "Carol",
+   "id": "00000000-0000-0000-0000-000000000003",
+   "lastName": "Example",
+   "notBefore": 0,
+   "requiredActions": [],
+   "totp": false,
+   "username": "carol"
+  },
+  {
+   "access": {
+    "manage": true
+   },
+   "attributes": {
+    "department": [
+     "engineering"
+    ]
+   },
+   "createdTimestamp": 1760616000000,
+   "disableableCredentialTypes": [],
+   "email": "dave@example.com",
+   "emailVerified": true,
+   "enabled": false,
+   "firstName": "Dave",
+   "id": "00000000-0000-0000-0000-000000000004",
+   "lastName": "Example",
+   "notBefore": 0,
+   "requiredActions": [],
+   "totp": false,
+   "username": "dave"
+  },
+  {
+   "access": {
+    "manage": true
+   },
+   "attributes": {
+    "department": [
+     "engineering"
+    ]
+   },
+   "createdTimestamp": 1794312000000,
+   "disableableCredentialTypes": [],
+   "email": "erin@example.com",
+   "emailVerified": true,
+   "enabled": true,
+   "firstName": "Erin",
+   "id": "00000000-0000-0000-0000-000000000005",
+   "lastName": "Example",
+   "notBefore": 0,
+   "requiredActions": [],
+   "totp": false,
+   "username": "erin"
+  },
+  {
+   "access": {
+    "manage": true
+   },
+   "attributes": {
+    "department": [
+     "engineering"
+    ]
+   },
+   "createdTimestamp": 1760616000000,
+   "disableableCredentialTypes": [],
+   "email": "frank@example.com",
+   "emailVerified": true,
+   "enabled": true,
+   "firstName": "Frank",
+   "id": "00000000-0000-0000-0000-000000000006",
+   "lastName": "Example",
+   "notBefore": 0,
+   "requiredActions": [
+    "CONFIGURE_TOTP"
+   ],
+   "totp": false,
+   "username": "frank"
+  },
+  {
+   "access": {
+    "manage": true
+   },
+   "attributes": {
+    "department": [
+     "engineering"
+    ]
+   },
+   "createdTimestamp": 1760616000000,
+   "disableableCredentialTypes": [],
+   "email": "grace@example.com",
+   "emailVerified": true,
+   "enabled": true,
+   "federationLink": "ldap-provider-id",
+   "firstName": "Grace",
+   "id": "00000000-0000-0000-0000-000000000007",
+   "lastName": "Example",
+   "notBefore": 0,
+   "requiredActions": [],
+   "totp": false,
+   "username": "grace"
+  },
+  {
+   "createdTimestamp": 1777896000000,
+   "enabled": true,
+   "id": "sa-1",
+   "requiredActions": [],
+   "serviceAccountClientId": "ci-deployer",
+   "username": "service-account-ci-deployer"
+  }
+ ],
+ "/users/00000000-0000-0000-0000-000000000001/credentials": [
+  {
+   "createdDate": 1769256000000,
+   "credentialData": "{\"hashIterations\":5,\"algorithm\":\"argon2\"}",
+   "id": "cred-password-300",
+   "type": "password",
+   "userLabel": "My authenticator"
+  },
+  {
+   "createdDate": 1769256000000,
+   "credentialData": "{\"hashIterations\":5,\"algorithm\":\"argon2\"}",
+   "id": "cred-otp-300",
+   "type": "otp",
+   "userLabel": "My authenticator"
+  }
+ ],
+ "/users/00000000-0000-0000-0000-000000000001/federated-identity": [],
+ "/users/00000000-0000-0000-0000-000000000001/groups": [
+  {
+   "id": "g1",
+   "name": "admins",
+   "path": "/admins"
+  }
+ ],
+ "/users/00000000-0000-0000-0000-000000000001/role-mappings/clients/rm-client-id/composite": [
+  {
+   "clientRole": true,
+   "composite": false,
+   "containerId": "rm-client-id",
+   "id": "role-realm-admin",
+   "name": "realm-admin"
+  },
+  {
+   "clientRole": true,
+   "composite": false,
+   "containerId": "rm-client-id",
+   "id": "role-manage-users",
+   "name": "manage-users"
+  },
+  {
+   "clientRole": true,
+   "composite": false,
+   "containerId": "rm-client-id",
+   "id": "role-view-users",
+   "name": "view-users"
+  },
+  {
+   "clientRole": true,
+   "composite": false,
+   "containerId": "rm-client-id",
+   "id": "role-manage-realm",
+   "name": "manage-realm"
+  },
+  {
+   "clientRole": true,
+   "composite": false,
+   "containerId": "rm-client-id",
+   "id": "role-view-realm",
+   "name": "view-realm"
+  }
+ ],
+ "/users/00000000-0000-0000-0000-000000000001/role-mappings/realm/composite": [
+  {
+   "clientRole": false,
+   "composite": false,
+   "containerId": "realm-id",
+   "id": "role-default-roles-example-realm",
+   "name": "default-roles-example-realm"
+  },
+  {
+   "clientRole": false,
+   "composite": false,
+   "containerId": "realm-id",
+   "id": "role-offline_access",
+   "name": "offline_access"
+  }
+ ],
+ "/users/00000000-0000-0000-0000-000000000002/credentials": [
+  {
+   "createdDate": 1769256000000,
+   "credentialData": "{\"hashIterations\":5,\"algorithm\":\"argon2\"}",
+   "id": "cred-password-300",
+   "type": "password",
+   "userLabel": "My authenticator"
+  }
+ ],
+ "/users/00000000-0000-0000-0000-000000000002/federated-identity": [],
+ "/users/00000000-0000-0000-0000-000000000002/groups": [
+  {
+   "id": "g2",
+   "name": "developers",
+   "path": "/developers"
+  }
+ ],
+ "/users/00000000-0000-0000-0000-000000000002/role-mappings/clients/rm-client-id/composite": [],
+ "/users/00000000-0000-0000-0000-000000000002/role-mappings/realm/composite": [
+  {
+   "clientRole": false,
+   "composite": false,
+   "containerId": "realm-id",
+   "id": "role-default-roles-example-realm",
+   "name": "default-roles-example-realm"
+  }
+ ],
+ "/users/00000000-0000-0000-0000-000000000003/credentials": [],
+ "/users/00000000-0000-0000-0000-000000000003/federated-identity": [
+  {
+   "identityProvider": "entra",
+   "userId": "entra-object-id",
+   "userName": "carol@example.com"
+  }
+ ],
+ "/users/00000000-0000-0000-0000-000000000003/groups": [
+  {
+   "id": "g3",
+   "name": "platform",
+   "path": "/platform"
+  }
+ ],
+ "/users/00000000-0000-0000-0000-000000000003/role-mappings/clients/rm-client-id/composite": [],
+ "/users/00000000-0000-0000-0000-000000000003/role-mappings/realm/composite": [
+  {
+   "clientRole": false,
+   "composite": false,
+   "containerId": "realm-id",
+   "id": "role-default-roles-example-realm",
+   "name": "default-roles-example-realm"
+  },
+  {
+   "clientRole": false,
+   "composite": false,
+   "containerId": "realm-id",
+   "id": "role-platform-admin",
+   "name": "platform-admin"
+  }
+ ],
+ "/users/00000000-0000-0000-0000-000000000004/credentials": [
+  {
+   "createdDate": 1769256000000,
+   "credentialData": "{\"hashIterations\":5,\"algorithm\":\"argon2\"}",
+   "id": "cred-password-300",
+   "type": "password",
+   "userLabel": "My authenticator"
+  }
+ ],
+ "/users/00000000-0000-0000-0000-000000000004/federated-identity": [],
+ "/users/00000000-0000-0000-0000-000000000004/groups": [],
+ "/users/00000000-0000-0000-0000-000000000004/role-mappings/clients/rm-client-id/composite": [
+  {
+   "clientRole": true,
+   "composite": false,
+   "containerId": "rm-client-id",
+   "id": "role-manage-users",
+   "name": "manage-users"
+  }
+ ],
+ "/users/00000000-0000-0000-0000-000000000004/role-mappings/realm/composite": [
+  {
+   "clientRole": false,
+   "composite": false,
+   "containerId": "realm-id",
+   "id": "role-default-roles-example-realm",
+   "name": "default-roles-example-realm"
+  }
+ ],
+ "/users/00000000-0000-0000-0000-000000000005/credentials": [
+  {
+   "createdDate": 1794398400000,
+   "credentialData": "{\"hashIterations\":5,\"algorithm\":\"argon2\"}",
+   "id": "cred-webauthn-9",
+   "type": "webauthn",
+   "userLabel": "My authenticator"
+  }
+ ],
+ "/users/00000000-0000-0000-0000-000000000005/federated-identity": [],
+ "/users/00000000-0000-0000-0000-000000000005/groups": [],
+ "/users/00000000-0000-0000-0000-000000000005/role-mappings/clients/rm-client-id/composite": [
+  {
+   "clientRole": true,
+   "composite": false,
+   "containerId": "rm-client-id",
+   "id": "role-view-users",
+   "name": "view-users"
+  }
+ ],
+ "/users/00000000-0000-0000-0000-000000000005/role-mappings/realm/composite": [
+  {
+   "clientRole": false,
+   "composite": false,
+   "containerId": "realm-id",
+   "id": "role-default-roles-example-realm",
+   "name": "default-roles-example-realm"
+  }
+ ],
+ "/users/00000000-0000-0000-0000-000000000006/credentials": [
+  {
+   "createdDate": 1769256000000,
+   "credentialData": "{\"hashIterations\":5,\"algorithm\":\"argon2\"}",
+   "id": "cred-password-300",
+   "type": "password",
+   "userLabel": "My authenticator"
+  }
+ ],
+ "/users/00000000-0000-0000-0000-000000000006/federated-identity": [],
+ "/users/00000000-0000-0000-0000-000000000006/groups": [],
+ "/users/00000000-0000-0000-0000-000000000006/role-mappings/clients/rm-client-id/composite": [
+  {
+   "clientRole": true,
+   "composite": false,
+   "containerId": "rm-client-id",
+   "id": "role-manage-users",
+   "name": "manage-users"
+  },
+  {
+   "clientRole": true,
+   "composite": false,
+   "containerId": "rm-client-id",
+   "id": "role-view-users",
+   "name": "view-users"
+  },
+  {
+   "clientRole": true,
+   "composite": false,
+   "containerId": "rm-client-id",
+   "id": "role-query-users",
+   "name": "query-users"
+  }
+ ],
+ "/users/00000000-0000-0000-0000-000000000006/role-mappings/realm/composite": [
+  {
+   "clientRole": false,
+   "composite": false,
+   "containerId": "realm-id",
+   "id": "role-default-roles-example-realm",
+   "name": "default-roles-example-realm"
+  }
+ ],
+ "/users/00000000-0000-0000-0000-000000000007/credentials": [
+  {
+   "createdDate": 1786536000000,
+   "credentialData": "{\"hashIterations\":5,\"algorithm\":\"argon2\"}",
+   "id": "cred-otp-100",
+   "type": "otp",
+   "userLabel": "My authenticator"
+  }
+ ],
+ "/users/00000000-0000-0000-0000-000000000007/federated-identity": [],
+ "/users/00000000-0000-0000-0000-000000000007/groups": [
+  {
+   "id": "g2",
+   "name": "developers",
+   "path": "/developers"
+  }
+ ],
+ "/users/00000000-0000-0000-0000-000000000007/role-mappings/clients/rm-client-id/composite": [],
+ "/users/00000000-0000-0000-0000-000000000007/role-mappings/realm/composite": [
+  {
+   "clientRole": false,
+   "composite": false,
+   "containerId": "realm-id",
+   "id": "role-default-roles-example-realm",
+   "name": "default-roles-example-realm"
+  }
+ ]
+}

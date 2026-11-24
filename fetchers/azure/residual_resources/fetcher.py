@@ -408,7 +408,8 @@ def main() -> int:
     excluded += excluded_assignments
     listed = {*ORPHAN_QUERIES, "resource_groups", "occupied_resource_groups", "deployment_slots", "role_assignments",
               "user_assigned_identities", "identity_references"}
-    if not listed <= set(sources):
+    orphans_read = listed <= set(sources)
+    if not orphans_read:
         exclusions.mark_unread()
     exclusions.warn_unmatched(logger)
 
@@ -425,7 +426,8 @@ def main() -> int:
         summary={
             **summarize(resources, assignments, principal_check, checked),
             **exclusions.summary(excluded, ("orphaned_resource", "role_assignment"), {
-                "orphaned_resources": len(resources), "role_assignments": len(assignments)}),
+                "orphaned_resources": len(resources) if orphans_read else None,
+                "role_assignments": len(assignments) if "role_assignments" in sources else None}),
         },
     )
 

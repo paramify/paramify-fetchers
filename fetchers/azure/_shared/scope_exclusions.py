@@ -11,6 +11,10 @@ from typing import Iterable, Optional
 SEPARATORS = re.compile(r"[\s,]+")
 
 
+def plural(kind: str) -> str:
+    return kind[:-1] + "ies" if kind.endswith("y") and kind[-2:-1] not in "aeiou" else kind + "s"
+
+
 def normalize(name: str) -> str:
     # DNS names compare without case or the root's trailing dot.
     return str(name).strip().lower().rstrip(".")
@@ -92,7 +96,7 @@ class ScopeExclusions:
         return {
             "scope_exclusion_patterns": list(self.patterns),
             "scope_exclusion_patterns_unmatched": self.unmatched(),
-            **{f"excluded_{kind}s": None if in_scope.get(f"{kind}s", 0) is None
+            **{f"excluded_{plural(kind)}": None if in_scope.get(plural(kind), 0) is None
                else sum(1 for e in excluded if e["kind"] == kind) for kind in kinds},
             **{f"in_scope_{name}": count for name, count in in_scope.items()},
         }
