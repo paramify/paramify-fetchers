@@ -61,6 +61,8 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **Literal pattern lists.** A `type: patterns` field can declare `globs: false`; `validate`, the run and the TUI then
+  refuse a pattern holding `*` or `?`, and `describe` says the field takes patterns without wildcards.
 - **The TUI shows which environment variables a manifest is missing, and stops a run that would fail on them.**
   - The manifest settings row has an `env` button (`✓ all set` or `✗ 2 missing`), each fetcher's status names what it
     needs (`✗ needs OKTA_API_TOKEN`), and the line under the table splits what a run needs from what only an upload needs.
@@ -2060,6 +2062,29 @@ schemas and the `paramify` CLI — not the internal code.
   setting lists the node pools that must have the cluster autoscaler on, as `pool` (every cluster) or `cluster/pool`.
   Missing pools and pools without the autoscaler are counted and named, a pool at zero nodes stays expected, and
   `all_expected_pools_autoscaling` gives one verdict. Each pool now records `min_count`. Unset, the fields stay null.
+
+- **`azure_devops_work_items` 0.4.0: TFVC changeset inclusions.** A new `changeset_inclusions` pattern list
+  (`AZURE_DEVOPS_CHANGESET_INCLUSIONS`, `path:<TFVC server path>` patterns with a reason each, edited like the Front
+  Door and DNS lists) names the TFVC paths whose linked changesets are in scope. A pattern takes in its path and
+  everything under it, without regard to case. Paths are literal: `validate` and the run refuse `*` and `?`, since the
+  read check couldn't prove every path a wildcard covers. Set, each run first reads every included path's latest
+  changeset and fails, writing no evidence, if one is missing, empty or can't be read. A linked changeset is then in
+  scope only if a file it changed (or renamed from) is under an included path, read from the changeset read the
+  fetcher already makes and paged to the end of its change list when that read didn't list every file; one whose
+  changed files can't all be read stays in scope. Others are left out under `results.excluded`, as `not_included`,
+  or as `not_readable` when the identity can't read them (TF14098, 401 or 403), which no longer fails the run. After a
+  refused changeset, every included path is read again at the end of the changeset reads, and one that no longer reads
+  fails the run without evidence, so access lost mid-run can't pass as changesets outside the paths. Each entry names
+  the work items that link it. `changed_before_approval`, `approved_by_change_author` and `first_linked_change` use
+  in-scope changesets only; an item whose changesets were all left out has none to check, as an item linked to
+  nothing, and doesn't hold the summary's change-order lists unknown. Those lists can't cover a refused changeset, so
+  an item that links one reads `unreadable_linked_changesets: true` and is listed in
+  `change_items_with_unreadable_changesets`. New: `results.changeset_inclusion_checks`,
+  `results.changeset_inclusion_recheck`, `results.excluded`, `unreadable_linked_changesets` on each work item, and in
+  the summary `changeset_inclusion_patterns`, `in_scope_changesets` (null when a linked changeset couldn't be read),
+  `not_included_changesets`, `not_readable_changesets`, `changeset_inclusions_rechecked` and
+  `change_items_with_unreadable_changesets`. Unset, a refused changeset still fails the run and the evidence only gains
+  these keys.
 
 - **`paramify upload` no longer drops a file for holding `../`, `/etc/passwd`, `/bin/sh`, `/bin/bash` or
   `<script`.** It checked every file for these strings and dropped a match before sending it, with `blocked by the
