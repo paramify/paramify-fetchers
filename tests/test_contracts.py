@@ -246,7 +246,6 @@ TEXT_FORMAT_PENDING = (
     "aws/codebuild_pipeline_config",
     "aws/codepipeline_config",
     "aws/component_ssl_enforcement_status",
-    "aws/config_conformance_packs",
     "aws/config_inventory",
     "aws/config_monitoring",
     "aws/database_high_availability",

@@ -109,6 +109,12 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **`aws_config_conformance_packs` 0.6.0 runs on boto3.** One Python process with one Config client replaces a shell
+  script that started the AWS CLI and `jq` for every API page. Resource evaluations are still requested one rule at a
+  time, but eight rules are read at once, so a pack with a hundred or more rules no longer spends most of its time
+  starting processes. The output, its file name, the IAM actions and the failure codes are unchanged, except that an
+  unknown `fedramp_pack` now reports `bad_config`. It needs the `aws` extra (boto3), which the Docker image already
+  installs.
 - **`azure_entra_sign_in_logs` 0.4.0: 50053 sign-in rejections.** `sign_ins_rejected_50053` counts interactive
   sign-ins Entra rejected with ResultType 50053, and `users_rejected_50053` counts the users they belong to. Entra logs
   both smart lockout and sign-ins from a malicious IP address under that code, so the counts are evidence, not a

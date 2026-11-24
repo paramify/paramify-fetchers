@@ -15,8 +15,8 @@ that an account, system, or individual control is compliant with FedRAMP or NIST
 | Variable | Required | Description |
 |---|---:|---|
 | `FEDRAMP_PACK` | No | Reference baseline and mapping to use: `low` (default) or `moderate` |
-| `AWS_PROFILE` | No | AWS CLI profile; when omitted, the ambient credential chain is used |
-| `AWS_DEFAULT_REGION` | No | AWS region; when omitted, AWS CLI configuration determines the region |
+| `AWS_PROFILE` | No | AWS named profile; when omitted, the ambient credential chain is used |
+| `AWS_DEFAULT_REGION` | No | AWS region; when omitted, the ambient region (`AWS_REGION` / AWS config) is used |
 | `EVIDENCE_DIR` | No | Output directory; defaults to `./evidence` |
 
 Example:
@@ -26,7 +26,7 @@ FEDRAMP_PACK=moderate \
 AWS_PROFILE=production-audit \
 AWS_DEFAULT_REGION=us-east-1 \
 EVIDENCE_DIR=./evidence \
-./fetchers/aws/config_conformance_packs/fetcher.sh
+python fetchers/aws/config_conformance_packs/fetcher.py
 ```
 
 The manifest schema exposes `FEDRAMP_PACK` as the `fedramp_pack` configuration
@@ -48,11 +48,7 @@ Example Paramify manifest entry using the FedRAMP Moderate baseline for the
 
 ## Requirements and IAM permissions
 
-Runtime tools:
-
-- AWS CLI
-- `jq`
-- `awk`, `sort`, and `comm`
+Runtime: Python with boto3 (the `aws` extra, which the Docker image installs).
 
 The AWS identity needs read access to these actions:
 
@@ -75,14 +71,15 @@ For every conformance pack, the fetcher:
    `Source.SourceIdentifier` values with paginated `DescribeConfigRules` calls
    in batches of at most 25 names.
 4. Requests resource evaluations separately for every rule and follows that
-   rule's `NextToken` chain until exhausted.
+   rule's `NextToken` chain until exhausted. Up to eight rules are read at a
+   time, in one process with one Config client.
 5. Collects the AWS compliance summary.
 6. Compares deployed rule source identifiers with the selected vendored
    FedRAMP template.
 7. Enriches rules and non-compliant resource findings with FedRAMP and NIST
    control identifiers.
 
-Explicit API pagination is used instead of relying on AWS CLI auto-pagination.
+Every call follows `NextToken` explicitly, at the largest page size the API allows.
 A repeated token is treated as a collection failure to prevent an infinite loop.
 
 ## Control mappings
@@ -224,5 +221,5 @@ The test module can also run standalone when pytest is unavailable:
 python tests/test_aws_config_control_mappings.py
 ```
 
-The standalone integration test requires `bash` and `jq`. If `jq` is not on
-`PATH`, provide its executable through `JQ_BIN`.
+The integration test runs the fetcher against a fake Config client and needs
+boto3 installed; it makes no AWS calls.
