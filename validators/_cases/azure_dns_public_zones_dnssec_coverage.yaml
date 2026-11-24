@@ -1,0 +1,21 @@
+validator: azure_dns_public_zones_dnssec_coverage
+cases:
+  - name: compliant
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"dnssec_enabled_public_zones":2,"dnssec_unknown_public_zones":0,"total_public_zones":2}}}'
+
+  - name: dnssec_enabled_public_zones_short
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"dnssec_enabled_public_zones":1,"dnssec_unknown_public_zones":0,"total_public_zones":2}}}'
+
+  - name: dnssec_unknown_public_zones_unknown_nonzero
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"dnssec_enabled_public_zones":2,"dnssec_unknown_public_zones":1,"total_public_zones":2}}}'
+
+  - name: no_total_public_zones
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"dnssec_enabled_public_zones":0,"dnssec_unknown_public_zones":0,"total_public_zones":0}}}'
+
+  - name: dnssec_enabled_public_zones_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"dnssec_enabled_public_zones_renamed":2,"dnssec_unknown_public_zones":0,"total_public_zones":2}}}'

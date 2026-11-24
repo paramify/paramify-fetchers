@@ -1,0 +1,10 @@
+# Set-level: every validator on the set, with azure_collection_succeeded.
+evidence_set: EVD-AZURE-RESIDUAL-RESOURCES
+cases:
+  - name: compliant
+    expect: PASS
+    artifact: '{"metadata":{"evidence_set":{"reference_id":"EVD-AZURE-RESIDUAL-RESOURCES"},"exit_code":0,"status":"success"},"payload":{"metadata":{"api_failures":[],"partial_failure":false},"results":{"orphaned_resources":[],"role_assignments":[{"orphan_kind":null,"principal_exists":true}]},"summary":{"deleted_principal_assignments":0,"foreign_principal_assignments":0,"identities_checked":4,"orphaned_resources":0,"orphans_by_kind":{},"principal_check":"complete","principals_checked":20,"principals_missing":0,"role_assignments_checked":45,"slots_checked":2,"stale_slot_days":90,"total_orphans":0}},"schema_version":"1.0"}'
+
+  - name: collection_failed
+    expect: FAIL
+    artifact: '{"metadata":{"evidence_set":{"reference_id":"EVD-AZURE-RESIDUAL-RESOURCES"},"exit_code":1,"status":"failed"},"payload":{"metadata":{"api_failures":[],"partial_failure":true},"results":{"orphaned_resources":[],"role_assignments":[{"orphan_kind":null,"principal_exists":true}]},"summary":{"deleted_principal_assignments":0,"foreign_principal_assignments":0,"identities_checked":4,"orphaned_resources":0,"orphans_by_kind":{},"principal_check":"failed","principals_checked":20,"principals_missing":0,"role_assignments_checked":45,"slots_checked":2,"stale_slot_days":90,"total_orphans":0}},"schema_version":"1.0"}'

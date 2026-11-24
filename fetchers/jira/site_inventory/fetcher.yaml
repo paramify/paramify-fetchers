@@ -1,5 +1,5 @@
 name: jira_site_inventory
-version: 0.1.1
+version: 0.2.0
 description: >-
   Inventories a Jira Cloud site — deployment info, projects with leads and issue
   counts, issue types, priorities, statuses, Jira Service Management service
@@ -37,6 +37,20 @@ config_schema:
     description: >-
       Explicit JQL for the issue query, e.g. `project in (OPS, CHG) AND
       updated >= -30d`. Overrides lookback_days entirely when set.
+  projects:
+    type: string
+    required: false
+    env: JIRA_PROJECTS
+    description: >-
+      Comma-separated project keys or exact project names (case does not
+      matter) to limit the inventory to. A value is matched as a key first and
+      as a name only when it is no project's key; metadata.projects_selected
+      lists the keys it matched. Projects, issue types, statuses,
+      service desks and issues then cover only these projects; the other
+      projects are left out and only counted (metadata.projects_left_out).
+      Priorities stay site-wide. The issue query is limited to these projects
+      even when `jql` names others. A name that matches no project the
+      account can see fails the run as bad_config.
   max_issues:
     type: integer
     required: false
@@ -54,10 +68,14 @@ evidence_set:
     Script: jira/site_inventory/fetcher.py. Authenticates to the Jira Cloud REST API with an account
     email + API token (basic auth). Reads GET /rest/api/3/serverInfo,
     /rest/api/3/myself, /rest/api/3/project/search (expand=lead,insight,issueTypes),
-    /rest/api/3/issuetype, /rest/api/3/priority/search and /rest/api/3/status;
-    lists service desks via GET /rest/servicedeskapi/servicedesk when Jira
+    /rest/api/3/issuetype, /rest/api/3/priority/search and /rest/api/3/status
+    (or GET /rest/api/3/project/{id}/statuses per project when JIRA_PROJECTS is
+    set); lists service desks via GET /rest/servicedeskapi/servicedesk when Jira
     Service Management is present; and pages recent issues through
-    POST /rest/api/3/search/jql (nextPageToken). Summary counts are null, not
+    POST /rest/api/3/search/jql (nextPageToken). When JIRA_PROJECTS is set,
+    projects, issue types, statuses, service desks and issues are limited to
+    the named projects; metadata.projects_left_out counts the others.
+    Priorities stay site-wide. Summary counts are null, not
     zero, for a section whose read failed or did not finish (projects, or the
     issue sample when the search failed or hit the cap). Output:
     jira_site_inventory.json

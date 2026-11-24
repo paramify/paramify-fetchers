@@ -1335,8 +1335,10 @@ def main() -> int:
                  **summarize_app_services(app_origins, apps, production_tag),
                  **summarize_health(health, unmatched, days, window),
                  **exclusions.summary(excluded, EXCLUDED_KINDS, {
-                     **in_scope_totals([sp["in_scope"] for sp in scoped_profiles]),
-                     "origin_groups": len(groups), "apps": len(apps)}),
+                     **{name: n if listed else None for name, n in {
+                         **in_scope_totals([sp["in_scope"] for sp in scoped_profiles]),
+                         "origin_groups": len(groups)}.items()},
+                     "apps": len(apps) if apps_listed else None}),
                  # in_scope_apps already counts the production apps left after both kinds of exclusion.
                  **resources.summary(excluded, RESOURCE_KINDS, {"profiles": len(profiles) if listed else None}),
                  **({} if apps_listed else {"excluded_production_apps": None})},

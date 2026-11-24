@@ -1,0 +1,42 @@
+validator: azure_policy_remediation_fields_present
+cases:
+  - name: all_counts_present_untruncated
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"remediated_resources_compliance_unknown":0,"remediated_resources_not_yet_reevaluated":0,"remediated_resources_now_non_compliant":0,"remediation_deployments_truncated":false,"remediation_failed_deployments":0,"remediation_tasks_by_provisioning_state":{}}}}'
+
+  - name: pretty_printed
+    expect: PASS
+    artifact: |
+      {
+        "metadata": {"exit_code": 0},
+        "payload": {
+          "summary": {
+            "remediated_resources_compliance_unknown": 0,
+            "remediated_resources_not_yet_reevaluated": 1,
+            "remediated_resources_now_non_compliant": 2,
+            "remediation_deployments_truncated": false,
+            "remediation_failed_deployments": 3,
+            "remediation_tasks_by_provisioning_state": {"Succeeded": 1}
+          }
+        }
+      }
+
+  - name: deployment_list_truncated
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"remediated_resources_compliance_unknown":0,"remediated_resources_not_yet_reevaluated":0,"remediated_resources_now_non_compliant":0,"remediation_deployments_truncated":true,"remediation_failed_deployments":0,"remediation_tasks_by_provisioning_state":{}}}}'
+
+  - name: older_still_key_spelling
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"remediated_resources_compliance_unknown":0,"remediated_resources_not_yet_reevaluated":0,"remediated_resources_still_non_compliant":0,"remediation_deployments_truncated":false,"remediation_failed_deployments":0,"remediation_tasks_by_provisioning_state":{}}}}'
+
+  - name: bucket_null
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"remediated_resources_compliance_unknown":null,"remediated_resources_not_yet_reevaluated":0,"remediated_resources_now_non_compliant":0,"remediation_deployments_truncated":false,"remediation_failed_deployments":0,"remediation_tasks_by_provisioning_state":{}}}}'
+
+  - name: failed_deployments_key_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"remediated_resources_compliance_unknown":0,"remediated_resources_not_yet_reevaluated":0,"remediated_resources_now_non_compliant":0,"remediation_deployments_truncated":false,"failed_remediation_deployments":0,"remediation_tasks_by_provisioning_state":{}}}}'
+
+  - name: provisioning_state_map_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"remediated_resources_compliance_unknown":0,"remediated_resources_not_yet_reevaluated":0,"remediated_resources_now_non_compliant":0,"remediation_deployments_truncated":false,"remediation_failed_deployments":0,"remediation_tasks_by_state":{}}}}'

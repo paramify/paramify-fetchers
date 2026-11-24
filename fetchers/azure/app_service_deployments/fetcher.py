@@ -638,19 +638,16 @@ def collect_app(client, collector: Collector, app_site: dict, scope: ResourceExc
 
 
 def collect_web_apps(subscription_id, cred, collector: Collector, scope: ResourceExclusions | None = None,
-                     excluded: list | None = None) -> tuple[list[dict], int]:
-    """(in-scope web apps, in-scope sites that aren't web apps). Web apps, function apps and slots the scope takes out
-    are appended to `excluded` before any per-app read."""
+                     excluded: list | None = None) -> tuple[list[dict] | None, int]:
+    """(in-scope web apps, or None when the site list couldn't be read; in-scope sites that aren't web apps). Web apps,
+    function apps and slots the scope takes out are appended to `excluded` before any per-app read."""
     client = web_client(subscription_id, cred, collector)
-    if client is None:
-        if scope is not None:
-            scope.mark_unread()
-        return [], 0
-    sites = collector.guard("web.web_apps.list", lambda: [project_site(s) for s in client.web_apps.list()], default=None)
+    sites = None if client is None else collector.guard(
+        "web.web_apps.list", lambda: [project_site(s) for s in client.web_apps.list()], default=None)
     if sites is None:
-        sites = []
         if scope is not None:
             scope.mark_unread()
+        return None, 0
     web_apps = [s for s in sites if is_web_app(s.get("kind"))]
     others = [s for s in sites if not is_web_app(s.get("kind"))]
     out: list[dict] = []
@@ -680,18 +677,18 @@ def excluded_site(scope: ResourceExclusions, excluded: list[dict]):
     return test
 
 
-def boundary_summary(scope: ResourceExclusions, excluded: list[dict], apps: list[dict]) -> dict:
+def boundary_summary(scope: ResourceExclusions, excluded: list[dict], apps: list[dict], listed: bool = True) -> dict:
     """Scope fields named boundary_excluded_*, since excluded_function_apps counts in-scope sites this fetcher does
-    not assess."""
+    not assess; every count is null when the site list wasn't read."""
     def count(kind):
-        return sum(1 for e in excluded if e["kind"] == kind)
+        return sum(1 for e in excluded if e["kind"] == kind) if listed else None
 
     return {
         **scope.summary(excluded, (), {}),
         "boundary_excluded_web_apps": count(WEB_APP_KIND),
         "boundary_excluded_function_apps": count(FUNCTION_APP_KIND),
         "boundary_excluded_deployment_slots": count(SLOT_KIND),
-        "in_scope_web_apps": len(apps),
+        "in_scope_web_apps": len(apps) if listed else None,
     }
 
 
@@ -771,7 +768,7 @@ def main() -> int:
     subscription_id = sub["subscription_id"]
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
-    apps: list[dict] = []
+    apps: list[dict] | None = None
     excluded = 0
     window: dict = {"days": activity_log_days(), "complete": False, "cut_reason": "not_read"}
     registration = REGISTRATION_UNKNOWN
@@ -782,14 +779,16 @@ def main() -> int:
         apps, excluded = collect_web_apps(subscription_id, cred, collector, scope, boundary)
         events, window = read_activity_log(subscription_id, cred, collector, window["days"], datetime.now(timezone.utc))
         window["requests_on_unlisted_sites"], window["requests_on_excluded_sites"] = attach_activity(
-            apps, events, excluded_site(scope, boundary))
+            apps or [], events, excluded_site(scope, boundary))
     elif not subscription_id:
         collector.record(
             "resolve_subscription",
             RuntimeError("no subscription id (set AZURE_SUBSCRIPTION_ID or configure an ambient Azure "
                          "credential that can list subscriptions)"),
         )
-    if not (subscription_id and cred is not None):
+    listed = apps is not None
+    apps = apps or []
+    if not listed:
         scope.mark_unread()
     scope.warn_unmatched(logger)
 
@@ -807,7 +806,7 @@ def main() -> int:
         summary={
             **summarize(apps, excluded, window),
             "provider_registration_status": registration,
-            **boundary_summary(scope, boundary, apps),
+            **boundary_summary(scope, boundary, apps, listed),
         },
     )
     filename = f"azure_app_service_deployments_{sanitize_for_filename(subscription_id or 'unknown')}.json"

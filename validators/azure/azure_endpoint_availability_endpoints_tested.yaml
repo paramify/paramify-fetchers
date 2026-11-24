@@ -1,0 +1,19 @@
+key: azure_endpoint_availability_endpoints_tested
+name: 'Azure Endpoint Availability: Endpoints Are Tested From Outside'
+type: AUTOMATED
+role: configuration
+source: community
+statement: >
+  At least one endpoint URL is requested by an enabled Application Insights availability test, so
+  availability is measured from outside. These are inputs to availability reporting; they do not
+  replace the availability reporting itself. Does not check whether the collection run succeeded.
+
+regex: '"endpoints_tested":\s*(?<endpoints_tested>[1-9]\d*)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-ENDPOINT-AVAILABILITY
