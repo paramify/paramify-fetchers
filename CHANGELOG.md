@@ -68,8 +68,7 @@ schemas and the `paramify` CLI — not the internal code.
     the end of the cursor, or writes no file and exits non-zero. Its `Host ID` column (Spotlight `aid`) equals the
     inventory's `unique_asset_identifier`: choose it as "inventory mapping" in the vulnerability preset. The
     `pipeline:` block names it as `asset_id_field`.
-  - Both reuse the category's Falcon client. `csv_safe` moves from the Inspector collector to `fetchers/_lib/csv_cells.py`,
-    and the two CSV reports share it.
+  - Both reuse the category's Falcon client, and the report writes its CSV with the shared `fetchers/_lib/report_csv.py`.
 
 - **`github_secret_scanning_report` 0.1.0: open secret scanning alerts as a vulnerability report.** The same shape
   for open secret scanning alerts, metadata only: type, validity, first location path, state and dates. Alerts are
