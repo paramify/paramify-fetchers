@@ -1,0 +1,82 @@
+name: release-publish
+
+# The release PR is merged: tag the reviewed commit and create the GitHub
+# Release (tools/release.py publish).
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    if: >-
+      github.event.pull_request.merged
+      && github.event.pull_request.base.ref == 'main'
+      && github.event.pull_request.head.ref == 'release/next'
+      && github.event.pull_request.head.repo.full_name == github.repository
+    # Not the drafts' `release` group: a group keeps one pending job, and a newer
+    # pending draft would cancel a pending publish. A draft that runs before the
+    # tag exists stops by itself (the release is merged but not tagged).
+    concurrency:
+      group: release-publish
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      # The App needs Workflows read and write too: a rebuild force-pushes release/next
+      # from an old main to a new one, and GitHub refuses that push if main changed
+      # .github/workflows in between.
+      - uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
+        id: app-token
+        with:
+          app-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+      # The App token, not GITHUB_TOKEN, so the pushes and the release PR start
+      # CI. ci-ok must report on the release PR. fetch-depth 0 with the default
+      # refspec brings every tag and origin/release/next, which the push lease needs.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          fetch-depth: 0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - run: python -m pip install -e .
+      - name: git identity is the release App
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          SLUG: ${{ steps.app-token.outputs.app-slug }}
+        run: |
+          id=$(gh api "/users/${SLUG}[bot]" --jq .id)
+          git config user.name "${SLUG}[bot]"
+          git config user.email "${id}+${SLUG}[bot]@users.noreply.github.com"
+      # After a squash merge, a checkout of main does not hold the PR head.
+      - name: fetch the reviewed commit
+        run: git fetch origin ${{ github.event.pull_request.head.sha }}
+      - name: tag and publish
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          SLACK_RELEASE_WEBHOOK: ${{ secrets.SLACK_RELEASE_WEBHOOK }}
+          RELEASE_REVIEWER: 21tmccauley
+        run: >-
+          python tools/release.py publish
+          --head-sha ${{ github.event.pull_request.head.sha }}
+          --merge-sha ${{ github.event.pull_request.merge_commit_sha }}
+      # Plain curl, so the Slack message still goes out when an earlier step (the App token,
+      # Python) is what failed.
+      - name: Post that the job failed
+        if: failure()
+        env:
+          SLACK_RELEASE_WEBHOOK: ${{ secrets.SLACK_RELEASE_WEBHOOK }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [ -n "$SLACK_RELEASE_WEBHOOK" ]; then
+            curl -sS -X POST -H 'Content-Type: application/json' \
+              -d "{\"text\":\"The weekly release job failed.\",\"url\":\"$RUN_URL\"}" \
+              "$SLACK_RELEASE_WEBHOOK" || true
+          fi

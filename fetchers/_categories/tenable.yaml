@@ -1,0 +1,9 @@
+display_name: Tenable
+description: >
+  Tenable vulnerability management platform. Exports scan results from Tenable.io
+  using the authenticated scan export API (request → poll → stream).
+
+requires:
+  python_packages:
+    - requests
+    - python-dotenv

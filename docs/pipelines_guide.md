@@ -5,7 +5,8 @@ Wiz CSV or a Nessus export. `paramify issues upload` sends it into an
 assessment's pipeline in Paramify, which turns the findings into issues. You set
 up a manifest and an assessment once, then run and send on the scanner's
 schedule. The pictures use `wiz_vulnerability_findings`, with synthetic findings
-from a stand-in for Wiz.
+from a stand-in for Wiz. The TUI recordings use `demo_scan_report`, a synthetic
+fetcher that is not in the repo, and a stand-in for Paramify.
 
 ![Flow: once per scanner, a manifest and an assessment with its close policy; each scan, validate, run, dry run, upload, one job, and a close when allowed; then jobs and checks in Paramify](img/pipelines/flow.svg)
 

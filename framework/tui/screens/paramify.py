@@ -1283,7 +1283,7 @@ class ParamifyPage(ParamifyWriter, Vertical):
     # -- actions: validators (v) ------------------------------------------ #
 
     def action_sync_validators(self) -> None:
-        """Preview the validators sync, confirm, then create and pair them."""
+        """Preview the validators sync, confirm, then create, pair and update them."""
         if self._busy:
             self.notify(BUSY_NOTICE)
             return
@@ -1296,45 +1296,44 @@ class ParamifyPage(ParamifyWriter, Vertical):
 
     @work(thread=True, exclusive=True, group="paramify-action")
     def _validators_preview_worker(self, root, manifest_path) -> None:
-        outcomes: list = []
-        failures: list = []
+        results: list = []
 
         def tally(ev: dict) -> None:
             if ev.get("event") == "sync_validator":
-                outcomes.append(ev.get("outcome") or "")
-                if ev.get("outcome") == "error":
-                    failures.append((ev.get("key") or "?", ev.get("error") or ""))
+                results.append(ev)
 
         try:
-            api.sync_validators(root, Path(manifest_path), dry_run=True, on_event=tally)
+            api.sync_validators(root, Path(manifest_path), dry_run=True, update=True, pair_existing=True,
+                                on_event=tally)
         except Exception as exc:  # noqa: BLE001
             self.post_message(ActionEvent("validators", {"event": "_failed", "error": str(exc)}))
             return
-        self.app.call_from_thread(self._confirm_validators, manifest_path, outcomes, failures)
+        self.app.call_from_thread(self._confirm_validators, manifest_path, results)
 
-    def _confirm_validators(self, manifest_path, outcomes: list, failures: list) -> None:
+    def _confirm_validators(self, manifest_path, results: list) -> None:
         self._planning = False
+        failures = [(r.get("key") or "?", r.get("error") or "") for r in results if r.get("outcome") == "error"]
         self._log_failures(failures)
-        create = outcomes.count("would_create")
-        exist = sum(o.startswith("would_skip") for o in outcomes)
+        create = [r["key"] for r in results if r.get("outcome") == "would_create"]
+        update = [r["key"] for r in results if r.get("outcome") == "would_update"]
+        pair = [r for r in results if r.get("would_pair")]
+        pair_sets = sum(len(r["would_pair"]) for r in pair)
+        good = sum(1 for r in results if r.get("outcome") == "would_skip_exists" and not r.get("would_pair"))
         rows = (self._status or {}).get("fetchers") or []
         missing = sum(1 for r in rows if r["evidence_set"].get("exists") is False)
-        # The syncer pairs a validator only when it creates it, so a validator
-        # that exists but is not paired stays that way.
-        unpaired = sum(1 for r in rows if r["evidence_set"].get("exists") for v in r["validators"]
-                       if v["paired"] is False)
-        if not create and failures:
-            self._done(Text(f"Validators: the preview failed for {plural(len(failures), 'validator')}, so nothing "
-                            f"was created ({exist} in Paramify already).", style=palette.FAIL))
-            return
-        if not create:
-            text = f"Validators: nothing to create ({exist} in Paramify already)."
-            if unpaired:
-                exists = agree(unpaired, "exists but isn't", "exist but aren't")
-                text += (f" {plural(unpaired, 'validator')} {exists} paired with "
-                         f"{agree(unpaired, 'its', 'their')} evidence set. Pair "
-                         f"{agree(unpaired, 'it', 'them')} in Paramify.")
-            self._done(Text(text, style=palette.WARN if unpaired else palette.OK))
+        does = agree(missing, "doesn't", "don't")
+        set_first = (f"{plural(missing, 'evidence set')} {does} exist yet: press s "
+                     f"first to create {agree(missing, 'it', 'them')}, then v pairs the validators with "
+                     f"{agree(missing, 'it', 'them')}.") if missing else ""
+        if not (create or update or pair):
+            if failures:
+                self._done(Text(f"Validators: the preview failed for {plural(len(failures), 'validator')}, so nothing "
+                                f"was changed ({good} in Paramify already).", style=palette.FAIL))
+                return
+            text = f"Validators: all {good} are in Paramify, paired, and match your files."
+            if set_first:
+                text = f"Validators: {set_first}"
+            self._done(Text(text, style=palette.WARN if set_first else palette.OK))
             return
 
         def go(ok: bool) -> None:
@@ -1346,18 +1345,32 @@ class ParamifyPage(ParamifyWriter, Vertical):
                 self._set_banner(Text("Validators sync cancelled.", style=palette.MUTED))
             self._refresh_hints()
 
-        if missing:
-            does = agree(missing, "doesn't", "don't")
-            ask = (f"Create {plural(create, 'validator')} in {self._base_url()}? {plural(missing, 'evidence set')} "
-                   f"{does} exist yet, and a validator is paired only when it's created: "
-                   f"press s first to create {agree(missing, 'it', 'them')}.")
-        else:
-            ask = f"Create {plural(create, 'validator')} in {self._base_url()} and pair each one with its evidence sets?"
-        failed = (f"\n\nThe preview failed for {plural(len(failures), 'validator')}; the log under the grid says why."
-                  if failures else "")
-        kept = (f" {exist} already {agree(exist, 'exists and stays as it is', 'exist and stay as they are')}."
-                if exist else "")
-        self.app.push_screen(ConfirmModal(f"{ask}{kept}{failed}"), go)
+        def keys(ks: list) -> str:
+            shown = ", ".join(ks[:3])
+            return shown + (f" and {len(ks) - 3} more" if len(ks) > 3 else "")
+
+        steps = []
+        if create:
+            steps.append(f"• Create {plural(len(create), 'validator')} and pair "
+                         f"{agree(len(create), 'it', 'each one')} with {agree(len(create), 'its', 'their')} "
+                         f"evidence sets: {keys(create)}.")
+        if pair:
+            steps.append(f"• Pair {plural(len(pair), 'validator')} already in Paramify with "
+                         f"{plural(pair_sets, 'more evidence set')}: {keys([r['key'] for r in pair])}.")
+        if update:
+            steps.append(f"• Update {plural(len(update), 'validator')} to match your files: {keys(update)}. "
+                         f"This replaces any edits made to {agree(len(update), 'it', 'them')} in Paramify.")
+        notes = []
+        if good:
+            notes.append(f"{good} already {agree(good, 'matches and is', 'match and are')} paired.")
+        if set_first:
+            notes.append(set_first)
+        if failures:
+            notes.append(f"The preview failed for {plural(len(failures), 'validator')}; the log under the grid says why.")
+        message = f"In {self._base_url()}:\n\n" + "\n".join(steps)
+        if notes:
+            message += "\n\n" + " ".join(notes)
+        self.app.push_screen(ConfirmModal(message + "\n\nGo ahead?"), go)
 
     @work(thread=True, exclusive=True, group="paramify-action")
     def _validators_worker(self, root, manifest_path) -> None:
@@ -1365,7 +1378,7 @@ class ParamifyPage(ParamifyWriter, Vertical):
             self.post_message(ActionEvent("validators", ev))
 
         try:
-            api.sync_validators(root, Path(manifest_path), on_event=post)
+            api.sync_validators(root, Path(manifest_path), update=True, pair_existing=True, on_event=post)
         except Exception as exc:  # noqa: BLE001
             post({"event": "_failed", "error": str(exc)})
 
@@ -1373,11 +1386,22 @@ class ParamifyPage(ParamifyWriter, Vertical):
         etype = ev.get("event")
         if etype == "sync_validator":
             outcome = ev.get("outcome") or "?"
-            style = palette.FAIL if outcome == "error" else (palette.OK if outcome == "created" else "dim")
+            paired = ev.get("paired") or ev.get("associated") or []
+            changed = outcome in ("created", "updated") or bool(paired)
+            style = palette.FAIL if outcome == "error" else (palette.OK if changed else "dim")
+            label = {"skipped_exists": "paired" if paired else "unchanged"}.get(outcome, outcome)
+            sets = f"  → {', '.join(paired)}" if paired else ""
             reason = f"  {ev['error']}" if ev.get("error") else ""
-            self._log(Text(f"  [{outcome}] {ev.get('key', '?')}{reason}", style=style))
+            failed = f"  pairing failed: {', '.join(ev['associate_failed'])}" if ev.get("associate_failed") else ""
+            self._log(Text(f"  [{label}] {ev.get('key', '?')}{sets}{reason}{failed}", style=style))
         elif etype == "sync_complete":
-            self._done(Text("Validators synced.", style=palette.OK if ev.get("ok", True) else palette.FAIL))
+            pairs = ev.get("associated", 0)
+            problems = (ev.get("errors") or 0) + (ev.get("associate_errors") or 0)
+            self._done(Text(
+                f"Validators: {ev.get('created', 0)} created, {ev.get('updated', 0)} updated, "
+                f"{plural(pairs, 'pairing')} made" + (f", {plural(problems, 'error')}" if problems else "") + ".",
+                style=palette.OK if ev.get("ok", True) else palette.FAIL,
+            ))
         elif etype == "_failed":
             self._log(Text(f"Validators sync failed: {ev.get('error', '')}", style=f"bold {palette.FAIL}"))
             self._done(Text(f"Validators sync failed: {ev.get('error', '')}", style=palette.FAIL))

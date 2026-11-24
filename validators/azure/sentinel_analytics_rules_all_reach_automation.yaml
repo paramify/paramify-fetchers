@@ -6,18 +6,21 @@ source: community
 statement: >
   Every enabled analytics rule on every Sentinel workspace read has an active automation rule that
   runs when it matches (all_enabled_rules_reach_automation is true): one triggered on a new incident
-  (for a rule that creates incidents) or a new alert, with no conditions or only conditions naming
-  analytics rules by id that include it. A rule only reached through a condition on the alert's data
-  (severity, title, entities) fails, as do unread automation rules and a workspace with no enabled
-  rules. Shows the automation is configured to run, not that its actions succeeded. Does not check
-  whether the collection run succeeded.
+  (for a rule that creates incidents) or a new alert (for Scheduled, NRT and Microsoft security
+  rules), with no conditions or only conditions naming analytics rules by full id (subscription and
+  workspace included) that include it. An automation rule that only closes the incident doesn't
+  count. A rule only reached through a condition on the alert's data (severity, title, entities) or
+  a bare rule name fails, as do unread analytics or automation rules, a failed read that could have
+  hidden rules, a workspace with no enabled rules, and the field appearing other than exactly once.
+  Shows the automation is configured to run, not that its actions succeeded or a notification was
+  delivered. Does not check whether the collection run succeeded.
 
 regex: '"all_enabled_rules_reach_automation":\s*true\b'
-rules_summary: MATCH_COUNT NOT_EQUALS 0
+rules_summary: MATCH_COUNT EQUALS 1
 validation_rules:
   - regexOperation: { type: MATCH_COUNT }
-    criteria: NOT_EQUALS
-    value: { type: CUSTOM_TEXT, customText: "0" }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "1" }
 
 evidence_sets:
   - EVD-AZURE-SENTINEL-ANALYTICS-RULES

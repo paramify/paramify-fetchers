@@ -1,0 +1,109 @@
+name: keycloak_realm_security
+version: 0.1.0
+description: >-
+  Shows whether a Keycloak realm enforces session timeouts, account lockout, password rules and phishing-resistant sign-in, and whether federation, sign-in notices and event logging are configured.
+category: keycloak
+source: community
+
+supports_targets: false
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: keycloak_realm_security.json
+
+config_schema:
+  max_idle_timeout_minutes:
+    type: integer
+    required: false
+    env: KEYCLOAK_MAX_IDLE_TIMEOUT_MINUTES
+    description: >
+      The adopted maximum idle timeout for sign-in sessions, in minutes. There is no default: while it is unset,
+      sso_session_idle_within_max is null rather than judged against a period nobody adopted, and the actual timeout
+      is still reported. A value that is not a whole number above 0 fails the run as bad_config and leaves it unset.
+
+secrets: []          # client_id and client_secret come from the category (fetchers/_categories/keycloak.yaml)
+
+ksis:
+  - KSI-IAM-APM   # phishing-resistant authenticators in the browser flow, fallback and recovery methods, federation
+  - KSI-IAM-SUS   # brute-force detection and lockout
+  - KSI-IAM-ELP   # conditional authenticators in the browser flow
+  - KSI-MLA-LET   # login and admin event logging
+
+evidence_set:
+  reference_id: EVD-KEYCLOAK-REALM-SECURITY
+  name: Keycloak Realm Security
+  instructions: |
+    Script: keycloak/realm_security/fetcher.py
+
+    Access: A Keycloak client with service accounts enabled whose service account holds the client roles view-realm, view-identity-providers and view-events, reached from a network that can call the Keycloak admin endpoint. Each call below names the role Keycloak checks for it, and a call refused for a missing role records that role in api_failures, so a first run shows exactly which roles are needed. Without view-events the event settings read as null; without view-identity-providers the identity providers read as null. Keep the admin endpoint private: run the fetcher from inside the private network that reaches it. On Keycloak 26.8.2 and later, the client also needs the built-in kc-admin-api client scope as a default scope, or every call is refused with 401. For a service account in master, the roles come from the <realm>-realm client in master (such as example-realm-realm, or master-realm when the realm being read is master); for one in the realm being read, from that realm's realm-management client. When the realm settings can't be read, the bound flows are unknown, so neither flow is read. Without view-realm, Keycloak still answers the realm call but with a reduced view; the fetcher treats that as a failure and leaves the realm settings null rather than reading the missing settings as off.
+
+    Commands Executed:
+    - POST /realms/{auth realm}/protocol/openid-connect/token — a client-credentials token for the service account (no role)
+    - GET /admin/realms/{realm} — session, token, lockout, password policy, SSL and flow bindings (view-realm; without it Keycloak returns only a reduced view)
+    - GET /admin/realms/{realm}/authentication/flows/{browser flow}/executions — every step of the browser sign-in flow with its requirement (view-realm)
+    - GET /admin/realms/{realm}/authentication/flows/{reset credentials flow}/executions — every step of account recovery (view-realm)
+    - GET /admin/realms/{realm}/authentication/required-actions — required actions, including terms and conditions (view-realm)
+    - GET /admin/realms/{realm}/identity-provider/instances — external identity providers (view-identity-providers)
+    - GET /admin/realms/{realm}/components (type UserStorageProvider) — user federation providers such as LDAP (view-realm)
+    - GET /admin/realms/{realm}/events/config — login and admin event logging (view-events)
+
+    Output: keycloak_realm_security.json — the realm's sign-in, session, lockout, password and event settings, each browser and reset-credentials flow step with its effective requirement, required actions, identity providers and user federation providers, without any client secret or bind credential.
+
+    Summary fields:
+
+    Which realm was read?
+    - realm_enabled — True if the realm is enabled; false if it is disabled; null if the realm could not be read, as is every realm setting below
+    - ssl_required — Whether HTTPS is required for requests to the realm: all, external (all but private addresses) or none
+    - registration_allowed — True if users can register themselves on the sign-in page; false if accounts are created only by administrators or federation
+
+    Do sessions end?
+    - sso_session_idle_timeout_minutes — Minutes a sign-in session may sit idle before it ends
+    - sso_session_max_lifespan_minutes — Minutes a sign-in session may last in total before the user signs in again
+    - access_token_lifespan_minutes — Minutes an access token stays valid
+    - remember_me_enabled — True if the sign-in page offers remember me, which keeps sessions under their own longer timeouts
+    - max_idle_timeout_minutes — The adopted maximum idle timeout in minutes, as configured; null when not set
+    - sso_session_idle_within_max — True if the realm's idle timeout, compared in seconds, is above 0 and at most max_idle_timeout_minutes; null while no maximum is set or the realm could not be read
+
+    Are repeated failed sign-ins locked out?
+    - brute_force_protected — True if brute-force detection is on; false if failed sign-ins never lock an account
+    - lockout_failure_threshold — Number of failed sign-ins that locks an account; null while brute-force detection is off
+    - permanent_lockout — True if a locked account stays locked until an administrator unlocks it; false if it unlocks after a wait; null while brute-force detection is off
+    - lockout_max_wait_minutes — Minutes of the longest temporary lockout; null while brute-force detection is off
+
+    Which password rules apply?
+    - password_policy_rules — List of the password policy's rule names, such as length or passwordHistory
+    - password_min_length — Number of characters a password must have at least; null when the policy sets no length
+    - password_history — Number of previous passwords that cannot be reused; null when the policy sets no history
+    - password_expiry_days — Days before a password must be changed; null when passwords do not expire
+
+    How does a person sign in?
+    - browser_flow — Alias of the authentication flow bound to browser sign-in
+    - browser_flow_alternative_authenticators — List of the authenticators marked ALTERNATIVE in the browser flow, where any one of them is enough (the fallback paths); null if the flow could not be read
+    - browser_flow_conditional_authenticators — List of the conditions (conditional- authenticators) in the browser flow that decide whether a subflow runs; null if the flow could not be read
+    - local_sign_in_requires_phishing_resistant — True if every local way through the browser flow passes a phishing-resistant authenticator, judged by Keycloak's flow rules (ALTERNATIVE steps are ignored where a flow has REQUIRED or CONDITIONAL ones; a CONDITIONAL step may be skipped; where only ALTERNATIVE steps remain, each must require it), leaving out session reuse (auth-cookie), the federated path (identity-provider-redirector) and Keycloak 26's Organization step (organization), which reuses a session or routes to an identity provider or to the forms; a subflow that only wraps those steps in conditions is left out too; null if the flow could not be read
+    - federated_sign_in_available — True if at least one external identity provider is enabled; false if none is; a redirector step without an enabled provider does not count. What that provider enforces (such as phishing-resistant sign-in) is not visible here and needs its own evidence; null if the identity providers could not be read
+    - identity_provider_redirector_enabled — True if the browser flow has an identity-provider-redirector step that is not disabled; null if the flow could not be read
+    - recovery_requires_phishing_resistant — True if every way through the reset-credentials flow, the recovery path, passes a phishing-resistant authenticator, by the same rules; false if access can be restored without one, such as by an email link alone; null if the flow could not be read
+    - reset_credentials_authenticators — List of the enabled authenticators in the reset-credentials flow, the recovery path used to restore access; null if the flow could not be read
+
+    What must a user do at sign-in?
+    - terms_and_conditions_enabled — True if the terms and conditions required action is enabled; false if it is not; null if the required actions could not be read
+    - terms_and_conditions_default_action — True if terms and conditions is also a default action, so every new user must accept it; false if it is not; null if the required actions could not be read
+    - default_required_actions — List of the enabled required actions every new user must complete, such as CONFIGURE_TOTP or webauthn-register; null if the required actions could not be read
+
+    Where do identities come from?
+    - identity_providers_enabled — Number of enabled external identity providers (OIDC or SAML brokers); null if they could not be read
+    - identity_provider_types — List of the types of the enabled identity providers, such as oidc or saml
+    - user_federation_providers — Number of user federation providers, such as LDAP or Kerberos; null if they could not be read
+
+    Are sign-ins and admin changes logged?
+    - login_events_enabled — True if event storage is on and LOGIN and LOGIN_ERROR are both saved event types, so successful and failed sign-ins are stored; false if storage is off or either type is not saved; null if the event settings or the saved types could not be read
+    - saved_event_types — List of the event types Keycloak saves (Saved types in the admin console); null if not returned
+    - login_events_expiration_days — Days stored login events are kept; null when they are kept until removed or the settings could not be read
+    - admin_events_enabled — True if Keycloak stores admin events (changes made through the admin console or API); false if it does not; null if the event settings could not be read
+    - admin_events_details_enabled — True if admin events include the full representation of what changed; false if they do not; null if the event settings could not be read
+    - event_listeners — List of the event listeners that receive events, such as jboss-logging (the server log); null if the event settings could not be read

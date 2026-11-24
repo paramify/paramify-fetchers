@@ -107,10 +107,10 @@ evidence_set:
 
     Do backups run?
     - servers_with_automatic_backup_within_window — Number of backup servers whose newest completed automatic backup finished within backup_window_hours (an automatic backup within the window); manual, on-demand backups never count; null unless every backup server's backup list was read
-    - servers_without_automatic_backup_within_window — List of backup server names without an automatic backup within the window
-    - servers_relying_on_manual_backup — Number of backup servers with no automatic backup within the window but a manual one within it, where a manual backup would otherwise hide broken automation
-    - servers_with_manual_backups — Number of backup servers with at least one manual, on-demand backup
-    - servers_with_unknown_backup_types — Number of backup servers with at least one backup whose backupType and source match no known label; such a backup is never counted as automatic, so it cannot hide broken automation (each server lists the labels under unknown_backup_labels)
+    - servers_without_automatic_backup_within_window — List of backup server names without an automatic backup within the window; null unless every backup server's backup list was read
+    - servers_relying_on_manual_backup — Number of backup servers with no automatic backup within the window but a manual one within it, where a manual backup would otherwise hide broken automation; null unless every backup server's backup list was read
+    - servers_with_manual_backups — Number of backup servers with at least one manual, on-demand backup; null unless every backup server's backup list was read
+    - servers_with_unknown_backup_types — Number of backup servers with at least one backup whose backupType and source match no known label; such a backup is never counted as automatic, so it cannot hide broken automation (each server lists the labels under unknown_backup_labels); null unless every backup server's backup list was read
     - max_hours_since_automatic_backup — Hours since the newest completed automatic backup of the backup server that has gone longest without one; null if any backup server has no completed automatic backup or could not be read
     - backup_window_hours — Hours a server's newest completed backup may be old and still count as a backup within the window
 

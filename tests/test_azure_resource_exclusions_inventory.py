@@ -110,7 +110,10 @@ def test_inventory_without_patterns_adds_only_empty_exclusion_fields(monkeypatch
     code, evidence = run_inventory(monkeypatch, tmp_path, None)
     summary = evidence["summary"]
     assert code == 0 and evidence["results"]["excluded"] == []
-    new = NEW_KEYS | {"excluded_resources", "in_scope_resources"}
+    expected = {"required_resources", "required_resources_missing", "required_resources_missing_ids",
+                "allowed_resource_patterns", "allowed_resource_patterns_unmatched", "unexpected_resources",
+                "unexpected_resources_by_type", "inventory_matches_expected"}
+    new = NEW_KEYS | expected | {"excluded_resources", "in_scope_resources"}
     assert {k: v for k, v in summary.items() if k not in new} == _inventory_summary_before()
     assert summary["resource_exclusion_patterns"] == summary["resource_exclusion_patterns_unmatched"] == []
     assert (summary["excluded_resources"], summary["in_scope_resources"], summary["total_resources"]) == (0, 4, 4)
@@ -145,6 +148,31 @@ def test_inventory_bare_pattern_fails_the_run(monkeypatch, tmp_path):
     code, evidence = run_inventory(monkeypatch, tmp_path, "rg-out")
     assert code == 1
     assert evidence["summary"]["total_resources"] == 4
+
+
+def _refuse(*args):
+    raise RuntimeError("sign-in failed")
+
+
+def _inventory_counts(monkeypatch, tmp_path, query_all, credential=lambda: object()):
+    _env(monkeypatch, tmp_path, inv, "rg:rg-out")
+    monkeypatch.setattr(inv, "credential", credential)
+    monkeypatch.setattr(inv, "resource_graph_client", lambda cred: object())
+    monkeypatch.setattr(inv, "query_all", query_all)
+    code = inv.main()
+    summary = json.loads((tmp_path / "azure_resource_inventory_s1.json").read_text())["summary"]
+    return code, (summary["in_scope_resources"], summary["excluded_resources"])
+
+
+def test_inventory_in_scope_count_is_null_when_the_resource_list_was_not_read(monkeypatch, tmp_path):
+    assert _inventory_counts(monkeypatch, tmp_path, None, credential=_refuse) == (1, (None, None))
+    assert _inventory_counts(monkeypatch, tmp_path, _refuse) == (1, (None, None))
+
+
+def test_inventory_in_scope_count_is_zero_when_the_resource_list_is_read_and_empty(monkeypatch, tmp_path):
+    def empty(client, sub, query):
+        return {"rows": [], "total_records": 0, "pages": 1}
+    assert _inventory_counts(monkeypatch, tmp_path, empty) == (0, (0, 0))
 
 
 # --- residual_resources ---
@@ -220,6 +248,37 @@ def run_residual(monkeypatch, tmp_path, patterns, failing=()):
     reads = _residual_fakes(monkeypatch, failing)
     code = rr.main()
     return code, json.loads((tmp_path / "azure_residual_resources_s1.json").read_text()), reads
+
+
+def _residual_counts(monkeypatch, tmp_path, refuse=None, rows=None, sign_in=True):
+    """(exit code, (in_scope_orphaned_resources, in_scope_role_assignments)) with the query `refuse` raising."""
+    _env(monkeypatch, tmp_path, rr, "rg:rg-out")
+    _residual_fakes(monkeypatch)
+    table = _residual_rows() if rows is None else rows
+
+    def query_all(client, sub, query):
+        if query == refuse:
+            raise RuntimeError("403")
+        found = table.get(query, [])
+        return {"rows": found, "total_records": len(found), "pages": 1}
+
+    monkeypatch.setattr(rr, "query_all", query_all)
+    if not sign_in:
+        monkeypatch.setattr(rr, "pinned_credential", _refuse)
+    code = rr.main()
+    summary = json.loads((tmp_path / "azure_residual_resources_s1.json").read_text())["summary"]
+    return code, (summary["in_scope_orphaned_resources"], summary["in_scope_role_assignments"])
+
+
+def test_residual_in_scope_counts_are_null_when_their_lists_were_not_read(monkeypatch, tmp_path):
+    assert _residual_counts(monkeypatch, tmp_path, sign_in=False) == (1, (None, None))
+    # Role assignments are one of the lists orphans are found from.
+    assert _residual_counts(monkeypatch, tmp_path, refuse=rr.ASSIGNMENTS_QUERY) == (1, (None, None))
+    assert _residual_counts(monkeypatch, tmp_path, refuse=rr.ORPHAN_QUERIES["unattached_disk"]) == (1, (None, 2))
+
+
+def test_residual_in_scope_counts_are_zero_when_the_lists_are_read_and_empty(monkeypatch, tmp_path):
+    assert _residual_counts(monkeypatch, tmp_path, rows={}) == (0, (0, 0))
 
 
 def test_residual_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_path):
@@ -306,6 +365,29 @@ def run_defender(monkeypatch, tmp_path, patterns, records=DEFENDER_RECORDS):
     monkeypatch.setattr(da, "collect_assessments", lambda sub, cred, collector: (list(records), da.REGISTERED))
     code = da.main()
     return code, json.loads((tmp_path / "azure_defender_assessments_s1.json").read_text())
+
+
+def _defender_counts(monkeypatch, tmp_path, collect, sign_in=True):
+    _env(monkeypatch, tmp_path, da, "rg:rg-out")
+    monkeypatch.setattr(da, "credential", (lambda: object()) if sign_in else _refuse)
+    monkeypatch.setattr(da, "collect_assessments", collect)
+    code = da.main()
+    summary = json.loads((tmp_path / "azure_defender_assessments_s1.json").read_text())["summary"]
+    return code, (summary["in_scope_assessments"], summary["excluded_assessments"])
+
+
+def test_defender_in_scope_count_is_null_when_the_list_was_not_read_in_full(monkeypatch, tmp_path):
+    def cut_off(sub, cred, collector):
+        collector.record("security.assessments.list", RuntimeError("throttled"))
+        return list(DEFENDER_RECORDS[:1]), da.UNKNOWN
+
+    assert _defender_counts(monkeypatch, tmp_path, None, sign_in=False) == (1, (None, None))
+    assert _defender_counts(monkeypatch, tmp_path, cut_off) == (1, (None, None))
+
+
+def test_defender_in_scope_count_is_zero_when_the_list_is_read_and_empty_or_defender_is_off(monkeypatch, tmp_path):
+    for status in (da.REGISTERED, da.NOT_REGISTERED):
+        assert _defender_counts(monkeypatch, tmp_path, lambda sub, cred, collector: ([], status)) == (0, (0, 0))
 
 
 def test_defender_without_patterns_adds_only_empty_exclusion_fields(monkeypatch, tmp_path):
@@ -703,7 +785,7 @@ def test_policy_list_limits_leave_the_recount_known_but_cut_deployments_null_the
 def test_policy_recount_survives_a_states_read_that_fails_partway(monkeypatch, tmp_path):
     code, evidence, _ = run_policy(monkeypatch, tmp_path, PATTERNS, fail=("states",))
     summary, results = evidence["summary"], evidence["results"]
-    assert code == 1 and summary["non_compliant_states_truncated"] is False
+    assert code == 1 and summary["non_compliant_states_truncated"] is None
     assert (summary["non_compliant_resources"], summary["non_compliant_assignments"]) == (2, 1)
     assert [a["is_compliant"] for a in results["assignment_compliance"]] == [True, False]
     assert summary["remediation_failed_deployments"] == 0
@@ -747,7 +829,7 @@ def test_policy_remediation_totals_are_null_when_a_task_or_deployment_list_fails
     for fail in ("deployments", "tasks"):
         code, evidence, _ = run_policy(monkeypatch, tmp_path, PATTERNS, fail=(fail,))
         summary = evidence["summary"]
-        assert code == 1 and summary["remediation_deployments_truncated"] is False, fail
+        assert code == 1 and summary["remediation_deployments_truncated"] is None, fail
         assert (summary["remediation_failed_deployments"], summary["remediation_successful_deployments"]) == (
             None, None), fail
         assert summary["non_compliant_resources"] == 2, fail

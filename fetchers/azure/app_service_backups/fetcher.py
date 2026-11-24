@@ -501,7 +501,8 @@ def exclude_sites(scope: ResourceExclusions, sites, rows):
     return keep(sites), keep(rows), sorted(out.values(), key=lambda e: arm_id_key(e["id"]))
 
 
-def boundary_summary(scope: ResourceExclusions, excluded: list[dict], apps: list[dict], exclusions: dict) -> dict:
+def boundary_summary(scope: ResourceExclusions, excluded: list[dict], apps: list[dict], exclusions: dict,
+                     apps_listed: bool = True) -> dict:
     """Scope fields named boundary_excluded_*, since excluded_function_apps and excluded_deployment_slots count
     in-scope items this fetcher does not assess; a count is null when the list showing that kind failed."""
     def count(kind, listed=True):
@@ -509,10 +510,10 @@ def boundary_summary(scope: ResourceExclusions, excluded: list[dict], apps: list
 
     return {
         **scope.summary(excluded, (), {}),
-        "boundary_excluded_web_apps": count(WEB_APP_KIND),
+        "boundary_excluded_web_apps": count(WEB_APP_KIND, apps_listed),
         "boundary_excluded_function_apps": count(FUNCTION_APP_KIND, exclusions["function_apps"]["count"] is not None),
         "boundary_excluded_deployment_slots": count(SLOT_KIND, exclusions["deployment_slots"]["count"] is not None),
-        "in_scope_web_apps": len(apps),
+        "in_scope_web_apps": len(apps) if apps_listed else None,
     }
 
 
@@ -614,7 +615,7 @@ def collect(subscription_id, cred, collector: Collector, settings: dict, now: da
     if client is None:
         if scope is not None:
             scope.mark_unread()
-        return [], None, exclusions, []
+        return None, None, exclusions, []
     sites = list_sites(client, collector)
 
     graph = collector.guard("resourcegraph.ResourceGraphClient (init)", lambda: resource_graph_client(cred))
@@ -651,7 +652,8 @@ def collect(subscription_id, cred, collector: Collector, settings: dict, now: da
         records = list(pool.map(lambda site: collect_app(client, collector, site, settings, now), apps))
     records.sort(key=lambda r: arm_id_key(r["id"]))
     storage = resolve_storage(graph, subscription_id, collector, records)
-    return records, inventory, exclusions, storage
+    # Web apps come from either list, so they are unread only when both failed.
+    return (None if sites is None and rows is None else records), inventory, exclusions, storage
 
 
 def main() -> int:
@@ -674,7 +676,7 @@ def main() -> int:
     subscription_id = sub["subscription_id"]
     cred = collector.guard("azure.identity.DefaultAzureCredential", lambda: pinned_credential(subscription_id))
 
-    apps: list[dict] = []
+    apps: list[dict] | None = None
     inventory, storage = None, []
     exclusions = {
         "function_apps": exclusion(None, FUNCTION_APP_REASON),
@@ -697,7 +699,9 @@ def main() -> int:
                 "ambient Azure credential that can list subscriptions)"
             ),
         )
-    if not (subscription_id and cred is not None):
+    apps_listed = apps is not None
+    apps = apps or []
+    if not apps_listed:
         scope.mark_unread()
     scope.warn_unmatched(logger)
 
@@ -729,7 +733,7 @@ def main() -> int:
         summary={
             **summarize(apps, inventory, exclusions, storage, settings),
             "provider_registration_status": registration,
-            **boundary_summary(scope, excluded, apps, exclusions),
+            **boundary_summary(scope, excluded, apps, exclusions, apps_listed),
         },
     )
 
