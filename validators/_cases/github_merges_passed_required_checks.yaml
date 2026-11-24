@@ -1,0 +1,14 @@
+validator: github_merges_passed_required_checks
+cases:
+- name: compliant
+  expect: PASS
+  artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"merged_with_failed_required_checks":0}}}'
+- name: nonzero
+  expect: FAIL
+  artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"merged_with_failed_required_checks":2}}}'
+- name: unread
+  expect: FAIL
+  artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"merged_with_failed_required_checks":null}}}'
+- name: renamed
+  expect: FAIL
+  artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"merged_with_failed_required_checks_renamed":0}}}'

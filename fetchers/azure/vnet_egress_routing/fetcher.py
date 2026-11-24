@@ -921,6 +921,20 @@ def main() -> int:
     if not (subscription_id and cred is not None) or any(f["operation"].startswith(unread_ops) for f in collector.failures):
         exclusions.mark_unread()
     exclusions.warn_unmatched(logger)
+
+    def read(*operations):
+        operations += ("network.NetworkManagementClient (init)",)
+        return bool(subscription_id and cred is not None) and not any(
+            f["operation"].startswith(operations) for f in collector.failures)
+
+    vnets_read = read("network.virtual_networks.list_all")
+    counts = {
+        "virtual_networks": len(vnets) if vnets_read else None, "subnets": len(subnets) if vnets_read else None,
+        "route_tables": len(tables) if read("network.route_tables.list_all") else None,
+        "network_interfaces": len(nics) if read("network.network_interfaces.list_all") else None,
+        "azure_firewalls": len(firewalls) if read("network.azure_firewalls.list_all") else None,
+        "virtual_hubs": len(hubs) if read("network.virtual_hubs.list") else None,
+    }
     evidence = build_payload(
         subscription_id=subscription_id,
         subscription_source=sub["subscription_source"],
@@ -939,9 +953,7 @@ def main() -> int:
         summary={
             **summarize(vnets, subnets, tables, nics, firewalls, hubs),
             "provider_registration_status": registration,
-            **exclusions.summary(excluded, EXCLUSION_KINDS, {
-                "virtual_networks": len(vnets), "subnets": len(subnets), "route_tables": len(tables),
-                "network_interfaces": len(nics), "azure_firewalls": len(firewalls), "virtual_hubs": len(hubs)}),
+            **exclusions.summary(excluded, EXCLUSION_KINDS, counts),
         },
     )
 

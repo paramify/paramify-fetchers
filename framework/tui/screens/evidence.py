@@ -40,12 +40,12 @@ class EvidencePage(Vertical):
             with Vertical(id="evidence-left", classes="panel"):
                 yield DataTable(id="evidence-runs")
                 yield Static(
-                    f"no runs yet — execute the manifest on tab [bold {palette.ACCENT}]3[/]",
+                    f"No runs yet. Run the manifest on the Run tab ([bold {palette.ACCENT}]2[/]).",
                     classes="empty-hint",
                 )
             with Vertical(id="evidence-right", classes="panel"):
                 yield DataTable(id="evidence-files")
-                yield Static("evidence files from the selected run appear here", classes="empty-hint")
+                yield Static("Pick a run to see its files.", classes="empty-hint")
 
     def on_mount(self) -> None:
         self._runs: List[dict] = []
@@ -79,7 +79,7 @@ class EvidencePage(Vertical):
             self._runs = api.list_runs(out)
         except Exception as exc:  # never let a disk/JSON issue kill the UI
             self._runs = []
-            self.notify(f"Could not list runs: {exc}", severity="error")
+            self.notify(f"Couldn't list runs: {exc}", severity="error")
 
         dt = self.query_one("#evidence-runs", DataTable)
         dt.clear()
@@ -165,14 +165,14 @@ class EvidencePage(Vertical):
             try:
                 text = api.preview_issue_report(p)
             except Exception as exc:
-                self.notify(f"Cannot read scan report: {exc}", severity="error", timeout=8)
+                self.notify(f"Couldn't read the scan report: {exc}", severity="error", timeout=8)
                 return
             self.app.push_screen(PreviewModal(text, title=p.name))
             return
         try:
             ev = api.read_evidence(p)
         except Exception as exc:
-            self.notify(f"Cannot read evidence: {exc}", severity="error", timeout=8)
+            self.notify(f"Couldn't read the evidence: {exc}", severity="error", timeout=8)
             return
         self.app.push_screen(PreviewModal(self._format(path, ev), title=p.name))
 
@@ -182,7 +182,7 @@ class EvidencePage(Vertical):
         # \u2014 in place of the characters the tenant actually uses is unreadable.
         payload = json.dumps(ev.get("payload"), indent=2, default=str, ensure_ascii=False)
         if not ev.get("enveloped"):
-            return f"{Path(path).name}   (raw — not enveloped)\n\n{payload}"
+            return f"{Path(path).name}\n\n{payload}"
 
         md = ev.get("metadata") or {}
         lines = [

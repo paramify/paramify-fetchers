@@ -13,6 +13,7 @@ import json
 from pathlib import Path
 from typing import Dict, Iterable, List, Set
 
+import yaml
 from jsonschema import Draft202012Validator
 
 from framework import yaml_io
@@ -39,6 +40,7 @@ def _parse_validator(data: dict, path: Path) -> Validator:
         attestation_rules=list(data.get("attestation_rules") or []),
         path=path.resolve(),
         category=path.parent.name,
+        source=data.get("source") or "paramify",
     )
 
 
@@ -116,3 +118,98 @@ def pipeline_conflicts(validators: Iterable[Validator], fetchers: Dict[str, Fetc
         f"never approve, so the pipeline never runs (remove {ref} from its evidence_sets)"
         for v in validators for ref in v.evidence_sets if ref in pipeline
     ]
+
+
+# --------------------------------------------------------------------------- #
+# Per-fetcher validator selection in the manifest.
+#
+#   - use: some_fetcher
+#     validators: [key_a, key_b]     # the exact tracked list (pinned)
+#
+# No `validators:` on an entry = the defaults: every Paramify-made validator
+# for the fetcher's evidence set. Unticking only stops tracking; nothing is
+# removed from the workspace.
+
+
+def available_for(ref: str, validators: Iterable[Validator]) -> List[Validator]:
+    """Every registry validator that applies to one evidence set."""
+    return [v for v in validators if ref in v.evidence_sets]
+
+
+def default_keys(available: Iterable[Validator]) -> List[str]:
+    return [v.key for v in available if v.source == "paramify"]
+
+
+def tracked_for(entry: dict, ref: str, validators: Iterable[Validator]) -> List[Validator]:
+    """The validators a manifest entry tracks for its evidence set."""
+    avail = available_for(ref, validators)
+    chosen = entry.get("validators") if isinstance(entry, dict) else None
+    keys = set(default_keys(avail) if chosen is None else chosen)
+    return [v for v in avail if v.key in keys]
+
+
+def manifest_tracked_sets(manifest: dict, fetchers: Dict[str, Fetcher],
+                          validators: Iterable[Validator], refs: Set[str] | None = None) -> Dict[str, List[str]]:
+    """Each tracked validator's key -> the manifest's evidence sets that track it, in manifest order
+    (optionally only for `refs`). A validator listed against many sets is paired only with these."""
+    validators = list(validators)
+    out: Dict[str, List[str]] = {}
+    for entry in (manifest.get("run") or {}).get("fetchers") or []:
+        name = entry.get("use") if isinstance(entry, dict) else None
+        fetcher = fetchers.get(name) if name else None
+        if not fetcher or not fetcher.evidence_set or fetcher.is_pipeline:
+            continue
+        ref = fetcher.evidence_set.reference_id
+        if refs is not None and ref not in refs:
+            continue
+        for v in tracked_for(entry, ref, validators):
+            sets = out.setdefault(v.key, [])
+            if ref not in sets:
+                sets.append(ref)
+    return out
+
+
+def manifest_tracked(manifest: dict, fetchers: Dict[str, Fetcher],
+                     validators: Iterable[Validator], refs: Set[str] | None = None) -> List[Validator]:
+    """Union of what the manifest's entries track (optionally only for `refs`)."""
+    validators = list(validators)
+    by_key = {v.key: v for v in validators}
+    return [by_key[k] for k in manifest_tracked_sets(manifest, fetchers, validators, refs)]
+
+
+def write_regex(path: Path, regex: str) -> None:
+    """Set the `regex:` of one registry file, keeping the rest of it (comments
+    included) as written. Only a one-line `regex:` is replaced, single-quoted as
+    the registry writes them; the file is read back to prove the value landed.
+
+    Raises ValueError when the file has no one-line `regex:` to replace (a
+    block scalar, or a quoted or plain one continued on the next lines), or
+    doesn't parse.
+    """
+    path = Path(path)
+    original = path.read_text()
+    lines = original.splitlines(keepends=True)
+    at = [i for i, line in enumerate(lines) if line.startswith("regex:")]
+    one_line = f"{path.name} has no one-line regex: to replace (it spans several lines). Edit it by hand."
+    if len(at) != 1:
+        raise ValueError(one_line)
+    try:
+        whole = (yaml_io.load(original) or {}).get("regex")
+        alone = (yaml_io.load(lines[at[0]]) or {}).get("regex")
+    except yaml.YAMLError:
+        # A quoted value left open on its line doesn't parse alone: it goes on below.
+        raise ValueError(one_line) from None
+    except AttributeError:
+        raise ValueError(f"{path.name} isn't a validator file. Edit it by hand.") from None
+    if alone != whole:  # the value goes on past its line (a block, or a continued scalar)
+        raise ValueError(one_line)
+    quoted = "'" + regex.replace("'", "''") + "'"
+    lines[at[0]] = f"regex: {quoted}\n"
+    text = "".join(lines)
+    try:
+        landed = (yaml_io.load(text) or {}).get("regex")
+    except (yaml.YAMLError, AttributeError):
+        landed = None
+    if landed != regex:
+        raise ValueError(f"The regex wouldn't read back the same from {path.name}. Edit it by hand.")
+    path.write_text(text)

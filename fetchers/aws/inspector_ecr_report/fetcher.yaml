@@ -1,5 +1,5 @@
 name: aws_inspector_ecr_report
-version: 0.2.0
+version: 0.3.0
 description: Converts active Inspector ECR findings to a complete CSV for a Paramify vulnerability assessment, preserving finding and image identity, package details, severity and observation dates.
 category: aws
 kind: issue_report
@@ -59,7 +59,12 @@ config_schema:
     type: boolean
     default: false
     env: AWS_INSPECTOR_ALLOW_EMPTY
-    description: Allow a header-only zero-finding report after successful collection and coverage checks. Does not allow missing images, disabled scanning or incomplete coverage.
+    description: Allow a header-only zero-finding report after successful collection and coverage checks. Does not allow disabled scanning or incomplete coverage; a scope that matches no images also needs allow_no_images.
+  allow_no_images:
+    type: boolean
+    default: false
+    env: AWS_INSPECTOR_ALLOW_NO_IMAGES
+    description: Allow a scope that matches no images, such as a tag no image carries yet. Requires allow_empty, since such a report is header-only. A misspelled tag or a usage filter that Inspector cannot match also selects no images, so check the evidence's repository_image_count and image_count.
 issue_report:
   assessment_type: VULNERABILITY
   title: Inspector ECR Vulnerability Findings

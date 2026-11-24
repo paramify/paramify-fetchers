@@ -1,0 +1,24 @@
+key: azure_appgw_backend_no_insecure_settings
+name: 'Application Gateway: Every Backend Connection Is Encrypted and Verified'
+type: AUTOMATED
+role: configuration
+source: community
+statement: >
+  No backend setting that a routing rule or path rule uses connects unencrypted (HTTP or TCP), or
+  turns off certificate validation or the server name check (insecure_backend_settings_in_use is 0).
+  Unused settings are not judged. Shows how the gateway connects to its backends, not the backends'
+  own TLS configuration. Fails if the count appears other than exactly once. Does not check whether
+  the collection run succeeded.
+
+regex: '"insecure_backend_settings_in_use":\s*(?<insecure_backend_settings_in_use>\d+)'
+rules_summary: MATCH_COUNT EQUALS 1; MATCH_GROUP[1] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "1" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # insecure_backend_settings_in_use
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-APPGW-BACKEND-TLS

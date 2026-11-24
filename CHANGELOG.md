@@ -10,39 +10,100 @@ schemas and the `paramify` CLI — not the internal code.
 
 ## [Unreleased]
 
-### Changed
+### Breaking
 
-- **`azure_aks_cluster_configuration` 0.7.0: autoscaling for expected pools.** A new `expected_autoscaling_pools`
-  setting lists the node pools that must have the cluster autoscaler on, as `pool` (every cluster) or `cluster/pool`.
-  Missing pools and pools without the autoscaler are counted and named, a pool at zero nodes stays expected, and
-  `all_expected_pools_autoscaling` gives one verdict. Each pool now records `min_count`. Unset, the fields stay null.
-- **`azure_devops_work_items` 0.4.0: TFVC changeset inclusions.** A new `changeset_inclusions` pattern list
-  (`AZURE_DEVOPS_CHANGESET_INCLUSIONS`, `path:<TFVC server path>` patterns with a reason each, edited like the Front
-  Door and DNS lists) names the TFVC paths whose linked changesets are in scope. A pattern takes in its path and
-  everything under it, without regard to case. Paths are literal: `validate` and the run refuse `*` and `?`, since the
-  read check couldn't prove every path a wildcard covers. Set, each run first reads every included path's latest
-  changeset and fails, writing no evidence, if one is missing, empty or can't be read. A linked changeset is then in
-  scope only if a file it changed (or renamed from) is under an included path, read from the changeset read the
-  fetcher already makes and paged to the end of its change list when that read didn't list every file; one whose
-  changed files can't all be read stays in scope. Others are left out under `results.excluded`, as `not_included`,
-  or as `not_readable` when the identity can't read them (TF14098, 401 or 403), which no longer fails the run. After a
-  refused changeset, every included path is read again at the end of the changeset reads, and one that no longer reads
-  fails the run without evidence, so access lost mid-run can't pass as changesets outside the paths. Each entry names
-  the work items that link it. `changed_before_approval`, `approved_by_change_author` and `first_linked_change` use
-  in-scope changesets only; an item whose changesets were all left out has none to check, as an item linked to
-  nothing, and doesn't hold the summary's change-order lists unknown. Those lists can't cover a refused changeset, so
-  an item that links one reads `unreadable_linked_changesets: true` and is listed in
-  `change_items_with_unreadable_changesets`. New: `results.changeset_inclusion_checks`,
-  `results.changeset_inclusion_recheck`, `results.excluded`, `unreadable_linked_changesets` on each work item, and in
-  the summary `changeset_inclusion_patterns`, `in_scope_changesets` (null when a linked changeset couldn't be read),
-  `not_included_changesets`, `not_readable_changesets`, `changeset_inclusions_rechecked` and
-  `change_items_with_unreadable_changesets`. Unset, a refused changeset still fails the run and the evidence only gains
-  these keys.
+- **`kind: inventory` requires a `pipeline:` block.** A `fetcher.yaml` with
+  `kind: inventory` and no `pipeline: {type: inventory, id_scheme: …}` fails the
+  schema, and a schema failure drops the fetcher from discovery. Migration: add
+  `pipeline: {type: inventory, id_scheme: <scheme>}` (the scheme list is in the
+  [pipeline fetchers guide](docs/pipeline_fetchers_guide.md)).
+
+- **Inventory records must carry `asset_type`.** Advanced config derives each
+  Inventory item's parent component from it, so a `kind: inventory` record
+  without a non-empty string `asset_type` now breaks the inventory contract
+  and the run is not sent. `metadata.inventory.by_asset_type` counts the
+  records per type (largest first). Migration: set a non-empty `asset_type`
+  (such as `endpoint`) on every record; `_template_inventory` already writes it.
+
+- **Datadog evidence: some fields are removed, renamed, or now mean something
+  else.** Re-check any validator or query that reads these fields:
+  - `datadog_siem_signals` 0.2.0: `status` is now the signal's triage state
+    (`open`, `under_review` or `archived`), and `summary.status_counts` counts
+    those states. Before, `status` held the signal's `status` attribute, which
+    is its severity. `severity` now has that value; before, it was always
+    null.
+  - `datadog_siem_configuration` 0.2.0: each suppression rule has Datadog's
+    own field names. `isEnabled` is now `enabled`, `startDate` is now
+    `start_date` and `expirationDate` is now `expiration_date`. `rule_id` is
+    removed; `rule_query` gives the rules that a suppression applies to.
+    `data.notification_integrations` and
+    `summary.notification_integrations_count` are removed (see **Removed**).
+    A failure now writes `error_code`, `metadata.partial_failure` and
+    `metadata.api_failures`.
+  - `datadog_siem_detection_rules` 0.2.0: the evidence holds only custom
+    Cloud SIEM rules (`isDefault` false, type `log_detection` or
+    `signal_correlation`). Default rules and the rules of other products are
+    left out, so `total_rules`, `enabled_rules` and `rules_by_type` can be
+    lower. The new `summary.rules_excluded` counts the rules left out.
+    `summary.rules_never_triggered_count` is removed (see **Removed**).
+  - `datadog_incidents_list` 0.2.0: `postmortem_id`,
+    `summary.incidents_with_postmortem` and
+    `summary.resolved_without_postmortem_ids` are `null`. A v2 incident has no
+    postmortem attribute, and the fetcher does not read attachments, so these
+    values are unknown. Before, they read as 0 and as every resolved incident.
+  - `datadog_log_indexes` 0.2.0: `summary.audit_indexes_below_90_days` is
+    `null`, not 0, when no audit index has a retention to check.
+  - Every Datadog fetcher that pages: when a page or a per-item read fails
+    after the first page, the summary figures counted from the list are
+    `null`, the status is `partial_failure`, and the run exits 1. Before, the
+    figures were numbers that looked complete, and the run exited 0.
 
 ### Added
 
 - **Literal pattern lists.** A `type: patterns` field can declare `globs: false`; `validate`, the run and the TUI then
   refuse a pattern holding `*` or `?`, and `describe` says the field takes patterns without wildcards.
+- **The TUI shows which environment variables a manifest is missing, and stops a run that would fail on them.**
+  - The manifest settings row has an `env` button (`✓ all set` or `✗ 2 missing`), each fetcher's status names what it
+    needs (`✗ needs OKTA_API_TOKEN`), and the line under the table splits what a run needs from what only an upload needs.
+  - The button (or `E`) opens a short list of just the missing variables and where to get each one, with a button that
+    adds them to `.env` as blank lines, as `paramify env --write` does.
+  - ctrl+r on the Run tab doesn't start while a variable a fetcher reads is empty, and says which.
+  - Only whether a variable has a value is ever checked. The TUI never shows, logs or takes a value.
+
+- **Evidence set frequency follows how often a manifest runs, and reaches sets that already exist.**
+  - The manifest settings row has a `frequency` button (daily, every 3 days, weekly, …), saved as `run.schedule.every`.
+    An entry can override it in its form (`e`). On the CLI: `paramify manifest set-frequency MANIFEST FREQUENCY
+    [--fetcher NAME]`.
+  - Order, highest first: the entry, a per-fetcher `frequency` in `upload.yaml`, `defaults.frequency` in `upload.yaml`
+    (now read), the manifest's frequency, the fetcher's own default (every 3 days).
+  - An upload now changes the frequency on an existing evidence set (`PATCH /evidence/{id}`) when one was chosen, and
+    the upload confirm shows it: `~ EVD-IAM-MFA: frequency every 3 days → daily`. A fetcher's default never changes an
+    existing set, and a key that can't edit sets skips the change, says so, and still uploads.
+  - The stack, owner, frequency and env buttons widen to fit a new value straight away. They used to keep their old
+    width and show `owner: t` until the window was resized.
+
+- **Validator results and a local test in the TUI (Validators tab).**
+  - Each validator shows PASS or FAIL from its latest result in Paramify, and the Paramify tab's validators cell
+    counts failures (`2/2 · 1 failing`).
+  - The validator window tests it against your last run with Node, as Paramify does, and shows each rule's mark and
+    the value it read, with a plain reason when it fails.
+  - On a failure, `a` asks Claude why (read-only `claude -p`, asked once per session before anything is sent). Any
+    regex it proposes is tested on the same files before it is shown, and `w` writes a passing one to the
+    validator's YAML after a confirm. Without Claude Code the key says so; `c` copies the same report to paste
+    anywhere. `PARAMIFY_ASK_CLAUDE=0` turns Ask Claude off.
+  - After `w` the window names the command that sends the new regex: `paramify validators sync -m MANIFEST --update`.
+    The Paramify tab's sync skips validators Paramify already has, so it doesn't send it.
+
+- **Choose the validators each fetcher tracks (TUI Validators tab, beta).** The tab lists the manifest's fetchers
+  and, for each, every registry validator for its evidence set in a Paramify section and a community section.
+  `space` tracks or untracks one and saves the manifest; `enter` shows the claim, regex, rules in plain words,
+  evidence sets and YAML file; `a` goes back to the defaults. The choice is saved as a `validators:` list on the
+  manifest entry. Validators gain an optional `source: paramify | community` field (absent = `paramify`);
+  community-made validators are tracked only when an entry lists them. Untracking never changes Paramify.
+- **Community-made fetchers are labelled in the TUI.** `fetcher.yaml` takes an optional
+  `source: paramify | community` (absent = `paramify`), also in `paramify catalog --json`. A community fetcher gets an
+  orange COMMUNITY label in the catalog, the manifest table and the Validators tab, and its detail says it was made
+  by the community and to read its code before giving it secrets.
 - **One-line install.** `curl -fsSL https://raw.githubusercontent.com/paramify/paramify-fetchers/main/install.sh |
   bash` clones the repo to `~/paramify-fetchers`, installs the CLI and TUI into the clone's `.venv`, and links
   `paramify` into `~/.local/bin`. In a terminal it shows a spinner and elapsed time for each step, offers to add
@@ -61,7 +122,8 @@ schemas and the `paramify` CLI — not the internal code.
   only to the commit a plan showed), and
   a once-a-day notice (`PARAMIFY_NO_UPDATE_CHECK=1` turns it off). See `docs/versioning_guide.md`.
 - **The TUI shows when an update is waiting and applies it.** A quiet `↑ 12 new commits on main · press U` line
-  in the header and on the welcome screen (it gives way first when the header is short of room); `U` opens the plan
+  in the header and on the welcome screen (it gives way first when the header is short of room); `U` (or `u`,
+  except on the Paramify tab, where `u` is upload run) opens the plan
   `paramify update` shows, with Apply (a second confirmation when breaking changes touch this clone) and Roll back.
   The update runs as a subprocess, so the running TUI never loads half-replaced code.
 - **Update notes**, `releases/unreleased.yaml` and `releases/<version>.yaml`: the short rows `paramify update` shows
@@ -135,56 +197,18 @@ schemas and the `paramify` CLI — not the internal code.
   fill unset or empty variables from it; a variable set in the environment always wins, and a run never needs the
   file. See [`docs/cli_guide.md`](docs/cli_guide.md#what-a-manifest-needs-paramify-env).
 
-### Breaking
-
-- **`kind: inventory` requires a `pipeline:` block.** A `fetcher.yaml` with
-  `kind: inventory` and no `pipeline: {type: inventory, id_scheme: …}` fails the
-  schema, and a schema failure drops the fetcher from discovery. Migration: add
-  `pipeline: {type: inventory, id_scheme: <scheme>}` (the scheme list is in the
-  [pipeline fetchers guide](docs/pipeline_fetchers_guide.md)).
-
-- **Inventory records must carry `asset_type`.** Advanced config derives each
-  Inventory item's parent component from it, so a `kind: inventory` record
-  without a non-empty string `asset_type` now breaks the inventory contract
-  and the run is not sent. `metadata.inventory.by_asset_type` counts the
-  records per type (largest first). Migration: set a non-empty `asset_type`
-  (such as `endpoint`) on every record; `_template_inventory` already writes it.
-
-- **Datadog evidence: some fields are removed, renamed, or now mean something
-  else.** Re-check any validator or query that reads these fields:
-  - `datadog_siem_signals` 0.2.0: `status` is now the signal's triage state
-    (`open`, `under_review` or `archived`), and `summary.status_counts` counts
-    those states. Before, `status` held the signal's `status` attribute, which
-    is its severity. `severity` now has that value; before, it was always
-    null.
-  - `datadog_siem_configuration` 0.2.0: each suppression rule has Datadog's
-    own field names. `isEnabled` is now `enabled`, `startDate` is now
-    `start_date` and `expirationDate` is now `expiration_date`. `rule_id` is
-    removed; `rule_query` gives the rules that a suppression applies to.
-    `data.notification_integrations` and
-    `summary.notification_integrations_count` are removed (see **Removed**).
-    A failure now writes `error_code`, `metadata.partial_failure` and
-    `metadata.api_failures`.
-  - `datadog_siem_detection_rules` 0.2.0: the evidence holds only custom
-    Cloud SIEM rules (`isDefault` false, type `log_detection` or
-    `signal_correlation`). Default rules and the rules of other products are
-    left out, so `total_rules`, `enabled_rules` and `rules_by_type` can be
-    lower. The new `summary.rules_excluded` counts the rules left out.
-    `summary.rules_never_triggered_count` is removed (see **Removed**).
-  - `datadog_incidents_list` 0.2.0: `postmortem_id`,
-    `summary.incidents_with_postmortem` and
-    `summary.resolved_without_postmortem_ids` are `null`. A v2 incident has no
-    postmortem attribute, and the fetcher does not read attachments, so these
-    values are unknown. Before, they read as 0 and as every resolved incident.
-  - `datadog_log_indexes` 0.2.0: `summary.audit_indexes_below_90_days` is
-    `null`, not 0, when no audit index has a retention to check.
-  - Every Datadog fetcher that pages: when a page or a per-item read fails
-    after the first page, the summary figures counted from the list are
-    `null`, the status is `partial_failure`, and the run exits 1. Before, the
-    figures were numbers that looked complete, and the run exited 0.
-
-### Added
-
+- **TUI regression tests for batches, channels and stacks.** The `tui` job now
+  covers the stack and owner pickers (online, typed, a listing error, escape),
+  the entry editor's Paramify settings, and the upload plan in the confirm,
+  made by the real planner against the in-process Paramify fake: a new batch on
+  a channel's request, an evidence-level batch, direct delivery, batches off
+  (the workspace flag, or an API with no batch routes), an API that refuses a
+  batch's approval, the owner choosing a channel, the refusal without one, the
+  settings-changed note, an upload, its no-op, a held entry resuming its batch
+  and a dropped file. New snapshots show the stack picker, the owner picker and the upload
+  plan; a second end-to-end flow picks a stack and an owner, runs, and confirms
+  the plan. The smoke job's goldens add `manifest set-stack`, `set-owner` and
+  the dry-run note for settings changed after the run.
 - **NIST CMVP category: cryptographic module validation status.**
   `nist_cmvp_module_validation_status` reads the public CMVP certificate page
   for each certificate number in its `certificates` config and reports whether
@@ -1979,6 +2003,88 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **`jira_site_inventory` 0.2.0: limit to named projects.** A new `projects` setting (`JIRA_PROJECTS`, project keys or
+  exact names) limits projects, issue types, statuses, service desks and issues to the named projects; the others are
+  only counted in `metadata.projects_left_out`. Statuses then come from each project's own status list. The issue
+  query is always limited to those projects, even when `jql` names others. A name that matches no visible project
+  fails as `bad_config`, and an unreadable project list collects nothing site-wide. Priorities stay site-wide. Off by
+  default.
+- **`paramify update` shows what changed by release.** The New section groups its highlights under the release that
+  shipped them, with the release date. Changes that are not in a release yet come first, under "unreleased". Each of
+  your fetchers shows its release notes, newest first, instead of a commit reason. The header counts the releases the
+  update crosses. The TUI update screen shows the newest note per fetcher, and the New list now holds up to ten
+  highlights.
+
+- **The TUI's validator sync (Paramify tab, `v`) now pairs and updates validators that already exist.** Before, it
+  created missing validators and paired only those, and told you to pair the rest in Paramify yourself. The preview
+  now lists three things and does them all on one yes:
+  - creates the missing validators and pairs them;
+  - pairs validators already in Paramify with the manifest's evidence sets they aren't paired with yet, and only
+    those sets, not every set the validator lists;
+  - updates validators whose content differs from your files, named in the confirm because it replaces edits made in
+    Paramify. One that matches is not sent. Paramify's default `disposition: PASS` and a trailing newline don't
+    count as a difference.
+  After `w` in the validator workbench, the hint points at `v` instead of `paramify validators sync --update`.
+  The CLI is unchanged, except that `--update` now skips a validator that already matches.
+- **`github_non_user_credentials` 0.3.0: limit to collected repositories.** A new `scope_to_repositories` setting
+  keeps apps, fine-grained tokens and organization Actions secrets only when they can reach a collected repository or
+  their reach is unknown, and marks each kept row with `reaches_collected_repositories`. Apps installed on selected
+  repositories stay as unknown, since GitHub shows that list only to the app itself, unless the organization's
+  confirmation is named in `apps_confirmed_reaching` or `apps_confirmed_not_reaching`; those apps carry
+  `reach_source: organization_confirmation` and are named in the metadata. Left-out and unknown counts are recorded.
+  Organization secret rows now carry `visibility`. Off by default.
+- **`github_workflow_runs` 0.3.0: scheduled-run actors.** Scheduled runs no longer name a user as `actor`, since GitHub
+  credits them to whoever last changed the schedule; `triggering_actor` is kept only on a re-run. A new
+  `include_actors` setting (default true) removes both fields from every run. The summary adds `runs_scheduled`.
+- **Plainer TUI wording.**
+  - Results read as sentences instead of key=value: "Uploaded 3 files, 1 already there.", not
+    `uploaded=3 duplicates=1 errors=0`.
+  - The upload confirm lists what is delivered where and anything refused, and leaves out no-op and tag steps.
+  - Counts use real plurals, messages name hosts instead of full API URLs, and `esc leave field` shows only while
+    you are typing.
+  - The Pipelines tab is one line when a manifest has nothing to send.
+  - Fixes: the Evidence tab sent you to tab 3 to run (it's 2), and the welcome screen said "1 fetchers".
+- **TUI tab keys: Validators is tab 4.** Paramify moves from `4` to `5` and Pipelines from `5` to `6`.
+- **`paramify validators sync -m` and the Paramify tab cover only the validators a manifest tracks.** Without a
+  `validators:` list an entry tracks every Paramify-made validator for its evidence set, which is every validator
+  the registry ships today, so nothing changes until an entry lists its own or a community validator is added.
+- **`aws_inspector_ecr_findings` and `aws_inspector_ecr_report` 0.3.0: image counts and an opt-in for an empty scope.**
+  - The evidence summary adds `repository_image_count`, every image in the selected repositories before tag,
+    push-date and usage filters, next to `image_count`, the images that match them. Both are logged. No new API calls.
+  - The report's "no images matched" and "missing coverage" refusals are now separate errors. No matched images is
+    `bad_config` and gives both counts; coverage gaps give the gap count and the first few image IDs.
+  - New report setting `allow_no_images` permits a scope that matches no images. It requires `allow_empty: true`, and
+    setting it alone fails before any AWS request.
+  - The report CSV adds a `Repository ARN` column after `Repository`, for matching findings to inventory. Update the
+    tenant's intake preset to map or ignore it.
+- **`azure_aks_cluster_configuration` 0.7.0: autoscaling for expected pools.** A new `expected_autoscaling_pools`
+  setting lists the node pools that must have the cluster autoscaler on, as `pool` (every cluster) or `cluster/pool`.
+  Missing pools and pools without the autoscaler are counted and named, a pool at zero nodes stays expected, and
+  `all_expected_pools_autoscaling` gives one verdict. Each pool now records `min_count`. Unset, the fields stay null.
+
+- **`azure_devops_work_items` 0.4.0: TFVC changeset inclusions.** A new `changeset_inclusions` pattern list
+  (`AZURE_DEVOPS_CHANGESET_INCLUSIONS`, `path:<TFVC server path>` patterns with a reason each, edited like the Front
+  Door and DNS lists) names the TFVC paths whose linked changesets are in scope. A pattern takes in its path and
+  everything under it, without regard to case. Paths are literal: `validate` and the run refuse `*` and `?`, since the
+  read check couldn't prove every path a wildcard covers. Set, each run first reads every included path's latest
+  changeset and fails, writing no evidence, if one is missing, empty or can't be read. A linked changeset is then in
+  scope only if a file it changed (or renamed from) is under an included path, read from the changeset read the
+  fetcher already makes and paged to the end of its change list when that read didn't list every file; one whose
+  changed files can't all be read stays in scope. Others are left out under `results.excluded`, as `not_included`,
+  or as `not_readable` when the identity can't read them (TF14098, 401 or 403), which no longer fails the run. After a
+  refused changeset, every included path is read again at the end of the changeset reads, and one that no longer reads
+  fails the run without evidence, so access lost mid-run can't pass as changesets outside the paths. Each entry names
+  the work items that link it. `changed_before_approval`, `approved_by_change_author` and `first_linked_change` use
+  in-scope changesets only; an item whose changesets were all left out has none to check, as an item linked to
+  nothing, and doesn't hold the summary's change-order lists unknown. Those lists can't cover a refused changeset, so
+  an item that links one reads `unreadable_linked_changesets: true` and is listed in
+  `change_items_with_unreadable_changesets`. New: `results.changeset_inclusion_checks`,
+  `results.changeset_inclusion_recheck`, `results.excluded`, `unreadable_linked_changesets` on each work item, and in
+  the summary `changeset_inclusion_patterns`, `in_scope_changesets` (null when a linked changeset couldn't be read),
+  `not_included_changesets`, `not_readable_changesets`, `changeset_inclusions_rechecked` and
+  `change_items_with_unreadable_changesets`. Unset, a refused changeset still fails the run and the evidence only gains
+  these keys.
+
 - **`paramify upload` no longer drops a file for holding `../`, `/etc/passwd`, `/bin/sh`, `/bin/bash` or
   `<script`.** It checked every file for these strings and dropped a match before sending it, with `blocked by the
   production WAF: '…'`. The WAF has exempted the upload routes from those rules since 2026-10-29, so the check only
@@ -1992,6 +2098,13 @@ schemas and the `paramify` CLI — not the internal code.
   largest page each API allows, so an enhanced scan with many findings takes a tenth of the requests, and a BASIC
   scan is read in one. The output, its file name and the IAM actions are unchanged. It needs the `aws` extra
   (boto3), which the Docker image already installs.
+
+- `aws_ecr_image_scanning` 0.5.0 writes null, not `[]`, for what it could not read: `applied_scan_filters` when a
+  repository's effective scanning configuration was not read, `registry_scanning.rules` when the registry
+  configuration was not read, and `repositories` when the repository list was not read. An empty list now always
+  means AWS returned none. A missing boto3 fails as `bad_config` and names the install command, instead of
+  `partial_failure`. The run's failure message lists failures in repository order, so it no longer changes from run
+  to run.
 
 - `qualys_vmdr_vulnerability_findings` uses the v6 host detection and v4 KnowledgeBase endpoints in place of v2,
   which Qualys has scheduled for end of life. Requests, parameters and the report columns are unchanged.
@@ -2835,6 +2948,98 @@ schemas and the `paramify` CLI — not the internal code.
   the CA counts are null when the CA read fails. `authentication_methods` now reads
   null, not an empty list, when the methods policy can't be read.
 
+- **`azure_sentinel_incidents` 0.2.0: response timeline, monthly metrics, rules
+  and entities.** Besides the latest SecurityIncident row per incident, which
+  still gives close times and now tasks, the fetcher reads every update row in
+  the lookback. Each incident gains:
+  - `acknowledged_time_utc` and `hours_to_acknowledge`: the first update by a
+    person that moves it to Active or Closed or gives it an owner or a different
+    one (by object id when both updates have one, so a renamed owner isn't a
+    different one), up to its first close, so a reopen never counts and removing an owner
+    doesn't either; a person creating it already Active or owned acknowledges
+    it at creation. Updates with no modifier, and those by automation rules,
+    playbooks, alert grouping, Fusion, incident creation or the Defender XDR
+    sync, don't count. Microsoft doesn't document what a person's update writes
+    as the modifier, so any other modifier counts as a person, an unlisted
+    system included. Known only when the creation row was read; a later row
+    missing doesn't undo one already found.
+  - `status_changes`, `owner_changes` and `severity_changes` (time, from, to and
+    who made it), and `tasks` with status and completion time. Owners compare
+    by object id when both updates have one, so a rename isn't an owner change,
+    and an owner known only by object id is named by it. Times are each
+    update's LastModifiedTime, and rows written at the same instant always sort
+    alike.
+  - `hours_to_detect` (first activity to creation), `comments_count`,
+    `classification_comment` and `related_analytic_rule_ids`.
+  - the `entities` on its alerts, as kind and identifier, from SecurityAlert
+    joined on the incident's alert ids: up to 25 of each kind, processes as image
+    name and process id, URLs as scheme and host only. Entities read
+    as `null` when the alerts can't be read.
+  - `provider_incident_id` and `provider_incident_url`: for an incident synced
+    from Defender XDR, its id and link there; Microsoft Graph alerts give the same
+    id as `incidentId`.
+  - `owner_object_id` and `owner_email`, beside the existing owner names. An
+    owner known only by email or object id is still an owner, in
+    `history_complete`, `open_new_unowned_history_incomplete` and the backlog
+    by owner.
+  - `history_complete`: whether every update was read: the incident was created
+    inside the history read, which starts at the lookback or SecurityIncident's
+    retention, whichever is later; its creation row was read; and a row tied for
+    the latest time read matches its current status, severity and owner (by
+    object id when both sides have one, else by name) and, if its
+    `lastModifiedTimeUtc` is within the last hour, is that recent. One already
+    acknowledged before its oldest update read has no acknowledgement time rather
+    than a late one. `updates_read` counts the update rows read for it.
+
+  Each workspace gains `monthly`: per calendar month of the lookback, MTTD by
+  month created, MTTA by month acknowledged and MTTR by month closed over the
+  in-scope incidents, and the open backlog at month end by severity and owner
+  over every incident, which is `null` for month ends older than
+  SecurityIncident's retention; its `updates_retained` is true when the whole
+  month is inside the history read. An older incident closed in the lookback leaves
+  the backlog without counting in that month's MTTR, so monthly MTTR may read
+  low. It also gains `recurring_titles`, `recurrence_by_title` and
+  `recurrence_by_rule` (two or more incidents created in the lookback),
+  `open_unacknowledged` (open, every update read, and no person has acknowledged
+  it), `open_new_unowned_history_incomplete` (open, still New with no owner, and
+  not every update read, so never counted in `open_unacknowledged`), and
+  `mttd_hours`, `mtta_hours` and `mttr_hours`. When the update history can't be
+  read, the timeline fields, `monthly`, `acknowledged_incidents` and
+  `open_unacknowledged` are `null` rather than empty. When close times can't be
+  read, `close_time_status` is `unknown` and the close-time counts are `null`,
+  rather than every closed incident counting as missing. A SecurityIncident
+  table the query can't find, in a workspace that lists an incident over an hour
+  old, is hidden by table-level access: the run records an access failure and
+  exits 1, and close times and history are unknown. In a workspace that lists
+  none, or only incidents under an hour old that may not be ingested yet, it
+  reads as empty, with a note. SecurityAlert is treated the same way when an
+  incident over an hour old has alerts. SecurityAlert is cut to the incidents'
+  alert ids before it is aggregated and joined, and a query whose result is too
+  large for one response (over 64 MB or 500,000 rows) is read again in halves
+  of the incidents, down to 64 shares, rather than failing the run.
+  The summary's counts, existing ones included, are `null` when any workspace's
+  incident list failed, the workspace list or a check for Sentinel failed, or a
+  workspace named in `SENTINEL_WORKSPACES` wasn't found, and the counts that
+  can be unknown are `null` when any workspace's value is; with no Sentinel
+  workspace found they are 0.
+  Each workspace also gains `limitations`: in a workspace connected to Defender
+  XDR, analysts usually work incidents in the Defender portal and
+  SecurityIncident shows mostly the XDR sync's updates, so those incidents read
+  as not acknowledged and an open one can count in `open_unacknowledged`; their
+  acknowledgement times would need Defender XDR's incident activity history,
+  which neither SecurityIncident nor Graph's `security/incidents` (its current
+  state and comments, but not when an incident was first activated or assigned)
+  provides.
+  Other existing fields are unchanged; KSI-PIY-RES is not mapped, since it isn't
+  evidenceable.
+
+### Deprecated
+
+- **`uploaders/paramify_evidence/uploader.py`.** It still works and keeps its
+  flags. It now hands the run to the same engine as `paramify upload`, prints a
+  deprecation notice, and writes the notice under `deprecations` in
+  `upload_log.json`. Use `paramify upload`.
+
 ### Removed
 
 - **Datadog evidence fields with no source in the API.**
@@ -2862,6 +3067,18 @@ schemas and the `paramify` CLI — not the internal code.
     repo without it (`checkov_bicep` already declared it optional).
 
   No fetcher's output changes, so no fetcher version moves.
+
+- **More in-scope counts read null, not 0, when their list couldn't be read.** Each `in_scope_*` count, and the
+  `excluded_*` count beside it, now reads null when the list it counts wasn't read, and 0 only when it was read and is
+  empty; each list is judged on its own. `azure_alert_rules` 0.3.2, `azure_app_service_backups` 0.3.3,
+  `azure_app_service_configuration` 0.5.2, `azure_app_service_deployments` 0.3.2 (and its `boundary_excluded_*`
+  counts), `azure_app_service_plans` 0.3.2, `azure_key_vault_key_rotation` 0.6.2, `azure_log_analytics_workspaces`
+  0.3.2, `azure_policy_compliance` 0.5.2 (still 0 with Microsoft.PolicyInsights unregistered),
+  `azure_sql_managed_instance_configuration` 0.5.1 and `azure_vnet_egress_routing` 0.3.2. `scope_exclusions` gains
+  the same unread state, so `azure_dns_configuration` 0.6.2 (`in_scope_record_sets`, also null while one zone's
+  record sets are unread) and `azure_front_door_tls`, `azure_front_door_waf_coverage` 0.6.2 and
+  `azure_front_door_origins` 0.8.2 (host, route and other counts) read null when the profile list wasn't read, and
+  their `scope_exclusion_patterns_unmatched` is null then too.
 
 - **`paramify run` stops its running fetchers on Ctrl-C or SIGTERM.** Each fetcher runs in its own session, so before,
   an interrupted run left it running and writing into the run directory. The runner now kills the fetcher's process
@@ -3615,100 +3832,6 @@ schemas and the `paramify` CLI — not the internal code.
   Graph simply did not return (indexing lag, or a scope the credential cannot
   read) gives `null` with no failure entry. **Re-check any validator or query
   that expects `private_ip_addresses` to be a list.**
-
-### Changed
-
-- **`azure_sentinel_incidents` 0.2.0: response timeline, monthly metrics, rules
-  and entities.** Besides the latest SecurityIncident row per incident, which
-  still gives close times and now tasks, the fetcher reads every update row in
-  the lookback. Each incident gains:
-  - `acknowledged_time_utc` and `hours_to_acknowledge`: the first update by a
-    person that moves it to Active or Closed or gives it an owner or a different
-    one (by object id when both updates have one, so a renamed owner isn't a
-    different one), up to its first close, so a reopen never counts and removing an owner
-    doesn't either; a person creating it already Active or owned acknowledges
-    it at creation. Updates with no modifier, and those by automation rules,
-    playbooks, alert grouping, Fusion, incident creation or the Defender XDR
-    sync, don't count. Microsoft doesn't document what a person's update writes
-    as the modifier, so any other modifier counts as a person, an unlisted
-    system included. Known only when the creation row was read; a later row
-    missing doesn't undo one already found.
-  - `status_changes`, `owner_changes` and `severity_changes` (time, from, to and
-    who made it), and `tasks` with status and completion time. Owners compare
-    by object id when both updates have one, so a rename isn't an owner change,
-    and an owner known only by object id is named by it. Times are each
-    update's LastModifiedTime, and rows written at the same instant always sort
-    alike.
-  - `hours_to_detect` (first activity to creation), `comments_count`,
-    `classification_comment` and `related_analytic_rule_ids`.
-  - the `entities` on its alerts, as kind and identifier, from SecurityAlert
-    joined on the incident's alert ids: up to 25 of each kind, processes as image
-    name and process id, URLs as scheme and host only. Entities read
-    as `null` when the alerts can't be read.
-  - `provider_incident_id` and `provider_incident_url`: for an incident synced
-    from Defender XDR, its id and link there; Microsoft Graph alerts give the same
-    id as `incidentId`.
-  - `owner_object_id` and `owner_email`, beside the existing owner names. An
-    owner known only by email or object id is still an owner, in
-    `history_complete`, `open_new_unowned_history_incomplete` and the backlog
-    by owner.
-  - `history_complete`: whether every update was read: the incident was created
-    inside the history read, which starts at the lookback or SecurityIncident's
-    retention, whichever is later; its creation row was read; and a row tied for
-    the latest time read matches its current status, severity and owner (by
-    object id when both sides have one, else by name) and, if its
-    `lastModifiedTimeUtc` is within the last hour, is that recent. One already
-    acknowledged before its oldest update read has no acknowledgement time rather
-    than a late one. `updates_read` counts the update rows read for it.
-
-  Each workspace gains `monthly`: per calendar month of the lookback, MTTD by
-  month created, MTTA by month acknowledged and MTTR by month closed over the
-  in-scope incidents, and the open backlog at month end by severity and owner
-  over every incident, which is `null` for month ends older than
-  SecurityIncident's retention; its `updates_retained` is true when the whole
-  month is inside the history read. An older incident closed in the lookback leaves
-  the backlog without counting in that month's MTTR, so monthly MTTR may read
-  low. It also gains `recurring_titles`, `recurrence_by_title` and
-  `recurrence_by_rule` (two or more incidents created in the lookback),
-  `open_unacknowledged` (open, every update read, and no person has acknowledged
-  it), `open_new_unowned_history_incomplete` (open, still New with no owner, and
-  not every update read, so never counted in `open_unacknowledged`), and
-  `mttd_hours`, `mtta_hours` and `mttr_hours`. When the update history can't be
-  read, the timeline fields, `monthly`, `acknowledged_incidents` and
-  `open_unacknowledged` are `null` rather than empty. When close times can't be
-  read, `close_time_status` is `unknown` and the close-time counts are `null`,
-  rather than every closed incident counting as missing. A SecurityIncident
-  table the query can't find, in a workspace that lists an incident over an hour
-  old, is hidden by table-level access: the run records an access failure and
-  exits 1, and close times and history are unknown. In a workspace that lists
-  none, or only incidents under an hour old that may not be ingested yet, it
-  reads as empty, with a note. SecurityAlert is treated the same way when an
-  incident over an hour old has alerts. SecurityAlert is cut to the incidents'
-  alert ids before it is aggregated and joined, and a query whose result is too
-  large for one response (over 64 MB or 500,000 rows) is read again in halves
-  of the incidents, down to 64 shares, rather than failing the run.
-  The summary's counts, existing ones included, are `null` when any workspace's
-  incident list failed, the workspace list or a check for Sentinel failed, or a
-  workspace named in `SENTINEL_WORKSPACES` wasn't found, and the counts that
-  can be unknown are `null` when any workspace's value is; with no Sentinel
-  workspace found they are 0.
-  Each workspace also gains `limitations`: in a workspace connected to Defender
-  XDR, analysts usually work incidents in the Defender portal and
-  SecurityIncident shows mostly the XDR sync's updates, so those incidents read
-  as not acknowledged and an open one can count in `open_unacknowledged`; their
-  acknowledgement times would need Defender XDR's incident activity history,
-  which neither SecurityIncident nor Graph's `security/incidents` (its current
-  state and comments, but not when an incident was first activated or assigned)
-  provides.
-  Other existing fields are unchanged; KSI-PIY-RES is not mapped, since it isn't
-  evidenceable.
-
-### Deprecated
-
-- **`uploaders/paramify_evidence/uploader.py`.** It still works and keeps its
-  flags. It now hands the run to the same engine as `paramify upload`, prints a
-  deprecation notice, and writes the notice under `deprecations` in
-  `upload_log.json`. Use `paramify upload`.
 
 ## [0.6.0-beta] - 2026-10-23
 

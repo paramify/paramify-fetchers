@@ -86,6 +86,15 @@ EVIDENCE_FREQUENCIES = (
     "MONTHLY", "QUARTERLY", "BIANNUAL", "ANNUAL",
 )
 DEFAULT_EVIDENCE_FREQUENCY = "THREE_DAY"
+# What a manifest can choose (run.schedule.every, an entry's paramify.frequency), shortest
+# first. NOT_SET is left out: a schedule always has a cadence.
+SCHEDULE_FREQUENCIES = tuple(f for f in EVIDENCE_FREQUENCIES if f != "NOT_SET")
+# Each value as a person says it, for messages and the TUI.
+FREQUENCY_WORDS = {
+    "NOT_SET": "not set", "DAILY": "daily", "THREE_DAY": "every 3 days", "WEEKLY": "weekly",
+    "BIWEEKLY": "every 2 weeks", "MONTHLY": "monthly", "QUARTERLY": "quarterly",
+    "BIANNUAL": "twice a year", "ANNUAL": "yearly",
+}
 
 
 @dataclass
@@ -165,6 +174,9 @@ class Validator:
     #: The registry directory the validator sits in (`validators/<category>/`),
     #: which is the service axis the uploaders tag it by.
     category: Optional[str] = None
+    #: Who made it: "paramify" or "community" (absent in the yaml = paramify).
+    #: Only Paramify-made validators are tracked by default.
+    source: str = "paramify"
 
 
 @dataclass
@@ -211,6 +223,8 @@ class Fetcher:
     evidence_set: Optional["EvidenceSet"] = None
     ksis: List[str] = field(default_factory=list)
     kind: str = "evidence"
+    #: Who made it: "paramify" or "community" (absent in fetcher.yaml = paramify).
+    source: str = "paramify"
     issue_report: Optional["IssueReport"] = None
     #: The Paramify pipeline this fetcher's output feeds. Required of an inventory.
     pipeline: Optional["Pipeline"] = None
@@ -344,6 +358,8 @@ class Manifest:
     entries: List[ManifestEntry]
     platforms: Dict[str, PlatformConfig] = field(default_factory=dict)
     paramify: Dict[str, Any] = field(default_factory=dict)
+    # run.schedule: {"every": <frequency>, "at": "HH:MM"}; empty when the manifest sets none.
+    schedule: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass

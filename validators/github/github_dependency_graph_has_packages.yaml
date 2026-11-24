@@ -1,0 +1,19 @@
+key: github_dependency_graph_has_packages
+name: GitHub Dependency Graph Has Packages
+type: AUTOMATED
+role: integrity
+source: community
+statement: >-
+  The dependency graph of every repository in scope holds at least one package. An empty graph fails,
+  because alerts are on but no manifest was parsed, so zero alerts proves nothing.
+regex: '"repositories_dependency_graph_empty":\s*\[\s*\]'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+- regexOperation:
+    type: MATCH_COUNT
+  criteria: NOT_EQUALS
+  value:
+    type: CUSTOM_TEXT
+    customText: '0'
+evidence_sets:
+- EVD-GITHUB-DEPENDABOT-ALERTS

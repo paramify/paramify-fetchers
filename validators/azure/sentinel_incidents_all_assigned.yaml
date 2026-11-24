@@ -1,0 +1,19 @@
+key: sentinel_incidents_all_assigned
+name: Azure Sentinel Incidents All Assigned
+type: AUTOMATED
+role: configuration
+source: community
+statement: >
+  Every Sentinel incident in scope (created in the lookback, default 90 days, or still open however
+  old) has an owner. Supports the owner/assigned part of KSI-MLA-RVL, KSI-INR-RIR, KSI-IAM-SUS and
+  KSI-CNA-ULN. Counts violations, so it relies on sentinel_incident_fields_present.
+
+regex: '"owner_assigned_to":\s*null'
+rules_summary: MATCH_COUNT EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-SENTINEL-INCIDENTS

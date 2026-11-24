@@ -1,0 +1,44 @@
+validator: sqlmi_failover_groups_all_synchronized
+cases:
+  - name: all_groups_catch_up
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"instance_failover_groups":[{"name":"fg-1","replication_role":"Primary","replication_state":"CATCH_UP"},{"name":"fg-2","replication_role":"Primary","replication_state":"CATCH_UP"}]}}}'
+
+  - name: all_groups_catch_up_pretty_printed
+    expect: PASS
+    note: guards the whitespace backtrack, where \s* matching nothing would let the lookahead see ' "CATCH_UP"'.
+    artifact: |
+      {
+        "metadata": {"exit_code": 0},
+        "payload": {"results": {"instance_failover_groups": [
+          {"name": "fg-1", "replication_role": "Primary", "replication_state":   "CATCH_UP"}
+        ]}}
+      }
+
+  - name: catchup_spelling_without_underscore
+    expect: PASS
+    note: the SQL REST reference spells the state CATCHUP; Managed Instance responses spell it CATCH_UP.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"instance_failover_groups":[{"name":"fg-1","replication_state":"CATCHUP"}]}}}'
+
+  - name: one_group_seeding
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"instance_failover_groups":[{"name":"fg-1","replication_state":"CATCH_UP"},{"name":"fg-2","replication_state":"SEEDING"}]}}}'
+
+  - name: one_group_suspended
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"instance_failover_groups":[{"name":"fg-1","replication_state":"SUSPENDED"}]}}}'
+
+  - name: state_missing
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"instance_failover_groups":[{"name":"fg-1","replication_state":null}]}}}'
+
+  - name: catch_up_prefix_is_not_catch_up
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"instance_failover_groups":[{"name":"fg-1","replication_state":"CATCH_UP_PENDING"}]}}}'
+
+  - name: state_renamed_ALONE_THIS_PASSES
+    expect: PASS
+    note: >
+      Deliberate. sqlmi_backups_failover_fields_present fails here; see
+      set_EVD-AZURE-SQLMI-BACKUPS.yaml.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"instance_failover_groups":[{"name":"fg-1","sync_state":"SUSPENDED"}]}}}'
