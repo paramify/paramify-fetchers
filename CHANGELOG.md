@@ -127,7 +127,9 @@ schemas and the `paramify` CLI — not the internal code.
   - `azure_front_door_waf_coverage` 0.6.3:
     - A host-route whose profile's security policies weren't read has `effective_scope: unknown` and `protected`
       null.
-    - A WAF policy that can't be found while the WAF policy list wasn't read is unknown, not `waf_unresolved`.
+    - A WAF policy that can't be found while the WAF policy list wasn't read is unknown, not `waf_unresolved`, and
+      a policy whose blocking is unknown leaves `waf_blocking` and `protected` null. Such host-routes count in
+      `unknown_host_routes`.
     - A profile's `waf_log_exported`, `access_log_exported`, `captured_log_categories` and `waf_log_destinations`
       are null when either log list wasn't read, and `waf_in_use` is null rather than false while its routes
       weren't read.
@@ -139,12 +141,15 @@ schemas and the `paramify` CLI — not the internal code.
       wasn't read. An excluded group lists `origins: null` then.
     - `in_scope_apps` and `excluded_apps` are null when the origin group scope is unknown, or when any profile's
       origin group or origin list wasn't read, excluded profiles included.
-    - Health records read `has_health_data`, `has_traffic` and `requests` null when that profile's metrics weren't
-      read.
+    - A group's `enabled_regions` and `active_regions` are null when its origin list wasn't read.
+    - Health records read health and traffic null, for the group and each origin, region and hour, when that
+      profile's metrics weren't read; `traffic_shift_count` and `traffic_shifts` too when its request metrics weren't.
+    - The production app counts are also null when an excluded profile's endpoint, route or rule set list wasn't
+      read, since its groups can put an app behind Front Door.
   - `azure_front_door_waf_policies` 0.2.2: when the managed rule set definitions weren't read, a default rule set's
     `rule_definition_found` is null instead of false, so the policy is no longer reported as
-    `rule_definition_not_found`. Its `blocking` is null unless another reason already makes it false. The blocking, rule group and newest-version
-    counts read null, and every count reads null when the policy list wasn't read.
+    `rule_definition_not_found`. Its `blocking` is null unless another reason already makes it false. The blocking,
+    rule group and newest-version counts read null, and every count reads null when the policy list wasn't read.
 
 - **In-scope counts read null, not 0, when their list couldn't be read.** A failed sign-in or list call left
   `in_scope_*` at 0, as if the subscription had none. Each now reads null when the list it counts wasn't read, and 0

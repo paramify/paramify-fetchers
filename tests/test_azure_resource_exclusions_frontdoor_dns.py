@@ -540,8 +540,21 @@ APP_EAST_CONFIG = {
 }
 
 
-def run_origins(monkeypatch, tmp_path, patterns, reads=None, scope=None, collect_profiles=None, lookup_sites=None):
+def run_origins(monkeypatch, tmp_path, patterns, reads=None, scope=None, collect_profiles=None, lookup_sites=None,
+                refused_metric=None):
     reads = [] if reads is None else reads
+
+    def metrics(sub, cred, collector, profiles, window):
+        read = {}
+        for p in profiles:
+            reads.append(("metrics", p["name"]))
+            ops = {key: f"monitor.metrics.list({metric}, {p['name']})"
+                   for key, metric in (("health", "OriginHealthPercentage"), ("requests", "OriginRequestCount"))}
+            for op in set(ops.values()) & {refused_metric}:
+                collector.record(op, REFUSED)
+            read[fd.arm_key(p["id"])] = {key: None if op == refused_metric else [] for key, op in ops.items()}
+        return read
+
     for attr, fake in {
         "collect_profiles": collect_profiles or (lambda subscription_id, cred, collector: (_topologies(), {})),
         "graph_client": lambda *a: object(),
@@ -550,9 +563,7 @@ def run_origins(monkeypatch, tmp_path, patterns, reads=None, scope=None, collect
         "lookup_plans": lambda *a: PLANS,
         "read_site_configs": lambda cred, collector, sites: reads.extend(("config", s["name"]) for s in sites) or {
             fd.arm_key(_site_id("app-east")): APP_EAST_CONFIG},
-        "collect_origin_metrics": lambda sub, cred, collector, profiles, window: reads.extend(
-            ("metrics", p["name"]) for p in profiles) or {
-            fd.arm_key(p["id"]): {"health": [], "requests": []} for p in profiles},
+        "collect_origin_metrics": metrics,
     }.items():
         monkeypatch.setattr(origins, attr, fake)
     for env in (origins.PRODUCTION_TAG_ENV, origins.LOOKBACK_ENV):
@@ -783,13 +794,26 @@ def _run_profile_reads(module, monkeypatch, tmp_path, refuse=None, scope="route:
             return policies, fd.definition_index(None)
 
         monkeypatch.setattr(module, "collect_waf_policies", unread_definitions)
-    elif refuse:
+    elif refuse == WAF_POLICIES_REFUSED:
+        _, definitions = _blocking_waf_policies()
+
+        def unread_policies(subscription_id, cred, collector):
+            collector.record(WAF_POLICIES_REFUSED, REFUSED)
+            return None, definitions
+
+        monkeypatch.setattr(module, "collect_waf_policies", unread_policies)
+    elif refuse == PROFILES_REFUSED:
+        # The shared profile list, so the refusal goes through its real guard.
+        monkeypatch.setattr(module, "front_door_profiles", fd.front_door_profiles)
+        _refuse(monkeypatch, module, refuse)
+    elif refuse and not refuse.startswith("monitor.metrics.list("):
         _refuse(monkeypatch, module, refuse)
     if module is tls:
         return _run(tls, monkeypatch, tmp_path, "rg:rg-out", "azure_front_door_tls", scope)
     if module is coverage:
         return _run(coverage, monkeypatch, tmp_path, "rg:rg-out", "azure_front_door_waf_coverage", scope)
-    return run_origins(monkeypatch, tmp_path, "rg:rg-out", scope=scope, collect_profiles=REAL_ORIGIN_PROFILES)
+    return run_origins(monkeypatch, tmp_path, "rg:rg-out", scope=scope, collect_profiles=REAL_ORIGIN_PROFILES,
+                       refused_metric=refuse if refuse and refuse.startswith("monitor.metrics.list(") else None)
 
 
 # The in-scope count each fetcher adds beyond hosts, custom domains, endpoints and routes.
@@ -797,6 +821,8 @@ OWN_COUNT = {tls: "secrets", coverage: "host_routes", origins: "origin_groups"}
 ROUTES_REFUSED = "cdn.routes.list_by_endpoint(fd-in/e)"
 DEFINITIONS_REFUSED = "frontdoor.managed_rule_sets.list"
 DOMAINS_REFUSED = "cdn.afd_custom_domains.list_by_profile(fd-in)"
+WAF_POLICIES_REFUSED = "frontdoor.policies.list_by_subscription"
+PROFILES_REFUSED = "cdn.profiles.list"
 
 
 @pytest.mark.parametrize("module", [tls, coverage, origins], ids=["tls", "coverage", "origins"])
@@ -932,17 +958,24 @@ def _constants(module) -> set:
     (tls, DOMAINS_REFUSED, {"custom_domains"}),
     (tls, "cdn.secrets.list_by_profile(fd-in)", {"secrets"}),
     (tls, "cdn.rule_sets.list_by_profile(fd-in)", {"rule_sets"}),
+    (tls, PROFILES_REFUSED, {"profiles", *tls.PROFILE_LISTS}),
     (tls, None, set()),
     (coverage, ROUTES_REFUSED, {"routes"}),
     (coverage, DOMAINS_REFUSED, {"custom_domains"}),
     (coverage, "cdn.security_policies.list_by_profile(fd-in)", {"security_policies"}),
     (coverage, "monitor.diagnostic_settings.list(fd-in)", {"log_settings"}),
     (coverage, DEFINITIONS_REFUSED, {"rule_set_definitions"}),
+    (coverage, WAF_POLICIES_REFUSED, {"waf_policies"}),
+    (coverage, PROFILES_REFUSED, {"profiles", *coverage.PROFILE_LISTS}),
     (coverage, None, set()),
     (origins, ROUTES_REFUSED, {"routes"}),
     (origins, "cdn.rule_sets.list_by_profile(fd-in)", {"rule_sets"}),
     (origins, "cdn.afd_origins.list_by_origin_group(fd-in/g)", {"origins"}),
-    (origins, "cdn.afd_origins.list_by_origin_group(fd-out/g)", {"excluded_profile_origins"}),
+    (origins, "cdn.afd_origins.list_by_origin_group(fd-out/g)", {"excluded_profile_lists"}),
+    (origins, "cdn.routes.list_by_endpoint(fd-out/e)", {"excluded_profile_lists"}),
+    (origins, "monitor.metrics.list(OriginHealthPercentage, fd-in)", {"health_metrics"}),
+    (origins, "monitor.metrics.list(OriginRequestCount, fd-in)", {"request_metrics"}),
+    (origins, PROFILES_REFUSED, {"profiles", *origins.PROFILE_LISTS}),
     (origins, None, set()),
 ], ids=lambda v: v if isinstance(v, str) else None)
 def test_summary_fields_built_from_an_unread_list_read_null(module, refuse, unread, monkeypatch, tmp_path):
@@ -1050,5 +1083,6 @@ def test_an_origin_groups_verdicts_are_null_for_what_wasnt_read():
     unread = origins.group_record(profile, group, None, [path], {}, {})
     assert (unread["origins"], unread["total_origins"], unread["connection_protected"]) == (None, None, None)
     assert unread["serving"] is True
+    assert (unread["enabled_regions"], unread["active_regions"]) == (None, None)
     no_paths = origins.group_record(profile, group, [], [path], {}, {}, paths_read=False)
     assert (no_paths["serving"], no_paths["protocols_to_origin"], no_paths["connection_protected"]) == (None, None, None)

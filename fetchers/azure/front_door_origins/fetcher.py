@@ -74,9 +74,9 @@ LOOKBACK_ENV = "AZURE_FRONT_DOOR_METRICS_LOOKBACK_DAYS"
 SCOPE_EXCLUSIONS_ENV = "AZURE_FRONT_DOOR_SCOPE_EXCLUSIONS"
 EXCLUDED_KINDS = ("custom_domain", "endpoint", "route", "origin_group", "app")
 # The per-profile lists this fetcher reads: the CDN lists, then each in-scope profile's metrics, then an excluded
-# profile's origin groups and origins (which can still keep an app in scope).
+# profile's lists (its groups can still keep an app in scope and put it behind Front Door).
 PROFILE_LISTS = ("endpoints", "routes", "custom_domains", "rule_sets", "origin_groups", "origins", "health_metrics",
-                 "request_metrics", "excluded_profile_origins")
+                 "request_metrics", "excluded_profile_lists")
 # A group's routes, and so whether it serves and over what, come from these.
 PATH_LISTS = frozenset({"endpoints", "routes", "rule_sets"})
 GROUPS = ("endpoints", "routes", "custom_domains", "rule_sets", "origin_groups")
@@ -103,7 +103,7 @@ FIELDS_BY_LISTS = (
         "app_service_origins", "serving_app_service_origins", "serving_app_service_origins_locked_to_front_door",
         "serving_app_service_origins_not_locked", "serving_app_service_origins_public_network_access_disabled",
         *(f"serving_app_service_origins_{gap}" for gap in APP_GAPS))),
-    ((*ORIGINS, "excluded_profile_origins"), tuple(
+    ((*ORIGINS, "excluded_profile_lists"), tuple(
         f"production_{app_type}s{suffix}" for app_type in ("web_app", "function_app") for suffix in APP_COUNTS)),
     ((*ORIGINS, "health_metrics", "request_metrics"), (
         "serving_groups_with_health_data", "serving_groups_with_traffic", "serving_groups_without_traffic",
@@ -351,8 +351,8 @@ def group_record(profile: dict, group: dict, origins: list[dict] | None, paths: 
         "enabled_origins": if_read(len(enabled)),
         "best_priority": best,
         "active_origins": if_read(len(active)),
-        "active_regions": active_regions,
-        "enabled_regions": enabled_regions,
+        "active_regions": if_read(active_regions),
+        "enabled_regions": if_read(enabled_regions),
         "enabled_origins_region_unresolved": if_read(sum(1 for o in enabled if not o["region"])),
         "multi_region_active_active": if_read(len(active_regions) >= 2),
         "multi_region_failover": if_read(len(enabled_regions) >= 2),
@@ -420,7 +420,7 @@ def summarize(profiles: list[dict], skipped_by_sku: dict, groups: list[dict]) ->
         "enabled_origins": count(origins, lambda o: o["effective_enabled_state"] == "Enabled"),
         "private_link_origins": count(origins, lambda o: o["private_link"] is not None),
         "origins_by_region_source": dict(sorted(Counter(str(o["region_source"]) for o in origins).items())),
-        "serving_regions": sorted({r for g in serving for r in g["active_regions"]}),
+        "serving_regions": sorted({r for g in serving for r in g["active_regions"] or []}),
         "serving_groups_multi_region_active_active": count(serving, lambda g: g["multi_region_active_active"]),
         "serving_groups_multi_region_failover": count(serving, lambda g: g["multi_region_failover"]),
         "serving_groups_single_enabled_origin": count(serving, lambda g: g["enabled_origins"] == 1),
@@ -778,9 +778,10 @@ def metrics_unread(collected: list[dict], metrics_by_profile: dict) -> set:
     return unread
 
 
-def excluded_origins_unread(outside: list[dict]) -> set:
-    return {"excluded_profile_origins"} if any(c.get("unread", frozenset()) & {"origin_groups", "origins"}
-                                               for c in outside) else set()
+def excluded_profile_unread(outside: list[dict]) -> set:
+    """An excluded profile's unread group, origin or path list leaves which apps its groups serve unknown."""
+    return {"excluded_profile_lists"} if any(c.get("unread", frozenset()) & (PATH_LISTS | {"origin_groups", "origins"})
+                                             for c in outside) else set()
 
 
 def app_scope_unread(scoped_profiles: list[dict], profiles: list[dict]) -> bool:
@@ -906,6 +907,7 @@ def group_health_record(profile_key_: str, group: dict, health: list[dict], requ
     """A group's health and traffic. "Last hour" is the profile's newest recent hour with requests (for serving) or with
     health data (for health); a group silent then isn't serving, and with no recent hour both are unknown."""
     threshold = health_threshold(group)
+    enabled_regions = group["enabled_regions"] or []
     group_name = str(group["name"] or "").lower()
     origin_rows, origin_hours, region_hours = [], [], {}
     for o in group["origins"] or []:
@@ -967,9 +969,9 @@ def group_health_record(profile_key_: str, group: dict, health: list[dict], requ
     resolved = [r for r in regions if r["region"] != "unresolved"]
     # Unhealthy if any enabled region is; otherwise unknown while any enabled region has no last-hour value.
     enabled_health = [next((r["healthy_last_hour"] for r in resolved if r["region"] == e), None)
-                      for e in group["enabled_regions"]]
+                      for e in enabled_regions]
     shifts = traffic_shifts(hours, {r: region_hours[r] for r in region_hours if r != "unresolved"})
-    multi_region = len(group["enabled_regions"]) >= 2
+    multi_region = None if group["enabled_regions"] is None else len(enabled_regions) >= 2
     return {
         "profile": group["profile"],
         "origin_group": group["name"],
@@ -988,8 +990,8 @@ def group_health_record(profile_key_: str, group: dict, health: list[dict], requ
         "all_regions_healthy_last_hour": (False if False in enabled_health
                                           else None if None in enabled_health or not enabled_health else True),
         "regions_serving_last_hour": [r["region"] for r in resolved if r["serving_last_hour"]],
-        "all_enabled_regions_serving_last_hour": None if last_request_hour is None else bool(group["enabled_regions"]) and all(
-            any(r["region"] == e and r["serving_last_hour"] for r in resolved) for e in group["enabled_regions"]),
+        "all_enabled_regions_serving_last_hour": None if last_request_hour is None else bool(enabled_regions) and all(
+            any(r["region"] == e and r["serving_last_hour"] for r in resolved) for e in enabled_regions),
         "traffic_shift_count": len(shifts),
         "traffic_shifts": shifts[-MAX_TRAFFIC_SHIFTS:],
         "hourly_by_region": [
@@ -999,6 +1001,26 @@ def group_health_record(profile_key_: str, group: dict, health: list[dict], requ
             for t in hours
         ] if multi_region else [],
     }
+
+
+HEALTH_FIELDS = ("health_avg", "health_min", "hours_with_health_data", "hours_healthy", "healthy_last_hour",
+                 "last_hour_health_avg")
+TRAFFIC_FIELDS = ("requests", "request_share_percentage", "hours_serving", "first_hour_serving", "last_hour_serving",
+                  "serving_last_hour")
+
+
+def null_unread_metrics(record: dict, health_read: bool, requests_read: bool) -> dict:
+    """Health or traffic from metrics that weren't read reads None for the group and each origin, region and hour."""
+    unread = (() if health_read else HEALTH_FIELDS) + (() if requests_read else TRAFFIC_FIELDS)
+    hourly = [slot for h in record["hourly_by_region"] for slot in h["regions"].values()]
+    for row in record["origins"] + record["regions"] + hourly:
+        row.update({k: None for k in unread if k in row})
+    if not health_read:
+        record.update(has_health_data=None, all_regions_healthy_last_hour=None)
+    if not requests_read:
+        record.update(has_traffic=None, requests=None, all_enabled_regions_serving_last_hour=None,
+                      regions_serving_last_hour=None, traffic_shift_count=None, traffic_shifts=None)
+    return record
 
 
 def origin_health_records(groups: list[dict], metrics_by_profile: dict, window_end: str) -> tuple[list[dict], list[dict]]:
@@ -1016,11 +1038,9 @@ def origin_health_records(groups: list[dict], metrics_by_profile: dict, window_e
         record = group_health_record(key, g, metrics["health"], metrics["requests"], hosts_by_profile,
                                      *last_hours(metrics, window_end))
         # Metrics or origins that weren't read leave health and traffic unknown, not absent.
-        if read["health"] is None or g["origins"] is None:
-            record.update(has_health_data=None, all_regions_healthy_last_hour=None)
-        if read["requests"] is None or g["origins"] is None:
-            record.update(has_traffic=None, requests=None, all_enabled_regions_serving_last_hour=None)
-        records.append(record)
+        origins_read = g["origins"] is not None
+        records.append(null_unread_metrics(record, origins_read and read["health"] is not None,
+                                           origins_read and read["requests"] is not None))
     unmatched = [
         {"profile_id": key, "metric": metric, "origin": s["origin"], "origin_group": s["origin_group"],
          "total": sum(p["total"] or 0 for p in s["points"]) if metric == "OriginRequestCount" else None}
@@ -1430,7 +1450,7 @@ def main() -> int:
                                  **summarize_app_services(app_origins, apps, production_tag),
                                  **summarize_health(health, unmatched, days, window)},
                                 FIELDS_BY_LISTS, unread_kinds(collected, listed, PROFILE_LISTS) | metrics_unread(
-                                    collected, metrics_by_profile) | excluded_origins_unread(outside)),
+                                    collected, metrics_by_profile) | excluded_profile_unread(outside)),
                  "provider_registration_status": registration,
                  **exclusions.summary(excluded, EXCLUDED_KINDS, {
                      **{name: n if listed else None for name, n in {
