@@ -27,6 +27,7 @@ from azure_common import (  # noqa: E402
 from frontdoor import (  # noqa: E402
     collect_waf_policies,
     definition_index,
+    null_unread,
     select_front_door,
     waf_policy_record,
 )
@@ -34,12 +35,29 @@ from resource_exclusions import ResourceExclusions  # noqa: E402
 
 logger = logging.getLogger("azure_front_door_waf_policies")
 
+# Summary fields by the lists they are built from; each reads null when one of those lists wasn't read. Blocking, rule
+# groups and the newest version come from the managed rule-set definitions.
+FIELDS_BY_LISTS = (
+    (("waf_policies",), (
+        "total_waf_policies", "premium_waf_policies", "standard_waf_policies", "associated_waf_policies",
+        "unassociated_waf_policies", "policies_disabled", "policies_in_detection_mode", "policies_mode_unset",
+        "policies_without_default_rule_set", "policies_default_rule_set_log_only", "policies_with_allow_all_custom_rule",
+        "waf_policies_with_rate_limit_rules", "total_disabled_managed_rules", "total_disabled_managed_rule_groups",
+        "skipped_policies_by_sku")),
+    (("waf_policies", "rule_set_definitions"), (
+        "blocking_waf_policies", "waf_policies_not_blocking", "associated_waf_policies_not_blocking",
+        "policies_rule_groups_not_blocking", "policies_rule_definition_not_found",
+        "policies_with_fully_disabled_rule_groups", "associated_policies_with_fully_disabled_rule_groups",
+        "policies_on_older_default_rule_set")),
+)
 
-def summarize(policies: list[dict], skipped_by_sku: dict) -> dict:
+
+def summarize(policies: list[dict], skipped_by_sku: dict, unread=frozenset()) -> dict:
+    """`unread` names the lists that weren't read (see FIELDS_BY_LISTS)."""
     def count(pred) -> int:
         return sum(1 for p in policies if pred(p))
 
-    return {
+    summary = {
         "total_waf_policies": len(policies),
         "premium_waf_policies": count(lambda p: p["sku"] == "Premium_AzureFrontDoor"),
         "standard_waf_policies": count(lambda p: p["sku"] == "Standard_AzureFrontDoor"),
@@ -71,6 +89,7 @@ def summarize(policies: list[dict], skipped_by_sku: dict) -> dict:
         ),
         "skipped_policies_by_sku": skipped_by_sku,
     }
+    return null_unread(summary, FIELDS_BY_LISTS, unread)
 
 
 def main() -> int:
@@ -90,7 +109,7 @@ def main() -> int:
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
     projected: list[dict] | None = None
-    definitions = definition_index([])
+    definitions = definition_index(None)
     registration = REGISTRATION_UNKNOWN
     if subscription_id and cred is not None:
         registration = provider_registration_status(collector, subscription_id, cred, "Microsoft.Network")
@@ -122,7 +141,9 @@ def main() -> int:
         subscription_source=sub["subscription_source"],
         collector=collector,
         results={"waf_policies": policies, "provider_registration_status": registration, "excluded": excluded},
-        summary={**summarize(policies, skipped_by_sku), "provider_registration_status": registration,
+        summary={**summarize(policies, skipped_by_sku, {name for name, read in (
+                    ("waf_policies", listed), ("rule_set_definitions", definitions.get("read", True))) if not read}),
+                 "provider_registration_status": registration,
                  **exclusions.summary(excluded, ("waf_policy",), {"waf_policies": len(policies) if listed else None})},
     )
     filename = f"azure_front_door_waf_policies_{sanitize_for_filename(subscription_id or 'unknown')}.json"
