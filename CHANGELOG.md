@@ -10,6 +10,13 @@ schemas and the `paramify` CLI — not the internal code.
 
 ## [Unreleased]
 
+### Changed
+
+- **`azure_velero_backups` 0.2.0: schedule checks per storage location.** Freshness, missed runs, the RPO and expected
+  schedules are judged per account/container/prefix, so one location's backups no longer hide another's missed run.
+  `expected_schedules` entries can be bound to one location (`schedule:hours@account/container[/prefix]`); an unbound
+  entry is checked in every location read. Schedule name lists now give `schedule@location`.
+
 ### Added
 
 - **`keycloak_service_accounts` fetcher.** Lists every Keycloak client with a service account, GET only with

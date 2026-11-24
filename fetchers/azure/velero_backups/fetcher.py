@@ -89,15 +89,26 @@ def parse_locations(value: Optional[str]) -> Tuple[List[Dict[str, str]], List[st
     return locations, invalid
 
 
+def location_key(account: str, container: str, prefix: Optional[str]) -> str:
+    """`account/container[/prefix]`, the form backup_locations uses; schedules are compared per key."""
+    return "/".join(p for p in ((account or "").lower(), container, (prefix or "").strip("/")) if p)
+
+
 def parse_expected(value: Optional[str]) -> Tuple[Optional[List[Dict[str, Any]]], List[str]]:
-    """`name:hours` entries (the schedule and how often it should produce a backup); None when unset."""
+    """`name:hours` or `name:hours@account/container[/prefix]` entries: the schedule, how often it should produce a
+    backup, and optionally the one storage location it must run in. None when unset."""
     if not (value or "").strip():
         return None, []
     expected, invalid = [], []
     for entry in _csv(value):
-        name, _, hours = entry.rpartition(":")
-        if name and hours.isdigit() and int(hours) > 0:
-            expected.append({"name": name, "interval_hours": int(hours)})
+        schedule, at, where = entry.partition("@")
+        name, _, hours = schedule.rpartition(":")
+        # A second @ can't be part of a location: storage container names allow only letters, digits and hyphens.
+        bound, bad = parse_locations(where) if at and "@" not in where else ([], [where] if at else [])
+        if name and hours.isdigit() and int(hours) > 0 and not bad and (not at or len(bound) == 1):
+            loc = bound[0] if bound else None
+            expected.append({"name": name, "interval_hours": int(hours),
+                             "location": location_key(loc["account"], loc["container"], loc["prefix"]) if loc else None})
         else:
             invalid.append(entry)
     return expected, invalid
@@ -170,11 +181,35 @@ def schedule_check(name: str, interval_hours: Optional[int], backups: List[Dict[
             "exceeds_rpo": (hours is None or hours > rpo) if rpo else None}
 
 
-def schedule_checks(backups: List[Dict[str, Any]], settings: Dict[str, Any], now: datetime) -> List[Dict[str, Any]]:
-    """Expected schedules when listed (so one with no backups still appears); otherwise every schedule a backup names."""
-    if settings["expected_schedules"] is not None:
-        return [schedule_check(e["name"], e["interval_hours"], backups, settings, now) for e in settings["expected_schedules"]]
-    return [schedule_check(n, None, backups, settings, now) for n in sorted({b["schedule"] for b in backups if b["schedule"]})]
+def _key(loc: Dict[str, Any]) -> str:
+    return location_key(loc["storage_account"], loc["container"], loc["prefix"])
+
+
+def schedule_checks(locations: List[Dict[str, Any]], settings: Dict[str, Any], now: datetime) -> List[Dict[str, Any]]:
+    """Each schedule judged in its own storage location, so one location's backups never cover another's.
+
+    With expected_schedules listed, a bound entry is checked only in its location (and as having no backups when that
+    location wasn't found), and an unbound entry in every location read. Otherwise every schedule a backup names, per
+    location. Each check names its location; `id` is `schedule@location`.
+    """
+    read = [loc for loc in locations if loc["backups_read"]]
+    out = []
+
+    def check(name, interval, backups, key, found=True):
+        return {**schedule_check(name, interval, backups, settings, now), "location": key, "id": f"{name}@{key}",
+                "location_found": found}
+
+    expected = settings["expected_schedules"]
+    for loc in read:
+        key = _key(loc)
+        if expected is not None:
+            out += [check(e["name"], e["interval_hours"], loc["backups"], key) for e in expected if e["location"] in (None, key)]
+        else:
+            out += [check(n, None, loc["backups"], key) for n in sorted({b["schedule"] for b in loc["backups"] if b["schedule"]})]
+    seen = {_key(loc) for loc in locations}
+    out += [check(e["name"], e["interval_hours"], [], e["location"], found=False)
+            for e in expected or [] if e["location"] and e["location"] not in seen]
+    return out
 
 
 def account_record(raw: Dict[str, Any]) -> Dict[str, Any]:
@@ -307,19 +342,31 @@ def summarize(locations: List[Dict[str, Any]], settings: Dict[str, Any], now: da
                          loc["restores"] if loc["restores_read"] else [], settings.get("retry_suffix"))
     label = settings.get("validation_label")
     validation = [b for b in backups if label and b.get("labels", {}).get(label[0]) == label[1]]
+    # Freshness per schedule and location (`schedule@location`), so one location's success can't cover another.
     latest: Dict[str, datetime] = {}
-    for b in backups:
-        when = parse_time(b["completed"])
-        if b["schedule"] and b["phase"] == COMPLETED and when and (b["schedule"] not in latest or when > latest[b["schedule"]]):
-            latest[b["schedule"]] = when
-    schedules = sorted({b["schedule"] for b in backups if b["schedule"]})
+    observed = set()
+    for loc in read:
+        for b in loc["backups"]:
+            if not b["schedule"]:
+                continue
+            sid = f"{b['schedule']}@{_key(loc)}"
+            observed.add(sid)
+            when = parse_time(b["completed"])
+            if b["phase"] == COMPLETED and when and (sid not in latest or when > latest[sid]):
+                latest[sid] = when
+    schedules = sorted(observed)
     hours = {s: (now - latest[s]).total_seconds() / 3600 for s in latest}
     expected = settings["expected_schedules"]
-    windows = {e["name"]: success_window_hours(e["interval_hours"], settings) for e in expected or []}
-    recent = [s for s in schedules if s in hours and hours[s] <= windows.get(s, settings["success_window_hours"])]
+    interval = {e["name"]: e["interval_hours"] for e in expected or [] if e["location"] is None}
+    interval.update({f"{e['name']}@{e['location']}": e["interval_hours"] for e in expected or [] if e["location"]})
+
+    def window(sid: str) -> int:
+        hours_for = interval.get(sid, interval.get(sid.rpartition("@")[0]))
+        return success_window_hours(hours_for, settings)
+    recent = [s for s in schedules if s in hours and hours[s] <= window(s)]
     clean_times = [parse_time(r["results_written"]) for r in restores if r["clean"]]
     clean_times = [t for t in clean_times if t]
-    checks = schedule_checks(backups, settings, now)
+    checks = schedule_checks(locations, settings, now)
 
     def known(value):
         return value if complete else None
@@ -345,9 +392,9 @@ def summarize(locations: List[Dict[str, Any]], settings: Dict[str, Any], now: da
         "schedules_without_success_within_window": known(sorted(set(schedules) - set(recent))),
         "max_hours_since_scheduled_success": known(round(max(hours.values()), 1) if hours and set(hours) == set(schedules) else None),
         "success_window_hours": settings["success_window_hours"],
-        "expected_schedules": len(expected) if expected is not None else None,
+        "expected_schedules": len(checks) if expected is not None else None,
         "expected_schedules_without_backups": known(sum(1 for c in checks if c["backups"] == 0)) if expected is not None else None,
-        "expected_schedules_without_backups_names": known(sorted(c["name"] for c in checks if c["backups"] == 0)) if expected is not None else None,
+        "expected_schedules_without_backups_names": known(sorted(c["id"] for c in checks if c["backups"] == 0)) if expected is not None else None,
         "missed_scheduled_runs": known(sum(c["missed_runs"] for c in checks)) if expected is not None else None,
         "schedules_with_missed_runs": known(sum(1 for c in checks if c["missed_runs"])) if expected is not None else None,
         "missed_run_lookback_days": settings["missed_run_lookback_days"],
@@ -578,9 +625,8 @@ def collect(client, subscription_id: str, collector: Collector, exclusions: Opti
     if not accounts_listed:
         exclusions.mark_unread()
     exclusions.warn_unmatched(logger)
-    all_backups = [b for loc in locations if loc["backups_read"] for b in loc["backups"]]
     results = {"backup_locations": locations, "evaluated_at": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
-               "schedules": schedule_checks(all_backups, settings, now),
+               "schedules": schedule_checks(locations, settings, now),
                "container_names": settings["container_names"], "explicit_locations": settings["explicit_locations"],
                "excluded": sorted(excluded, key=lambda e: arm_id_key(e.get("id")))}
     summary = {**summarize(locations, settings, now, discovered),
