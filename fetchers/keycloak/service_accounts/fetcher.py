@@ -90,14 +90,16 @@ def service_account_record(client: Dict[str, Any], realm_roles: Optional[List[Di
                            max_age_days: Optional[int], now: datetime) -> Dict[str, Any]:
     """One service-account client. Never the secret: only its type, age and expiry."""
     authenticator = client.get("clientAuthenticatorType") or "client-secret"
-    shared = authenticator in SHARED_SECRET
+    # True for a secret shared with Keycloak, False for a key or certificate only the client holds, and None for an
+    # authenticator this fetcher doesn't know (a newer or custom one), which is never assumed to have no secret.
+    shared = True if authenticator in SHARED_SECRET else False if authenticator in KEY_OR_CERTIFICATE else None
     created = _epoch(_attr(client, CREATED_ATTR)) if shared else None
     expires = _epoch(_attr(client, EXPIRES_ATTR)) if shared else None
     age = round((now.timestamp() - created) / 86400, 1) if created else None
     admin_names, realm_names = _names(admin_roles), _names(realm_roles)
     owner = str(_attr(client, owner_attribute) or "").strip() if owner_attribute else None
-    over: Optional[bool] = None  # unjudged while no maximum is set, or the secret's age is unknown
-    if max_age_days and not shared:
+    over: Optional[bool] = None  # unjudged while no maximum is set, the secret's age is unknown, or the authenticator is
+    if max_age_days and shared is False:
         over = False
     elif max_age_days and age is not None:
         over = age > max_age_days
@@ -113,6 +115,7 @@ def service_account_record(client: Dict[str, Any], realm_roles: Optional[List[Di
         "secret_age_days": age,
         "secret_expires": _iso(expires),
         "rotated_secret_present": bool(_attr(client, ROTATED_ATTR)) if shared else None,
+        "authenticator_recognized": shared is not None,
         "secret_over_max_age": over,
         "owner": owner if owner else None,
         "owned": bool(owner) if owner_attribute else None,
@@ -137,6 +140,7 @@ def summarize(clients: Optional[List[Dict[str, Any]]], records: Optional[List[Di
     read = clients is not None and records is not None
     cs, rs = clients or [], [r for r in records or [] if r["enabled"]]
     shared = [r for r in rs if r["shared_secret"]]
+    unrecognized = [r for r in rs if r["shared_secret"] is None]
     ages = [r["secret_age_days"] for r in shared if r["secret_age_days"] is not None]
     return {
         "clients_read": read,
@@ -148,11 +152,13 @@ def summarize(clients: Optional[List[Dict[str, Any]]], records: Optional[List[Di
         "service_accounts_by_authenticator": dict(sorted(Counter(r["authenticator"] for r in rs).items())) if read else None,
         "service_accounts_using_shared_secret": len(shared) if read else None,
         "service_accounts_using_key_or_certificate": sum(1 for r in rs if r["authenticator"] in KEY_OR_CERTIFICATE) if read else None,
+        "service_accounts_unrecognized_authenticator": len(unrecognized) if read else None,
         # How old are the secrets?
         "max_secret_age_days": max_age_days,
         "service_account_secrets_age_unknown": sum(1 for r in shared if r["secret_age_days"] is None) if read else None,
         "oldest_service_account_secret_days": max(ages) if read and ages else None,
-        "service_account_secrets_over_max_age": _count(shared, "secret_over_max_age") if read and max_age_days else None,
+        # An unrecognized authenticator may rest on a secret of unknown age, so it leaves this unjudged.
+        "service_account_secrets_over_max_age": _count(shared + unrecognized, "secret_over_max_age") if read and max_age_days else None,
         "service_account_secrets_expiring": sum(1 for r in shared if r["secret_expires"]) if read else None,
         # Who owns them?
         "owner_attribute": owner_attribute,

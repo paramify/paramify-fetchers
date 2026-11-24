@@ -52,7 +52,7 @@ evidence_set:
     - GET /admin/realms/{realm}/users/{id}/role-mappings/realm/composite — that user's effective realm roles (view-users)
     - GET /admin/realms/{realm}/users/{id}/role-mappings/clients/{realm-management id}/composite — that user's effective admin roles (view-users)
 
-    Output: keycloak_service_accounts.json — each service-account client's client ID, enabled state, authenticator, whether it rests on a shared secret, the secret's creation and expiry times and age, whether a rotated secret is still valid, its owner, other sign-in flows it allows, and its effective realm and admin roles. Client secrets, rotated secrets and keys are never copied. This fetcher's own client is one of the service accounts listed.
+    Output: keycloak_service_accounts.json — each service-account client's client ID, enabled state, authenticator, whether it rests on a shared secret (null for an authenticator this fetcher doesn't recognize), the secret's creation and expiry times and age, whether a rotated secret is still valid, its owner, other sign-in flows it allows, and its effective realm and admin roles. Client secrets, rotated secrets and keys are never copied. This fetcher's own client is one of the service accounts listed.
 
     Summary fields:
 
@@ -65,14 +65,15 @@ evidence_set:
 
     How do they authenticate?
     - service_accounts_by_authenticator — Map of each client authenticator to its count: client-secret, client-secret-jwt (a shared secret), client-jwt (a signed key) or client-x509 (a certificate)
-    - service_accounts_using_shared_secret — Number using client-secret or client-secret-jwt, a secret Keycloak also holds
+    - service_accounts_using_shared_secret — Number using client-secret or client-secret-jwt, a secret Keycloak also holds (a service account with an unrecognized authenticator counts in neither)
     - service_accounts_using_key_or_certificate — Number using client-jwt or client-x509, a private key or certificate only the client holds
+    - service_accounts_unrecognized_authenticator — Number using an authenticator this fetcher doesn't know, such as a newer or custom one; each is never assumed to have no shared secret, and while any is present service_account_secrets_over_max_age is null
 
     How old are the secrets?
     - max_secret_age_days — The max_secret_age_days setting; null when unset
     - service_account_secrets_age_unknown — Number of shared secrets without a creation time recorded, such as one set before Keycloak recorded it
     - oldest_service_account_secret_days — Age in days of the oldest shared secret whose creation time is known; null if there is none
-    - service_account_secrets_over_max_age — Number of shared secrets older than max_secret_age_days; null when it is unset or any secret's age is unknown
+    - service_account_secrets_over_max_age — Number of shared secrets older than max_secret_age_days; null when it is unset, any secret's age is unknown, or any service account uses an unrecognized authenticator
     - service_account_secrets_expiring — Number of shared secrets with an expiry time set, as a client secret rotation policy sets
 
     Who owns them?

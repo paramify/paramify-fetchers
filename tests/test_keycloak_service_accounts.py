@@ -164,3 +164,20 @@ def test_a_bad_maximum_age_fails_as_bad_config(keycloak, tmp_path, monkeypatch, 
     assert sa.main() == 1
     assert _evidence(tmp_path)["summary"]["service_account_secrets_over_max_age"] is None
     assert json.loads((tmp_path / "status.json").read_text())["code"] == "bad_config"
+
+
+@pytest.mark.parametrize("authenticator", ["federated-jwt", "custom-spiffe"])
+def test_an_unrecognized_authenticator_leaves_secret_age_unknown(keycloak, tmp_path, authenticator, assert_summary_documented):
+    # Every known secret's age is set, so only the unfamiliar authenticator can leave the count unjudged.
+    clients = _with_creation_time(10)
+    jwt = next(c for c in clients if c.get("clientAuthenticatorType") == "client-jwt")
+    jwt["clientAuthenticatorType"] = authenticator
+    keycloak(clients=clients)
+    assert sa.main() == 0
+    ev = _evidence(tmp_path)
+    s = ev["summary"]
+    assert (s["service_accounts_unrecognized_authenticator"], s["service_account_secrets_over_max_age"]) == (1, None)
+    assert (s["service_accounts_using_shared_secret"], s["service_accounts_using_key_or_certificate"]) == (3, 0)
+    record = next(r for r in ev["results"]["service_accounts"] if r["authenticator"] == authenticator)
+    assert (record["shared_secret"], record["authenticator_recognized"], record["secret_over_max_age"]) == (None, False, None)
+    assert_summary_documented("keycloak/service_accounts", s)
