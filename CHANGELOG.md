@@ -40,6 +40,16 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- **`azure_network_security_groups` 0.6.2: every count and verdict from an unread list reads null, not 0.** When the
+  network security group list isn't read, the group and rule counts (`total_network_security_groups`,
+  `total_security_rules`, the open-to-Internet and outbound counts) and the east-west verdicts read null. When the
+  virtual network list isn't read, the subnet counts, the east-west verdicts and the NIC coverage counts that need a
+  subnet's group (`nics_protected_by_subnet_nsg_only`, `nics_without_any_nsg`, `nic_nsg_coverage_percentage`) read
+  null; each NIC's `subnet_nsg_ids`, `unresolved_subnet_ids` and `nsg_protection_source` are null, and
+  `protected_by_nsg` is true only for a NIC with its own group. When the network interface list isn't read, the NIC
+  counts read null. Each subnet's east-west fields are null while the group list is unread. Before, these read 0 or
+  were judged against an empty list.
+
 - **In-scope counts read null, not 0, when their list couldn't be read.** A failed sign-in or list call left
   `in_scope_*` at 0, as if the subscription had none. Each now reads null when the list it counts wasn't read, and 0
   only when it was read and is empty; the matching `excluded_*` count is null with it.
