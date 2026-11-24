@@ -30,6 +30,9 @@ from fetcher_status import report_failure  # noqa: E402
 NAME = "istio_mesh_security"
 OUTPUT = "istio_mesh_security.json"
 PAGE = 500
+# Seconds to connect and to wait for each response, so an unreachable API server fails the read instead of holding
+# the run until the runner's own limit.
+REQUEST_TIMEOUT = (10, 60)
 SYSTEM_NAMESPACES = frozenset({"kube-system", "kube-public", "kube-node-lease"})
 WEAK_MTLS = frozenset({"PERMISSIVE", "DISABLE"})
 OLD_TLS = frozenset({"TLSV1_0", "TLSV1_1"})
@@ -390,19 +393,22 @@ class MeshReader:
 
     def namespaces(self) -> Optional[List[Dict[str, Any]]]:
         ser = self.core.api_client.sanitize_for_serialization
-        return self._pages("namespaces", lambda t: ser(self.core.list_namespace(limit=PAGE, _continue=t)))
+        return self._pages("namespaces", lambda t: ser(self.core.list_namespace(limit=PAGE, _continue=t,
+                                                                                _request_timeout=REQUEST_TIMEOUT)))
 
     def custom_list(self, group: str, plural: str) -> Optional[List[Dict[str, Any]]]:
-        return self._pages(plural, lambda t: self.custom.list_cluster_custom_object(group, "v1", plural, limit=PAGE, _continue=t))
+        return self._pages(plural, lambda t: self.custom.list_cluster_custom_object(
+            group, "v1", plural, limit=PAGE, _continue=t, _request_timeout=REQUEST_TIMEOUT))
 
     def configmap(self, operation: str, name: str, namespace: str) -> Optional[Dict[str, Any]]:
         ser = self.core.api_client.sanitize_for_serialization
-        return self._call(operation, lambda: ser(self.core.read_namespaced_config_map(name, namespace)))
+        return self._call(operation, lambda: ser(self.core.read_namespaced_config_map(name, namespace,
+                                                                                      _request_timeout=REQUEST_TIMEOUT)))
 
     def istiod(self, namespace: str) -> Optional[List[Dict[str, Any]]]:
         ser = self.apps.api_client.sanitize_for_serialization
-        return self._pages("istiod", lambda t: ser(self.apps.list_namespaced_deployment(namespace, label_selector="app=istiod",
-                                                                                         limit=PAGE, _continue=t)))
+        return self._pages("istiod", lambda t: ser(self.apps.list_namespaced_deployment(
+            namespace, label_selector="app=istiod", limit=PAGE, _continue=t, _request_timeout=REQUEST_TIMEOUT)))
 
 
 def collect(reader: MeshReader, control_plane: str = ISTIO_SYSTEM, mesh_configmap: str = DEFAULT_MESH_CONFIGMAP,

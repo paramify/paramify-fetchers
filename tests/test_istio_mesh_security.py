@@ -47,11 +47,12 @@ class _Api:
     api_client = _Serializer()
 
     def __init__(self, refused=(), page_size=None, istiod=None, configmaps=None, missing=()):
-        self.refused, self.page_size, self.calls = set(refused), page_size, []
+        self.refused, self.page_size, self.calls, self.timeouts = set(refused), page_size, [], []
         self.istiod_fixture, self.configmaps, self.missing = istiod, configmaps or {}, set(missing)
 
-    def _page(self, what, body, cont):
+    def _page(self, what, body, cont, timeout=None):
         self.calls.append((what, cont))
+        self.timeouts.append((what, timeout))
         if what in self.refused:
             raise ApiError(403)
         if not self.page_size:
@@ -62,26 +63,26 @@ class _Api:
         return {**body, "items": items, "metadata": {"continue": str(start + self.page_size) if more else None}}
 
     # CoreV1Api
-    def list_namespace(self, limit=None, _continue=None):
-        return self._page("namespaces", fx("namespaces"), _continue)
+    def list_namespace(self, limit=None, _continue=None, _request_timeout=None):
+        return self._page("namespaces", fx("namespaces"), _continue, _request_timeout)
 
-    def read_namespaced_config_map(self, name, namespace):
+    def read_namespaced_config_map(self, name, namespace, _request_timeout=None):
         what = "root certificate" if name == "istio-ca-root-cert" else "mesh config"
         self.calls.append(("configmap", f"{namespace}/{name}"))
         if (namespace, name) in self.missing:
             raise ApiError(404)
         body = self.configmaps.get(name) or fx("configmap-root-cert" if name == "istio-ca-root-cert" else "configmap-istio")
-        return self._page(what, body, None)
+        return self._page(what, body, None, _request_timeout)
 
     # AppsV1Api
-    def list_namespaced_deployment(self, namespace, label_selector=None, limit=None, _continue=None):
+    def list_namespaced_deployment(self, namespace, label_selector=None, limit=None, _continue=None, _request_timeout=None):
         self.calls.append(("deployments", namespace))
         body = self.istiod_fixture if self.istiod_fixture is not None else fx("deployments-istiod")
-        return self._page("istiod", body, _continue)
+        return self._page("istiod", body, _continue, _request_timeout)
 
     # CustomObjectsApi
-    def list_cluster_custom_object(self, group, version, plural, limit=None, _continue=None):
-        return self._page(plural, fx(plural), _continue)
+    def list_cluster_custom_object(self, group, version, plural, limit=None, _continue=None, _request_timeout=None):
+        return self._page(plural, fx(plural), _continue, _request_timeout)
 
 
 def _reader(**kw):
@@ -263,6 +264,24 @@ def test_lists_are_read_page_by_page():
     ev, _, api = _summary(page_size=2)
     assert ev["summary"]["namespaces"] == 6 and ev["summary"]["authorization_policies"] == 5
     assert [c for w, c in api.calls if w == "namespaces"][:2] == [None, "2"]
+
+
+def test_every_call_has_a_request_timeout():
+    _, _, api = _summary(page_size=2)
+    assert len(api.timeouts) > 9 and all(t == im.REQUEST_TIMEOUT for _, t in api.timeouts)
+
+
+def test_a_timed_out_read_is_recorded_and_leaves_only_its_fields_null(monkeypatch):
+    reader, _ = _reader()
+
+    def black_holed(*args, **kwargs):
+        raise TimeoutError("read timed out")
+    monkeypatch.setattr(reader.custom, "list_cluster_custom_object", black_holed)
+    ev = im.collect(reader, now=NOW)
+    assert {f["operation"] for f in reader.api_failures} == {"peerauthentications", "authorizationpolicies", "gateways",
+                                                             "virtualservices", "destinationrules"}
+    assert set(reader.codes) == {"target_unreachable"}
+    assert (ev["summary"]["mesh_mtls_mode"], ev["summary"]["namespaces"]) == (None, 6)
 
 
 def test_a_refused_read_names_its_permission_and_leaves_only_its_fields_null():
