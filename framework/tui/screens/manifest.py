@@ -275,9 +275,7 @@ class ManifestPanel(ButtonRowNav, Vertical):
             errs = by_key.get(ekey, [])
             status = self._status_cell(errs, render.env_missing(self._env_vars, use))
             name = Text(use)
-            if d and d.get("source") == "community":
-                name.append("  ")
-                name.append_text(palette.community_tag("community"))
+            name.append_text(palette.fetcher_tags(d))
             dt.add_row(
                 name,
                 render.kind_pill(kinds.kind_of(d)) if d else "—",

@@ -210,9 +210,7 @@ class CatalogPanel(FilterListNav, Horizontal):
         label = Text()
         label.append("[x] " if checked else "[ ] ", style="green" if checked else "dim")
         label.append(name)
-        if fetcher.get("source") == "community":
-            label.append("  ")
-            label.append_text(palette.community_tag("community"))
+        label.append_text(palette.fetcher_tags(fetcher))
         return label
 
     def set_marked(self, names) -> None:

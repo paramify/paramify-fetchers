@@ -216,9 +216,8 @@ def fetcher_detail(f: dict, in_manifest: Optional[bool] = None) -> RenderableTyp
     if f.get("version"):
         title.append(f"  v{f['version']}", style="dim")
     community = f.get("source") == "community"
-    if community:
-        title.append("  ")
-        title.append_text(palette.community_tag("community"))
+    beta = f.get("status") == "beta"
+    title.append_text(palette.fetcher_tags(f))
 
     meta = Text()
     meta.append("kind: ", style="dim")
@@ -237,6 +236,8 @@ def fetcher_detail(f: dict, in_manifest: Optional[bool] = None) -> RenderableTyp
         status = [Text.assemble(("a", f"bold {palette.ACCENT}"), (" add to the manifest", "dim"))]
 
     provenance = [Text(palette.COMMUNITY_NOTE, style=palette.ORANGE)] if community else []
+    if beta:
+        provenance.append(Text(palette.BETA_NOTE, style=palette.WARN))
 
     return Group(
         title,
@@ -321,15 +322,14 @@ def entry_detail(
     header.append("  ")
     header.append_text(kind_pill(kinds.kind_of(descriptor)))
     header.append("  [fanout]" if fanout else "  [single]", style="dim")
-    community = descriptor.get("source") == "community"
-    if community:
-        header.append("  ")
-        header.append_text(palette.community_tag("community"))
+    header.append_text(palette.fetcher_tags(descriptor))
 
     secs = entry.get("secrets") or {}
     parts: List[RenderableType] = [header]
-    if community:
+    if descriptor.get("source") == "community":
         parts.append(Text(palette.COMMUNITY_NOTE, style=palette.ORANGE))
+    if descriptor.get("status") == "beta":
+        parts.append(Text(palette.BETA_NOTE, style=palette.WARN))
     parts += [Text(), _destination(descriptor, config_view, in_manifest=True, frequency=frequency), Text()]
 
     # secrets (non per-target live at entry level)

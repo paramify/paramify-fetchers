@@ -808,6 +808,7 @@ def describe_cmd(
     typer.echo(
         f"{style.head(style.name(f['name']))}  {style.dim('v' + f['version'])}"
         f"  {style.dim('(category=')}{style.env(f['category'] or '-')}{style.dim(')')}"
+        + (f"  {style.warn('[beta]')}" if f.get("status") == "beta" else "")
     )
     typer.echo(f"  {f['description']}")
     typer.echo(f"  {style.dim('supports_targets:')} {f['supports_targets']}")

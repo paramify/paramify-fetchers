@@ -228,6 +228,7 @@ def _parse_fetcher(data: dict, path: Path) -> Fetcher:
         ksis=list(data.get("ksis") or []),
         kind=data.get("kind", "evidence"),
         source=data.get("source") or "paramify",
+        status=data.get("status") or "stable",
         issue_report=issue_report,
         pipeline=pipeline,
         depends_on=list(data.get("depends_on") or []),
