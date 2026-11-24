@@ -1,0 +1,13 @@
+validator: azure_managed_identity_no_unattached_identities_with_roles
+cases:
+  - name: compliant
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"unattached_identities_with_roles":0}}}'
+
+  - name: unattached_identities_with_roles_nonzero
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"unattached_identities_with_roles":1}}}'
+
+  - name: unattached_identities_with_roles_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"unattached_identities_with_roles_renamed":0}}}'

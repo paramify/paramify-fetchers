@@ -60,15 +60,25 @@ def needs_full(path: str) -> bool:
     return not path.endswith(".md")
 
 
-def plan(event: str, paths: list[str] | None) -> dict[str, str]:
-    """The scope and the SDK jobs to run. `paths` is None when the diff could not be read."""
+# The weekly release PR always comes from this branch (tools/release.py).
+RELEASE_BRANCH = "release/next"
+
+
+def plan(event: str, paths: list[str] | None, head_ref: str = "") -> dict[str, str]:
+    """The scope and the jobs to run. `paths` is None when the diff could not be read.
+
+    `head_ref` is the pull request's source branch. The release-check job runs
+    only for the release branch, whatever the scope.
+    """
+    release = str(head_ref == RELEASE_BRANCH).lower()
     if event != "pull_request" or not paths or any(needs_full(p) for p in paths):
-        return {"scope": "full", "azure": "true", "oci": "true"}
+        return {"scope": "full", "azure": "true", "oci": "true", "release": release}
     shared = any(p.startswith(SHARED_FETCHER_CODE) for p in paths)
     return {
         "scope": "fetchers",
         "azure": str(shared or any(AZURE.search(p) for p in paths)).lower(),
         "oci": str(shared or any(OCI.search(p) for p in paths)).lower(),
+        "release": release,
     }
 
 
@@ -96,7 +106,7 @@ def main() -> int:
     args = parser.parse_args()
 
     paths = changed_paths() if args.event == "pull_request" else None
-    result = plan(args.event, paths)
+    result = plan(args.event, paths, os.environ.get("GITHUB_HEAD_REF", ""))
 
     if paths:
         widening = [p for p in paths if needs_full(p)]

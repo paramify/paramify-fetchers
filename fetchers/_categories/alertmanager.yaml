@@ -1,0 +1,29 @@
+display_name: Alertmanager
+description: >-
+  Prometheus Alertmanager, read through its v2 API and metrics endpoint: alert routing, receivers, active and
+  suppressed alerts, silences, and notification delivery attempts and failures. One Alertmanager (or one HA cluster
+  member) per run.
+
+requires:
+  python_packages:
+    - requests
+    - python-dotenv
+    - pyyaml
+
+# Shared by every alertmanager fetcher. The runner injects these env vars for any fetcher with category: alertmanager.
+config_schema:
+  base_url:
+    type: string
+    required: true
+    env: ALERTMANAGER_BASE_URL
+    description: >-
+      Alertmanager base URL, such as https://alertmanager.example.com or http://alertmanager.monitoring:9093,
+      reached from a network that can call it. Include any path prefix the server is served under.
+
+secrets:
+  - name: token
+    env: ALERTMANAGER_TOKEN
+    required: false
+    description: >-
+      Bearer token, only when a proxy in front of Alertmanager requires one. Alertmanager itself has no
+      authentication; leave it unset when the API is reached directly.

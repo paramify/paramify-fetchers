@@ -1,0 +1,30 @@
+evidence_set: EVD-AZURE-DEFENDER-REG-COMPLIANCE
+cases:
+  - name: mcsb_graded
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"regulatory_compliance_status":"available","standards":[{"is_microsoft_cloud_security_benchmark":true,"name":"Microsoft-cloud-security-benchmark","state":"Failed"}]},"summary":{"assessments_by_state":{"Failed":12,"Passed":40,"Skipped":0,"Unsupported":3},"mcsb_standard_present":true,"mcsb_state":"Failed","mcsb_total_controls":79,"regulatory_compliance_status":"available"}}}'
+
+  - name: mcsb_graded_but_no_assessment_graded
+    expect: FAIL
+    note: >
+      The benchmark carries a Failed state, so the benchmark validator passes, but no
+      assessment behind its controls was graded Passed or Failed. Only
+      azure_defender_compliance_assessments_graded fails.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"regulatory_compliance_status":"available","standards":[{"is_microsoft_cloud_security_benchmark":true,"name":"Microsoft-cloud-security-benchmark","state":"Failed"}]},"summary":{"assessments_by_state":{"Failed":0,"Passed":0,"Skipped":4,"Unsupported":3},"mcsb_standard_present":true,"mcsb_state":"Failed","mcsb_total_controls":79,"regulatory_compliance_status":"available"}}}'
+
+  - name: provider_not_registered
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"regulatory_compliance_status":"provider_not_registered","standards":[]},"summary":{"mcsb_standard_present":false,"mcsb_state":null,"regulatory_compliance_status":"provider_not_registered"}}}'
+
+  - name: collection_failed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":1,"status":"failed","error":"AuthorizationFailed"},"payload":{"results":{"regulatory_compliance_status":"unknown","standards":[]},"summary":{"mcsb_standard_present":false,"mcsb_state":null}}}'
+
+  - name: controls_list_failed_after_standards_listed
+    expect: FAIL
+    note: >
+      The standards list succeeded, so mcsb_state reads Failed and the benchmark
+      validator alone passes, but a later controls call failed and the run exited 1.
+      azure_collection_succeeded fails, and with no assessments listed so does
+      azure_defender_compliance_assessments_graded.
+    artifact: '{"metadata":{"exit_code":1,"status":"failed","error":"AuthorizationFailed"},"payload":{"metadata":{"partial_failure":true},"results":{"regulatory_compliance_status":"available","standards":[{"control_count":0,"controls":[],"is_microsoft_cloud_security_benchmark":true,"name":"Microsoft-cloud-security-benchmark","state":"Failed"}]},"summary":{"assessments_by_state":{"Failed":0,"Passed":0,"Skipped":0,"Unsupported":0},"mcsb_standard_present":true,"mcsb_state":"Failed","mcsb_total_controls":0,"regulatory_compliance_status":"available"}}}'

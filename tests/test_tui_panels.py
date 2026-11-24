@@ -350,7 +350,7 @@ def test_add_fetchers_brings_comparator_inputs(tmp_path, run_tui):
     added, notices = run_tui(body, path)
     assert set(added) == {"demo_policy_check", "demo_hello"}
     assert _uses(path) == {"demo_policy_check", "demo_hello"}
-    assert any("Added demo_policy_check + 1 input" in text for text, _ in notices), notices
+    assert any("Added demo_policy_check and 1 input." in text for text, _ in notices), notices
 
 
 def test_add_fetchers_keeps_the_entry_when_autosave_fails(tmp_path, monkeypatch, run_tui):
@@ -417,5 +417,5 @@ def test_a_on_a_shared_manifest_panel_asks_for_the_catalog(tmp_path, monkeypatch
         return hint, len(asked), type(app.screen).__name__
 
     hint, n, screen = run_tui(body, _manifest_with(tmp_path))
-    assert "press a on a fetcher to add it" in hint
+    assert "Press a on a fetcher to add it." in hint
     assert n == 1 and screen == "WorkspaceScreen", "a opened the picker instead of asking for the catalog"

@@ -829,7 +829,7 @@ def describe_cmd(
                 var = f"  {style.dim('env=')}{style.env(fld['env'])}" if fld.get("env") else ""
                 if fld.get("type") == patterns.TYPE:
                     # Written in the manifest only; the env var is the runner's hand-off, not a user setting.
-                    takes = api.grammar_text(fld.get("prefixes") or (), fld.get("bare", True))
+                    takes = api.grammar_text(fld.get("prefixes") or (), fld.get("bare", True), fld.get("globs", True))
                     var = f"  {style.dim('takes=')}{style.env(takes)}"
                 typer.echo(
                     f"    - {style.env(fld['name'])} {style.dim('(' + fld['type'] + ',')} "
@@ -2294,6 +2294,30 @@ def manifest_set_stack(
     if note and not json_out:
         _err(f"Note: {note}")
     _save_and_report(m, path, root, json_out, extra={"stack": stack_id, "stack_name": stack_name})
+
+
+@manifest_app.command("set-frequency")
+def manifest_set_frequency(
+    manifest: str = typer.Argument(..., help="Path to manifest yaml"),
+    frequency: str = typer.Argument(..., help="DAILY, THREE_DAY, WEEKLY, BIWEEKLY, MONTHLY, QUARTERLY, BIANNUAL or ANNUAL; an empty string removes it"),
+    fetcher: Optional[str] = typer.Option(None, "--fetcher", help="Set it for this fetcher entry only (a fetcher name or an entry key such as aws_iam_mfa#1)"),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON"),
+):
+    """Record how often evidence sets expect a new artifact.
+
+    Manifest-wide it is how often the manifest runs (run.schedule.every); with
+    --fetcher it overrides that for one entry. The next upload changes the
+    frequency on evidence sets that already exist. upload.yaml's per-fetcher
+    `frequency` and `defaults.frequency` sit between the two.
+    """
+    root = api.find_repo_root()
+    path = _resolve_manifest_arg(root, manifest, json_out)
+    m = _read_for_edit(path, json_out)
+    try:
+        api.set_frequency(m, frequency, use=fetcher)
+    except ValueError as e:
+        _fail(path, str(e), json_out)
+    _save_and_report(m, path, root, json_out, extra={"frequency": frequency.strip().upper() or None})
 
 
 @manifest_app.command("set-owner")

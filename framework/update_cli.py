@@ -218,7 +218,7 @@ def _update(run: _Run, root: Path, *, to: Optional[str], expect: Optional[str], 
     run.doc.update(up.public(plan))
     run.section(view.your_fetchers(plan["fetchers"], plan["used"], plan["breaking"]))
     run.section(view.breaking(plan["breaking"]))
-    run.section(view.whats_new(plan["highlights"]))
+    run.section(view.whats_new(plan["highlights"], plan.get("releases") or []))
     run.section(view.rest(plan))
     if not run.json:
         run.console.print()

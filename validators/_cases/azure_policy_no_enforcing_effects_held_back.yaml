@@ -1,0 +1,17 @@
+validator: azure_policy_no_enforcing_effects_held_back
+cases:
+  - name: nothing_held_back
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"enforcing_effects_not_enforced_assignments":0,"total_policy_assignments":17}}}'
+
+  - name: initiative_with_dine_members_set_to_donotenforce
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"enforcing_effects_not_enforced_assignments":1,"total_policy_assignments":17}}}'
+
+  - name: two_digit_count_does_not_read_as_zero
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"enforcing_effects_not_enforced_assignments":10,"total_policy_assignments":44}}}'
+
+  - name: rollup_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"summary":{"held_back_assignments":0,"total_policy_assignments":17}}}'

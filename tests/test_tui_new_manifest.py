@@ -146,7 +146,7 @@ def test_a_stack_list_error_is_explained_in_the_stack_step(demo_workspace, token
     async def body(app, pilot):
         await _name(app, pilot, "aws-prod")
         assert isinstance(app.screen, PickerModal)
-        assert "Could not list" in _notice(app) and "401 Unauthorized" in _notice(app)
+        assert "Couldn't list stacks" in _notice(app) and "401 Unauthorized" in _notice(app)
         assert "without a stack" in _only_choice(app)
         await pilot.press("escape")  # Escape is a skip here too
         await _settle(app, pilot)

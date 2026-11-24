@@ -982,3 +982,31 @@ def test_no_request_fallback_reports_no_channel(fake, root, tmp_path):
     assert entry["state"] == "delivered" and entry["artifact_request"] is None
     assert entry["channel"] is None and entry["stack"] is None
     assert all("channel" not in e for e in events if e["event"] == "upload_file")
+
+
+def test_confirm_lines_keep_what_a_person_decides_on():
+    """The TUI's upload confirm: deliveries, creations, refusals with their fix and
+    warnings; no-op steps left out and tags only counted."""
+    from framework.sync.model import Action, Plan
+
+    plan = Plan(notes=["the manifest now sets stack st-2"], actions=[
+        Action(id="evidence_sets/EVD-A", provider="evidence_sets", key="EVD-A", verb="create",
+               summary="create evidence set EVD-A"),
+        Action(id="evidence_sets/EVD-B", provider="evidence_sets", key="EVD-B", verb="noop",
+               summary="evidence set EVD-B exists"),
+        Action(id="tags/EVD-A", provider="tags", key="EVD-A", verb="tag", summary="tag EVD-A"),
+        Action(id="tags/EVD-B", provider="tags", key="EVD-B", verb="tag", summary="tag EVD-B"),
+        Action(id="delivery/a", provider="delivery", key="a", verb="deliver",
+               summary="deliver 2 files to AR-1: new batch", warnings=["evidence-level batch"]),
+        Action(id="delivery/b", provider="delivery", key="b", verb="noop", summary="already delivered"),
+        Action(id="delivery/c", provider="delivery", key="c", verb="refuse", summary="no stack", fix="set one"),
+    ])
+    assert render.confirm_lines(plan) == [
+        "! the manifest now sets stack st-2",
+        "+ create evidence set EVD-A",
+        "a: 2 files to AR-1: new batch",
+        "    ! evidence-level batch",
+        "✗ c: no stack",
+        "    fix: set one",
+        "Also tags 2 evidence sets.",
+    ]

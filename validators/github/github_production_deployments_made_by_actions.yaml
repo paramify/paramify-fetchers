@@ -1,0 +1,19 @@
+key: github_production_deployments_made_by_actions
+name: GitHub Production Deployments Made by Actions
+type: AUTOMATED
+role: configuration
+source: community
+statement: >-
+  Every production deployment in the window was created by GitHub Actions, not by a person or another
+  integration calling the API.
+regex: '"production_deployments_not_by_actions":\s*\[\s*\]'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+- regexOperation:
+    type: MATCH_COUNT
+  criteria: NOT_EQUALS
+  value:
+    type: CUSTOM_TEXT
+    customText: '0'
+evidence_sets:
+- EVD-GITHUB-DEPLOYMENT-CONTROLS

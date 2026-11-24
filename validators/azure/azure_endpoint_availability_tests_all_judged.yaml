@@ -1,0 +1,24 @@
+key: azure_endpoint_availability_tests_all_judged
+name: 'Azure Endpoint Availability: Every Test Was Judged Against the Target'
+type: AUTOMATED
+role: configuration
+source: community
+statement: >
+  Every enabled availability test was judged against the target: none is missing an hour of the
+  lookback or unread (availability_tests_not_judged is 0). Also fails while no target is configured
+  (see 'Availability Target Is Configured' for the cause), so an undecided or unread value is never
+  reported as a pass. These are inputs to availability reporting; they do not replace the availability
+  reporting itself. Does not check whether the collection run succeeded.
+
+regex: '"availability_tests_not_judged":\s*(?<availability_tests_not_judged>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # availability_tests_not_judged
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-ENDPOINT-AVAILABILITY

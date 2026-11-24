@@ -1,0 +1,61 @@
+{
+  "apiVersion": "security.istio.io/v1",
+  "items": [
+    {
+      "apiVersion": "security.istio.io/v1",
+      "kind": "PeerAuthentication",
+      "metadata": {
+        "name": "default",
+        "namespace": "istio-system",
+        "uid": "00000000-0000-0000-0000-000000000011"
+      },
+      "spec": {
+        "mtls": {
+          "mode": "STRICT"
+        }
+      }
+    },
+    {
+      "apiVersion": "security.istio.io/v1",
+      "kind": "PeerAuthentication",
+      "metadata": {
+        "name": "scrape",
+        "namespace": "monitoring",
+        "uid": "00000000-0000-0000-0000-000000000012"
+      },
+      "spec": {
+        "mtls": {
+          "mode": "PERMISSIVE"
+        }
+      }
+    },
+    {
+      "apiVersion": "security.istio.io/v1",
+      "kind": "PeerAuthentication",
+      "metadata": {
+        "name": "metrics-port",
+        "namespace": "payments",
+        "uid": "00000000-0000-0000-0000-000000000013"
+      },
+      "spec": {
+        "mtls": {
+          "mode": "STRICT"
+        },
+        "portLevelMtls": {
+          "9090": {
+            "mode": "DISABLE"
+          }
+        },
+        "selector": {
+          "matchLabels": {
+            "app": "ledger"
+          }
+        }
+      }
+    }
+  ],
+  "kind": "PeerAuthenticationList",
+  "metadata": {
+    "continue": ""
+  }
+}
