@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import logging
 import sys
 from collections import namedtuple
 from pathlib import Path
@@ -169,7 +170,7 @@ def arm(monkeypatch, tmp_path):
     monkeypatch.setenv("EVIDENCE_DIR", str(tmp_path))
     monkeypatch.setenv("FETCHER_STATUS_FILE", str(tmp_path / "status.json"))
     for env in ("AZURE_AUTHORITY_HOST", "AZURE_TENANT_ID", "AZURE_ENVIRONMENT", "AZURE_RESOURCE_EXCLUSIONS", "AZURE_TARGET_SUBSCRIPTION_ONLY",
-                ea.LOOKBACK_ENV, ea.TARGET_ENV):
+                ea.LOOKBACK_ENV, ea.TARGET_ENV, ea.EXPECTED_ENV):
         monkeypatch.delenv(env, raising=False)
     return serve
 
@@ -240,13 +241,13 @@ def test_one_incomplete_test_is_not_judged_and_the_others_still_are():
 
 def test_status_code_and_content_checks_are_read_from_standard_and_classic_tests():
     standard = {"ValidationRules": {"ExpectedHttpStatusCode": 200, "SSLCheck": True, "ContentValidation": {"ContentMatch": "healthy"}}}
-    assert ea.validation(standard) == {"checks_status_code": True, "checks_content": True, "checks_ssl": True}
+    assert ea.validation(standard) == {"checks_status_code": True, "expected_status_code": 200, "checks_content": True, "checks_ssl": True}
     assert ea.validation({"ValidationRules": {"ExpectedHttpStatusCode": 200}})["checks_content"] is False
     ping = {"Configuration": {"WebTest": '<WebTest><Items><Request ExpectedHttpStatusCode="200" /></Items><ValidationRules><ValidationRule '
                                           'Classname="Microsoft.VisualStudio.TestTools.WebTesting.Rules.ValidationRuleFindText"><RuleParameters>'
                                           '<RuleParameter Name="FindText" Value="OK" /></RuleParameters></ValidationRule></ValidationRules></WebTest>'}}
-    assert ea.validation(ping) == {"checks_status_code": True, "checks_content": True, "checks_ssl": False}
-    assert ea.validation({}) == {"checks_status_code": False, "checks_content": False, "checks_ssl": False}
+    assert ea.validation(ping) == {"checks_status_code": True, "expected_status_code": 200, "checks_content": True, "checks_ssl": False}
+    assert ea.validation({}) == {"checks_status_code": False, "expected_status_code": None, "checks_content": False, "checks_ssl": False}
 
 
 def test_application_checks_are_counted_across_enabled_tests():
@@ -301,3 +302,141 @@ def test_classic_ping_tests_read_their_url_from_the_webtest_xml():
 def test_without_a_target_the_not_judged_counts_stay_null():
     s = ea.summarize([_test()], [_lb()], {"lookback_days": 7, "target": None})
     assert (s["availability_tests_not_judged"], s["load_balancers_not_judged"]) == (None, None)
+
+
+
+# --- expected endpoints and a complete window ---
+
+FULL_DAY = tuple((str(h), 100.0) for h in range(24))
+
+
+def _day_test(url, hours=24, name="t"):
+    t = ea.test_record(raw_test(name, url=url))
+    t.update(ea.judged(list(FULL_DAY[:hours]), ea.READ, 99.9, 24))
+    return t
+
+
+def _settings(*urls):
+    return {**SETTINGS, "lookback_days": 1, "expected_endpoints": sorted(ea.normalize_url(u) for u in urls) if urls else None}
+
+
+def test_urls_match_regardless_of_scheme_and_host_case_and_a_trailing_slash():
+    assert ea.normalize_url("HTTPS://App.Example.com/Health/") == "https://app.example.com/Health"
+    assert ea.normalize_url("https://app.example.com/") == ea.normalize_url("https://app.example.com")
+    assert ea.normalize_url("ftp://files.example.com") is None and ea.normalize_url("not a url") is None
+
+
+def test_an_expected_endpoint_without_a_test_is_reported():
+    s = ea.summarize([_day_test("https://app.example.com/health")], [],
+                     _settings("https://app.example.com/health", "https://api.example.com/"))
+    assert (s["expected_endpoints"], s["expected_endpoints_untested"]) == (2, 1)
+    assert s["expected_endpoints_untested_names"] == ["https://api.example.com"]
+    assert (s["expected_endpoints_fully_measured"], s["measurement_window_complete"]) == (1, False)
+
+
+def test_missing_hours_are_counted_apart_and_leave_the_window_incomplete():
+    s = ea.summarize([_day_test("https://app.example.com/health", hours=20)], [], _settings("https://app.example.com/health"))
+    assert (s["availability_hours_missing"], s["expected_endpoints_fully_measured"], s["measurement_window_complete"]) == (4, 0, False)
+    assert s["lowest_availability_percentage"] == 100.0  # the average alone would look healthy
+
+
+def test_every_expected_endpoint_measured_every_hour_is_a_complete_window():
+    tests = [_day_test("https://app.example.com/health", name="app"), _day_test("https://api.example.com", name="api")]
+    s = ea.summarize(tests, [], _settings("https://APP.example.com/health/", "https://api.example.com/"))
+    assert (s["expected_endpoints_untested"], s["expected_endpoints_fully_measured"]) == (0, 2)
+    assert (s["availability_hours_missing"], s["measurement_window_complete"]) == (0, True)
+
+
+def test_without_expected_endpoints_their_counts_are_null_and_the_window_covers_every_enabled_test():
+    s = ea.summarize([_day_test("https://app.example.com/health"), _day_test("https://api.example.com", hours=23)], [], _settings())
+    assert (s["expected_endpoints"], s["expected_endpoints_untested"], s["expected_endpoints_fully_measured"]) == (None, None, None)
+    assert (s["availability_hours_missing"], s["measurement_window_complete"]) == (1, False)
+    assert ea.summarize([], [], _settings())["measurement_window_complete"] is False  # nothing tested is not a complete window
+
+
+def test_unread_results_leave_the_window_unknown():
+    unread = ea.test_record(raw_test("app", url="https://app.example.com/health"))
+    unread.update(ea.judged([], ea.ERROR, 99.9, 24))
+    s = ea.summarize([unread], [], _settings("https://app.example.com/health"))
+    assert (s["availability_hours_missing"], s["expected_endpoints_fully_measured"], s["measurement_window_complete"]) == (None, None, None)
+    assert s["expected_endpoints_untested"] == 0  # the test exists; only its results are unknown
+
+
+def test_an_expected_endpoint_that_is_not_a_url_fails_the_run(arm, tmp_path, monkeypatch):
+    monkeypatch.setenv(ea.EXPECTED_ENV, "https://app.example.com, not-a-url")
+    collector = ea.Collector(logging.getLogger("test"))
+    settings = ea.settings_from_env(collector)
+    assert settings["expected_endpoints"] == ["https://app.example.com"]
+    assert [f["operation"] for f in collector.failures] == [f"config {ea.EXPECTED_ENV}"] and "not-a-url" in collector.failures[0]["message"]
+
+
+# --- expected responses ---
+
+def _coded_test(url, code, name="t", classic=False):
+    raw = raw_test(name, url=url)
+    if classic:
+        raw["properties"].pop("Request")
+        raw["properties"]["Configuration"] = {"WebTest": f'<WebTest><Items><Request Url="{url}" ExpectedHttpStatusCode="{code}" /></Items></WebTest>'}
+    else:
+        raw["properties"]["ValidationRules"] = {"ExpectedHttpStatusCode": code}
+    t = ea.test_record(raw)
+    t.update(ea.judged(list(FULL_DAY), ea.READ, 99.9, 24))
+    return t
+
+
+def test_the_expected_status_code_is_read_from_standard_and_classic_tests():
+    assert _coded_test("https://app.example.com", 200)["expected_status_code"] == 200
+    assert _coded_test("https://app.example.com", 401, classic=True)["expected_status_code"] == 401
+    zero = _coded_test("https://app.example.com", 0)
+    assert (zero["expected_status_code"], zero["checks_status_code"]) == (None, False)  # 0 checks no status
+
+
+def test_entries_take_an_optional_status_code_after_the_last_at():
+    urls, codes, bad = ea.parse_expected_endpoints(
+        "https://registry.example.com/v2/@401, https://sso.example.com/realms/r/.well-known/openid-configuration@200, "
+        "https://user@app.example.com, https://x.example.com@999, https://y.example.com@200, https://Y.example.com/@404, nope@200")
+    assert urls == ["https://registry.example.com/v2", "https://sso.example.com/realms/r/.well-known/openid-configuration",
+                    "https://user@app.example.com", "https://y.example.com"]
+    assert codes == {"https://registry.example.com/v2": 401, "https://sso.example.com/realms/r/.well-known/openid-configuration": 200,
+                     "https://y.example.com": 200}
+    assert bad == ["https://x.example.com@999", "https://Y.example.com/@404", "nope@200"]
+    assert ea.parse_expected_endpoints("  ") == (None, {}, [])
+
+
+def _coded_settings(value):
+    urls, codes, _ = ea.parse_expected_endpoints(value)
+    return {**SETTINGS, "lookback_days": 1, "expected_endpoints": urls, "expected_status_codes": codes}
+
+
+def test_an_expected_response_no_test_checks_for_is_reported():
+    tests = [_coded_test("https://registry.example.com/v2/", 200, name="reg"), _coded_test("https://app.example.com", 200, name="app")]
+    s = ea.summarize(tests, [], _coded_settings(
+        "https://registry.example.com/v2@401, https://app.example.com@200, https://api.example.com@200, https://docs.example.com"))
+    assert (s["expected_endpoints"], s["expected_responses"], s["expected_responses_unchecked"]) == (4, 3, 2)
+    assert s["expected_responses_unchecked_names"] == ["https://api.example.com@200", "https://registry.example.com/v2@401"]
+
+
+def test_a_test_expecting_the_listed_code_checks_the_response():
+    tests = [_coded_test("https://registry.example.com/v2/", 401, name="reg"), _coded_test("https://app.example.com", 200, name="app", classic=True)]
+    s = ea.summarize(tests, [], _coded_settings("https://registry.example.com/v2@401, https://app.example.com@200"))
+    assert (s["expected_responses"], s["expected_responses_unchecked"], s["expected_responses_unchecked_names"]) == (2, 0, [])
+
+
+def test_without_expected_responses_their_counts_are_null():
+    s = ea.summarize([_coded_test("https://app.example.com", 200)], [], _coded_settings("https://app.example.com"))
+    assert (s["expected_responses"], s["expected_responses_unchecked"], s["expected_responses_unchecked_names"]) == (0, None, None)
+    s = ea.summarize([], [], _coded_settings(""))
+    assert (s["expected_responses"], s["expected_responses_unchecked"]) == (None, None)
+
+
+def test_unlisted_tests_leave_the_expected_responses_unknown():
+    s = ea.summarize([], [], _coded_settings("https://app.example.com@200"), tests_listed=False)
+    assert (s["expected_responses"], s["expected_responses_unchecked"], s["expected_responses_unchecked_names"]) == (1, None, None)
+
+
+def test_two_codes_for_one_url_fail_the_run(monkeypatch):
+    monkeypatch.setenv(ea.EXPECTED_ENV, "https://app.example.com@200, https://app.example.com/@503")
+    collector = ea.Collector(logging.getLogger("test"))
+    settings = ea.settings_from_env(collector)
+    assert settings["expected_status_codes"] == {"https://app.example.com": 200}
+    assert [f["operation"] for f in collector.failures] == [f"config {ea.EXPECTED_ENV}"]

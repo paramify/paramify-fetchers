@@ -10,6 +10,16 @@ schemas and the `paramify` CLI — not the internal code.
 
 ## [Unreleased]
 
+### Changed
+
+- **`azure_endpoint_availability` 0.2.0: expected endpoints and a complete window.** A new `expected_endpoints` setting
+  lists the URLs that must be tested; expected endpoints that no enabled, in-scope test requests are reported, and
+  `expected_endpoints_fully_measured` counts those with a result in every hour. `availability_hours_missing` shows
+  missing samples apart from the averages, and `measurement_window_complete` says whether every expected endpoint
+  (or every enabled test) was measured for the whole lookback. Unset, the expected-endpoint counts stay null. An entry
+  can add the response a test must expect, as `URL@status` (such as `@401` for an endpoint that requires
+  credentials); `expected_responses_unchecked` counts expected responses that no test requesting that URL checks for.
+
 ### Added
 
 - **`keycloak_service_accounts` fetcher.** Lists every Keycloak client with a service account, GET only with

@@ -8,7 +8,8 @@ import re
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
+from urllib.parse import urlsplit, urlunsplit
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR.parent / "_shared"))
@@ -30,6 +31,7 @@ LOOKBACK_ENV = "AZURE_ENDPOINT_AVAILABILITY_LOOKBACK_DAYS"
 TARGET_ENV = "AZURE_AVAILABILITY_TARGET_PERCENTAGE"
 DEFAULT_LOOKBACK_DAYS = 7
 MAX_LOOKBACK_DAYS = 30
+EXPECTED_ENV = "AZURE_EXPECTED_ENDPOINTS"
 
 READ, ERROR, NOT_APPLICABLE = "read", "error", "not_applicable"
 LB_METRICS = ("data_path", "health_probe")
@@ -45,19 +47,31 @@ def component_of(tags: Optional[Dict[str, str]]) -> Optional[str]:
     return None
 
 
-def validation(props: Dict[str, Any]) -> Dict[str, Optional[bool]]:
+def status_code(value: Any) -> Optional[int]:
+    """An HTTP status code from 100 to 599, or None; a test with 0 or no code does not check the status."""
+    try:
+        code = int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+    return code if 100 <= code <= 599 else None
+
+
+def validation(props: Dict[str, Any]) -> Dict[str, Any]:
     """What a test checks beyond reachability: standard tests carry ValidationRules; classic ping tests carry rules in their XML."""
     rules = props.get("ValidationRules")
     if isinstance(rules, dict):
         content = ((rules.get("ContentValidation") or {}).get("ContentMatch") or "").strip()
-        return {"checks_status_code": bool(rules.get("ExpectedHttpStatusCode")), "checks_content": bool(content),
+        code = status_code(rules.get("ExpectedHttpStatusCode"))
+        return {"checks_status_code": code is not None, "expected_status_code": code, "checks_content": bool(content),
                 "checks_ssl": bool(rules.get("SSLCheck"))}
     xml = ((props.get("Configuration") or {}).get("WebTest") or "")
     if xml:
-        return {"checks_status_code": bool(re.search(r'ExpectedHttpStatusCode="[1-9]', xml)),
+        found = re.search(r'ExpectedHttpStatusCode="(\d+)"', xml)
+        code = status_code(found.group(1) if found else None)
+        return {"checks_status_code": code is not None, "expected_status_code": code,
                 "checks_content": "ValidationRuleFindText" in xml and bool(re.search(r'Name="FindText" Value="[^"]+"', xml)),
                 "checks_ssl": False}
-    return {"checks_status_code": False, "checks_content": False, "checks_ssl": False}
+    return {"checks_status_code": False, "expected_status_code": None, "checks_content": False, "checks_ssl": False}
 
 
 def classic_url(props: Dict[str, Any]) -> Optional[str]:
@@ -135,6 +149,56 @@ def judged(points: List[Tuple[str, float]], status: str, target: Optional[float]
             "below_target": (average < target) if complete and average is not None and target is not None else None}
 
 
+def normalize_url(url: Optional[str]) -> Optional[str]:
+    """Scheme and host in lowercase, without a trailing slash, so the same endpoint matches however it is written.
+    None unless it is an http or https URL with a host."""
+    parts = urlsplit((url or "").strip())
+    if parts.scheme.lower() not in ("http", "https") or not parts.netloc:
+        return None
+    path = parts.path.rstrip("/")
+    return urlunsplit((parts.scheme.lower(), parts.netloc.lower(), path, parts.query, ""))
+
+
+def parse_expected_endpoints(value: Optional[str]) -> Tuple[Optional[List[str]], Dict[str, int], List[str]]:
+    """`url` or `url@status` entries: the URLs that must be tested and, where given, the HTTP status code a test must
+    expect from each (401 for an endpoint that requires credentials, say). None when unset; the third value lists
+    the entries that are not in that form, or that give one URL two different codes."""
+    if value is None or not value.strip():
+        return None, {}, []
+    urls: Set[str] = set()
+    codes: Dict[str, int] = {}
+    invalid: List[str] = []
+    for entry in (e.strip() for e in value.split(",")):
+        if not entry:
+            continue
+        url, at, code = entry.rpartition("@")
+        if not (at and re.fullmatch(r"\d{3}", code)):
+            url, code = entry, ""
+        normalized = normalize_url(url)
+        if normalized is None or (code and status_code(code) is None):
+            invalid.append(entry)
+            continue
+        if code and codes.setdefault(normalized, int(code)) != int(code):
+            invalid.append(entry)
+            continue
+        urls.add(normalized)
+    return sorted(urls), codes, invalid
+
+
+def expected_endpoint_records(enabled: List[Dict[str, Any]], expected: List[str],
+                              codes: Optional[Dict[str, int]] = None) -> List[Dict[str, Any]]:
+    """Each expected URL: the enabled in-scope tests that request it, whether one of them was measured in every hour
+    of the lookback, and, when an expected status code is given, whether one of them expects that code."""
+    out = []
+    for url in expected:
+        mine = [t for t in enabled if normalize_url(t["url"]) == url]
+        code = (codes or {}).get(url)
+        out.append({"url": url, "tested": bool(mine), "tests": sorted(t["test_name"] or t["name"] for t in mine),
+                    "fully_measured": any(t["measurement_complete"] for t in mine), "expected_status_code": code,
+                    "response_checked": None if code is None else any(t.get("expected_status_code") == code for t in mine)})
+    return out
+
+
 def _lowest(values: List[Optional[float]]) -> Optional[float]:
     known = [v for v in values if v is not None]
     return min(known) if known else None
@@ -144,6 +208,9 @@ def summarize(tests: List[Dict[str, Any]], balancers: List[Dict[str, Any]], sett
               tests_listed: bool = True, balancers_listed: bool = True) -> Dict[str, Any]:
     enabled = [t for t in tests if t["enabled"]]
     tests_complete = tests_listed and all(t["metric_status"] == READ for t in enabled)
+    expected = settings.get("expected_endpoints")
+    endpoints = expected_endpoint_records(enabled, expected or [], settings.get("expected_status_codes"))
+    responses = [e for e in endpoints if e["expected_status_code"] is not None]
     standard = [b for b in balancers if b["standard"]]
     lb_complete = balancers_listed and all(b[k]["metric_status"] in (READ, NOT_APPLICABLE) for b in standard for k in LB_METRICS)
     target = settings["target"]
@@ -201,6 +268,20 @@ def summarize(tests: List[Dict[str, Any]], balancers: List[Dict[str, Any]], sett
             [b[k]["measurement_coverage_percentage"] for b in standard for k in ("data_path", "health_probe")])),
         "lookback_days": settings["lookback_days"],
         "availability_target_percentage": settings["target"],
+        # Missing samples apart from the averages, and whether the window is complete.
+        "availability_hours_missing": t_known(sum(t["hours_missing"] or 0 for t in enabled)),
+        "expected_endpoints": len(expected) if expected is not None else None,
+        "expected_endpoints_untested": (sum(1 for e in endpoints if not e["tested"]) if tests_listed else None) if expected is not None else None,
+        "expected_endpoints_untested_names": (sorted(e["url"] for e in endpoints if not e["tested"]) if tests_listed else None)
+        if expected is not None else None,
+        "expected_endpoints_fully_measured": t_known(sum(1 for e in endpoints if e["fully_measured"])) if expected is not None else None,
+        "expected_responses": len(responses) if expected is not None else None,
+        "expected_responses_unchecked": (sum(1 for e in responses if not e["response_checked"]) if tests_listed else None)
+        if responses else None,
+        "expected_responses_unchecked_names": (sorted(f'{e["url"]}@{e["expected_status_code"]}' for e in responses
+                                                      if not e["response_checked"]) if tests_listed else None) if responses else None,
+        "measurement_window_complete": t_known(all(e["fully_measured"] for e in endpoints) if expected is not None
+                                               else bool(enabled) and all(t["measurement_complete"] for t in enabled)),
     }
 
 
@@ -217,7 +298,13 @@ def settings_from_env(collector: Collector) -> Dict[str, Any]:
         except ValueError:
             collector.record(f"config {TARGET_ENV}", ValueError(
                 f"invalid setting {TARGET_ENV}={raw!r}: expected a number above 0 and up to 100; left unset"))
-    return {"lookback_days": days, "target": target}
+    # Unset until the offering lists the endpoints that must be tested.
+    expected, codes, bad = parse_expected_endpoints(os.environ.get(EXPECTED_ENV))
+    if bad:
+        collector.record(f"config {EXPECTED_ENV}", ValueError(
+            f"invalid setting {EXPECTED_ENV}: {', '.join(bad)} not an http or https URL with a host, optionally followed by "
+            "@ and a status code from 100 to 599, with one code per URL"))
+    return {"lookback_days": days, "target": target, "expected_endpoints": expected, "expected_status_codes": codes}
 
 
 # --- collection ---
