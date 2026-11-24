@@ -39,7 +39,14 @@ LOCKOUT_TYPES = frozenset({"USER_DISABLED_BY_TEMPORARY_LOCKOUT", "USER_DISABLED_
 PRIVILEGED_RESOURCES = frozenset({"REALM_ROLE_MAPPING", "CLIENT_ROLE_MAPPING", "GROUP_MEMBERSHIP", "REALM_ROLE", "CLIENT_ROLE",
                                   "CLIENT", "CLIENT_SCOPE", "REALM", "IDENTITY_PROVIDER", "IDENTITY_PROVIDER_MAPPER",
                                   "AUTH_FLOW", "AUTH_EXECUTION", "AUTH_EXECUTION_FLOW", "REQUIRED_ACTION", "COMPONENT",
-                                  "USER_FEDERATION_PROVIDER", "REALM_SCOPE_MAPPING", "CLIENT_SCOPE_MAPPING"})
+                                  "USER_FEDERATION_PROVIDER", "REALM_SCOPE_MAPPING", "CLIENT_SCOPE_MAPPING",
+                                  # A default or optional client scope given to or taken from a client: it changes
+                                  # the access and claims that client's tokens carry.
+                                  "CLIENT_SCOPE_CLIENT_MAPPING"})
+# User sign-ins, the same types login_events_storage_enabled needs saved.
+SIGN_IN_TYPES = frozenset({"LOGIN", "LOGIN_ERROR"})
+# More than this many events read from the server (including those outside the window) leaves the stream null.
+MAX_SCANNED = 2 * MAX_EVENTS
 
 logger = logging.getLogger(NAME)
 
@@ -67,14 +74,16 @@ def login_record(e: Dict[str, Any]) -> Dict[str, Any]:
     return {"time": _iso(e.get("time")), "type": e.get("type"), "client_id": e.get("clientId"), "error": e.get("error")}
 
 
-def _disables_user(e: Dict[str, Any]) -> bool:
-    """An UPDATE to a user whose representation sets enabled to false; `enabled` is the only field read from it."""
-    if e.get("operationType") != "UPDATE" or e.get("resourceType") != "USER" or not e.get("representation"):
+def _disables_user(e: Dict[str, Any]) -> Optional[bool]:
+    """An UPDATE to a user whose representation sets enabled to false; `enabled` is the only field read from it.
+    None for a user UPDATE without a readable representation (admin event details off when it was stored)."""
+    if e.get("operationType") != "UPDATE" or e.get("resourceType") != "USER":
         return False
     try:
-        return json.loads(e["representation"]).get("enabled") is False
-    except (ValueError, AttributeError):
-        return False
+        rep = json.loads(e.get("representation") or "")
+    except ValueError:
+        return None
+    return rep.get("enabled") is False if isinstance(rep, dict) else None
 
 
 def admin_record(e: Dict[str, Any]) -> Dict[str, Any]:
@@ -93,8 +102,11 @@ def summarize(config: Optional[Dict[str, Any]], logins: Optional[List[Dict[str, 
     logins, admins = logins or [], admins or []
     failed = [e for e in logins if e.get("type") == "LOGIN_ERROR"]
     others = [e for e in logins if not (own_client_id and e.get("clientId") == own_client_id)]
-    newest_login = max((e.get("time") or 0 for e in others), default=0) or None
+    newest_login = max((e.get("time") or 0 for e in others if e.get("type") in SIGN_IN_TYPES), default=0) or None
     newest_admin = max((e.get("time") or 0 for e in admins), default=0) or None
+    disabled = [_disables_user(e) for e in admins]
+    # Without details Keycloak doesn't keep the changed user, so a disable can't be seen: unknown, not 0.
+    users_disabled_known = ad and (config or {}).get("adminEventsDetailsEnabled") is not False and None not in disabled
     return {
         "lookback_days": lookback_days,
         # Is storage on?
@@ -116,7 +128,7 @@ def summarize(config: Optional[Dict[str, Any]], logins: Optional[List[Dict[str, 
         "admin_events": len(admins) if ad else None,
         "admin_privileged_changes": sum(1 for e in admins if e.get("resourceType") in PRIVILEGED_RESOURCES) if ad else None,
         "users_created": sum(1 for e in admins if (e.get("operationType"), e.get("resourceType")) == ("CREATE", "USER")) if ad else None,
-        "users_disabled": sum(1 for e in admins if _disables_user(e)) if ad else None,
+        "users_disabled": sum(1 for d in disabled if d) if users_disabled_known else None,
         "credential_resets": sum(1 for e in admins if e.get("resourceType") == "USER" and e.get("operationType") == "ACTION"
                                  and str(e.get("resourcePath") or "").endswith("/reset-password")) if ad else None,
         "role_grants": sum(1 for e in admins if e.get("operationType") == "CREATE"
@@ -129,19 +141,33 @@ def summarize(config: Optional[Dict[str, Any]], logins: Optional[List[Dict[str, 
 
 # --- collection ---
 
-def read_stream(client: KeycloakClient, operation: str, path: str, since: datetime) -> Optional[List[Dict[str, Any]]]:
-    """Every event since `since`, newest first, page by page; None when a page can't be read or the window is too large."""
-    out: List[Dict[str, Any]] = []
-    cutoff = since.timestamp() * 1000
+def _event_key(e: Dict[str, Any]) -> str:
+    return str(e.get("id") or json.dumps(e, sort_keys=True))
+
+
+def read_stream(client: KeycloakClient, operation: str, path: str, since: datetime, until: datetime) -> Optional[List[Dict[str, Any]]]:
+    """Every event from `since` to `until`, newest first, page by page; None when a page can't be read or the window is
+    too large.
+
+    dateFrom is sent as a day, which every Keycloak version takes (epoch milliseconds only from 26.2), so the server
+    also returns the events of that day before `since`. The offset therefore moves by what the server returned, not by
+    what was kept, and the read stops at the first page that reaches past `since`. Events stored while paging push the
+    list down, so one can come back on the next page: each is kept once, by id, and any newer than `until` is left out."""
+    out: Dict[str, Dict[str, Any]] = {}
+    start, end = since.timestamp() * 1000, until.timestamp() * 1000
+    offset = 0
     while True:
-        page = client.get(operation, path, {"dateFrom": since.strftime("%Y-%m-%d"), "first": str(len(out)), "max": str(PAGE)},
+        page = client.get(operation, path, {"dateFrom": since.strftime("%Y-%m-%d"), "first": str(offset), "max": str(PAGE)},
                           role="view-events")
         if page is None:
             return None
-        out.extend(e for e in page if (e.get("time") or 0) >= cutoff)
-        if len(page) < PAGE:
-            return out
-        if len(out) >= MAX_EVENTS:
+        offset += len(page)
+        for e in page:
+            if start <= (e.get("time") or 0) <= end:
+                out.setdefault(_event_key(e), e)
+        if len(page) < PAGE or (page[-1].get("time") or 0) < start:
+            return list(out.values())
+        if len(out) >= MAX_EVENTS or offset >= MAX_SCANNED:
             client._fail(operation, "Too many events", f"more than {MAX_EVENTS} events in the window; counts left null rather "
                          "than undercounted. Shorten the lookback.", "partial_failure")
             return None
@@ -161,9 +187,10 @@ def collect(client: KeycloakClient, lookback_days: int, now: Optional[datetime] 
     now = now or datetime.now(timezone.utc)
     since = now - timedelta(days=lookback_days)
     config = client.get("events configuration", "/events/config", role="view-events")
-    logins = read_stream(client, "login events", "/events", since)
-    admins = read_stream(client, "admin events", "/admin-events", since)
-    results = {"window_start": since.strftime("%Y-%m-%dT%H:%M:%SZ"),
+    # One window end for both streams, fixed before the first page: events stored during the run are left out.
+    logins = read_stream(client, "login events", "/events", since, now)
+    admins = read_stream(client, "admin events", "/admin-events", since, now)
+    results = {"window_start": since.strftime("%Y-%m-%dT%H:%M:%SZ"), "window_end": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
                "login_events": [login_record(e) for e in logins] if logins is not None else None,
                "admin_events": [admin_record(e) for e in admins] if admins is not None else None}
     return {"results": results, "summary": summarize(config, logins, admins, lookback_days, now, own_client_id)}

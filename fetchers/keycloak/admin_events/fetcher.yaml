@@ -41,20 +41,20 @@ evidence_set:
   instructions: |
     Script: keycloak/admin_events/fetcher.py
 
-    Access: A Keycloak client with service accounts enabled whose service account holds the realm-management client role view-events, and nothing else, reached from a network that can call the Keycloak admin endpoint. On Keycloak 26.8.2 and later, the client also needs the built-in kc-admin-api client scope as a default scope, or every call is refused with 401.
+    Access: A Keycloak client with service accounts enabled whose service account holds the client role view-events, and nothing else, reached from a network that can call the Keycloak admin endpoint. For a service account in master, the role comes from the <realm>-realm client in master (such as example-realm-realm, or master-realm when the realm being read is master); for one in the realm being read, from that realm's realm-management client. On Keycloak 26.8.2 and later, the client also needs the built-in kc-admin-api client scope as a default scope, or every call is refused with 401.
 
     Commands Executed:
     - POST /realms/{auth realm}/protocol/openid-connect/token — a client-credentials token for the service account (no role)
     - GET /admin/realms/{realm}/events/config — whether sign-in and admin event storage is on (view-events)
-    - GET /admin/realms/{realm}/events — stored sign-in events since the start of the window, page by page (view-events)
-    - GET /admin/realms/{realm}/admin-events — stored admin events since the start of the window, page by page (view-events)
+    - GET /admin/realms/{realm}/events — stored sign-in events since the start of the window's first day, page by page; events outside the window are left out (view-events)
+    - GET /admin/realms/{realm}/admin-events — stored admin events since the start of the window's first day, page by page; events outside the window are left out (view-events)
 
-    Output: keycloak_admin_events.json — each event's type, time, client and error, or operation and resource type. Usernames, user IDs, IP addresses, token IDs and the changed objects are never copied. Events stored in Keycloak are not proof that they reach a SIEM, which needs its own evidence.
+    Output: keycloak_admin_events.json — the window's start and end (window_start, window_end), and each event's type, time, client and error, or operation and resource type. Usernames, user IDs, IP addresses, token IDs and the changed objects are never copied. Events stored in Keycloak are not proof that they reach a SIEM, which needs its own evidence.
 
     Summary fields:
 
     Is event storage on?
-    - lookback_days — Days of events read
+    - lookback_days — Days of events read. The window ends when the run starts: events stored while it reads are left out, and an event read twice is counted once
     - login_events_storage_enabled — True if event storage is on and LOGIN and LOGIN_ERROR are saved event types, so successful and failed sign-ins are stored; null if the event settings or the saved types could not be read, as are the two fields below (when unread)
     - admin_events_storage_enabled — True if Keycloak stores admin events
     - admin_events_details_enabled — True if admin events keep the changed object, which users_disabled needs
@@ -67,14 +67,14 @@ evidence_set:
     - lockouts — Number of accounts locked by brute-force detection (USER_DISABLED_BY_TEMPORARY_LOCKOUT or USER_DISABLED_BY_PERMANENT_LOCKOUT)
     - collector_token_requests — Number of sign-in events from this fetcher's own client, its token requests; they are left out of the recency fields
     - login_event_types — Map of each sign-in event type to its count
-    - newest_login_event — Time of the newest stored sign-in event from anything but this fetcher's client; null if there is none
+    - newest_login_event — Time of the newest stored user sign-in event (LOGIN or LOGIN_ERROR); token, logout and service-account (CLIENT_LOGIN) events do not count; null if there is none
     - hours_since_newest_login_event — Hours since newest_login_event
 
     What do the admin events show?
     - admin_events — Number of stored admin events in the window; null if they could not be read or there were more than 20,000, as is every admin field below
-    - admin_privileged_changes — Number of admin events changing role or group grants, roles, clients, client scopes, realm settings, identity providers, authentication flows, required actions or federation components
+    - admin_privileged_changes — Number of admin events changing role or group grants, roles, clients, client scopes or a client's assigned client scopes, realm settings, identity providers, authentication flows, required actions or federation components
     - users_created — Number of users created
-    - users_disabled — Number of updates that disabled a user; counts only when admin_events_details_enabled is true, since the changed object is what shows it
+    - users_disabled — Number of updates that disabled a user. Only the changed object shows this, so it is null when admin_events_details_enabled is false, or when any user update in the window has no changed object (stored while details were off)
     - credential_resets — Number of passwords reset by an administrator
     - role_grants — Number of realm or client role grants to a user or group
     - admin_operations — Map of each operation and resource type, such as UPDATE USER, to its count

@@ -147,8 +147,8 @@ def test_a_user_counts_as_disabled_only_from_its_changed_object():
         return {"operationType": "UPDATE", "resourceType": "USER", "representation": rep}
     assert ae._disables_user(update('{"enabled": false, "username": "x"}')) is True
     assert ae._disables_user(update('{"enabled": true}')) is False
-    assert ae._disables_user(update(None)) is False   # details off: unknown, never counted
-    assert ae._disables_user(update("not json")) is False
+    assert ae._disables_user(update(None)) is None   # details off: unknown, never counted
+    assert ae._disables_user(update("not json")) is None
 
 
 def test_an_out_of_range_lookback_is_bad_config(keycloak, tmp_path, monkeypatch):
@@ -162,3 +162,110 @@ def test_an_out_of_range_lookback_is_bad_config(keycloak, tmp_path, monkeypatch)
 def test_sign_in_storage_counts_only_when_both_types_are_saved(saved, expected):
     config = dict(CONFIG, enabledEventTypes=saved) if saved is not None else {k: v for k, v in CONFIG.items() if k != "enabledEventTypes"}
     assert ae.summarize(config, [], [], 7, NOW)["login_events_storage_enabled"] is expected
+
+
+# --- review fixes ---
+
+DAY_MS = 86_400_000
+NOW_MS = int(NOW.timestamp() * 1000)
+WINDOW_START_MS = NOW_MS - 7 * DAY_MS
+
+
+class _ByDayKeycloak(_Keycloak):
+    """Serves /events the way Keycloak does: dateFrom applied by whole day (UTC), newest first, first/max offsets.
+    `between_pages` runs after each page, to change the store while the fetcher reads it. Stops a runaway loop."""
+
+    def __init__(self, events, between_pages=None, **kwargs):
+        super().__init__(events=events, admin_events=[], **kwargs)
+        self.between_pages = between_pages
+
+    def get(self, url, params=None, timeout=None, allow_redirects=True, headers=None):
+        tail = urlparse(url).path[len("/admin/realms/example-realm"):]
+        if tail != "/events":
+            return super().get(url, params, timeout, allow_redirects, headers)
+        self.gets.append((tail, dict(params or {})))
+        assert len(self.gets) < 50, "the event read never ends"
+        day = datetime.strptime(params["dateFrom"], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        stored = sorted((e for e in self.streams[tail] if e["time"] >= day.timestamp() * 1000), key=lambda e: -e["time"])
+        first, size = int(params["first"]), int(params["max"])
+        page = stored[first:first + size]
+        if self.between_pages:
+            self.between_pages(self.streams[tail])
+        return _Resp(200, page)
+
+
+def _sign_in(i, time_ms, kind="LOGIN", client="web-app"):
+    return {"id": f"evt-{i}", "time": time_ms, "type": kind, "clientId": client}
+
+
+def test_a_busy_first_day_before_the_window_start_does_not_loop(keycloak, tmp_path, monkeypatch):
+    # A full page and more of events on the window's first day, but before its start: Keycloak returns them, because
+    # dateFrom is a day. The read must advance by what the server returned and stop once it is past the window start.
+    monkeypatch.setattr(ae, "PAGE", 5)
+    inside = [_sign_in(i, NOW_MS - 1000 * (i + 1)) for i in range(12)]
+    before_start = [_sign_in(100 + i, WINDOW_START_MS - 1000 * (i + 1)) for i in range(6)]
+    session = _ByDayKeycloak(inside + before_start)
+    monkeypatch.setattr(client_mod.requests, "Session", lambda: session)
+    assert ae.main() == 0
+    assert _evidence(tmp_path)["summary"]["login_events"] == 12
+    firsts = [int(p["first"]) for t, p in session.gets if t == "/events"]
+    assert firsts == [0, 5, 10]  # the third page holds the last 2 in the window and the first 3 before it
+
+
+def test_an_event_stored_while_paging_is_neither_counted_twice_nor_past_the_window_end(keycloak, tmp_path, monkeypatch):
+    monkeypatch.setattr(ae, "PAGE", 2)
+    stored = [_sign_in(i, NOW_MS - 1000 * (i + 1)) for i in range(3)]
+    added = []
+
+    def arrive(events):
+        if not added:  # one new sign-in after the first page, newer than the window end
+            added.append(_sign_in(99, NOW_MS + 5000))
+            events.append(added[0])
+
+    session = _ByDayKeycloak(stored, between_pages=arrive)
+    monkeypatch.setattr(client_mod.requests, "Session", lambda: session)
+    assert ae.main() == 0
+    ev = _evidence(tmp_path)
+    assert ev["summary"]["login_events"] == 3 and ev["summary"]["logins_succeeded"] == 3
+    assert ev["results"]["window_end"] == "2026-11-18T01:00:00Z"
+    assert ev["summary"]["newest_login_event"] == ae._iso(NOW_MS - 1000)
+
+
+def _update_user(rep, resource="USER"):
+    return {"operationType": "UPDATE", "resourceType": resource, "representation": rep, "time": NOW_MS - 1000}
+
+
+def test_users_disabled_is_null_when_the_changed_object_is_not_kept():
+    disabled = _update_user('{"enabled": false}')
+    details_off = dict(CONFIG, adminEventsDetailsEnabled=False)
+    assert ae.summarize(CONFIG, [], [disabled], 7, NOW)["users_disabled"] == 1
+    assert ae.summarize(details_off, [], [_update_user(None)], 7, NOW)["users_disabled"] is None
+    # Details on now, but an update stored while they were off has no changed object.
+    assert ae.summarize(CONFIG, [], [disabled, _update_user(None)], 7, NOW)["users_disabled"] is None
+    assert ae.summarize(CONFIG, [], [disabled, _update_user("not json")], 7, NOW)["users_disabled"] is None
+    # An update to something else, without a changed object, doesn't hide a user change.
+    assert ae.summarize(CONFIG, [], [disabled, _update_user(None, "CLIENT")], 7, NOW)["users_disabled"] == 1
+    assert ae.admin_record(_update_user(None))["user_disabled"] is None
+
+
+def test_newest_sign_in_counts_only_sign_in_events():
+    # Storage on, but only token, logout and service-account events are saved: no user sign-in is stored.
+    others = [_sign_in(1, NOW_MS - 2000, "CODE_TO_TOKEN"), _sign_in(2, NOW_MS - 1000, "LOGOUT"),
+              _sign_in(3, NOW_MS - 500, "CLIENT_LOGIN", "other-service"), _sign_in(4, NOW_MS - 100, "CLIENT_LOGIN", "paramify-reader")]
+    config = dict(CONFIG, enabledEventTypes=["CODE_TO_TOKEN", "REFRESH_TOKEN", "LOGOUT", "CLIENT_LOGIN"])
+    s = ae.summarize(config, others, [], 7, NOW, own_client_id="paramify-reader")
+    assert (s["newest_login_event"], s["hours_since_newest_login_event"]) == (None, None)
+    failed = _sign_in(5, NOW_MS - 3000, "LOGIN_ERROR")
+    assert ae.summarize(CONFIG, others + [failed], [], 7, NOW, own_client_id="paramify-reader")["newest_login_event"] == ae._iso(failed["time"])
+
+
+@pytest.mark.parametrize("operation", ["CREATE", "DELETE"])
+def test_a_client_scope_assignment_is_a_privileged_change(operation):
+    event = {"operationType": operation, "resourceType": "CLIENT_SCOPE_CLIENT_MAPPING", "time": NOW_MS - 1000}
+    assert ae.summarize(CONFIG, [], [event], 7, NOW)["admin_privileged_changes"] == 1
+    assert ae.admin_record(event)["privileged"] is True
+
+
+def test_the_access_text_names_the_client_for_an_account_in_master():
+    text = (REPO_ROOT / "fetchers" / "keycloak" / "admin_events" / "fetcher.yaml").read_text()
+    assert "<realm>-realm client in master" in text
