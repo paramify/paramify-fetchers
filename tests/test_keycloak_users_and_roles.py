@@ -200,7 +200,7 @@ def test_users_are_read_page_by_page(keycloak, tmp_path, monkeypatch):
     assert _evidence(tmp_path)["summary"]["users_total"] == 7
 
 
-# --- Todd's review: organizations, linked accounts, unknown inactivity, service-account link, realm scope ---
+# --- Review fixes: organizations, linked accounts, unknown inactivity, service-account link, realm scope ---
 
 def _add_user(overrides, uid, username, *, created=1760616000000, creds=("password",), idps=(), admin=(), sa=None):
     base = f"/users/{uid}"
