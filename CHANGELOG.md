@@ -12,6 +12,15 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`kubernetes_workload_resilience` fetcher and `kubernetes` category.** Reads any cluster's Kubernetes API (GET and
+  LIST only) through a kubeconfig, including AKS with kubelogin, or the in-cluster service account. For each Deployment
+  and StatefulSet: replicas with any autoscaler minimum, PodDisruptionBudget coverage and budgets that block node drains,
+  zone spread as configured and where ready pods actually run (the scheduler spreads by default, so placement decides),
+  and readiness and liveness probes. A workload's pods are the ones it owns, found through its ReplicaSets, not every
+  pod with matching labels. Each budget is judged once, over every pod it selects, with Kubernetes' rounding. When a
+  pod's zone or owner, or a budget's pod count, can't be found, the workload is listed as unknown and the matching list
+  is null, not empty. An API server that can't be reached is recorded as `target_unreachable`, and each call times
+  out. System namespaces are left out by default. The README has the least-privilege RBAC.
 - **`alertmanager_alert_delivery` fetcher and `alertmanager` category.** Reads Prometheus Alertmanager's v2 API and
   metrics endpoint, GET only: the route tree and receivers (names and integration types only, never receiver
   settings), active, silenced and inhibited alerts, silences, and the notifications started and the notifications that
@@ -152,6 +161,12 @@ schemas and the `paramify` CLI — not the internal code.
   source, which can pick out one kind of line with a line filter; a quiet source without a heartbeat leaves the
   overall verdict null. Log lines and stream labels are never copied. The category sends `LOKI_TENANT_ID` as
   `X-Scope-OrgID` and an optional bearer token for a proxy.
+- **`openscap_benchmark_results` 0.1.0 and the `openscap` category: each target's latest OpenSCAP benchmark
+  result.** Reads XCCDF results and ARF reports written by `oscap xccdf eval`, gzipped or not, from an Azure Blob
+  Storage container (GET only, with the run's Azure identity) or a local directory. For each target's newest scan it
+  reports the profile, rule results, failed rules by severity, errors and waived rules. `expected_targets` and
+  `max_age_days` have no default, so their fields stay null until set. Rule text is never copied, and XML is parsed
+  with defusedxml.
 - **The TUI shows which environment variables a manifest is missing, and stops a run that would fail on them.**
   - The manifest settings row has an `env` button (`✓ all set` or `✗ 2 missing`), each fetcher's status names what it
     needs (`✗ needs OKTA_API_TOKEN`), and the line under the table splits what a run needs from what only an upload needs.
