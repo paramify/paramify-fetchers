@@ -28,6 +28,7 @@ from pathlib import Path
 
 import pytest
 
+from framework.paramify import pipelines as uploader_pipelines
 from framework.paramify.client import Client
 from framework.paramify.pipelines import Pipelines
 
@@ -412,6 +413,93 @@ def test_events_describe_the_job(tmp_path):
     assert "job_queued" in kinds and "job_complete" in kinds
     assert [e["status"] for e in events if e["event"] == "job_status"] == ["IN_PROGRESS", "COMPLETED"]
     assert kinds[-1] == "upload_complete"
+
+
+class PerJobClient(FakeClient):
+    """FakeClient whose jobs each report their own statuses: `by_job` maps a job
+    id to the statuses its successive polls report, last one repeated."""
+
+    def __init__(self, by_job, **kw):
+        super().__init__(**kw)
+        self.by_job = {k: list(v) for k, v in by_job.items()}
+        self.job_polls = {}
+
+    def get_job(self, job_id):
+        n = self.job_polls.get(job_id, 0)
+        self.job_polls[job_id] = n + 1
+        self.polls += 1
+        statuses = self.by_job[job_id]
+        status = statuses[min(n, len(statuses) - 1)]
+        return {"id": job_id, "status": status, "type": "PROCESS",
+                "counts": COUNTS if status == uploader.JOB_COMPLETED else None,
+                "error": None, "blockedByJobId": None}
+
+
+def test_every_assessment_is_queued_before_any_job_is_waited_on(tmp_path):
+    """Jobs on different assessments run independently, so the second
+    assessment's reports are sent without waiting for the first one's job."""
+    run_dir = make_run(tmp_path, [{"name": "a.csv"}, {"name": "b.csv", "assessment_id": OTHER}])
+    client = PerJobClient({"job-1": ["IN_PROGRESS", "COMPLETED"],
+                           "job-2": ["IN_PROGRESS", "COMPLETED"]})
+    events = []
+    summary = run_upload(run_dir, client, on_event=events.append)
+    kinds = [e["event"] for e in events]
+    assert summary["ok"]
+    assert max(i for i, k in enumerate(kinds) if k in ("upload_file", "job_queued")) \
+        < min(i for i, k in enumerate(kinds) if k == "job_status")
+    assert sorted(e["job_id"] for e in events if e["event"] == "job_complete") == ["job-1", "job-2"]
+    # Both jobs finish on the second poll, so the wait is one poll interval, not two.
+    assert client.clock == uploader_pipelines._POLL_FIRST
+
+
+def test_the_wait_takes_as_long_as_the_slowest_job(tmp_path):
+    run_dir = make_run(tmp_path, [{"name": "a.csv"}, {"name": "b.csv", "assessment_id": OTHER}])
+    client = PerJobClient({"job-1": ["COMPLETED"],
+                           "job-2": ["IN_PROGRESS", "IN_PROGRESS", "COMPLETED"]})
+    events = []
+    summary = run_upload(run_dir, client, on_event=events.append)
+    assert summary["ok"]
+    # The finished job is not polled again while the slow one runs.
+    assert client.job_polls == {"job-1": 1, "job-2": 3}
+    assert [e["job_id"] for e in events if e["event"] == "job_complete"] == ["job-1", "job-2"]
+
+
+def test_each_job_is_logged_as_soon_as_it_settles(tmp_path):
+    """A run killed while a slow job is still running must already have the
+    fast job's outcome on disk."""
+    run_dir = make_run(tmp_path, [{"name": "a.csv"}, {"name": "b.csv", "assessment_id": OTHER}])
+    client = PerJobClient({"job-1": ["COMPLETED"], "job-2": ["IN_PROGRESS", "COMPLETED"]})
+    on_disk = {}
+
+    def on_event(ev):
+        # job_complete comes just before that job's save, so at the slow job's
+        # event the log shows what the fast job's save wrote.
+        if ev["event"] == "job_complete" and ev["job_id"] == "job-2":
+            on_disk.update(read_log(run_dir)["jobs"])
+
+    run_upload(run_dir, client, on_event=on_event)
+    assert on_disk[ASSESSMENT][-1]["status"] == "COMPLETED"
+    assert on_disk[OTHER][-1]["status"] == "QUEUED"
+    assert read_log(run_dir)["jobs"][OTHER][-1]["status"] == "COMPLETED"
+
+
+def test_a_failed_job_on_one_assessment_does_not_hide_the_other(tmp_path):
+    run_dir = make_run(tmp_path, [{"name": "a.csv"}, {"name": "b.csv", "assessment_id": OTHER}])
+    client = PerJobClient({"job-1": ["IN_PROGRESS", "FAILED"], "job-2": ["COMPLETED"]})
+    summary = run_upload(run_dir, client)
+    assert summary["jobs_failed"] == 1
+    by_aid = {a["assessment_id"]: a["job"]["status"] for a in summary["assessments"]}
+    assert by_aid == {ASSESSMENT: "FAILED", OTHER: "COMPLETED"}
+
+
+def test_jobs_already_queued_are_waited_on_after_a_halt(tmp_path):
+    """A workspace-wide refusal stops the sends, not the wait on what is queued."""
+    run_dir = make_run(tmp_path, [{"name": "a.csv"}, {"name": "b.csv", "assessment_id": OTHER}])
+    client = PerJobClient({"job-1": ["IN_PROGRESS", "COMPLETED"]},
+                          raise_on={"b.csv": uploader.IntakeNotEnabled("intake is off")})
+    summary = run_upload(run_dir, client)
+    assert summary["halted"]
+    assert summary["assessments"][0]["job"]["status"] == "COMPLETED"
 
 
 # --------------------------------------------------------------------------- #

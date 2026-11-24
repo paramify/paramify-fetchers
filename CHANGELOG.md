@@ -109,6 +109,11 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **`paramify issues upload` waits on every assessment's job at once.** Reports for every assessment are sent and their
+  processing jobs queued first, then all the jobs are polled together. A run that sends to several assessments waits as
+  long as its slowest job instead of the sum of them, and the next assessment's reports no longer wait on the previous
+  job. Each job's outcome is still written to `_intake_log.json` as soon as it settles, and `--wait-timeout` still
+  applies to each job. Job status lines now follow all the upload lines instead of each assessment's own.
 - **`azure_entra_sign_in_logs` 0.4.0: 50053 sign-in rejections.** `sign_ins_rejected_50053` counts interactive
   sign-ins Entra rejected with ResultType 50053, and `users_rejected_50053` counts the users they belong to. Entra logs
   both smart lockout and sign-ins from a malicious IP address under that code, so the counts are evidence, not a
