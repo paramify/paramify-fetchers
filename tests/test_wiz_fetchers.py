@@ -756,8 +756,9 @@ def test_host_rejected_slice_with_unread_rows_is_a_failure(fake, tmp_path):
 
 
 def test_http_error_keeps_the_response_body(fake, tmp_path):
-    # The bare "HTTP {status}" record made #473 undebuggable; the failure now
-    # carries Wiz's own message from the body.
+    # Keep message as "HTTP {status}" so downstream checks on message do not
+    # confuse HTTP error bodies with GraphQL errors, while preserving Wiz's
+    # response body in detail for debugging (#473).
     real = fake.__call__
 
     def bad(url, data=None, json=None, headers=None, timeout=None, allow_redirects=True):
@@ -770,7 +771,34 @@ def test_http_error_keeps_the_response_body(fake, tmp_path):
     assert client.graphql("cloudAccounts", "query { cloudAccounts { nodes { id } } }") is None
     failure = client.api_failures[-1]
     assert failure["type"] == "HTTPError" and failure["status_code"] == 400
-    assert "Cannot query field 'bogus'" in failure["message"]
+    assert failure["message"] == "HTTP 400"
+    assert "Cannot query field 'bogus'" in failure["detail"]
+
+
+def test_host_http_500_internal_error_body_is_not_split(fake, tmp_path):
+    # A repeated HTTP 500 whose body mentions "internal error" must remain a
+    # single failure rather than triggering fetch_slice's GraphQL split loop.
+    fake.pages["hostConfigurationRuleAssessments"] = [[
+        _host(1, "PASS", "HIGH", RHEL_STIG, fake=fake), _host(2, "FAIL", "LOW", RHEL_STIG, fake=fake)]]
+    real = fake.__call__
+    attempted = []
+
+    def fail_500(url, data=None, json=None, headers=None, timeout=None, allow_redirects=True):
+        filter_by = ((json or {}).get("variables") or {}).get("filterBy") or {}
+        if url == API and filter_by.get("result") == "FAIL":
+            attempted.append(filter_by)
+            return FakeResponse(500, {"errors": [{"message": "an internal error has occurred"}]})
+        return real(url, data=data, json=json, headers=headers, timeout=timeout, allow_redirects=allow_redirects)
+
+    wiz_client.requests.post = fail_500
+    code, ev = run("host_configuration_posture", tmp_path)
+    assert code == 1
+    assert ev["scope"]["split_slices"] == []
+    assert attempted and all(set(f) == {"result"} for f in attempted)
+    http_500_failures = [f for f in ev["api_failures"] if f.get("status_code") == 500]
+    assert len(http_500_failures) == 1
+    assert http_500_failures[0]["message"] == "HTTP 500"
+    assert "internal error" in http_500_failures[0]["detail"]
 
 
 # --- modules not yet exercised on a live tenant ---------------------------

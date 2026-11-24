@@ -242,7 +242,7 @@ def fetch_slice(client: WizClient, filter_by: Dict[str, Any], depth: int, cap: i
     if len(rejected_400) == len(new_failures):
         del client.api_failures[before:]
         rejected.append({"filter": dict(filter_by), "records_read_before_error": len(nodes),
-                         "wiz_errors": [f.get("message") for f in rejected_400][:3]})
+                         "wiz_errors": [f.get("detail") or f.get("message") for f in rejected_400][:3]})
         return
     # Only Wiz's own "internal error" is worth routing around; auth, rate
     # limits, caps and cursor problems are reported exactly as they happened.

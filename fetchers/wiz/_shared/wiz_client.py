@@ -424,6 +424,7 @@ class WizClient:
         body = {"query": query, "variables": variables or {}}
         last_response: Any = None
         last_error: Optional[str] = None
+        last_detail: Optional[str] = None
         reauthed = False
 
         for attempt in range(MAX_RETRIES + 1):
@@ -440,7 +441,7 @@ class WizClient:
                                          allow_redirects=False)
             except requests.exceptions.RequestException as e:
                 # Only the type: some requests errors quote the headers, and so the token.
-                last_error, last_response = type(e).__name__, None
+                last_error, last_response, last_detail = type(e).__name__, None, None
                 if attempt < MAX_RETRIES:
                     time.sleep(self._retry_delay(None, attempt))
                     continue
@@ -461,18 +462,16 @@ class WizClient:
             last_response = response
             if response.status_code != 200:
                 last_error = f"HTTP {response.status_code}"
-                detail = _error_detail(response)
-                if detail:
-                    last_error = f"{last_error}: {detail}"
+                last_detail = _error_detail(response)
                 break
 
             try:
                 payload = response.json()
             except ValueError:
-                last_error = "response was not JSON"
+                last_error, last_detail = "response was not JSON", None
                 break
             if not isinstance(payload, dict):
-                last_error = "response was not a JSON object"
+                last_error, last_detail = "response was not a JSON object", None
                 break
 
             errors = payload.get("errors") or []
@@ -495,17 +494,24 @@ class WizClient:
             return payload.get("data")
 
         self._record(operation, "HTTPError" if last_response is not None else "ConnectionError",
-                     last_error or "request failed", getattr(last_response, "status_code", None))
+                     last_error or "request failed", getattr(last_response, "status_code", None),
+                     detail=last_detail)
         return None
 
-    def _record(self, operation: str, kind: str, message: str, status_code: Optional[int], partial: bool = False) -> None:
+    def _record(self, operation: str, kind: str, message: str, status_code: Optional[int], partial: bool = False,
+                detail: Optional[str] = None) -> None:
         failure: Dict[str, Any] = {"operation": operation, "type": kind, "message": message[:500]}
+        if detail:
+            failure["detail"] = detail[:500]
         if status_code is not None:
             failure["status_code"] = status_code
         if partial:
             failure["partial"] = True
         self.api_failures.append(failure)
-        logger.warning("Wiz %s failed: %s", operation, message[:200])
+        if detail:
+            logger.warning("Wiz %s failed: %s (%s)", operation, message[:200], detail[:200])
+        else:
+            logger.warning("Wiz %s failed: %s", operation, message[:200])
 
     # --- pagination -------------------------------------------------------
 
