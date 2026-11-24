@@ -49,7 +49,6 @@ fetchers:
 - name: aws_config_inventory
   version: 0.1.0
   note: Every asset an AWS Config aggregator records, across accounts and regions, as inventory
-  draft: true
 - name: aws_ecr_image_scanning
   version: 0.5.0
   note: runs on boto3
@@ -71,7 +70,6 @@ fetchers:
 - name: azure_ai_hub_configuration
   version: 0.2.1
   note: You can exclude workspaces by name; an excluded workspace's connections and datastores are not read
-  draft: true
 - name: azure_ai_services_configuration
   version: 0.2.2
   note: names its search service counts
@@ -81,22 +79,18 @@ fetchers:
 - name: azure_aks_workload_security
   version: 0.1.0
   note: Pod security settings and network policy coverage, read from each AKS cluster's Kubernetes API
-  draft: true
 - name: azure_alert_rules
   version: 0.3.2
   note: You can exclude alert rules, action groups and processing rules; routing still checks every group
-  draft: true
 - name: azure_api_management_configuration
   version: 0.2.1
   note: services, with their APIs, products, backends, hostnames and certificates, none of them read
 - name: azure_app_gateway_backend_tls
   version: 0.2.1
   note: You can exclude gateways by name; a list it can't read now gives null counts, not 0
-  draft: true
 - name: azure_app_gateway_tls_listeners
   version: 0.2.1
   note: You can exclude gateways by name; a list it can't read now gives null counts, not 0
-  draft: true
 - name: azure_app_gateway_waf
   version: 0.2.2
   note: '`total_waf_policies` is null when the WAF policy list could not be read'
@@ -109,7 +103,6 @@ fetchers:
 - name: azure_app_service_deployments
   version: 0.3.2
   note: You can exclude web apps, function apps and slots; a slot is excluded along with its app
-  draft: true
 - name: azure_app_service_plans
   version: 0.3.2
   note: plans and the web and function apps on them
@@ -119,11 +112,9 @@ fetchers:
 - name: azure_backup_vault_protection
   version: 0.1.1
   note: Recent recovery points, retention, soft delete, immutability and geo-redundancy per Backup vault
-  draft: true
 - name: azure_bastion_configuration
   version: 0.1.1
   note: Each Bastion host's settings and logging, and which VMs it can reach without an open port
-  draft: true
 - name: azure_change_provenance
   version: 0.3.1
   note: before and after values for direct edits and manual deployments
@@ -133,14 +124,12 @@ fetchers:
 - name: azure_container_workloads_configuration
   version: 0.2.1
   note: You can exclude Container Apps environments, apps, jobs and container groups
-  draft: true
 - name: azure_cosmosdb_configuration
   version: 0.2.1
   note: database accounts
 - name: azure_data_services_configuration
   version: 0.3.0
   note: A service list it can't read now gives null counts, not 0; you can exclude clusters and namespaces
-  draft: true
 - name: azure_databricks_workspace_configuration
   version: 0.2.1
   note: workspaces
@@ -156,7 +145,6 @@ fetchers:
 - name: azure_defender_vulnerability_findings
   version: 0.1.1
   note: Findings now belong to their parent Azure resource; only real CVE ids count as CVEs
-  draft: true
 - name: azure_devops_audit_streams
   version: 0.1.1
   note: no longer reads unlisted streams as no streams
@@ -229,7 +217,6 @@ fetchers:
 - name: azure_firewall_configuration
   version: 0.1.1
   note: Firewall allow and deny rules, threat intelligence, IDPS, TLS inspection and log export
-  draft: true
 - name: azure_flexible_server_backups
   version: 0.1.0
   note: fetcher
@@ -257,30 +244,24 @@ fetchers:
 - name: azure_log_analytics_deletion_rights
   version: 0.2.1
   note: A failed workspace list gives null counts; excluding a workspace you named now fails the run
-  draft: true
 - name: azure_log_analytics_query_audit
   version: 0.2.1
   note: A workspace list it can't read now gives null counts, not 0
-  draft: true
 - name: azure_log_analytics_workspaces
   version: 0.3.2
   note: You can exclude workspaces; an excluded workspace's tables, exports and solutions are not read
-  draft: true
 - name: azure_log_storage_immutability
   version: 0.2.1
   note: You can exclude storage accounts, or a single log container by id
-  draft: true
 - name: azure_managed_identity_configuration
   version: 0.3.0
   note: A list it can't read now gives null counts, not 0; you can exclude identities
-  draft: true
 - name: azure_managed_redis_configuration
   version: 0.3.0
   note: a list that could not be read gives null counts, not 0
 - name: azure_monitor_fired_alerts
   version: 0.2.2
   note: You can exclude alert rules and the alerts on chosen resources; their history is not read
-  draft: true
 - name: azure_mysql_configuration
   version: 0.3.0
   note: flexible servers, whose parameters are then not read
@@ -323,7 +304,6 @@ fetchers:
 - name: azure_residual_resources
   version: 0.3.1
   note: You can exclude orphaned resources and role assignments by resource group or id
-  draft: true
 - name: azure_resource_diagnostic_settings
   version: 0.4.1
   note: shows whether resource logs arrive
@@ -333,14 +313,12 @@ fetchers:
 - name: azure_resource_locks
   version: 0.1.1
   note: Every management lock, and whether log, backup, key and storage resources are locked against deletion
-  draft: true
 - name: azure_sentinel_analytics_rules
   version: 0.4.0
   note: alert connections the tenant confirms
 - name: azure_sentinel_automation_rules
   version: 0.2.1
   note: Says plainly that playbook contents are not read; a failed list gives null counts, not 0
-  draft: true
 - name: azure_sentinel_data_sources
   version: 0.4.1
   note: Basic and Auxiliary tables can be measured
@@ -359,11 +337,9 @@ fetchers:
 - name: azure_service_log_records
   version: 0.2.1
   note: You can exclude App Service apps, slots and SQL managed instances
-  draft: true
 - name: azure_sql_encryption_status
   version: 0.2.1
   note: You can exclude SQL servers; their databases are excluded with them
-  draft: true
 - name: azure_sql_managed_instance_backups
   version: 0.5.0
   note: failover history
@@ -373,7 +349,6 @@ fetchers:
 - name: azure_sql_managed_instance_encryption
   version: 0.4.0
   note: When the instance list can't be read, every count is now null, not 0
-  draft: true
 - name: azure_sql_server_configuration
   version: 0.2.1
   note: logical servers; their firewall rules and audit, alert and vulnerability settings are not read
@@ -386,14 +361,12 @@ fetchers:
 - name: azure_virtual_wan_configuration
   version: 0.2.1
   note: You can exclude virtual WANs, hubs, VPN gateways, VPN sites and point-to-site gateways
-  draft: true
 - name: azure_vm_hardening_status
   version: 0.3.1
   note: OS patch settings
 - name: azure_vnet_egress_routing
   version: 0.3.2
   note: You can exclude VNets, subnets, route tables, NICs, firewalls and WAN hubs
-  draft: true
 - name: azure_vpn_gateway_configuration
   version: 0.3.0
   note: '`active_active_gateways` and `p2s_enabled_gateways` count only Vpn-type gateways'
@@ -403,38 +376,30 @@ fetchers:
 - name: azure_zone_redundancy
   version: 0.1.1
   note: Whether compute, network, storage, database and backup resources span availability zones
-  draft: true
 - name: checkov_bicep
   version: 0.3.0
   note: the TFVC source signs in with Entra when no token is set
 - name: checkov_kubernetes
   version: 0.2.1
   note: Keeps the summary counts in quiet mode, and never hands your Azure identity to Checkov
-  draft: true
 - name: checkov_terraform
   version: 0.2.1
   note: Keeps the summary counts in quiet mode, and never hands your Azure identity to Checkov
-  draft: true
 - name: cornerstone_incident_response_training
   version: 0.1.0
   note: Incident response and disaster recovery training completion per user, from Cornerstone
-  draft: true
 - name: cornerstone_role_based_training
   version: 0.1.0
   note: Role-based training completion for high-risk roles per user, from Cornerstone
-  draft: true
 - name: cornerstone_secure_development_training
   version: 0.1.0
   note: Secure software development training completion per user, from Cornerstone
-  draft: true
 - name: cornerstone_security_awareness_training
   version: 0.1.0
   note: Security awareness training completion per user, from Cornerstone
-  draft: true
 - name: datadog_apm_services
   version: 0.1.1
   note: Retries when rate-limited; a failed page now shows as a partial collection with null counts
-  draft: true
 - name: datadog_incident_timelines
   version: 0.2.0
   note: each timeline cell keeps its `content` text, `important` flag and `id`
@@ -444,7 +409,6 @@ fetchers:
 - name: datadog_infra_agent_checks
   version: 0.1.1
   note: Retries when rate-limited; a failed page now shows as a partial collection with null counts
-  draft: true
 - name: datadog_log_archives
   version: 0.1.1
   note: '`summary.enabled_archives` counts archives in state `WORKING` or `WORKING_AUTH_LEGACY`'
@@ -460,19 +424,15 @@ fetchers:
 - name: datadog_siem_detection_rules
   version: 0.2.0
   note: Holds only your custom Cloud SIEM rules, so rule counts can drop; rules_never_triggered_count is gone
-  draft: true
 - name: datadog_siem_signals
   version: 0.2.0
   note: status is now the triage state (open, under review, archived); severity holds the old status value
-  draft: true
 - name: fedramp_marketplace_vendor_certification_status
   version: 0.1.0
   note: 'FedRAMP Marketplace status of the vendor packages you list: certified, in process or delisted'
-  draft: true
 - name: fedramp_marketplace_workspace_vendor_certification_status
   version: 0.1.0
   note: FedRAMP Marketplace status of every FedRAMP system recorded in your Paramify workspace
-  draft: true
 - name: github_access_review
   version: 0.3.0
   note: accept the invitations 404 only from an App token or an owner
@@ -485,15 +445,12 @@ fetchers:
 - name: github_branch_protection
   version: 0.2.0
   note: 'The protection GitHub enforces on each default branch: reviews, status checks, signed commits'
-  draft: true
 - name: github_code_scanning_alerts
   version: 0.2.0
   note: Code scanning coverage per repository, and every alert with its severity, age and outcome
-  draft: true
 - name: github_dependabot_alerts
   version: 0.2.0
   note: Dependabot alerts with severity, age and time to fix, and whether each repository is scanned
-  draft: true
 - name: github_deployment_controls
   version: 0.3.0
   note: records who approved each production deployment
@@ -506,132 +463,102 @@ fetchers:
 - name: github_org_security_settings
   version: 0.3.0
   note: 'Org security settings: required 2FA and who lacks it, default permissions, Actions token rights'
-  draft: true
 - name: github_pull_request_checks
   version: 0.2.0
   note: 'How changes reached each default branch: merged PRs with approvals and checks, and direct pushes'
-  draft: true
 - name: github_release_integrity
   version: 0.2.0
   note: 'Whether releases can be verified: build provenance attestations, immutable releases, signed tags'
-  draft: true
 - name: github_repository_inventory
   version: 0.3.0
   note: Every repository in the organization as an inventory record, with its security features
-  draft: true
 - name: github_secret_scanning
   version: 0.2.0
   note: Secret scanning and push protection per repository, alerts and bypasses; never the secrets
-  draft: true
 - name: github_significant_change_notifications
   version: 0.2.0
   note: FedRAMP Significant Change Notifications from pull requests flagged as significant changes
-  draft: true
 - name: github_vulnerability_disclosure
   version: 0.2.0
   note: Whether outsiders can report vulnerabilities privately, and whether a security policy is shown
-  draft: true
 - name: github_workflow_runs
   version: 0.3.0
   note: gives the GitHub Actions run history
 - name: gitlab_significant_change_notifications
   version: 0.1.1
   note: Every secret it reads now has a description in paramify describe
-  draft: true
 - name: jira_site_inventory
   version: 0.2.0
   note: limit to named projects
 - name: nist_cmvp_module_validation_status
   version: 0.1.0
   note: Whether each cryptographic module certificate you list is FIPS 140-2 or 140-3 validated
-  draft: true
 - name: oci_audit_logging_events
   version: 0.1.0
   note: Audit log retention, logs and Events rules, and whether alerts reach a confirmed subscriber
-  draft: true
 - name: oci_bastion_sessions
   version: 0.1.0
   note: 'Whether each Bastion gives just-in-time access: session lifetime, allow-list and sessions opened'
-  draft: true
 - name: oci_block_volume_encryption
   version: 0.1.0
   note: Whose key encrypts each block and boot volume and backup, and in-transit encryption
-  draft: true
 - name: oci_certificates
   version: 0.1.0
   note: Every certificate and CA with its validity, algorithms, revocation state and auto-renewal
-  draft: true
 - name: oci_cloud_guard_posture
   version: 0.1.0
   note: Cloud Guard targets, auto-remediation, Security Zones and open problems by risk and age
-  draft: true
 - name: oci_compute_instances
   version: 0.1.0
   note: Each instance's metadata endpoint, boot integrity, in-transit encryption and public exposure
-  draft: true
 - name: oci_data_service_exposure
   version: 0.1.0
   note: Which databases, file systems and Integration instances the internet can reach, and their keys
-  draft: true
 - name: oci_dependency_vulnerabilities
   version: 0.1.0
   note: 'Application Dependency Management audits: severities found, ignored, and remediation progress'
-  draft: true
 - name: oci_iam_password_policy
   version: 0.1.0
   note: Each identity domain's password policy against the CIS length, history, expiry and lockout rules
-  draft: true
 - name: oci_iam_policies
   version: 0.1.0
   note: Every IAM policy statement, the broad or unguarded grants, and dynamic groups
-  draft: true
 - name: oci_iam_users_credentials
   version: 0.1.0
   note: Each user's MFA, console access and admin membership, and every credential with its age
-  draft: true
 - name: oci_network_exposure
   version: 0.1.0
   note: Rules that admit the internet, which of them are reachable, egress limits and flow logs
-  draft: true
 - name: oci_object_storage_buckets
   version: 0.1.0
   note: Each bucket's public access, pre-authenticated requests, key, versioning, retention and logging
-  draft: true
 - name: oci_vault_keys
   version: 0.1.0
   note: Each Vault key's protection mode, auto-rotation, and whether it is inside the rotation window
-  draft: true
 - name: oci_zpr_policies
   version: 0.1.0
   note: Whether Zero Trust Packet Routing is on, its policies, and which VCNs enforce a ZPR attribute
-  draft: true
 - name: qualys_scan_coverage
   version: 0.1.0
   note: Each host's last vulnerability scan and last authenticated scan, and IPs with no host record
-  draft: true
 - name: qualys_scan_schedules
   version: 0.1.0
   note: Active scan schedules, the longest gap between runs, and whether each scans with authentication
-  draft: true
 - name: qualys_stig_compliance_report
   version: 0.1.0
   note: Every evaluated posture for a Qualys STIG policy, with controls, remediation and exceptions
-  draft: true
 - name: qualys_vmdr_vulnerability_findings
   version: 0.1.0
   note: Scoped VMDR detections with KnowledgeBase, QVS and CISA enrichment, as a CSV report
-  draft: true
 - name: qualys_vulnerability_findings
   version: 0.1.0
   note: open detections (New, Active, Re-Opened) by severity and type, with each one's age against `remediation_days`
 - name: qualys_vulnerability_remediation
   version: 0.1.0
   note: Vulnerabilities fixed in the lookback window, whether on time for their severity, and which came back
-  draft: true
 - name: servicenow_after_action_reports
   version: 0.1.0
   note: Incident after action reports from the ServiceNow Paramify ITSM API
-  draft: true
 - name: servicenow_cases
   version: 0.2.0
   note: have `evidence_set` blocks
@@ -650,14 +577,12 @@ fetchers:
 - name: sophos_endpoint_protection
   version: 0.1.0
   note: 'Per endpoint: whether protection services run, tamper protection is on and Intercept X is installed'
-  draft: true
 - name: sophos_threat_protection_policies
   version: 0.1.0
   note: for each threat protection policy, whether a scheduled scan is configured and whether on-access scanning is on
 - name: wiz_inventory
   version: 0.1.0
   note: Every cloud resource Wiz has found, with account, region, IPs, owner and exposure, as inventory
-  draft: true
 - name: wiz_vulnerability_findings
   version: 0.4.0
   note: SLA columns
