@@ -137,7 +137,7 @@ def test_failure_keeps_record_and_verified_partial_originals(mod, graph, damage)
     if damage == 'missing':
         del objects[candidate]
     elif damage == 'digest':
-        objects[candidate] = b'changed bytes'
+        objects[candidate] = original.replace(b'CycloneDX', b'CycloneDY')
     elif damage == 'encoded':
         objects[candidate] = Response(original, headers={'Content-Encoding': 'gzip'})
     elif damage == 'truncated':

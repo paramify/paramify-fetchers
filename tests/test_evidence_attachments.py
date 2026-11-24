@@ -60,7 +60,7 @@ def test_bad_attachment_refuses_the_whole_record(tmp_path, damage):
     if damage == 'missing':
         p.unlink()
     elif damage == 'hash':
-        p.write_bytes(b'other')
+        p.write_bytes(RAW.replace(b'true', b'TRUE'))
     elif damage == 'size':
         item['bytes'] += 1
     elif damage == 'traversal':
