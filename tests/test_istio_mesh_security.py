@@ -46,9 +46,9 @@ class _Api:
 
     api_client = _Serializer()
 
-    def __init__(self, refused=(), page_size=None, istiod=None):
+    def __init__(self, refused=(), page_size=None, istiod=None, configmaps=None):
         self.refused, self.page_size, self.calls = set(refused), page_size, []
-        self.istiod_fixture = istiod
+        self.istiod_fixture, self.configmaps = istiod, configmaps or {}
 
     def _page(self, what, body, cont):
         self.calls.append((what, cont))
@@ -67,7 +67,8 @@ class _Api:
 
     def read_namespaced_config_map(self, name, namespace):
         what = {"istio": "mesh config", "istio-ca-root-cert": "root certificate"}[name]
-        return self._page(what, fx("configmap-istio" if name == "istio" else "configmap-root-cert"), None)
+        body = self.configmaps.get(name) or fx("configmap-istio" if name == "istio" else "configmap-root-cert")
+        return self._page(what, body, None)
 
     # AppsV1Api
     def list_namespaced_deployment(self, namespace, label_selector=None, limit=None, _continue=None):
@@ -189,8 +190,25 @@ def test_go_durations(value, hours):
 
 
 def test_outbound_policy_defaults_to_allow_any():
-    assert im.outbound_policy({"data": {"mesh": "defaultConfig: {}\n"}}) == "ALLOW_ANY"
-    assert im.outbound_policy(None) is None
+    assert im.mesh_settings({"data": {"mesh": "defaultConfig: {}\n"}})["outbound_traffic_policy"] == "ALLOW_ANY"
+    assert im.mesh_settings({"data": {}})["outbound_traffic_policy"] == "ALLOW_ANY"
+
+
+@pytest.mark.parametrize("configmaps, failed, null_fields", [
+    ({"istio": {"data": {"mesh": "outboundTrafficPolicy: [unclosed"}}}, "mesh config", ["outbound_traffic_policy"]),
+    ({"istio": {"data": {"mesh": "just a string"}}}, "mesh config", ["outbound_traffic_policy"]),
+    ({"istio-ca-root-cert": {"data": {"root-cert.pem": "-----BEGIN CERTIFICATE-----\nnot base64\n-----END CERTIFICATE-----\n"}}},
+     "root certificate", ["root_certificates", "root_certificate_expires", "root_certificate_days_remaining"])])
+def test_unparseable_content_is_a_recorded_failure_not_a_crash(configmaps, failed, null_fields):
+    ev, reader, _ = _summary(configmaps=configmaps)
+    s = ev["summary"]
+    assert [f["operation"] for f in reader.api_failures] == [failed]
+    assert reader.api_failures[0]["type"].startswith("unparseable") and reader.codes == ["partial_failure"]
+    assert all(s[k] is None for k in null_fields)
+    # Every other read still counts.
+    assert (s["mesh_mtls_mode"], s["gateways"], s["workload_cert_ttl"]) == ("STRICT", 2, "12h")
+    assert (s["outbound_traffic_policy"] is None) == (failed == "mesh config")
+    assert (s["root_certificates"] is None) == (failed == "root certificate")
 
 
 def test_without_a_kubeconfig_or_a_cluster_the_run_is_bad_config(monkeypatch, tmp_path):

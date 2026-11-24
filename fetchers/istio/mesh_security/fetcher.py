@@ -145,18 +145,21 @@ def tls_disabled(rules: List[Dict[str, Any]]) -> List[str]:
     return sorted(out)
 
 
-def outbound_policy(configmap: Optional[Dict[str, Any]]) -> Optional[str]:
-    """outboundTrafficPolicy.mode from the mesh config; Istio's default is ALLOW_ANY when it isn't set."""
-    if configmap is None:
-        return None
+def mesh_settings(configmap: Dict[str, Any]) -> Dict[str, Any]:
+    """The settings read from the mesh config's `mesh` YAML. Raises ValueError (or a YAML error) when it isn't a mapping."""
     mesh = yaml.safe_load((configmap.get("data") or {}).get("mesh") or "") or {}
-    return ((mesh.get("outboundTrafficPolicy") or {}).get("mode") or "ALLOW_ANY").upper()
+    if not isinstance(mesh, dict):
+        raise ValueError(f"mesh is a YAML {type(mesh).__name__}, not a mapping")
+    outbound = mesh.get("outboundTrafficPolicy") or {}
+    if not isinstance(outbound, dict):
+        raise ValueError("mesh outboundTrafficPolicy is not a mapping")
+    # Istio's default is ALLOW_ANY when the mode isn't set.
+    return {"outbound_traffic_policy": str(outbound.get("mode") or "ALLOW_ANY").upper()}
 
 
-def root_certificates(configmap: Optional[Dict[str, Any]]) -> Optional[List[Dict[str, Any]]]:
-    """Each certificate in istio-ca-root-cert (more than one during a rotation): subject and expiry. Public data only."""
-    if configmap is None:
-        return None
+def root_certificates(configmap: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Each certificate in istio-ca-root-cert (more than one during a rotation): subject and expiry. Public data only.
+    Raises ValueError when the PEM can't be parsed."""
     pem = ((configmap.get("data") or {}).get("root-cert.pem") or "").encode()
     certs = x509.load_pem_x509_certificates(pem) if pem.strip() else []
     return [{"subject": c.subject.rfc4514_string(), "not_after": c.not_valid_after_utc.strftime("%Y-%m-%dT%H:%M:%SZ")} for c in certs]
@@ -183,8 +186,8 @@ def workload_cert_ttl(deployments: Optional[List[Dict[str, Any]]]) -> Tuple[Opti
     return (DEFAULT_WORKLOAD_CERT_TTL, "default") if deployments else (None, "istiod_not_found")
 
 
-def summarize(data: Dict[str, Optional[List[Dict[str, Any]]]], mesh_config: Optional[Dict[str, Any]],
-              root_cert: Optional[Dict[str, Any]], istiod: Optional[List[Dict[str, Any]]], root: str,
+def summarize(data: Dict[str, Optional[List[Dict[str, Any]]]], mesh: Optional[Dict[str, Any]],
+              certs: Optional[List[Dict[str, Any]]], istiod: Optional[List[Dict[str, Any]]], root: str,
               now: datetime) -> Dict[str, Any]:
     """What is configured, never a verdict beyond Istio's own rules. Each group is null when the read behind it failed."""
     ns, pas, aps, gws, vss, drs = (data.get(k) for k in ("namespaces", "peerauthentications", "authorizationpolicies",
@@ -196,7 +199,6 @@ def summarize(data: Dict[str, Optional[List[Dict[str, Any]]]], mesh_config: Opti
     mode = mesh_mtls_mode(pas, root) if pas is not None else None
     weaker = mtls_overrides(pas, root) if pas is not None else None
     servers = gateway_servers(gws) if gws is not None else None
-    certs = root_certificates(root_cert)
     earliest = min((c["not_after"] for c in certs), default=None) if certs else None
     ttl, ttl_source = workload_cert_ttl(istiod)
     return {
@@ -227,7 +229,7 @@ def summarize(data: Dict[str, Optional[List[Dict[str, Any]]]], mesh_config: Opti
         "virtual_services_on_gateways": sum(1 for v in vss if (v.get("spec") or {}).get("gateways")) if vss is not None else None,
         # Traffic policy
         "destination_rules_tls_disabled": tls_disabled(drs) if drs is not None else None,
-        "outbound_traffic_policy": outbound_policy(mesh_config),
+        "outbound_traffic_policy": mesh["outbound_traffic_policy"] if mesh is not None else None,
         # Certificates
         "root_certificates": len(certs) if certs is not None else None,
         "root_certificate_expires": earliest,
@@ -258,6 +260,17 @@ class MeshReader:
                                       "message": str(detail)})
             self.codes.append(CODES.get(int(status), "partial_failure") if status else "target_unreachable")
             logger.error("%s failed: %s", operation, status or type(exc).__name__)
+            return None
+
+    def parse(self, operation: str, fn: Callable[[], Any]) -> Any:
+        """Parse what a read returned; content that can't be parsed is recorded like a failed read and leaves None."""
+        try:
+            return fn()
+        except Exception as exc:  # noqa: BLE001 - boundary: one bad value must not lose every other read
+            self.api_failures.append({"operation": operation, "type": f"unparseable ({type(exc).__name__})",
+                                      "message": str(exc)[:300]})
+            self.codes.append("partial_failure")
+            logger.error("%s could not be parsed: %s", operation, type(exc).__name__)
             return None
 
     def _pages(self, operation: str, fetch: Callable[[Optional[str]], Dict[str, Any]]) -> Optional[List[Dict[str, Any]]]:
@@ -297,7 +310,9 @@ def collect(reader: MeshReader, root: str, now: Optional[datetime] = None) -> Di
                           ("networking.istio.io", "destinationrules")):
         data[plural] = reader.custom_list(group, plural)
     mesh_config = reader.configmap("mesh config", "istio", root)
+    mesh = reader.parse("mesh config", lambda: mesh_settings(mesh_config)) if mesh_config is not None else None
     root_cert = reader.configmap("root certificate", "istio-ca-root-cert", root)
+    certs = reader.parse("root certificate", lambda: root_certificates(root_cert)) if root_cert is not None else None
     istiod = reader.istiod(root)
     results = {
         "root_namespace": root,
@@ -310,9 +325,9 @@ def collect(reader: MeshReader, root: str, now: Optional[datetime] = None) -> Di
                                     "allows_all": allows_all(p)} for p in data["authorizationpolicies"]]
         if data["authorizationpolicies"] is not None else None,
         "gateway_servers": gateway_servers(data["gateways"]) if data["gateways"] is not None else None,
-        "root_certificates": root_certificates(root_cert),
+        "root_certificates": certs,
     }
-    return {"results": results, "summary": summarize(data, mesh_config, root_cert, istiod, root, now)}
+    return {"results": results, "summary": summarize(data, mesh, certs, istiod, root, now)}
 
 
 def clients(context: Optional[str]) -> Tuple[Any, Any, Any]:

@@ -78,10 +78,10 @@ evidence_set:
 
     Is traffic otherwise restricted?
     - destination_rules_tls_disabled — List of DestinationRules that turn TLS off (tls.mode DISABLE) for a host or a port; null if they could not be read
-    - outbound_traffic_policy — The mesh configuration's outbound traffic policy: REGISTRY_ONLY (only registered services) or ALLOW_ANY, Istio's default; null if the mesh configuration could not be read
+    - outbound_traffic_policy — The mesh configuration's outbound traffic policy: REGISTRY_ONLY (only registered services) or ALLOW_ANY, Istio's default; null if the mesh configuration could not be read or parsed
 
     Are mesh certificates current?
-    - root_certificates — Number of certificates in istio-ca-root-cert (more than one during a root rotation); null if it could not be read, as are the two fields below
+    - root_certificates — Number of certificates in istio-ca-root-cert (more than one during a root rotation); null if it could not be read or parsed, as are the two fields below
     - root_certificate_expires — When the earliest-expiring root certificate expires
     - root_certificate_days_remaining — Days until then
     - workload_cert_ttl — istiod's workload certificate lifetime (DEFAULT_WORKLOAD_CERT_TTL), or Istio's default of 24h when not set; null if istiod could not be read or wasn't found
