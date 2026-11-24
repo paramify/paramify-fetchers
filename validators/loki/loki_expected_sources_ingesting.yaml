@@ -4,11 +4,13 @@ type: AUTOMATED
 role: configuration
 source: community
 statement: >
-  Every expected log source sent at least one line to Loki in the recent window
-  (all_expected_sources_ingesting is true). Fails when any source is quiet, any source's queries
-  failed, no source is set, or the field appears other than exactly once. Shows the logs are
-  collected and stored, not that anyone reviews or alerts on them. Does not check whether the
-  collection run succeeded.
+  Every expected log source sent at least one line to Loki in the recent window, and every source
+  marked quiet (one whose silence is normal) has a heartbeat source that is still arriving
+  (all_expected_sources_ingesting is true). Fails when any other source sent nothing, a quiet
+  source's heartbeat is silent or stale, a quiet source has no heartbeat, any source's queries
+  failed or returned a malformed response, no source is set, or the field appears other than
+  exactly once. Shows the logs are collected and stored, not that anyone reviews or alerts on them.
+  Does not check whether the collection run succeeded.
 
 regex: '"all_expected_sources_ingesting":\s*true\b'
 rules_summary: MATCH_COUNT EQUALS 1
