@@ -1,0 +1,41 @@
+display_name: Kubernetes (any cluster)
+description: >-
+  Kubernetes workloads read through the cluster's own API, for any conformant cluster (AKS, EKS, GKE and others),
+  with a standard kubeconfig or the in-cluster service account. GET and LIST only. The k8s category is different: it
+  reaches EKS through AWS credentials and the aws CLI.
+
+requires:
+  python_packages:
+    - kubernetes
+    - python-dotenv
+
+config_schema:
+  context:
+    type: string
+    required: false
+    env: KUBERNETES_CONTEXT
+    description: >-
+      The kubeconfig context to use. Leave unset to use the kubeconfig's current context, or the in-cluster service
+      account when the fetcher runs in a pod.
+  excluded_namespaces:
+    type: string
+    required: false
+    default: kube-system,kube-public,kube-node-lease
+    env: KUBERNETES_EXCLUDED_NAMESPACES
+    description: >-
+      Comma-separated namespaces whose workloads are left out, such as the cluster's own system namespaces. Set it to
+      an empty value to include every namespace.
+
+# No secrets: credentials come from the kubeconfig (such as an AKS kubeconfig that signs in through kubelogin) or from
+# the in-cluster service account. These variables are passed through so either path works.
+auth:
+  passthrough_env:
+    - KUBECONFIG
+    - KUBERNETES_SERVICE_HOST
+    - KUBERNETES_SERVICE_PORT
+    - AZURE_CLIENT_ID
+    - AZURE_TENANT_ID
+    - AZURE_CLIENT_SECRET
+    - AZURE_FEDERATED_TOKEN_FILE
+    - AZURE_AUTHORITY_HOST
+    - AAD_LOGIN_METHOD

@@ -1,0 +1,217 @@
+{
+  "apiVersion": "apps/v1",
+  "items": [
+    {
+      "metadata": {
+        "labels": {
+          "app": "legacy",
+          "pod-template-hash": "7d9c5b8f101"
+        },
+        "name": "legacy-7d9c5b8f101",
+        "namespace": "archive",
+        "ownerReferences": [
+          {
+            "apiVersion": "apps/v1",
+            "blockOwnerDeletion": true,
+            "controller": true,
+            "kind": "Deployment",
+            "name": "legacy",
+            "uid": "00000000-0000-0000-0000-000000000001"
+          }
+        ],
+        "uid": "00000000-0000-0000-0000-000000000101"
+      },
+      "spec": {
+        "replicas": 0,
+        "selector": {
+          "matchLabels": {
+            "app": "legacy",
+            "pod-template-hash": "7d9c5b8f101"
+          }
+        }
+      }
+    },
+    {
+      "metadata": {
+        "labels": {
+          "app": "api",
+          "pod-template-hash": "7d9c5b8f102"
+        },
+        "name": "api-7d9c5b8f102",
+        "namespace": "billing",
+        "ownerReferences": [
+          {
+            "apiVersion": "apps/v1",
+            "blockOwnerDeletion": true,
+            "controller": true,
+            "kind": "Deployment",
+            "name": "api",
+            "uid": "00000000-0000-0000-0000-000000000002"
+          }
+        ],
+        "uid": "00000000-0000-0000-0000-000000000102"
+      },
+      "spec": {
+        "replicas": 2,
+        "selector": {
+          "matchLabels": {
+            "app": "api",
+            "pod-template-hash": "7d9c5b8f102"
+          }
+        }
+      }
+    },
+    {
+      "metadata": {
+        "labels": {
+          "app": "istiod",
+          "pod-template-hash": "7d9c5b8f103"
+        },
+        "name": "istiod-7d9c5b8f103",
+        "namespace": "istio-system",
+        "ownerReferences": [
+          {
+            "apiVersion": "apps/v1",
+            "blockOwnerDeletion": true,
+            "controller": true,
+            "kind": "Deployment",
+            "name": "istiod",
+            "uid": "00000000-0000-0000-0000-000000000003"
+          }
+        ],
+        "uid": "00000000-0000-0000-0000-000000000103"
+      },
+      "spec": {
+        "replicas": 1,
+        "selector": {
+          "matchLabels": {
+            "app": "istiod",
+            "pod-template-hash": "7d9c5b8f103"
+          }
+        }
+      }
+    },
+    {
+      "metadata": {
+        "labels": {
+          "app": "coredns",
+          "pod-template-hash": "7d9c5b8f104"
+        },
+        "name": "coredns-7d9c5b8f104",
+        "namespace": "kube-system",
+        "ownerReferences": [
+          {
+            "apiVersion": "apps/v1",
+            "blockOwnerDeletion": true,
+            "controller": true,
+            "kind": "Deployment",
+            "name": "coredns",
+            "uid": "00000000-0000-0000-0000-000000000004"
+          }
+        ],
+        "uid": "00000000-0000-0000-0000-000000000104"
+      },
+      "spec": {
+        "replicas": 2,
+        "selector": {
+          "matchLabels": {
+            "app": "coredns",
+            "pod-template-hash": "7d9c5b8f104"
+          }
+        }
+      }
+    },
+    {
+      "metadata": {
+        "labels": {
+          "app": "worker",
+          "pod-template-hash": "7d9c5b8f105"
+        },
+        "name": "worker-7d9c5b8f105",
+        "namespace": "reports",
+        "ownerReferences": [
+          {
+            "apiVersion": "apps/v1",
+            "blockOwnerDeletion": true,
+            "controller": true,
+            "kind": "Deployment",
+            "name": "worker",
+            "uid": "00000000-0000-0000-0000-000000000005"
+          }
+        ],
+        "uid": "00000000-0000-0000-0000-000000000105"
+      },
+      "spec": {
+        "replicas": 1,
+        "selector": {
+          "matchLabels": {
+            "app": "worker",
+            "pod-template-hash": "7d9c5b8f105"
+          }
+        }
+      }
+    },
+    {
+      "metadata": {
+        "labels": {
+          "app": "web",
+          "pod-template-hash": "7d9c5b8f106"
+        },
+        "name": "web-7d9c5b8f106",
+        "namespace": "storefront",
+        "ownerReferences": [
+          {
+            "apiVersion": "apps/v1",
+            "blockOwnerDeletion": true,
+            "controller": true,
+            "kind": "Deployment",
+            "name": "web",
+            "uid": "00000000-0000-0000-0000-000000000006"
+          }
+        ],
+        "uid": "00000000-0000-0000-0000-000000000106"
+      },
+      "spec": {
+        "replicas": 3,
+        "selector": {
+          "matchLabels": {
+            "app": "web",
+            "pod-template-hash": "7d9c5b8f106"
+          }
+        }
+      }
+    },
+    {
+      "metadata": {
+        "labels": {
+          "app": "frontend",
+          "pod-template-hash": "7d9c5b8f107"
+        },
+        "name": "frontend-7d9c5b8f107",
+        "namespace": "web",
+        "ownerReferences": [
+          {
+            "apiVersion": "apps/v1",
+            "blockOwnerDeletion": true,
+            "controller": true,
+            "kind": "Deployment",
+            "name": "frontend",
+            "uid": "00000000-0000-0000-0000-000000000007"
+          }
+        ],
+        "uid": "00000000-0000-0000-0000-000000000107"
+      },
+      "spec": {
+        "replicas": 3,
+        "selector": {
+          "matchLabels": {
+            "app": "frontend",
+            "pod-template-hash": "7d9c5b8f107"
+          }
+        }
+      }
+    }
+  ],
+  "kind": "ReplicaSetList",
+  "metadata": {}
+}
