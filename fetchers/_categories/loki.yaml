@@ -1,0 +1,33 @@
+display_name: Loki
+description: >-
+  Grafana Loki, read through its HTTP query API: which expected log sources are arriving and how recently. One Loki
+  (or one tenant of a multi-tenant Loki) per run.
+
+requires:
+  python_packages:
+    - requests
+    - python-dotenv
+
+# Shared by every loki fetcher. The runner injects these env vars for any fetcher with category: loki.
+config_schema:
+  base_url:
+    type: string
+    required: true
+    env: LOKI_BASE_URL
+    description: >-
+      Loki base URL, such as http://loki-gateway.logging.svc.cluster.local or https://loki.example.com, reached from
+      a network that can call its query API. Include any path prefix the API is served under.
+  tenant_id:
+    type: string
+    env: LOKI_TENANT_ID
+    description: >-
+      The tenant to read, sent as X-Scope-OrgID, when Loki runs with multi-tenancy (auth_enabled). Leave unset for a
+      single-tenant Loki.
+
+secrets:
+  - name: token
+    env: LOKI_TOKEN
+    required: false
+    description: >-
+      Bearer token, only when Loki or a proxy in front of it requires one. Loki's own API has no authentication;
+      leave it unset when the API is reached directly.
