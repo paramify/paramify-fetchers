@@ -1,0 +1,50 @@
+name: aws_inspector_findings_report
+version: 0.1.0
+description: Converts every active Inspector finding for EC2 instances, ECR images, Lambda functions and Lambda code to a complete CSV for a Paramify vulnerability assessment, linked to aws_config_inventory by resource ARN.
+category: aws
+kind: issue_report
+status: beta
+pipeline:
+  type: vulnerability
+  id_scheme: aws-arn
+  asset_id_field: Resource ARN
+supports_targets: true
+runtime:
+  type: python
+  entry: fetcher.py
+  timeout: 3600
+output:
+  type: csv
+  path: aws_inspector_findings_report.csv
+  aggregation: per_target
+secrets: []
+target_schema:
+  region:
+    type: string
+    required: false
+    env: AWS_DEFAULT_REGION
+    description: AWS region; defaults to the AWS CLI credential/configuration chain.
+  profile:
+    type: string
+    required: false
+    env: AWS_PROFILE
+    description: AWS profile; omit for the ambient role or credentials.
+config_schema:
+  scan_types:
+    type: string
+    default: '[]'
+    env: AWS_INSPECTOR_SCAN_TYPES
+    description: JSON array of scan types to collect, from EC2, ECR, LAMBDA and LAMBDA_CODE. Each one must be enabled in Inspector, or the run fails. Empty collects every scan type that is enabled and skips the others.
+  min_severity:
+    type: string
+    default: ''
+    env: AWS_INSPECTOR_MIN_SEVERITY
+    description: Only findings of this severity or higher (CRITICAL, HIGH, MEDIUM, LOW or INFORMATIONAL). UNTRIAGED findings are always included. Empty applies no filter.
+  allow_empty:
+    type: boolean
+    default: false
+    env: AWS_INSPECTOR_ALLOW_EMPTY
+    description: Allow a header-only zero-finding report after successful collection. Does not allow failed collection or scanning that is not enabled.
+issue_report:
+  assessment_type: VULNERABILITY
+  title: Inspector Vulnerability Findings

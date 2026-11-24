@@ -1,0 +1,304 @@
+{
+  "_comment": "Synthetic Inspector2 ListFindings records, one per scan type and finding type. Account 111122223333 is the AWS documentation example account.",
+  "account": "111122223333",
+  "region": "us-east-1",
+  "findings": {
+    "ec2_package": {
+      "findingArn": "arn:aws:inspector2:us-east-1:111122223333:finding/00000000000000000000000000000001",
+      "awsAccountId": "111122223333",
+      "type": "PACKAGE_VULNERABILITY",
+      "title": "CVE-2026-10001 - openssl",
+      "description": "Synthetic finding for offline tests.",
+      "severity": "HIGH",
+      "status": "ACTIVE",
+      "firstObservedAt": "2026-10-01T00:00:00+00:00",
+      "lastObservedAt": "2026-11-01T00:00:00+00:00",
+      "updatedAt": "2026-11-02T00:00:00+00:00",
+      "remediation": {
+        "recommendation": {
+          "text": "Update the affected package."
+        }
+      },
+      "inspectorScore": 7.5,
+      "fixAvailable": "YES",
+      "exploitAvailable": "NO",
+      "epss": {
+        "score": 0.00123
+      },
+      "packageVulnerabilityDetails": {
+        "vulnerabilityId": "CVE-2026-10001",
+        "source": "NVD",
+        "cvss": [
+          {
+            "baseScore": 7.5,
+            "scoringVector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N",
+            "source": "NVD",
+            "version": "3.1"
+          }
+        ],
+        "vulnerablePackages": [
+          {
+            "name": "openssl",
+            "version": "1.0.0",
+            "fixedInVersion": "1.0.1",
+            "packageManager": "OS"
+          }
+        ],
+        "referenceUrls": [
+          "https://nvd.nist.gov/vuln/detail/CVE-2026-10001"
+        ],
+        "relatedVulnerabilities": []
+      },
+      "resources": [
+        {
+          "type": "AWS_EC2_INSTANCE",
+          "id": "i-0123456789abcdef0",
+          "partition": "aws",
+          "region": "us-east-1",
+          "tags": {
+            "Name": "web-1"
+          },
+          "details": {
+            "awsEc2Instance": {
+              "type": "t3.micro",
+              "imageId": "ami-0123456789abcdef0",
+              "platform": "AMAZON_LINUX_2023",
+              "vpcId": "vpc-0123456789abcdef0",
+              "subnetId": "subnet-0123456789abcdef0"
+            }
+          }
+        }
+      ]
+    },
+    "ec2_network": {
+      "findingArn": "arn:aws:inspector2:us-east-1:111122223333:finding/00000000000000000000000000000002",
+      "awsAccountId": "111122223333",
+      "type": "NETWORK_REACHABILITY",
+      "title": "Port 22 is reachable from an Internet Gateway - TCP",
+      "description": "Synthetic finding for offline tests.",
+      "severity": "MEDIUM",
+      "status": "ACTIVE",
+      "firstObservedAt": "2026-10-01T00:00:00+00:00",
+      "lastObservedAt": "2026-11-01T00:00:00+00:00",
+      "updatedAt": "2026-11-02T00:00:00+00:00",
+      "remediation": {
+        "recommendation": {
+          "text": "Update the affected package."
+        }
+      },
+      "networkReachabilityDetails": {
+        "openPortRange": {
+          "begin": 22,
+          "end": 22
+        },
+        "protocol": "TCP",
+        "networkPath": {
+          "steps": [
+            {
+              "componentId": "igw-0123456789abcdef0",
+              "componentType": "AWS::EC2::InternetGateway"
+            },
+            {
+              "componentId": "sg-0123456789abcdef0",
+              "componentType": "AWS::EC2::SecurityGroup"
+            }
+          ]
+        }
+      },
+      "resources": [
+        {
+          "type": "AWS_EC2_INSTANCE",
+          "id": "i-0123456789abcdef0",
+          "partition": "aws",
+          "region": "us-east-1",
+          "details": {
+            "awsEc2Instance": {
+              "type": "t3.micro"
+            }
+          }
+        }
+      ]
+    },
+    "ecr_image": {
+      "findingArn": "arn:aws:inspector2:us-east-1:111122223333:finding/00000000000000000000000000000003",
+      "awsAccountId": "111122223333",
+      "type": "PACKAGE_VULNERABILITY",
+      "title": "CVE-2026-10002 - zlib",
+      "description": "Synthetic finding for offline tests.",
+      "severity": "CRITICAL",
+      "status": "ACTIVE",
+      "firstObservedAt": "2026-10-01T00:00:00+00:00",
+      "lastObservedAt": "2026-11-01T00:00:00+00:00",
+      "updatedAt": "2026-11-02T00:00:00+00:00",
+      "remediation": {
+        "recommendation": {
+          "text": "Update the affected package."
+        }
+      },
+      "inspectorScore": 9.8,
+      "fixAvailable": "NO",
+      "exploitAvailable": "YES",
+      "packageVulnerabilityDetails": {
+        "vulnerabilityId": "CVE-2026-10002",
+        "source": "NVD",
+        "cvss": [
+          {
+            "baseScore": 7.5,
+            "scoringVector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N",
+            "source": "NVD",
+            "version": "3.1"
+          }
+        ],
+        "vulnerablePackages": [
+          {
+            "name": "zlib",
+            "version": "1.0.0",
+            "fixedInVersion": "1.0.1",
+            "packageManager": "OS"
+          }
+        ],
+        "referenceUrls": [
+          "https://nvd.nist.gov/vuln/detail/CVE-2026-10002"
+        ],
+        "relatedVulnerabilities": []
+      },
+      "resources": [
+        {
+          "type": "AWS_ECR_CONTAINER_IMAGE",
+          "id": "arn:aws:ecr:us-east-1:111122223333:repository/example-service/sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "partition": "aws",
+          "region": "us-east-1",
+          "details": {
+            "awsEcrContainerImage": {
+              "repositoryName": "example-service",
+              "imageHash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "imageTags": [
+                "latest",
+                "v1.2.3"
+              ],
+              "registry": "111122223333",
+              "architecture": "amd64",
+              "platform": "DEBIAN_12",
+              "pushedAt": "2026-09-01T00:00:00+00:00"
+            }
+          }
+        }
+      ]
+    },
+    "lambda_package": {
+      "findingArn": "arn:aws:inspector2:us-east-1:111122223333:finding/00000000000000000000000000000004",
+      "awsAccountId": "111122223333",
+      "type": "PACKAGE_VULNERABILITY",
+      "title": "CVE-2026-10003 - requests",
+      "description": "Synthetic finding for offline tests.",
+      "severity": "UNTRIAGED",
+      "status": "ACTIVE",
+      "firstObservedAt": "2026-10-01T00:00:00+00:00",
+      "lastObservedAt": "2026-11-01T00:00:00+00:00",
+      "updatedAt": "2026-11-02T00:00:00+00:00",
+      "remediation": {
+        "recommendation": {
+          "text": "Update the affected package."
+        }
+      },
+      "fixAvailable": "YES",
+      "exploitAvailable": "NO",
+      "packageVulnerabilityDetails": {
+        "vulnerabilityId": "CVE-2026-10003",
+        "source": "NVD",
+        "cvss": [
+          {
+            "baseScore": 7.5,
+            "scoringVector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N",
+            "source": "NVD",
+            "version": "3.1"
+          }
+        ],
+        "vulnerablePackages": [
+          {
+            "name": "requests",
+            "version": "1.0.0",
+            "fixedInVersion": "1.0.1",
+            "packageManager": "OS"
+          }
+        ],
+        "referenceUrls": [
+          "https://nvd.nist.gov/vuln/detail/CVE-2026-10003"
+        ],
+        "relatedVulnerabilities": [
+          "GHSA-xxxx-yyyy-zzzz"
+        ]
+      },
+      "resources": [
+        {
+          "type": "AWS_LAMBDA_FUNCTION",
+          "id": "arn:aws:lambda:us-east-1:111122223333:function:example-fn:$LATEST",
+          "partition": "aws",
+          "region": "us-east-1",
+          "details": {
+            "awsLambdaFunction": {
+              "functionName": "example-fn",
+              "runtime": "PYTHON_3_12",
+              "version": "$LATEST",
+              "codeSha256": "c3ludGhldGlj",
+              "executionRoleArn": "arn:aws:iam::111122223333:role/example-fn-role",
+              "packageType": "ZIP"
+            }
+          }
+        }
+      ]
+    },
+    "lambda_code": {
+      "findingArn": "arn:aws:inspector2:us-east-1:111122223333:finding/00000000000000000000000000000005",
+      "awsAccountId": "111122223333",
+      "type": "CODE_VULNERABILITY",
+      "title": "CWE-798 - Hardcoded credentials",
+      "description": "Synthetic finding for offline tests.",
+      "severity": "HIGH",
+      "status": "ACTIVE",
+      "firstObservedAt": "2026-10-01T00:00:00+00:00",
+      "lastObservedAt": "2026-11-01T00:00:00+00:00",
+      "updatedAt": "2026-11-02T00:00:00+00:00",
+      "remediation": {
+        "recommendation": {
+          "text": "Update the affected package."
+        }
+      },
+      "codeVulnerabilityDetails": {
+        "detectorId": "python/hardcoded-credentials@v1.0",
+        "detectorName": "Hardcoded credentials",
+        "ruleId": "python-detect-hardcoded-credentials",
+        "cwes": [
+          "CWE-798"
+        ],
+        "filePath": {
+          "fileName": "app.py",
+          "filePath": "src/app.py",
+          "startLine": 10,
+          "endLine": 12
+        },
+        "referenceUrls": [
+          "https://cwe.mitre.org/data/definitions/798.html"
+        ]
+      },
+      "resources": [
+        {
+          "type": "AWS_LAMBDA_FUNCTION",
+          "id": "arn:aws:lambda:us-east-1:111122223333:function:example-fn:$LATEST",
+          "partition": "aws",
+          "region": "us-east-1",
+          "details": {
+            "awsLambdaFunction": {
+              "functionName": "example-fn",
+              "runtime": "PYTHON_3_12",
+              "version": "$LATEST",
+              "codeSha256": "c3ludGhldGlj",
+              "executionRoleArn": "arn:aws:iam::111122223333:role/example-fn-role",
+              "packageType": "ZIP"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

@@ -3,37 +3,50 @@
 Uses boto3 with the standard AWS credential chain (profile, role, SSO, ECS task
 role, environment). Every request is read-only. Evidence and issue reports share
 filters and pagination; neither collector contacts Paramify. The existing
-uploader owns intake/jobs.
+uploader owns intake/jobs. The client, pagination, finding queries, CSV writing
+and atomic publication live in inspector_common.py, shared with
+aws_inspector_findings_report.
 """
 
 from __future__ import annotations
 
-import csv
-import errno
+import csv  # noqa: F401 -- tests patch csv.DictWriter through this module
 import hashlib
 import json
 import logging
 import os
 import re
 import sys
-import tempfile
-from collections import Counter, deque
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing, contextmanager
-from datetime import date, datetime, timedelta, timezone
-from itertools import islice
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from dotenv import load_dotenv
-
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "_lib"))
 from fetcher_status import report_failure
-from report_csv import csv_safe
+from inspector_common import (
+    SEVERITIES,
+    WORKERS,
+    Aws,
+    CollectionError,
+    equal,
+    first_sighting,
+    nonempty_strings,
+    publish,
+    query_findings,
+    read_bool,
+    read_days,
+    read_list,
+    read_severity,
+    run,
+    severities_at_or_above,
+    utc_now,
+    write_csv,
+)
 
 RESOURCE_TYPE = "AWS_ECR_CONTAINER_IMAGE"
-# Highest first, after UNTRIAGED: a min_severity threshold keeps every severity
-# up to its own, so an untriaged finding (which may be anything) is always kept.
-SEVERITIES = ("UNTRIAGED", "CRITICAL", "HIGH", "MEDIUM", "LOW", "INFORMATIONAL")
 # Multi-architecture parents. Inspector scans the per-platform images an index
 # points to, never the index itself, so an index can never have ACTIVE coverage.
 INDEX_MEDIA_TYPES = frozenset(
@@ -42,14 +55,7 @@ INDEX_MEDIA_TYPES = frozenset(
         "application/vnd.docker.distribution.manifest.list.v2+json",
     }
 )
-PAGE_SIZES = {
-    ("ecr", "describe-repositories"): 1000,
-    ("ecr", "describe-images"): 1000,
-    ("inspector2", "list-coverage"): 200,
-    ("inspector2", "list-findings"): 100,
-}
-IMAGE_WORKERS = 8
-FINDING_QUERIES_AHEAD = 2 * IMAGE_WORKERS
+IMAGE_WORKERS = WORKERS
 INDEX_BATCH = 100
 HASHES_PER_QUERY = 10
 IMAGE_FIELDS = (
@@ -106,152 +112,6 @@ CSV_COLUMNS = [
 ]
 
 
-class CollectionError(Exception):
-    def __init__(self, message, code="partial_failure"):
-        super().__init__(message)
-        self.code = code
-
-
-def utc_now():
-    return datetime.now(timezone.utc).isoformat()
-
-
-def error_code(stderr):
-    for pattern, code in (
-        (
-            r"ExpiredToken|InvalidClientTokenId|UnrecognizedClient|Unable to locate credentials|SSO.*expired",
-            "auth_failed",
-        ),
-        (r"AccessDenied|Unauthorized|not authorized", "not_authorized"),
-        (r"Throttl|TooManyRequests|RequestLimitExceeded", "rate_limited"),
-        (r"endpoint URL|ConnectTimeout|ReadTimeout|Could not connect", "target_unreachable"),
-        (r"ValidationException|InvalidParameter|Invalid region", "bad_config"),
-    ):
-        if re.search(pattern, stderr, re.I):
-            return code
-    return "partial_failure"
-
-
-def plain(value):
-    """boto3 values as the JSON the AWS CLI prints: timestamps become ISO 8601."""
-    if isinstance(value, dict):
-        return {k: plain(v) for k, v in value.items()}
-    if isinstance(value, list):
-        return [plain(v) for v in value]
-    if isinstance(value, (datetime, date)):
-        return value.isoformat()
-    return value
-
-
-class Aws:
-    def __init__(self):
-        try:
-            import boto3
-            from botocore.config import Config
-        except ImportError as exc:
-            raise CollectionError(
-                "boto3 is required for the Inspector ECR fetchers (pip install -r requirements.txt)",
-                "bad_config",
-            ) from exc
-        try:
-            session = boto3.Session(profile_name=os.environ.get("AWS_PROFILE") or None)
-        except Exception as exc:
-            raise CollectionError(f"AWS session: {exc}", "bad_config") from exc
-        # The runner maps target.region to AWS_DEFAULT_REGION; pin it explicitly
-        # so an ambient AWS_REGION cannot override a manifest target.
-        self.region = (
-            os.environ.get("AWS_DEFAULT_REGION")
-            or os.environ.get("AWS_REGION")
-            or session.region_name
-        )
-        if not self.region:
-            raise CollectionError("Set a region in the target or AWS configuration", "bad_config")
-        self.session = session
-        self.config = Config(
-            region_name=self.region,
-            retries={"mode": "standard", "max_attempts": 4},
-            connect_timeout=30,
-            read_timeout=180,
-            max_pool_connections=IMAGE_WORKERS + 2,
-        )
-        self.clients = {}
-
-    def client(self, service):
-        # Clients are thread-safe; sessions are not. collect() creates the ECR
-        # client on the main thread before its workers share it.
-        if service not in self.clients:
-            self.clients[service] = self.session.client(service, config=self.config)
-        return self.clients[service]
-
-    def call(self, service, operation, **params):
-        try:
-            method = getattr(self.client(service), operation.replace("-", "_"))
-            result = method(**params)
-        except Exception as exc:
-            reason = str(exc).strip()[-1000:] or type(exc).__name__
-            raise CollectionError(f"aws {service} {operation}: {reason}", error_code(reason)) from exc
-        if not isinstance(result, dict):
-            raise CollectionError(f"{operation} returned a non-object response")
-        result.pop("ResponseMetadata", None)
-        return plain(result)
-
-    def pages(self, service, operation, key, **params):
-        size = PAGE_SIZES.get((service, operation))
-        if size:
-            params = {"maxResults": size, **params}
-        tokens = set()
-        for _ in range(10000):
-            response = self.call(service, operation, **params)
-            records = response.get(key)
-            if not isinstance(records, list) or any(not isinstance(r, dict) for r in records):
-                raise CollectionError(f"{operation} returned invalid {key}")
-            yield from records
-            token = response.get("nextToken")
-            if not token:
-                return
-            if not isinstance(token, str) or token in tokens:
-                raise CollectionError(f"{operation} repeated/invalid pagination token")
-            tokens.add(token)
-            params = {**params, "nextToken": token}
-        raise CollectionError(f"{operation} exceeded 10000 pages; no complete report available")
-
-
-def read_list(name):
-    try:
-        values = json.loads(os.environ.get(name, "[]"))
-    except ValueError as exc:
-        raise CollectionError(f"{name} must be a JSON array of strings", "bad_config") from exc
-    if not isinstance(values, list) or any(not isinstance(v, str) or not v.strip() for v in values):
-        raise CollectionError(f"{name} must be a JSON array of nonempty strings", "bad_config")
-    values = sorted(set(values))
-    if len(values) > 10:
-        raise CollectionError(f"{name} supports at most 10 values per target", "bad_config")
-    return values
-
-
-def read_bool(name):
-    value = os.environ.get(name, "false").strip().lower()
-    if value not in ("true", "false"):
-        raise CollectionError(f"{name} must be true or false", "bad_config")
-    return value == "true"
-
-
-def read_days(name):
-    value = os.environ.get(name, "").strip() or "0"
-    if not re.fullmatch(r"\d+", value) or int(value) > 3650:
-        raise CollectionError(f"{name} must be a whole number of days from 0 to 3650", "bad_config")
-    return int(value)
-
-
-def read_severity(name):
-    value = os.environ.get(name, "").strip().upper()
-    if value and value not in SEVERITIES[1:]:
-        raise CollectionError(
-            f"{name} must be one of {', '.join(SEVERITIES[1:])}, or empty", "bad_config"
-        )
-    return value or None
-
-
 def read_scope():
     """Every scope setting, validated before any AWS request."""
     return {
@@ -275,14 +135,6 @@ def default_scope(repositories=(), image_tags=()):
     }
 
 
-def equal(values):
-    return [{"comparison": "EQUALS", "value": value} for value in values]
-
-
-def nonempty_strings(*values):
-    return all(isinstance(value, str) and value for value in values)
-
-
 def parse_time(value):
     if not isinstance(value, str) or not value:
         return None
@@ -291,15 +143,6 @@ def parse_time(value):
     except ValueError:
         return None
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
-
-
-def severities_at_or_above(minimum):
-    return list(SEVERITIES[: SEVERITIES.index(minimum) + 1])
-
-
-def canonical_digest(record):
-    text = json.dumps(record, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(text.encode()).digest()
 
 
 def compact_finding(finding, vulnerabilities):
@@ -391,25 +234,6 @@ def index_images(manifest):
         if (entry.get("annotations") or {}).get("vnd.docker.reference.type") == "attestation-manifest":
             continue
         yield entry["digest"]
-
-
-def in_order(pool, fn, items, ahead):
-    """fn(item) for each item on the pool, yielded in item order.
-
-    At most `ahead` calls are submitted but not yet consumed, so results held in
-    memory stay bounded. Calls not yet started are cancelled if the consumer stops.
-    """
-    items = iter(items)
-    pending = deque(pool.submit(fn, item) for item in islice(items, ahead))
-    try:
-        while pending:
-            result = pending.popleft().result()
-            for item in islice(items, 1):
-                pending.append(pool.submit(fn, item))
-            yield result
-    finally:
-        for future in pending:
-            future.cancel()
 
 
 def collect(aws, scope, *, allow_partial=False, now=None):
@@ -635,75 +459,44 @@ def collect(aws, scope, *, allow_partial=False, now=None):
                     raise CollectionError("Inspector returned invalid coverage identity/status")
                 coverage.append(resource)
 
-        def list_findings(query):
-            """Every page of one query; earlier pages survive a failure."""
-            records, error = [], None
-            try:
-                records.extend(
-                    aws.pages("inspector2", "list-findings", "findings", filterCriteria=query)
-                )
-            except Exception as exc:
-                error = exc
-            return records, error
-
-        def queried_findings(pool):
-            # Handled in query order, so evidence and failures stay deterministic
-            # and report mode raises the first failure in that order.
-            for records, error in in_order(pool, list_findings, finding_filters, FINDING_QUERIES_AHEAD):
-                yield from records
-                if error is not None:
-                    raise error
-
-        with attempt("inspector2 list-findings"), ThreadPoolExecutor(
-            max_workers=max(1, min(IMAGE_WORKERS, len(finding_filters)))
-        ) as pool:
-            # Created here, before the workers share it: clients are thread-safe, sessions are not.
-            aws.client("inspector2")
-            # closing() cancels unstarted queries as soon as a failure stops the loop.
-            with closing(queried_findings(pool)) as found:
-                for finding in found:
-                    if finding.get("awsAccountId") != account or finding.get("status") != "ACTIVE":
-                        raise CollectionError(
-                            "Inspector returned a finding outside the requested account/status scope"
+        # Handled in query order, so evidence and failures stay deterministic and
+        # report mode raises the first failure in that order. closing() cancels
+        # unstarted queries as soon as a failure stops the loop.
+        with attempt("inspector2 list-findings"), closing(query_findings(aws, finding_filters)) as found:
+            for finding in found:
+                if finding.get("awsAccountId") != account or finding.get("status") != "ACTIVE":
+                    raise CollectionError(
+                        "Inspector returned a finding outside the requested account/status scope"
+                    )
+                if not nonempty_strings(
+                    finding.get("findingArn"),
+                    finding.get("packageVulnerabilityDetails", {}).get("vulnerabilityId"),
+                ):
+                    raise CollectionError(
+                        "Inspector returned a finding without its identity/vulnerability ID"
+                    )
+                resources = finding.get("resources")
+                if not resources:
+                    raise CollectionError("Inspector returned a finding without affected resources")
+                for resource in resources:
+                    detail = resource.get("details", {}).get("awsEcrContainerImage", {})
+                    if (
+                        resource.get("type") != RESOURCE_TYPE
+                        or resource.get("region") != aws.region
+                        or not nonempty_strings(
+                            detail.get("repositoryName"), detail.get("imageHash")
                         )
-                    if not nonempty_strings(
-                        finding.get("findingArn"),
-                        finding.get("packageVulnerabilityDetails", {}).get("vulnerabilityId"),
+                        or (repositories and detail["repositoryName"] not in repositories)
+                        or (
+                            image_tags
+                            and (detail["repositoryName"], detail["imageHash"]) not in inventory_keys
+                        )
                     ):
                         raise CollectionError(
-                            "Inspector returned a finding without its identity/vulnerability ID"
+                            "Inspector returned incomplete or out-of-scope ECR resource details"
                         )
-                    resources = finding.get("resources")
-                    if not resources:
-                        raise CollectionError("Inspector returned a finding without affected resources")
-                    for resource in resources:
-                        detail = resource.get("details", {}).get("awsEcrContainerImage", {})
-                        if (
-                            resource.get("type") != RESOURCE_TYPE
-                            or resource.get("region") != aws.region
-                            or not nonempty_strings(
-                                detail.get("repositoryName"), detail.get("imageHash")
-                            )
-                            or (repositories and detail["repositoryName"] not in repositories)
-                            or (
-                                image_tags
-                                and (detail["repositoryName"], detail["imageHash"]) not in inventory_keys
-                            )
-                        ):
-                            raise CollectionError(
-                                "Inspector returned incomplete or out-of-scope ECR resource details"
-                            )
-                    # Duplicate pages may overlap while Inspector updates its live dataset.
-                    # A digest stands in for the full record, which is not kept.
-                    digest = canonical_digest(finding)
-                    previous = finding_digests.get(finding["findingArn"])
-                    if previous is not None and previous != digest:
-                        raise CollectionError(
-                            "Inspector finding changed between pages; retry for a consistent report"
-                        )
-                    if previous is None:
-                        finding_digests[finding["findingArn"]] = digest
-                        findings[finding["findingArn"]] = compact_finding(finding, vulnerabilities)
+                if first_sighting(finding_digests, finding):
+                    findings[finding["findingArn"]] = compact_finding(finding, vulnerabilities)
 
     by_resource = {c.get("resourceId"): c for c in coverage}
     if scope["in_use_only"] or scope["last_in_use_days"]:
@@ -883,52 +676,19 @@ def write_output(evidence, report, directory, allow_empty=False, allow_no_images
     suffix = scope_suffix(meta, results["scope"])
     name = "aws_inspector_ecr_report" if report else "aws_inspector_ecr_findings"
     target = re.sub(r"[^A-Za-z0-9._-]", "_", f"{meta['account_id']}_{meta['region']}_{suffix}")
-    directory.mkdir(parents=True, exist_ok=True)
-    dest = directory / f"{name}_{target}.{'csv' if report else 'json'}"
-    # A sibling staging file stays outside runner discovery even after SIGKILL.
-    # Publish by rename only: a cross-filesystem copy could expose partial bytes.
-    directory = directory.resolve()
-    with tempfile.NamedTemporaryFile(
-        mode="w",
-        encoding="utf-8",
-        newline="",
-        dir=directory.parent,
-        prefix=".inspector-",
-        suffix=".tmp",
-        delete=False,
-    ) as stream:
-        temporary = Path(stream.name)
-        try:
-            if report:
-                writer = csv.DictWriter(stream, fieldnames=CSV_COLUMNS)
-                writer.writeheader()
-                writer.writerows(
-                    {key: csv_safe(value) for key, value in row.items()}
-                    for row in csv_rows(evidence)
-                )
-            else:
-                # Compact separators: indentation alone inflates large evidence severalfold.
-                json.dump(evidence, stream, separators=(",", ":"))
-            stream.close()
-            try:
-                temporary.replace(dest)
-            except OSError as exc:
-                if exc.errno == errno.EXDEV:
-                    raise CollectionError(
-                        "Atomic publication requires EVIDENCE_DIR and its parent on the same filesystem; "
-                        "use an output subdirectory inside the mounted volume",
-                        "bad_config",
-                    ) from exc
-                raise
-        finally:
-            temporary.unlink(missing_ok=True)
-    return dest
+
+    def write(stream):
+        if report:
+            write_csv(stream, CSV_COLUMNS, csv_rows(evidence))
+        else:
+            # Compact separators: indentation alone inflates large evidence severalfold.
+            json.dump(evidence, stream, separators=(",", ":"))
+
+    return publish(directory, f"{name}_{target}.{'csv' if report else 'json'}", write)
 
 
 def main(report=False):
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
-    load_dotenv()
-    try:
+    def body():
         scope = read_scope()
         allow_empty = read_bool("AWS_INSPECTOR_ALLOW_EMPTY")
         allow_no_images = read_bool("AWS_INSPECTOR_ALLOW_NO_IMAGES")
@@ -951,17 +711,13 @@ def main(report=False):
             allow_empty,
             allow_no_images,
         )
-    except CollectionError as exc:
-        report_failure(str(exc), exc.code)
-        return 1
-    except Exception as exc:
-        report_failure(f"Inspector collection failed: {exc}", "internal_error")
-        return 1
-    logging.info("Saved %s", dest)
-    failures = evidence["metadata"]["api_failures"]
-    if failures:
-        codes = {failure["code"] for failure in failures}
-        code = codes.pop() if len(codes) == 1 else "partial_failure"
-        report_failure("; ".join(f"{f['operation']}: {f['message']}" for f in failures), code)
-        return 1
-    return 0
+        logging.info("Saved %s", dest)
+        failures = evidence["metadata"]["api_failures"]
+        if failures:
+            codes = {failure["code"] for failure in failures}
+            code = codes.pop() if len(codes) == 1 else "partial_failure"
+            report_failure("; ".join(f"{f['operation']}: {f['message']}" for f in failures), code)
+            return 1
+        return 0
+
+    return run(body)
