@@ -54,6 +54,18 @@ You can edit the file in the GitHub web editor, or check out `release/next`
 and push to it. The release file is the only place where hand edits survive
 a rebuild.
 
+For a long release, use the review tool. It shows each row as users see it
+on `paramify update`, and it lists only the rows that still need you:
+
+```bash
+git fetch origin && git switch -c review origin/release/next
+python tools/release_review.py releases/<version>.yaml
+```
+
+In the tool, Enter marks a row reviewed and goes to the next row that needs
+you. Ctrl+S saves and lists what still fails. Then commit and run
+`git push origin HEAD:release/next`.
+
 Do not fix a CHANGELOG mistake on `release/next`. Fix it on `main` in an
 ordinary PR. The workflow rebuilds `release/next` after each push to `main`
 while the release PR is open, and the rebuild replaces the CHANGELOG and
