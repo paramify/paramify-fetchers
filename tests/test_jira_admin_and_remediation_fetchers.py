@@ -2769,3 +2769,27 @@ def test_incident_postmortem_ticket_without_subtasks_but_with_linked_action_item
     assert i["findings"] == [] and [a["key"] for a in i["action_items"]] == ["IR-20"] and code == 0
     search = next(c for c in calls if c[1] == "/rest/api/3/search/jql")
     assert len(search[3]["fields"]) == len(set(search[3]["fields"])), "no field is asked for twice"
+
+
+def _schema_default_env(name: str) -> dict:
+    """The env a framework run always sets for a fetcher: every config_schema default, by its env var."""
+    import yaml
+    schema = yaml.safe_load((JIRA / name / "fetcher.yaml").read_text())["config_schema"]
+    return {spec["env"]: str(spec["default"]) for spec in schema.values() if spec.get("default") is not None}
+
+
+@pytest.mark.parametrize("fields", [
+    {"category": "", "phase": "", "detected_at": "", "reported_at": ""},
+    {"category": "", "phase": "", "detected_at": "", "initial_report_due": "Initial Report Due"},
+    {"category": "", "phase": "", "initial_report_due": "Initial Report Due"},
+])
+def test_incident_schema_defaults_do_not_trip_the_conflict_checks(run, fields):
+    # The framework exports every fetcher.yaml default, so a default on a setting that a
+    # conflict check treats as "set" would refuse these manifests on every run.
+    defaults = _schema_default_env("incident_postmortems")
+    assert "JIRA_INCIDENT_REPORT_MINUTES" not in defaults
+    env = {**defaults, "JIRA_INCIDENT_JQL": "project = IR", "JIRA_INCIDENT_FIELDS": json.dumps(fields)}
+    inc = _incident(1, {**SEV, "cf12": "2020-11-03T11:00:00.000-0500", "cf13": "2020-11-03T11:15:00.000-0500",
+                        "cf21": "2020-11-03T11:30:00.000-0500"}, cat="new")
+    code, out, _, status = run("incident_postmortems", _deadline_router([inc]), env)
+    assert code == 0 and status is None and out["incidents"][0]["findings"] == []

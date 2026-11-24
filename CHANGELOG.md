@@ -148,6 +148,11 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Fixed
 
+- **`jira_incident_postmortems` 0.2.1: `report_minutes` no longer has a default in `fetcher.yaml`.** A run exports
+  every declared default, so the 60-minute default counted as "set" and every manifest that turned `detected_at` off,
+  or named an `initial_report_due` field, was refused as `bad_config`. The window is still 60 minutes when the setting
+  is absent.
+
 - **Front Door counts and verdicts read null when a list they're built from wasn't read.** Before, a refused list
   inside one profile (endpoints, routes, custom domains, rule sets, secrets, security policies, diagnostic settings,
   origin groups, origins, metrics), or the profile list itself, read as empty: counts came out short or 0, verdicts

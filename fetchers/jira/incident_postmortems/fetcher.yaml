@@ -1,5 +1,5 @@
 name: jira_incident_postmortems
-version: 0.2.0
+version: 0.2.1
 description: >-
   Collects Jira incident tickets with severity, category, detected and reported
   times (minutes to report against a reporting window and per-category
@@ -67,8 +67,11 @@ config_schema:
     type: integer
     required: false
     env: JIRA_INCIDENT_REPORT_MINUTES
-    default: 60
-    description: Maximum minutes from detection to report before an incident is flagged as reported late.
+    description: >-
+      Maximum minutes from detection to report before an incident is flagged as
+      reported late; 60 when not set. It has no default here on purpose: a
+      default would count as set, and setting it with detected_at turned off or
+      with an initial_report_due field is refused as bad_config.
   category_targets:
     type: string
     required: false
