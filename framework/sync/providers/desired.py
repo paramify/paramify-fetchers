@@ -7,11 +7,12 @@ from __future__ import annotations
 
 import json
 import shlex
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 from pathlib import Path
 from typing import Any, Dict, Literal, Optional
 
+from framework.attachments import originals
 from framework.contract import (
     DEFAULT_EVIDENCE_FREQUENCY,
     EVIDENCE_FREQUENCIES,
@@ -48,6 +49,10 @@ class DeliveryFile:
     skip_kind: Literal["skipped", "error"] = "skipped"
     # The envelope's collected_at, sent as the artifact's effectiveDate; None: the upload time is sent.
     effective_date: Optional[str] = None
+    raw_sha256: Optional[str] = None
+    raw_bytes: Optional[int] = None
+    attachment_root: Optional[str] = None
+    attachment_path: Optional[str] = None
     pipeline: bool = False  # the envelope names a Paramify pipeline (metadata.pipeline, or an older inventory)
 
 
@@ -395,6 +400,28 @@ def desired_from_run(
                 effective_date=metadata.get("collected_at") or None,
                 pipeline=bool(pipeline_of(metadata)),
             ))
+            if "attachments" in metadata:
+                try:
+                    attached = originals(run_dir, metadata["attachments"])
+                    if pipeline_of(metadata) and attached:
+                        raise OSError("original companions cannot be sent through a parsing pipeline")
+                    for item in attached:
+                        relative = item["path"]
+                        files.append(DeliveryFile(
+                            path=run_dir / relative,
+                            original_file_name=path.stem + "__" + Path(relative).name,
+                            title=Path(relative).name,
+                            note=artifact_note(metadata, entry_key=key) + "; original_sha256=" + item["sha256"],
+                            kind="evidence", skip_reason=reason,
+                            effective_date=metadata.get("collected_at") or None,
+                            raw_sha256=item["sha256"], raw_bytes=item["bytes"],
+                            attachment_root=str(run_dir.resolve()), attachment_path=relative,
+                        ))
+                except OSError as exc:
+                    files[-1] = replace(files[-1], skip_reason=f"attachments: {exc}", skip_kind="error")
+        invalid = next((f.skip_reason for f in files if (f.skip_reason or "").startswith("attachments: ")), None)
+        if invalid:
+            files = [replace(f, skip_reason=invalid, skip_kind="error") for f in files]
         md = chosen if chosen is not None else (first_md or {})
         es_final = (chosen_es if chosen is not None else first_es) or {}
         cfg = settings.get(key) or {}

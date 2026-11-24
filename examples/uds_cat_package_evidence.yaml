@@ -1,0 +1,16 @@
+# Synthetic values only. Collection and publication require the intended source/destination authority.
+run:
+  platforms:
+    uds_cat:
+      config:
+        url: https://cat.example.test
+        expected_materials: '["customer-sbom", "oscap-image", "trivy-image"]'
+  fetchers:
+    - use: uds_cat_package_evidence
+      secrets:
+        api_token: ${env:CAT_API_TOKEN}
+      targets:
+        - organization: example
+          package_ref: example/demo:1.0.0-amd64
+          attestation_digests: '["sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]'
+          subject_digest: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb

@@ -176,6 +176,7 @@ class Validator:
     category: Optional[str] = None
     #: Who made it: "paramify" or "community" (absent in the yaml = paramify).
     #: Only Paramify-made validators are tracked by default.
+    output_attachments: bool = False
     source: str = "paramify"
 
 
@@ -231,6 +232,8 @@ class Fetcher:
     #: The fetchers whose evidence from the same run this one reads. Non-empty
     #: makes it a comparator (comparators/<category>/<name>/).
     depends_on: List[str] = field(default_factory=list)
+    #: Whether the native uploader delivers raw original companions.
+    output_attachments: bool = False
 
     @property
     def entry_path(self) -> Path:

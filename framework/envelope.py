@@ -114,6 +114,8 @@ def wrap_outputs(
         if is_enveloped(raw):
             continue
         file_meta = meta
+        if fetcher.output_attachments:
+            file_meta = {**meta, "attachments": raw.get("attachments", []) if isinstance(raw, dict) else None}
         if fetcher.is_inventory:
             file_meta = {**meta, "inventory": inventory.check(raw, result.exit_code)}
             if file_meta["inventory"].get("problems"):

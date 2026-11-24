@@ -356,3 +356,11 @@ file from step 5.
 
 **More detail:** [contract checks](fetcher_contract_guide.md) ·
 [the create-fetcher skill](../.claude/skills/create-fetcher/SKILL.md)
+
+## Retain original companion files
+
+For original attestations, reports or other files accompanying an evidence
+record, use the opt-in [original-file contract](evidence_attachments_guide.md).
+It reuses native evidence delivery and preserves original bytes. It does not
+replace the issue-report intake contract or a qualified file preset. ASCII
+hyphens are also accepted as the separator in instruction field lines.

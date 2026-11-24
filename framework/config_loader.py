@@ -220,6 +220,7 @@ def _parse_fetcher(data: dict, path: Path) -> Fetcher:
         output_type=output["type"],
         output_path=output["path"],
         output_aggregation=output.get("aggregation"),
+        output_attachments=output.get("attachments", False),
         secrets=secrets,
         supports_targets=data.get("supports_targets", False),
         target_schema=target_schema,

@@ -1,0 +1,92 @@
+name: uds_cat_package_evidence
+version: 0.1.0
+description: Shows retained CAT package attestations, SBOMs, scanner materials, policy results and missing evidence, with digest-verified original files.
+category: uds_cat
+source: community
+kind: evidence
+supports_targets: true
+runtime:
+  type: python
+  entry: fetcher.py
+  timeout: 600
+output:
+  type: json
+  path: uds_cat_package_evidence_<identity>.json
+  aggregation: per_target
+  attachments: true
+secrets: []
+config_schema:
+  url:
+    type: string
+    required: true
+    env: CAT_URL
+    description: CAT HTTPS origin, without a path, query, fragment or embedded credentials.
+  ca_bundle:
+    type: string
+    env: CAT_CA_BUNDLE
+    description: Optional local PEM trust bundle for a private CA; TLS verification stays enabled.
+  expected_materials:
+    type: string
+    default: '[]'
+    env: CAT_EXPECTED_MATERIALS
+    description: JSON array of exact expected material names. Empty means scanner population is not evaluated.
+  max_object_bytes:
+    type: integer
+    default: 209715200
+    env: CAT_MAX_OBJECT_BYTES
+    description: Positive per-original transfer limit. Default matches the separate native artifact readback guard.
+  max_total_bytes:
+    type: integer
+    default: 1073741824
+    env: CAT_MAX_TOTAL_BYTES
+    description: Positive total transfer budget per target, including failed transfers.
+  max_objects:
+    type: integer
+    default: 1000
+    env: CAT_MAX_OBJECTS
+    description: Positive maximum unique retained original objects per target.
+target_schema:
+  organization:
+    type: string
+    required: true
+    env: CAT_ORGANIZATION
+    description: Exact single CAT organization name.
+  package_ref:
+    type: string
+    required: true
+    env: CAT_PACKAGE_REF
+    description: Customer-selected package/version/architecture label, retained as configured rather than asserted from source.
+  attestation_digests:
+    type: string
+    required: true
+    env: CAT_ATTESTATION_DIGESTS
+    description: JSON array of trusted SHA256 content digests for every selected run's root attestations.
+  subject_digest:
+    type: string
+    required: true
+    env: CAT_SUBJECT_DIGEST
+    description: Required SHA256 subject or image/package material digest reachable from every root. Does not prove per-report image attribution.
+evidence_set:
+  reference_id: EVD-UDS-CAT-PACKAGE-EVIDENCE
+  name: UDS CAT Package Evidence
+  instructions: |
+    Script: uds_cat/package_evidence/fetcher.py
+
+    Access: Read access to the exact organization's existing artifact content. Source reads must not provision credentials. Digest binding is not signature verification.
+
+    Commands Executed:
+    - GET /api/v1/artifacts/{organization}/{digest} - retrieves pinned roots and linked stored evidence, never launches scans or modifies infrastructure.
+
+    Output: uds_cat_package_evidence_<identity>.json - package graph and collection gaps, with exact-byte originals below _attachments. Configured labels do not establish source identity or complete expected scan coverage.
+
+    Summary fields:
+
+    What retained evidence was collected?
+    - graph_complete - True if all declared stored originals and parsed linked attestations were retrieved, each root binds the requested subject and configured expected names were found; false if any collection or binding check failed. Not scan acceptance.
+    - unique_originals - Number of unique digest-verified original objects retained.
+    - original_bytes - Bytes in unique retained originals, before compression.
+    - material_references - Number of material edges observed, including references, inline content, failures and policy bundles.
+    - missing_expected_materials - List of configured expected material names without retained or inline evidence.
+    - expected_population - Whether expected names were checked: checked or not_configured. Names do not establish which scans were required.
+    - unsupported_outcomes - Number of material edges annotated by CAT with an unsupported scan outcome; not a successful zero-finding scan.
+    - scan_acceptance - Whether scanner results were accepted: not_evaluated. Original policy failures and scan outcomes remain in the evidence.
