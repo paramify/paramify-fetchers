@@ -360,6 +360,7 @@ Defender for Cloud and Azure Policy:
 | `azure_defender_plans` | Defender for Cloud plans: tier, sub-plan, enablement and coverage |
 | `azure_defender_assessments` | Every Defender for Cloud assessment result per resource, with status and severity |
 | `azure_defender_vulnerability_findings` | Defender for Cloud CVE findings on each container image and server: open findings by severity, how many have a fix, latest scan, and per finding the CVE, CVSS score, package, fixed version and age since the CVE was published |
+| `azure_defender_vulnerability_report` | Not evidence: an issue report. Every open Defender for Cloud vulnerability finding on container images and servers as a CSV for a Paramify vulnerability assessment, with no cap. Its `Asset ID` column is the lowercase resource ID that `azure_asset_inventory` uses ([README](defender_vulnerability_report/README.md)) |
 | `azure_defender_regulatory_compliance` | Regulatory compliance standards, their controls and assessments, with passed, failed and skipped counts |
 | `azure_policy_assignments` | Policy assignments in effect, own and inherited: enforcement mode, scope, exclusions, and whether each actually enforces |
 | `azure_policy_compliance` | Non-compliant resources and policies, evaluation details, and remediation tasks with their deployments |
@@ -369,6 +370,7 @@ Inventory and change:
 | Fetcher | Evidence |
 |---|---|
 | `azure_resource_inventory` | Every resource from Resource Graph with type, location, tags and SKU, plus its Defender for Cloud coverage |
+| `azure_asset_inventory` | Not evidence: an inventory for a Paramify Inventory pipeline. Every resource from Resource Graph, one record each, keyed by its lowercase resource ID ([README](asset_inventory/README.md)) |
 | `azure_residual_resources` | Leftovers: unattached disks, NICs and public IPs, unused NSGs, empty resource groups, stale slots, unused identities, assignments to deleted principals |
 | `azure_change_provenance` | Every control-plane change in the last 14 days, attributed to a pipeline, a manual deployment or a direct edit |
 | `azure_app_service_deployments` | How each web app and slot is deployed: Kudu records, slot swaps and publishing-credential use with who and when, deployment source, and how each slot differs from production |

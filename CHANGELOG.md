@@ -60,6 +60,20 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`azure_asset_inventory` and `azure_defender_vulnerability_report`: an Azure inventory and scan-report pair.** Both
+  use `id_scheme: azure-resource-id`, so Paramify can link each Defender vulnerability finding to its Inventory item.
+  - `azure_asset_inventory` (`kind: inventory`) lists every Resource Graph resource in a subscription, one record each
+    under `payload.data`, keyed by the resource ID in lowercase, with `asset_type` (the resource type), name, location,
+    resource group, subscription, kind, SKU, provisioning state and tags. It runs the `Resources` query of
+    `azure_resource_inventory`. Any failed page, missing ID or repeated ID writes no records and fails the run.
+  - `azure_defender_vulnerability_report` (`kind: issue_report`, `VULNERABILITY`) writes every open Defender for Cloud
+    vulnerability finding on container images and servers to a CSV, one row per finding on each resource. It runs the
+    open-findings query of `azure_defender_vulnerability_findings` with no cap: it reads every page, or writes no
+    report and fails the run. Its `Asset ID` column holds the same lowercase resource ID; choose it as "inventory
+    mapping" in the vulnerability preset. It declares `pipeline: {type: vulnerability, id_scheme: azure-resource-id,
+    asset_id_field: Asset ID}` and still uploads with `paramify issues upload`. Zero findings fail unless
+    `allow_empty` is set. See `fetchers/azure/defender_vulnerability_report/README.md`.
+
 - **`github_secret_scanning_report` 0.1.0: open secret scanning alerts as a vulnerability report.** The same shape
   for open secret scanning alerts, metadata only: type, validity, first location path, state and dates. Alerts are
   requested with `hide_secret`, and only named fields are copied, so the secret value never reaches the report.

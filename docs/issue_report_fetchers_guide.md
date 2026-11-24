@@ -114,7 +114,8 @@ When a tool has no practical export (for example, Amazon Inspector's export
 needs an S3 bucket and KMS key the customer would have to set up first), the
 fetcher may build the report itself from the tool's read APIs, as
 [`aws_inspector_ecr_report`](../fetchers/aws/inspector_ecr_report/README.md)
-does. An API-built report must:
+and [`azure_defender_vulnerability_report`](../fetchers/azure/defender_vulnerability_report/README.md)
+do. An API-built report must:
 
 - document its columns in the fetcher's README, since the assessment needs an
   intake preset that matches them;
