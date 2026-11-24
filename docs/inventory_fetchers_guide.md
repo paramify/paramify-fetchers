@@ -8,8 +8,9 @@ it, and a Paramify inventory pipeline turns each record into an Inventory item.
 **You need:** [the repo installed](../README.md#install) ·
 [an API key](../uploaders/paramify_evidence/README.md#paramify-api-key) ·
 an inventory fetcher ([`aws_config_inventory`](../fetchers/aws/config_inventory/fetcher.yaml),
-`github_repository_inventory`, `sophos_endpoint_inventory` and
-[`wiz_inventory`](../fetchers/wiz/inventory/README.md) ship; to write another,
+`github_repository_inventory`, `sophos_endpoint_inventory`,
+[`wiz_inventory`](../fetchers/wiz/inventory/README.md) and
+[`qualys_host_inventory`](../fetchers/qualys/host_inventory/README.md) ship; to write another,
 [copy the template](../fetchers/_template_inventory/), see the
 [pipeline fetchers guide](pipeline_fetchers_guide.md), or ask
 [your AI agent](../README.md#drive-it-with-an-ai-agent)). The example is

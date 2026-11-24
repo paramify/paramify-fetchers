@@ -60,6 +60,12 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`qualys_host_inventory`: a Qualys VMDR host inventory for a Paramify inventory pipeline.** One record per host that
+  the API user sees, keyed by the Qualys host ID (new ID scheme `qualys-host-id`). That ID is the `Host ID` column of
+  `qualys_vmdr_vulnerability_findings`, so Paramify can link each finding to its Inventory item. Each record also holds
+  the name, IPv4 and IPv6 address, DNS and NetBIOS name, OS, tracking method, Qualys asset ID and last scan dates. A run
+  that misses a page or a host writes no records and exits non-zero.
+
 - **`status: beta` in `fetcher.yaml` marks a fetcher that is not proven yet.** The field takes `stable` (the default)
   or `beta`. A beta fetcher gets a BETA label after its name everywhere the TUI names it (catalog, manifest table,
   both detail panes, with a note in the details) and `[beta]` on the first line of `paramify describe`.

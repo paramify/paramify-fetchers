@@ -25,6 +25,7 @@ SEVERITIES = ("5", "4", "3", "2", "1")
 NOT_RETURNED = "not_returned"
 DEFAULT_REMEDIATION_DAYS = "5:30,4:30,3:90,2:180,1:180"
 ASSET_GROUP_PATH = "/api/2.0/fo/asset/group/"
+HOST_PATH = "/api/5.0/fo/asset/host/"
 DETECTION_PATH = "/api/5.0/fo/asset/host/vm/detection/"
 PAGE_SIZE = "1000"
 
@@ -128,6 +129,12 @@ def host_identity(host: Element) -> dict:
         "os": text(host, "OS"),
         "tracking_method": text(host, "TRACKING_METHOD"),
     }
+
+
+def list_hosts(client: QualysClient, **extra: str) -> Iterable[Element]:
+    """Every HOST element of the host list, with all details, across every page."""
+    params = {"action": "list", "details": "All", "show_tags": "0", "truncation_limit": PAGE_SIZE, **extra}
+    return client.records(HOST_PATH, params, "HOST", "list_hosts")
 
 
 def detection_params(**extra: str) -> dict:

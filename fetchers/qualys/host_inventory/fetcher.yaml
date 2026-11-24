@@ -1,0 +1,44 @@
+name: qualys_host_inventory
+version: 0.1.0
+description: >-
+  Lists every host in Qualys VMDR that the API user sees, one record each, keyed
+  by the Qualys host ID that the VMDR findings report uses.
+category: qualys
+
+kind: inventory
+status: beta
+pipeline:
+  type: inventory
+  id_scheme: qualys-host-id
+
+supports_targets: false
+
+runtime:
+  type: python
+  entry: fetcher.py
+  timeout: 1800
+
+output:
+  type: json
+  path: qualys_host_inventory.json
+
+secrets: []          # username / password, api_url and private_cloud_host come from _categories/qualys.yaml
+
+ksis:
+  - KSI-PIY-GIV
+
+evidence_set:
+  reference_id: EVD-QUALYS-HOST-INVENTORY
+  name: Qualys VMDR Host Inventory
+  instructions: |
+    Script: qualys/host_inventory/fetcher.py
+
+    Access: A local Qualys user with the Reader role and API access, assigned the All asset group. A Reader sees only the hosts in its asset groups, so the inventory holds only the hosts the user sees.
+
+    Commands Executed:
+    - GET /api/5.0/fo/asset/host/?action=list&details=All&show_asset_id=1 (every page, following the next-page URL Qualys returns) — every host with its IDs, addresses, names, operating system and last scan dates
+
+    Output: qualys_host_inventory.json — one record per host, keyed by its Qualys host ID (the Host ID column of qualys_vmdr_vulnerability_findings), with its display name, IPv4 and IPv6 address, DNS and NetBIOS name, operating system, tracking method, Qualys asset ID and last vulnerability and authenticated scan dates; a run that could not collect every host writes no records, and the uploader does not send it.
+  description: >-
+    Every host in Qualys VMDR that the API user sees, for Paramify's Inventory,
+    keyed so that each Qualys VMDR finding links to its host.

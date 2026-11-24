@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<KNOWLEDGE_BASE_VULN_LIST_OUTPUT>
+  <RESPONSE>
+    <DATETIME>2026-11-20T08:06:00Z</DATETIME>
+    <VULN_LIST>
+      <VULN>
+        <QID>38739</QID>
+        <TITLE><![CDATA[Synthetic SSH finding]]></TITLE>
+      </VULN>
+    </VULN_LIST>
+  </RESPONSE>
+</KNOWLEDGE_BASE_VULN_LIST_OUTPUT>
