@@ -1,0 +1,22 @@
+key: azure_velero_restore_results_readable
+name: 'Azure Velero: Every Restore Result Readable'
+type: AUTOMATED
+role: integrity
+source: community
+statement: >
+  Every restore Velero recorded has a readable results file (restores_results_missing is 0), so no
+  restore is counted without knowing whether it had errors. Does not check whether the collection run
+  succeeded.
+
+regex: '"restores_results_missing":\s*(?<restores_results_missing>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # restores_results_missing
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-VELERO-BACKUPS

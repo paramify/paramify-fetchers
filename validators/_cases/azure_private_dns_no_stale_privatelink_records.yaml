@@ -1,0 +1,21 @@
+validator: azure_private_dns_no_stale_privatelink_records
+cases:
+  - name: compliant
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"privatelink_records_ip_mismatch":0,"privatelink_records_partially_backed":0,"privatelink_records_stale":0}}}'
+
+  - name: privatelink_records_ip_mismatch_nonzero
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"privatelink_records_ip_mismatch":1,"privatelink_records_partially_backed":0,"privatelink_records_stale":0}}}'
+
+  - name: privatelink_records_partially_backed_nonzero
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"privatelink_records_ip_mismatch":0,"privatelink_records_partially_backed":1,"privatelink_records_stale":0}}}'
+
+  - name: privatelink_records_stale_nonzero
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"privatelink_records_ip_mismatch":0,"privatelink_records_partially_backed":0,"privatelink_records_stale":1}}}'
+
+  - name: privatelink_records_ip_mismatch_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"privatelink_records_ip_mismatch_renamed":0,"privatelink_records_partially_backed":0,"privatelink_records_stale":0}}}'

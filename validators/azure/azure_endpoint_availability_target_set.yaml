@@ -1,0 +1,19 @@
+key: azure_endpoint_availability_target_set
+name: 'Azure Endpoint Availability: Availability Target Is Configured'
+type: AUTOMATED
+role: configuration
+source: community
+statement: >
+  An availability objective is configured (availability_target_percentage is a number). Fails while it
+  is not set, which marks the target as undecided rather than an endpoint as unavailable. Does not
+  check whether the collection run succeeded.
+
+regex: '"availability_target_percentage":\s*(?<availability_target_percentage>\d+(?:\.\d+)?)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-ENDPOINT-AVAILABILITY

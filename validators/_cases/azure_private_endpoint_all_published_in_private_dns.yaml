@@ -1,0 +1,13 @@
+validator: azure_private_endpoint_all_published_in_private_dns
+cases:
+  - name: compliant
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"endpoints_without_private_dns_zone_group":0}}}'
+
+  - name: endpoints_without_private_dns_zone_group_nonzero
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"endpoints_without_private_dns_zone_group":1}}}'
+
+  - name: endpoints_without_private_dns_zone_group_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"endpoints_without_private_dns_zone_group_renamed":0}}}'

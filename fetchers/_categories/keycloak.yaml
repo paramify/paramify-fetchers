@@ -37,11 +37,11 @@ secrets:
   - name: client_id
     env: KEYCLOAK_CLIENT_ID
     description: >-
-      Client ID of a confidential client with service accounts enabled. Its service account needs the realm-management
-      roles view-realm, view-identity-providers, view-events, view-users and view-clients, and nothing else (each
-      fetcher's instructions name the roles it uses): from realm-management in the realm being read, or from the
-      <realm>-realm client when the client is in master. On Keycloak 26.8.2 and
-      later, also assign the built-in kc-admin-api client scope to the client as a default scope.
+      Client ID of a confidential client with service accounts enabled. Its service account needs the roles
+      view-realm, view-identity-providers, view-events, view-users and view-clients, and nothing else (each fetcher's
+      instructions name the roles it uses). For a client in master, they come from the <realm>-realm client in master
+      (master-realm to read master itself). Otherwise they come from realm-management in the realm being read. On
+      Keycloak 26.8.2 and later, also assign the built-in kc-admin-api client scope to the client as a default scope.
   - name: client_secret
     env: KEYCLOAK_CLIENT_SECRET
     description: Client secret of that client.

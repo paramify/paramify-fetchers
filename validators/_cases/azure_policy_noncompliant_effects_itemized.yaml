@@ -1,0 +1,22 @@
+validator: azure_policy_noncompliant_effects_itemized
+cases:
+  - name: noncompliant_members_carry_effect
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"assignment_compliance":[{"non_compliant_member_policies":[{"effect":"audit","non_compliant_resources":12}],"non_compliant_resources":12}]},"summary":{"non_compliant_assignments":1}}}'
+
+  - name: nothing_noncompliant_nothing_to_itemize
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"assignment_compliance":[{"non_compliant_member_policies":[],"non_compliant_policies":0,"non_compliant_resources":0}]},"summary":{"non_compliant_assignments":0,"resources_evaluated":40}}}'
+
+  - name: effect_key_renamed_with_noncompliant_assignments
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"assignment_compliance":[{"non_compliant_member_policies":[{"policy_effect":"deployifnotexists","non_compliant_resources":1}],"non_compliant_resources":1}]},"summary":{"non_compliant_assignments":1}}}'
+
+  - name: ten_noncompliant_assignments_is_not_zero
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"assignment_compliance":[{"non_compliant_member_policies":[{"policy_effect":"audit","non_compliant_resources":1}],"non_compliant_resources":1}]},"summary":{"non_compliant_assignments":10}}}'
+
+  - name: compliant_record_zero_policies_does_not_satisfy_it
+    expect: FAIL
+    note: a per-assignment "non_compliant_policies":0 must not stand in for the summary's zero
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"assignment_compliance":[{"non_compliant_member_policies":[],"non_compliant_policies":0,"non_compliant_resources":0},{"non_compliant_member_policies":[{"policy_effect":"deny","non_compliant_resources":1}],"non_compliant_policies":1,"non_compliant_resources":1}]},"summary":{"non_compliant_assignments":1}}}'

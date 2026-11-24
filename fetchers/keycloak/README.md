@@ -13,9 +13,11 @@ client-credentials grant as a dedicated service-account client, then issues only
    Don't request the scope in the token call instead: Keycloak 26.8.1 and earlier reject an unknown scope.
 3. Give its service account the roles `view-realm`, `view-identity-providers`, `view-events`, `view-users` and
    `view-clients`, and nothing else (each fetcher's instructions name the roles it uses):
-   - for a client in the realm being read, from that realm's `realm-management` client;
-   - for a client in `master` (then set `auth_realm: master`), from the `<realm>-realm` client in `master`, such as
-     `example-realm-realm`. These are Keycloak's realm-specific admin roles.
+   - for a client in `master`, from the `<realm>-realm` client in `master`, such as `example-realm-realm`. These are
+     Keycloak's realm-specific admin roles. Set `auth_realm: master` when the realm being read is not `master`. To read
+     `master` itself, use `master-realm`: `master` has no `realm-management` client. `users_and_roles` does not read
+     `master`.
+   - for a client in any other realm being read, from that realm's `realm-management` client.
    No manage-* role is needed.
 4. Set `KEYCLOAK_BASE_URL`, `KEYCLOAK_REALM` (required), optionally `KEYCLOAK_AUTH_REALM`, and the
    `KEYCLOAK_CLIENT_ID` and `KEYCLOAK_CLIENT_SECRET` secrets. The fetcher must run from a network that can reach the
@@ -24,6 +26,7 @@ client-credentials grant as a dedicated service-account client, then issues only
 | Fetcher | Evidence set | Shows |
 | --- | --- | --- |
 | `realm_security` | `EVD-KEYCLOAK-REALM-SECURITY` | Sessions, lockout, password policy, browser and recovery flows, required actions, federation, event logging |
+| `admin_events` | `EVD-KEYCLOAK-ADMIN-EVENTS` | Stored sign-in and admin events over a window: sign-ins, lockouts, user, role and client changes. Needs only `view-events` |
 | `users_and_roles` | `EVD-KEYCLOAK-USERS-AND-ROLES` | Every user's state, authenticators, groups, effective roles and recent sign-ins; privileged users, missing second factors, inactive accounts |
 
 Client secrets in identity provider configs and bind credentials in user federation configs are never written to
