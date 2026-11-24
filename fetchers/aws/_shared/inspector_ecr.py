@@ -26,7 +26,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "_lib"))
 from fetcher_status import report_failure
-from report_csv import csv_safe  # noqa: F401 -- inspector_common imports it from here
 from inspector_common import (
     SEVERITIES,
     WORKERS,

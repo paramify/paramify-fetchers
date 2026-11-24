@@ -29,6 +29,7 @@ from dotenv import load_dotenv
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "_lib"))
 from fetcher_status import report_failure
+from report_csv import csv_safe
 
 # Highest first, after UNTRIAGED: a min_severity threshold keeps every severity
 # up to its own, so an untriaged finding (which may be anything) is always kept.
@@ -273,13 +274,7 @@ def query_findings(aws, queries):
 
 
 def write_csv(stream, columns, rows):
-    """A header and rows, each string cell made safe for spreadsheets.
-
-    csv_safe stays in inspector_ecr.py, its original home. It is imported here
-    at call time, because inspector_ecr imports this module.
-    """
-    from inspector_ecr import csv_safe
-
+    """A header and rows, each string cell made safe for spreadsheets (fetchers/_lib/report_csv.py)."""
     writer = csv.DictWriter(stream, fieldnames=columns)
     writer.writeheader()
     writer.writerows({key: csv_safe(value) for key, value in row.items()} for row in rows)
