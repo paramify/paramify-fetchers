@@ -96,6 +96,7 @@ def test_real_mesh_gives_every_judgment(assert_summary_documented):
     assert reader.api_failures == []
     assert (s["namespaces"], s["namespaces_in_mesh"], s["namespaces_not_in_mesh"]) == (6, 4, ["default", "legacy"])
     assert (s["mesh_mtls_mode"], s["strict_mtls_everywhere"]) == ("STRICT", False)
+    assert (s["mesh_mtls_policy"], s["mtls_policies_ignored"], s["authorization_policies_dry_run"]) == ("istio-system/default", [], [])
     assert s["mtls_weaker_overrides_names"] == ["monitoring/scrape PERMISSIVE", "payments/metrics-port:9090 DISABLE"]
     assert (s["authorization_policies"], s["mesh_default_deny"], s["namespaces_in_mesh_with_default_deny"]) == (5, False, 2)
     assert s["namespaces_in_mesh_without_default_deny"] == ["ingress", "monitoring"]
@@ -111,8 +112,51 @@ def test_real_mesh_gives_every_judgment(assert_summary_documented):
 
 def test_no_mesh_wide_policy_is_reported_as_none_never_strict():
     pas = [p for p in fx("peerauthentications")["items"] if p["metadata"]["namespace"] != ROOT]
-    assert im.mesh_mtls_mode(pas, ROOT) == "NONE"   # Istio applies PERMISSIVE
-    assert im.mesh_mtls_mode([{"metadata": {"namespace": ROOT}, "spec": {}}], ROOT) == "UNSET"
+    assert im.mesh_mtls(pas, ROOT) == ("NONE", None)   # Istio applies PERMISSIVE
+    assert im.mesh_mtls([{"metadata": {"namespace": ROOT, "name": "d"}, "spec": {}}], ROOT) == ("UNSET", f"{ROOT}/d")
+
+
+def _pa(name, mode, created, ns=ROOT, **spec):
+    meta = {"namespace": ns, "name": name, **({"creationTimestamp": created} if created else {})}
+    return {"metadata": meta, "spec": {"mtls": {"mode": mode}, **spec}}
+
+
+OLD_PERMISSIVE = _pa("old", "PERMISSIVE", "2026-01-01T00:00:00Z")
+NEW_STRICT = _pa("new", "STRICT", "2026-06-01T00:00:00Z")
+
+
+@pytest.mark.parametrize("order", [[NEW_STRICT, OLD_PERMISSIVE], [OLD_PERMISSIVE, NEW_STRICT]])
+def test_the_oldest_mesh_wide_peer_authentication_wins_whatever_the_list_order(order):
+    data = {k: fx(k)["items"] for k in ("namespaces", "authorizationpolicies", "gateways", "virtualservices", "destinationrules")}
+    data["peerauthentications"] = order
+    s = im.summarize(data, None, None, None, ROOT, NOW)
+    assert (s["mesh_mtls_mode"], s["mesh_mtls_policy"]) == ("PERMISSIVE", f"{ROOT}/old")
+    assert (s["strict_mtls_everywhere"], s["mtls_policies_ignored"]) == (False, [f"{ROOT}/new STRICT"])
+
+
+def test_same_second_duplicates_are_ordered_by_name_as_istio_does():
+    a, b = _pa("b-strict", "STRICT", "2026-01-01T00:00:00Z"), _pa("a-permissive", "PERMISSIVE", "2026-01-01T00:00:00Z")
+    assert im.mesh_mtls([a, b], ROOT) == ("PERMISSIVE", f"{ROOT}/a-permissive")
+
+
+def test_duplicates_without_creation_times_are_a_conflict_never_strict():
+    data = {k: fx(k)["items"] for k in ("namespaces", "authorizationpolicies", "gateways", "virtualservices", "destinationrules")}
+    data["peerauthentications"] = [_pa("x", "STRICT", None), _pa("y", "PERMISSIVE", None)]
+    s = im.summarize(data, None, None, None, ROOT, NOW)
+    assert (s["mesh_mtls_mode"], s["mesh_mtls_policy"], s["strict_mtls_everywhere"]) == ("CONFLICT", None, False)
+    assert s["mtls_policies_ignored"] == []
+
+
+def test_an_ignored_namespace_duplicate_is_not_an_override_but_the_one_in_effect_is():
+    pas = [NEW_STRICT, _pa("old-weak", "PERMISSIVE", "2026-01-01T00:00:00Z", ns="shop"),
+           _pa("new-strict", "STRICT", "2026-06-01T00:00:00Z", ns="shop"),
+           _pa("new-weak", "DISABLE", "2026-07-01T00:00:00Z", ns="payments"),
+           _pa("old-strict", "STRICT", "2026-02-01T00:00:00Z", ns="payments")]
+    assert im.mtls_overrides(pas, ROOT) == ["shop/old-weak PERMISSIVE"]
+
+
+def test_an_empty_selector_is_namespace_wide():
+    assert im.mesh_mtls([_pa("d", "STRICT", None, selector={"matchLabels": {}})], ROOT) == ("STRICT", f"{ROOT}/d")
 
 
 def test_a_mesh_wide_default_deny_covers_every_in_mesh_namespace():
@@ -124,11 +168,32 @@ def test_a_mesh_wide_default_deny_covers_every_in_mesh_namespace():
 
 @pytest.mark.parametrize("policy, deny, allow_all", [
     ({}, True, False), ({"action": "ALLOW"}, True, False), ({"action": "DENY"}, False, False),
-    ({"selector": {"matchLabels": {"app": "x"}}}, False, False), ({"rules": [{}]}, False, True),
+    ({"selector": {"matchLabels": {"app": "x"}}}, False, False), ({"selector": {"matchLabels": {}}}, True, False),
+    ({"rules": [{}]}, False, True),
     ({"action": "ALLOW", "rules": [{"from": [{"source": {"namespaces": ["a"]}}]}]}, False, False)])
 def test_default_deny_and_allow_all_follow_istio_semantics(policy, deny, allow_all):
     p = {"metadata": {"namespace": "ns", "name": "p"}, "spec": policy}
     assert (im.is_default_deny(p), im.allows_all(p)) == (deny, allow_all)
+
+
+@pytest.mark.parametrize("value, simulated", [("true", True), ("True", True), ("1", True), ("t", True),
+                                              ("false", False), ("yes", False), (None, False)])
+def test_a_dry_run_policy_is_never_enforced(value, simulated):
+    annotations = {"istio.io/dry-run": value} if value is not None else {}
+    for spec in ({}, {"rules": [{}]}):
+        p = {"metadata": {"namespace": ROOT, "name": "p", "annotations": annotations}, "spec": spec}
+        assert im.dry_run(p) is simulated
+        assert (im.is_default_deny(p) or im.allows_all(p)) is not simulated
+
+
+def test_a_dry_run_allow_nothing_is_not_mesh_wide_default_deny():
+    data = {k: fx(k)["items"] for k in ("namespaces", "peerauthentications", "gateways", "virtualservices", "destinationrules")}
+    simulated = {"metadata": {"namespace": ROOT, "name": "deny-all", "annotations": {"istio.io/dry-run": "true"}}, "spec": {}}
+    data["authorizationpolicies"] = fx("authorizationpolicies")["items"] + [simulated]
+    s = im.summarize(data, None, None, None, ROOT, NOW)
+    assert (s["mesh_default_deny"], s["namespaces_in_mesh_with_default_deny"]) == (False, 2)
+    assert s["namespaces_in_mesh_without_default_deny"] == ["ingress", "monitoring"]
+    assert (s["authorization_policies"], s["authorization_policies_dry_run"]) == (6, [f"{ROOT}/deny-all"])
 
 
 def test_a_plaintext_server_on_any_non_tls_protocol_is_reported():

@@ -68,13 +68,58 @@ def in_mesh(ns: Dict[str, Any]) -> bool:
     return labels.get("istio-injection") == "enabled" or bool(labels.get("istio.io/rev"))
 
 
+def _selects_workloads(spec: Dict[str, Any]) -> bool:
+    """True when a policy's selector names labels. Istio treats a missing or empty selector as the whole namespace."""
+    return bool((spec.get("selector") or {}).get("matchLabels"))
+
+
+def _created(p: Dict[str, Any]) -> Optional[datetime]:
+    value = (p.get("metadata") or {}).get("creationTimestamp")
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00")) if value else None
+    except ValueError:
+        return None
+
+
+def namespace_wide_policies(policies: List[Dict[str, Any]]) -> Tuple[Dict[str, Optional[Dict[str, Any]]], List[Dict[str, Any]]]:
+    """The selector-less PeerAuthentication Istio applies in each namespace, and the ones it ignores.
+
+    Istio uses one per namespace: the oldest by creationTimestamp, then by name (pilot/pkg/model/authentication.go).
+    When a namespace has more than one and a timestamp is missing, the one in effect can't be told: it maps to None
+    and none of them is listed as ignored.
+    """
+    by_ns: Dict[str, List[Dict[str, Any]]] = {}
+    for p in policies:
+        if not _selects_workloads(p.get("spec") or {}):
+            by_ns.setdefault((p.get("metadata") or {}).get("namespace") or "", []).append(p)
+    effective: Dict[str, Optional[Dict[str, Any]]] = {}
+    ignored: List[Dict[str, Any]] = []
+    for ns, found in by_ns.items():
+        if len(found) > 1 and any(_created(p) is None for p in found):
+            effective[ns] = None
+            continue
+        found = sorted(found, key=lambda p: (_created(p) or datetime.min.replace(tzinfo=timezone.utc),
+                                             (p.get("metadata") or {}).get("name") or ""))
+        effective[ns], ignored = found[0], ignored + found[1:]
+    return effective, ignored
+
+
+def _mtls_mode(p: Dict[str, Any]) -> str:
+    return (((p.get("spec") or {}).get("mtls") or {}).get("mode") or "UNSET").upper()
+
+
 def mtls_overrides(policies: List[Dict[str, Any]], root: str) -> List[str]:
-    """Namespace-, workload- and port-level PeerAuthentication settings weaker than STRICT, named down to the port."""
+    """Namespace-, workload- and port-level PeerAuthentication settings weaker than STRICT, named down to the port.
+    A namespace-wide policy that Istio ignores (a newer duplicate) is not an override."""
+    effective, ignored = namespace_wide_policies(policies)
+    skip = {id(p) for p in ignored}
     out = []
     for p in policies:
+        if id(p) in skip:
+            continue
         spec = p.get("spec") or {}
-        mode = ((spec.get("mtls") or {}).get("mode") or "").upper()
-        mesh_wide = (p.get("metadata") or {}).get("namespace") == root and not spec.get("selector")
+        mode = _mtls_mode(p)
+        mesh_wide = (p.get("metadata") or {}).get("namespace") == root and not _selects_workloads(spec)
         if not mesh_wide and mode in WEAK_MTLS:
             out.append(f"{_ref(p)} {mode}")
         for port, setting in sorted((spec.get("portLevelMtls") or {}).items()):
@@ -84,26 +129,37 @@ def mtls_overrides(policies: List[Dict[str, Any]], root: str) -> List[str]:
     return sorted(out)
 
 
-def mesh_mtls_mode(policies: List[Dict[str, Any]], root: str) -> str:
-    """The root namespace's selector-less PeerAuthentication mode; NONE when there is none (Istio then applies PERMISSIVE)."""
-    for p in policies:
-        spec = p.get("spec") or {}
-        if (p.get("metadata") or {}).get("namespace") == root and not spec.get("selector"):
-            return ((spec.get("mtls") or {}).get("mode") or "UNSET").upper()
-    return "NONE"
+def mesh_mtls(policies: List[Dict[str, Any]], root: str) -> Tuple[str, Optional[str]]:
+    """The mesh-wide mTLS mode and the policy that sets it: the root namespace's selector-less PeerAuthentication in
+    effect. NONE when there is none (Istio then applies PERMISSIVE); CONFLICT when there are several and the one in
+    effect can't be told."""
+    effective, _ = namespace_wide_policies(policies)
+    if root not in effective:
+        return "NONE", None
+    p = effective[root]
+    return ("CONFLICT", None) if p is None else (_mtls_mode(p), _ref(p))
+
+
+def dry_run(p: Dict[str, Any]) -> bool:
+    """An AuthorizationPolicy annotated istio.io/dry-run is only simulated, never enforced. Istio reads the value with
+    Go's strconv.ParseBool."""
+    value = ((p.get("metadata") or {}).get("annotations") or {}).get("istio.io/dry-run")
+    return str(value) in ("1", "t", "T", "true", "TRUE", "True")
 
 
 def is_default_deny(p: Dict[str, Any]) -> bool:
-    """Istio's allow-nothing policy: ALLOW (the default action) with no rules and no selector or target."""
+    """Istio's allow-nothing policy: ALLOW (the default action) with no rules and no selector or target, and enforced
+    (not dry-run)."""
     spec = p.get("spec") or {}
-    return ((spec.get("action") or "ALLOW").upper() == "ALLOW" and not spec.get("rules") and not spec.get("selector")
-            and not spec.get("targetRef") and not spec.get("targetRefs") and not spec.get("provider"))
+    return ((spec.get("action") or "ALLOW").upper() == "ALLOW" and not spec.get("rules") and not _selects_workloads(spec)
+            and not spec.get("targetRef") and not spec.get("targetRefs") and not spec.get("provider") and not dry_run(p))
 
 
 def allows_all(p: Dict[str, Any]) -> bool:
-    """An ALLOW policy with an empty rule, which matches every request to the workloads it selects."""
+    """An enforced ALLOW policy with an empty rule, which matches every request to the workloads it selects."""
     spec = p.get("spec") or {}
-    return (spec.get("action") or "ALLOW").upper() == "ALLOW" and any(r == {} for r in spec.get("rules") or [])
+    return ((spec.get("action") or "ALLOW").upper() == "ALLOW" and any(r == {} for r in spec.get("rules") or [])
+            and not dry_run(p))
 
 
 def is_plaintext(protocol: str, tls: Optional[Dict[str, Any]]) -> bool:
@@ -196,7 +252,8 @@ def summarize(data: Dict[str, Optional[List[Dict[str, Any]]]], mesh: Optional[Di
     meshed = [n for n in workload if in_mesh(n)]
     names = {(n.get("metadata") or {}).get("name") for n in meshed}
     deny_ns = {(p.get("metadata") or {}).get("namespace") for p in aps or [] if is_default_deny(p)}
-    mode = mesh_mtls_mode(pas, root) if pas is not None else None
+    mode, mode_policy = mesh_mtls(pas, root) if pas is not None else (None, None)
+    ignored_pas = namespace_wide_policies(pas)[1] if pas is not None else None
     weaker = mtls_overrides(pas, root) if pas is not None else None
     servers = gateway_servers(gws) if gws is not None else None
     earliest = min((c["not_after"] for c in certs), default=None) if certs else None
@@ -208,6 +265,8 @@ def summarize(data: Dict[str, Optional[List[Dict[str, Any]]]], mesh: Optional[Di
         "namespaces_not_in_mesh": sorted(set(n["metadata"]["name"] for n in workload) - names) if ns is not None else None,
         # mTLS
         "mesh_mtls_mode": mode,
+        "mesh_mtls_policy": mode_policy,
+        "mtls_policies_ignored": sorted(f"{_ref(p)} {_mtls_mode(p)}" for p in ignored_pas) if ignored_pas is not None else None,
         "mtls_weaker_overrides": len(weaker) if weaker is not None else None,
         "mtls_weaker_overrides_names": weaker,
         "strict_mtls_everywhere": (mode == "STRICT" and not weaker) if pas is not None else None,
@@ -219,8 +278,9 @@ def summarize(data: Dict[str, Optional[List[Dict[str, Any]]]], mesh: Optional[Di
         "namespaces_in_mesh_without_default_deny": (sorted(names - deny_ns) if root not in deny_ns else [])
         if aps is not None and ns is not None else None,
         "authorization_policies_allowing_all": sorted(_ref(p) for p in aps if allows_all(p)) if aps is not None else None,
-        "authorization_deny_policies": sum(1 for p in aps if ((p.get("spec") or {}).get("action") or "").upper() == "DENY")
-        if aps is not None else None,
+        "authorization_deny_policies": sum(1 for p in aps if ((p.get("spec") or {}).get("action") or "").upper() == "DENY"
+                                           and not dry_run(p)) if aps is not None else None,
+        "authorization_policies_dry_run": sorted(_ref(p) for p in aps if dry_run(p)) if aps is not None else None,
         # Ingress
         "gateways": len(gws) if gws is not None else None,
         "gateway_servers": len(servers) if servers is not None else None,
@@ -316,12 +376,14 @@ def collect(reader: MeshReader, root: str, now: Optional[datetime] = None) -> Di
     istiod = reader.istiod(root)
     results = {
         "root_namespace": root,
-        "peer_authentications": [{"ref": _ref(p), "selector": bool((p.get("spec") or {}).get("selector")),
+        "peer_authentications": [{"ref": _ref(p), "selector": _selects_workloads(p.get("spec") or {}),
+                                  "created": (p.get("metadata") or {}).get("creationTimestamp"),
                                   "mode": ((p.get("spec") or {}).get("mtls") or {}).get("mode"),
                                   "port_level": (p.get("spec") or {}).get("portLevelMtls")} for p in data["peerauthentications"]]
         if data["peerauthentications"] is not None else None,
         "authorization_policies": [{"ref": _ref(p), "action": (p.get("spec") or {}).get("action") or "ALLOW",
-                                    "rules": len((p.get("spec") or {}).get("rules") or []), "default_deny": is_default_deny(p),
+                                    "rules": len((p.get("spec") or {}).get("rules") or []), "dry_run": dry_run(p),
+                                    "default_deny": is_default_deny(p),
                                     "allows_all": allows_all(p)} for p in data["authorizationpolicies"]]
         if data["authorizationpolicies"] is not None else None,
         "gateway_servers": gateway_servers(data["gateways"]) if data["gateways"] is not None else None,

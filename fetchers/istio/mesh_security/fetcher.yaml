@@ -56,18 +56,21 @@ evidence_set:
     - namespaces_not_in_mesh — List of the namespaces without sidecar injection; their workloads get no mesh mTLS or authorization
 
     Is mTLS required?
-    - mesh_mtls_mode — Mode of the root namespace's PeerAuthentication with no selector (STRICT, PERMISSIVE, DISABLE or UNSET); NONE when there is none, in which case Istio applies PERMISSIVE; null if PeerAuthentications could not be read, as are the fields below
-    - mtls_weaker_overrides — Number of namespace-, workload- or port-level PeerAuthentication settings of PERMISSIVE or DISABLE
+    - mesh_mtls_mode — Mode of the root namespace's PeerAuthentication with no selector (STRICT, PERMISSIVE, DISABLE or UNSET). NONE when there is none, in which case Istio applies PERMISSIVE. When there are several, Istio uses the oldest and ignores the rest. CONFLICT when there are several and the oldest can't be told. Null if PeerAuthentications could not be read, as are the fields below
+    - mesh_mtls_policy — The mesh-wide PeerAuthentication in effect, as namespace/name; null when there is none or the mode is CONFLICT
+    - mtls_policies_ignored — List of namespace- or mesh-wide PeerAuthentications that Istio ignores because an older one is in the same namespace, each as namespace/name and mode
+    - mtls_weaker_overrides — Number of namespace-, workload- or port-level PeerAuthentication settings of PERMISSIVE or DISABLE, not counting ignored ones
     - mtls_weaker_overrides_names — List of those settings, each as namespace/name, with :port for a port-level one, and the mode
     - strict_mtls_everywhere — True if mesh_mtls_mode is STRICT and there are no weaker overrides
 
     Is authorization default-deny?
     - authorization_policies — Number of AuthorizationPolicies; null if they could not be read, as are the fields below
-    - mesh_default_deny — True if the root namespace has an allow-nothing policy (ALLOW with no rules and no selector), which denies by default across the mesh
+    - mesh_default_deny — True if the root namespace has an allow-nothing policy (ALLOW with no rules and no selector), which denies by default across the mesh. A dry-run policy does not count, as Istio does not enforce it
     - namespaces_in_mesh_with_default_deny — Number of in-mesh namespaces covered by an allow-nothing policy, their own or the mesh-wide one; null if namespaces could not be read
     - namespaces_in_mesh_without_default_deny — List of in-mesh namespaces with no allow-nothing policy, where requests are allowed unless a policy denies them; null if namespaces could not be read
-    - authorization_policies_allowing_all — List of ALLOW policies with an empty rule, which matches every request to the workloads they select
-    - authorization_deny_policies — Number of DENY policies
+    - authorization_policies_allowing_all — List of enforced ALLOW policies with an empty rule, which matches every request to the workloads they select
+    - authorization_deny_policies — Number of enforced DENY policies
+    - authorization_policies_dry_run — List of policies with the istio.io/dry-run annotation set to true. Istio only logs what they would do. They count toward no other field except authorization_policies
 
     Is ingress encrypted?
     - gateways — Number of Istio Gateways; null if they could not be read, as are the fields below
