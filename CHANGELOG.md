@@ -114,6 +114,15 @@ schemas and the `paramify` CLI — not the internal code.
   both smart lockout and sign-ins from a malicious IP address under that code, so the counts are evidence, not a
   pass or fail on smart lockout. With the sign-in logs unread, both are null.
 
+- **`azure_activity_log_alerts` 0.4.0: alerts on attempts to alter protected log storage.** A new fixed map,
+  `log_storage_protection_coverage`, shows whether an alert that reaches a person fires on deleting or changing a
+  container's immutability policy, clearing a legal hold, or deleting a blob container or storage account. An alert
+  with no outcome filter fires on the attempt, so one Azure denies is seen too; one filtered on status, subStatus or
+  level counts only as possible, as does any match while the action groups or processing rules are unread. With the
+  alert list unread, the map and its counts are null, not uncovered. An alert scoped below the storage account gets
+  no credit for deleting the account. It is kept apart from the 12 CIS operations, so their totals do not move.
+  `all_log_storage_protection_operations_covered` gives one verdict.
+
 ### Fixed
 
 - **Front Door counts and verdicts read null when a list they're built from wasn't read.** Before, a refused list

@@ -1,7 +1,7 @@
 name: azure_activity_log_alerts
-version: 0.3.1
+version: 0.4.0
 description: >-
-  Shows which security-relevant control-plane operations and App Service changes an enabled activity log alert covers, and whether those alerts reach a person.
+  Shows which security-relevant control-plane operations, App Service changes and changes to protected log storage an enabled activity log alert covers, and whether those alerts reach a person.
 category: azure
 
 config_schema:
@@ -79,7 +79,7 @@ evidence_set:
     - GET Microsoft.AlertsManagement/actionRules — processing rules that suppress or add action groups
     - GET <action group id> (per referenced action group not in the subscription's own list, such as one in another subscription; an id that isn't an action group path is never fetched) — its receivers
 
-    Output: azure_activity_log_alerts_<subscription>.json — each activity log alert with the operations it fires on, the receivers it notifies (phone numbers cut to the last four digits, webhooks to their host) and whether it reaches a person, plus the operations it's judged against and the resources left out.
+    Output: azure_activity_log_alerts_<subscription>.json — each activity log alert with the operations it fires on, the outcome fields it filters on (status, subStatus, level), whether its scope or a resourceId condition narrows it below a storage account, the receivers it notifies (phone numbers cut to the last four digits, webhooks to their host) and whether it reaches a person, plus the operations it's judged against and the resources left out. The log storage protection map shows what is configured, not that a notification was delivered, and doesn't check which storage accounts an alert covers; each alert record shows its scopes and conditions.
 
     Summary fields:
 
@@ -154,3 +154,16 @@ evidence_set:
     - change_operations_total — Number of App Service changes in change_operation_coverage; always 4
     - all_change_operations_covered — True if every App Service change is marked true; false if any is marked false; null if none is false but some are only possibly covered
     - uncovered_change_operations — List of the App Service changes marked false in change_operation_coverage
+
+    Does a person get alerted to attempts to alter protected log storage?
+    - log_storage_protection_coverage — For each change that would let immutable log storage be altered or removed, true if an enabled alert that reaches a person fires on every attempt at it, including one Azure denies; null if only an alert that might reach a person does, if the alert filters on status, subStatus or level (so may skip a denied attempt), if the action groups or processing (suppression) rules could not be read, or, for every change, if the alert list could not be read; false otherwise. An alert scoped below the storage account gets no credit for deleting the account. The full operation names are in results.log_storage_protection_operations:
+      - delete_immutability_policy (Microsoft.Storage/storageAccounts/blobServices/containers/immutabilityPolicies/delete)
+      - change_immutability_policy (Microsoft.Storage/storageAccounts/blobServices/containers/immutabilityPolicies/write)
+      - clear_legal_hold (Microsoft.Storage/storageAccounts/blobServices/containers/clearLegalHold/action)
+      - delete_blob_container (Microsoft.Storage/storageAccounts/blobServices/containers/delete)
+      - delete_storage_account (Microsoft.Storage/storageAccounts/delete)
+    - log_storage_protection_operations_covered — Number of those changes marked true in log_storage_protection_coverage; null if the alert list could not be read
+    - log_storage_protection_operations_possibly_covered — Number marked null in log_storage_protection_coverage; null if the alert list could not be read
+    - log_storage_protection_operations_total — Number of changes in log_storage_protection_coverage; always 5
+    - all_log_storage_protection_operations_covered — True if every change is marked true; false if any is marked false; null if none is false but some are only possibly covered, or the alert list could not be read
+    - uncovered_log_storage_protection_operations — List of the changes marked false in log_storage_protection_coverage; null if the alert list could not be read
