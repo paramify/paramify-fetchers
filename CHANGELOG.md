@@ -3263,6 +3263,35 @@ schemas and the `paramify` CLI — not the internal code.
   explicitly enabled. Existing security-contact reads and failure handling are
   unchanged.
 
+- **`azure_policy_compliance` 0.6.0: unread reads give null counts, and an
+  unread remediation task can no longer read as complete.**
+  - `deployments_complete` could read true on a run that missed a task's
+    deployment list: a later task's read replaced the record of unread tasks.
+    A task whose deployments could not be listed now keeps it false.
+  - A remediation task at a scope the fetcher doesn't recognise now fails the
+    run, where before it was skipped with only a log line.
+  - When the compliance summary could not be read, `non_compliant_resources`,
+    `non_compliant_policies`, `compliant_resources`, `resources_evaluated`,
+    `resource_compliance_percentage`, `assignments_evaluated`,
+    `non_compliant_assignments` and `compliant_assignments` read null, not 0.
+    When the remediation task list could not be read, `remediation_tasks`,
+    `remediation_tasks_by_provisioning_state` and the two deployment totals
+    read null, not 0. `listed_non_compliant_states` and
+    `listed_distinct_non_compliant_resources` read null when the non-compliant
+    states query failed. With the provider not registered they still read 0.
+  - With a `resource_exclusions` pattern set and the summary unread,
+    `non_compliant_assignments` and `compliant_assignments` read null, not 0.
+  - When the task list or any task's deployment list was not read,
+    `remediation_deployments_listed`, `remediation_deployments_by_status` and
+    the `remediated_resources_*` counts (and
+    `succeeded_remediations_now_non_compliant`) read null, not counts over the
+    partial list.
+  - `resources_by_compliance_state` and `policies_by_compliance_state` read null,
+    not `{}`, when the compliance summary could not be read.
+    `non_compliant_states_truncated` reads null when the non-compliant states
+    query failed, and `remediation_deployments_truncated` reads null when the
+    task list or a task's deployment list was not read, not false.
+
 - **`azure_managed_identity_configuration` 0.3.0: an unread list gives null
   counts, not 0, and an unread federated-credential list no longer counts an
   identity as unattached.**
