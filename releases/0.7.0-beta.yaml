@@ -70,7 +70,8 @@ fetchers:
   note: activity log alert rules, action groups and alert processing rules
 - name: azure_ai_hub_configuration
   version: 0.2.1
-  note: hubs, projects and other Machine Learning workspaces; an excluded workspace's connections, datastores…
+  note: You can exclude workspaces by name; an excluded workspace's connections and datastores are not read
+  draft: true
 - name: azure_ai_services_configuration
   version: 0.2.2
   note: names its search service counts
@@ -83,7 +84,8 @@ fetchers:
   draft: true
 - name: azure_alert_rules
   version: 0.3.2
-  note: alert rules, action groups and alert processing rules; routing is still worked out against every action group…
+  note: You can exclude alert rules, action groups and processing rules; routing still checks every group
+  draft: true
 - name: azure_api_management_configuration
   version: 0.2.1
   note: services, with their APIs, products, backends, hostnames and certificates, none of them read
@@ -106,7 +108,8 @@ fetchers:
   note: cipher suites, basic-auth publishing, Key Vault references and runtime end of support
 - name: azure_app_service_deployments
   version: 0.3.2
-  note: web apps, function apps and deployment slots (a slot follows its app), taken out before the per-app reads, so…
+  note: You can exclude web apps, function apps and slots; a slot is excluded along with its app
+  draft: true
 - name: azure_app_service_plans
   version: 0.3.2
   note: plans and the web and function apps on them
@@ -129,13 +132,15 @@ fetchers:
   note: registries, which then get no diagnostic-settings reads
 - name: azure_container_workloads_configuration
   version: 0.2.1
-  note: Container Apps environments, apps and jobs, and container groups; an app or job also leaves with its…
+  note: You can exclude Container Apps environments, apps, jobs and container groups
+  draft: true
 - name: azure_cosmosdb_configuration
   version: 0.2.1
   note: database accounts
 - name: azure_data_services_configuration
   version: 0.3.0
-  note: a service list that was not read gives null counts, and a MongoDB cluster with public access Disabled reads…
+  note: A service list it can't read now gives null counts, not 0; you can exclude clusters and namespaces
+  draft: true
 - name: azure_databricks_workspace_configuration
   version: 0.2.1
   note: workspaces
@@ -150,7 +155,8 @@ fetchers:
   note: security contacts
 - name: azure_defender_vulnerability_findings
   version: 0.1.1
-  note: key findings to the parent Azure resource, CVE-shaped ids only as CVEs, unique paging ids, open count after…
+  note: Findings now belong to their parent Azure resource; only real CVE ids count as CVEs
+  draft: true
 - name: azure_devops_audit_streams
   version: 0.1.1
   note: no longer reads unlisted streams as no streams
@@ -258,19 +264,23 @@ fetchers:
   draft: true
 - name: azure_log_analytics_workspaces
   version: 0.3.2
-  note: workspaces; an excluded workspace's tables, data exports and solutions are not read, and excluding the…
+  note: You can exclude workspaces; an excluded workspace's tables, exports and solutions are not read
+  draft: true
 - name: azure_log_storage_immutability
   version: 0.2.1
-  note: storage accounts, whose containers are then not read; an `id:` pattern can take a single log container out of…
+  note: You can exclude storage accounts, or a single log container by id
+  draft: true
 - name: azure_managed_identity_configuration
   version: 0.3.0
-  note: an unread list gives null counts, not 0, and an unread federated-credential list no longer counts an identity…
+  note: A list it can't read now gives null counts, not 0; you can exclude identities
+  draft: true
 - name: azure_managed_redis_configuration
   version: 0.3.0
   note: a list that could not be read gives null counts, not 0
 - name: azure_monitor_fired_alerts
   version: 0.2.2
-  note: alert rules by their own resource group or id, and fired alerts by their target resource; alerts on the…
+  note: You can exclude alert rules and the alerts on chosen resources; their history is not read
+  draft: true
 - name: azure_mysql_configuration
   version: 0.3.0
   note: flexible servers, whose parameters are then not read
@@ -312,7 +322,8 @@ fetchers:
   note: a list that could not be read gives null counts, not 0
 - name: azure_residual_resources
   version: 0.3.1
-  note: orphaned resources (an empty resource group through its own id) and role assignments by their scope (they…
+  note: You can exclude orphaned resources and role assignments by resource group or id
+  draft: true
 - name: azure_resource_diagnostic_settings
   version: 0.4.1
   note: shows whether resource logs arrive
@@ -347,10 +358,12 @@ fetchers:
   note: resource_exclusions is a pattern list
 - name: azure_service_log_records
   version: 0.2.1
-  note: App Service apps and slots, and SQL managed instances, which get no diagnostic-setting, slot or database…
+  note: You can exclude App Service apps, slots and SQL managed instances
+  draft: true
 - name: azure_sql_encryption_status
   version: 0.2.1
-  note: logical servers, whose databases leave with them; an in-scope server whose key sits in an excluded vault…
+  note: You can exclude SQL servers; their databases are excluded with them
+  draft: true
 - name: azure_sql_managed_instance_backups
   version: 0.5.0
   note: failover history
@@ -359,7 +372,8 @@ fetchers:
   note: subnet rules and routes, maintenance window and data classification
 - name: azure_sql_managed_instance_encryption
   version: 0.4.0
-  note: when the instance list is not read, every count is null (`total_managed_instances` and…
+  note: When the instance list can't be read, every count is now null, not 0
+  draft: true
 - name: azure_sql_server_configuration
   version: 0.2.1
   note: logical servers; their firewall rules and audit, alert and vulnerability settings are not read
@@ -371,13 +385,15 @@ fetchers:
   note: fetcher
 - name: azure_virtual_wan_configuration
   version: 0.2.1
-  note: virtual WANs, hubs, hub VPN gateways (with their connections), VPN sites, point-to-site gateways and VPN…
+  note: You can exclude virtual WANs, hubs, VPN gateways, VPN sites and point-to-site gateways
+  draft: true
 - name: azure_vm_hardening_status
   version: 0.3.1
   note: OS patch settings
 - name: azure_vnet_egress_routing
   version: 0.3.2
-  note: virtual networks, subnets, route tables, network interfaces, Azure Firewalls and Virtual WAN hubs; a subnet…
+  note: You can exclude VNets, subnets, route tables, NICs, firewalls and WAN hubs
+  draft: true
 - name: azure_vpn_gateway_configuration
   version: 0.3.0
   note: '`active_active_gateways` and `p2s_enabled_gateways` count only Vpn-type gateways'
@@ -443,10 +459,12 @@ fetchers:
   note: reads the documented endpoints and no longer reports Cloud SIEM as off by mistake
 - name: datadog_siem_detection_rules
   version: 0.2.0
-  note: the evidence holds only custom Cloud SIEM rules (`isDefault` false, type `log_detection` or…
+  note: Holds only your custom Cloud SIEM rules, so rule counts can drop; rules_never_triggered_count is gone
+  draft: true
 - name: datadog_siem_signals
   version: 0.2.0
-  note: '`status` is now the signal''s triage state (`open`, `under_review` or `archived`), and `summary.status_counts`…'
+  note: status is now the triage state (open, under review, archived); severity holds the old status value
+  draft: true
 - name: fedramp_marketplace_vendor_certification_status
   version: 0.1.0
   note: 'FedRAMP Marketplace status of the vendor packages you list: certified, in process or delisted'
@@ -589,10 +607,12 @@ fetchers:
   draft: true
 - name: qualys_scan_coverage
   version: 0.1.0
-  note: each host's last vulnerability scan and last authenticated scan against `scan_window_days` (default 31, so a…
+  note: Each host's last vulnerability scan and last authenticated scan, and IPs with no host record
+  draft: true
 - name: qualys_scan_schedules
   version: 0.1.0
-  note: active scan schedules and their longest gap between runs, whether each option profile enables authentication…
+  note: Active scan schedules, the longest gap between runs, and whether each scans with authentication
+  draft: true
 - name: qualys_stig_compliance_report
   version: 0.1.0
   note: Every evaluated posture for a Qualys STIG policy, with controls, remediation and exceptions
@@ -606,7 +626,8 @@ fetchers:
   note: open detections (New, Active, Re-Opened) by severity and type, with each one's age against `remediation_days`
 - name: qualys_vulnerability_remediation
   version: 0.1.0
-  note: detections fixed within the lookback, fixed within or after their timeframe, and the detections reopened in…
+  note: Vulnerabilities fixed in the lookback window, whether on time for their severity, and which came back
+  draft: true
 - name: servicenow_after_action_reports
   version: 0.1.0
   note: Incident after action reports from the ServiceNow Paramify ITSM API
@@ -628,7 +649,8 @@ fetchers:
   note: every endpoint, one inventory record each
 - name: sophos_endpoint_protection
   version: 0.1.0
-  note: for each endpoint, whether its protection services run, whether tamper protection is on, whether Intercept X…
+  note: 'Per endpoint: whether protection services run, tamper protection is on and Intercept X is installed'
+  draft: true
 - name: sophos_threat_protection_policies
   version: 0.1.0
   note: for each threat protection policy, whether a scheduled scan is configured and whether on-access scanning is on
