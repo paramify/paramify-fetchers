@@ -1,0 +1,465 @@
+# HELP alertmanager_alerts How many alerts by state.
+# TYPE alertmanager_alerts gauge
+alertmanager_alerts{state="active"} 2
+alertmanager_alerts{state="suppressed"} 0
+alertmanager_alerts{state="unprocessed"} 0
+# HELP alertmanager_alerts_invalid_total The total number of received alerts that were invalid.
+# TYPE alertmanager_alerts_invalid_total counter
+alertmanager_alerts_invalid_total{version="v2"} 0
+# HELP alertmanager_alerts_per_alert_limit Current limit on number of alerts per alert name
+# TYPE alertmanager_alerts_per_alert_limit gauge
+alertmanager_alerts_per_alert_limit 0
+# HELP alertmanager_alerts_received_total The total number of received alerts.
+# TYPE alertmanager_alerts_received_total counter
+alertmanager_alerts_received_total{status="firing",version="v2"} 2
+alertmanager_alerts_received_total{status="resolved",version="v2"} 0
+# HELP alertmanager_alerts_subscriber_channel_writes_total Number of times alerts were written to subscriber channels
+# TYPE alertmanager_alerts_subscriber_channel_writes_total counter
+alertmanager_alerts_subscriber_channel_writes_total{subscriber="dispatcher"} 2
+alertmanager_alerts_subscriber_channel_writes_total{subscriber="inhibitor"} 2
+# HELP alertmanager_api_connect_stream_concurrency_limit_exceeded_total Total number of Connect API streams rejected because the concurrency limit was reached.
+# TYPE alertmanager_api_connect_stream_concurrency_limit_exceeded_total counter
+alertmanager_api_connect_stream_concurrency_limit_exceeded_total{procedure="ServerReflectionInfo",service="grpc.reflection.v1.ServerReflection"} 0
+alertmanager_api_connect_stream_concurrency_limit_exceeded_total{procedure="ServerReflectionInfo",service="grpc.reflection.v1alpha.ServerReflection"} 0
+alertmanager_api_connect_stream_concurrency_limit_exceeded_total{procedure="Watch",service="grpc.health.v1.Health"} 0
+# HELP alertmanager_api_connect_stream_requests_in_flight Current number of admitted Connect API streams.
+# TYPE alertmanager_api_connect_stream_requests_in_flight gauge
+alertmanager_api_connect_stream_requests_in_flight{procedure="ServerReflectionInfo",service="grpc.reflection.v1.ServerReflection"} 0
+alertmanager_api_connect_stream_requests_in_flight{procedure="ServerReflectionInfo",service="grpc.reflection.v1alpha.ServerReflection"} 0
+alertmanager_api_connect_stream_requests_in_flight{procedure="Watch",service="grpc.health.v1.Health"} 0
+# HELP alertmanager_api_connect_unary_concurrency_limit_exceeded_total Total number of Connect API unary RPCs rejected because the concurrency limit was reached.
+# TYPE alertmanager_api_connect_unary_concurrency_limit_exceeded_total counter
+alertmanager_api_connect_unary_concurrency_limit_exceeded_total{procedure="Check",service="grpc.health.v1.Health"} 0
+alertmanager_api_connect_unary_concurrency_limit_exceeded_total{procedure="GetStatus",service="status.v3alpha.StatusService"} 0
+# HELP alertmanager_api_connect_unary_deadline_exceeded_total Total number of Connect API unary RPCs whose configured server timeout expired, independent of the final RPC outcome.
+# TYPE alertmanager_api_connect_unary_deadline_exceeded_total counter
+alertmanager_api_connect_unary_deadline_exceeded_total{procedure="Check",service="grpc.health.v1.Health"} 0
+alertmanager_api_connect_unary_deadline_exceeded_total{procedure="GetStatus",service="status.v3alpha.StatusService"} 0
+# HELP alertmanager_api_connect_unary_requests_in_flight Current number of admitted Connect API unary RPCs.
+# TYPE alertmanager_api_connect_unary_requests_in_flight gauge
+alertmanager_api_connect_unary_requests_in_flight{procedure="Check",service="grpc.health.v1.Health"} 0
+alertmanager_api_connect_unary_requests_in_flight{procedure="GetStatus",service="status.v3alpha.StatusService"} 0
+# HELP alertmanager_build_info A metric with a constant '1' value labeled by version, revision, branch, goversion from which alertmanager was built, and the goos and goarch for the build.
+# TYPE alertmanager_build_info gauge
+alertmanager_build_info{branch="HEAD",goarch="amd64",goos="linux",goversion="go1.27.3",revision="8cf67a8e75004bad6c3c6bacc829945cf8a3ee65",tags="netgo",version="0.35.0"} 1
+# HELP alertmanager_cluster_enabled Indicates whether the clustering is enabled or not.
+# TYPE alertmanager_cluster_enabled gauge
+alertmanager_cluster_enabled 0
+# HELP alertmanager_config_hash Hash of the currently loaded alertmanager configuration. Note that this is not a cryptographically strong hash.
+# TYPE alertmanager_config_hash gauge
+alertmanager_config_hash 1.03815269523237e+14
+# HELP alertmanager_config_last_reload_success_timestamp_seconds Timestamp of the last successful configuration reload.
+# TYPE alertmanager_config_last_reload_success_timestamp_seconds gauge
+alertmanager_config_last_reload_success_timestamp_seconds 1.7949583171216176e+09
+# HELP alertmanager_config_last_reload_successful Whether the last configuration reload attempt was successful.
+# TYPE alertmanager_config_last_reload_successful gauge
+alertmanager_config_last_reload_successful 1
+# HELP alertmanager_dispatcher_aggregation_group_creation_given_up_total Number of alerts dropped because aggregation group creation exceeded the retry limit.
+# TYPE alertmanager_dispatcher_aggregation_group_creation_given_up_total counter
+alertmanager_dispatcher_aggregation_group_creation_given_up_total 0
+# HELP alertmanager_dispatcher_aggregation_group_creation_retries_total Number of CAS retries while creating aggregation groups under contention.
+# TYPE alertmanager_dispatcher_aggregation_group_creation_retries_total counter
+alertmanager_dispatcher_aggregation_group_creation_retries_total 0
+# HELP alertmanager_dispatcher_aggregation_group_limit_reached_total Number of times when dispatcher failed to create new aggregation group due to limit.
+# TYPE alertmanager_dispatcher_aggregation_group_limit_reached_total counter
+alertmanager_dispatcher_aggregation_group_limit_reached_total 0
+# HELP alertmanager_dispatcher_aggregation_groups Number of active aggregation groups
+# TYPE alertmanager_dispatcher_aggregation_groups gauge
+alertmanager_dispatcher_aggregation_groups 2
+# HELP alertmanager_dispatcher_alert_processing_duration_seconds Summary of latencies for the processing of alerts.
+# TYPE alertmanager_dispatcher_alert_processing_duration_seconds summary
+alertmanager_dispatcher_alert_processing_duration_seconds_sum 0.000227559
+alertmanager_dispatcher_alert_processing_duration_seconds_count 2
+# HELP alertmanager_http_concurrency_limit_exceeded_total Total number of times an HTTP request failed because the concurrency limit was reached.
+# TYPE alertmanager_http_concurrency_limit_exceeded_total counter
+alertmanager_http_concurrency_limit_exceeded_total{method="get"} 0
+# HELP alertmanager_http_request_duration_seconds Histogram of latencies for HTTP requests.
+# TYPE alertmanager_http_request_duration_seconds histogram
+alertmanager_http_request_duration_seconds_bucket{code="200",handler="/-/ready",method="get",le="0.005"} 1
+alertmanager_http_request_duration_seconds_bucket{code="200",handler="/-/ready",method="get",le="0.01"} 1
+alertmanager_http_request_duration_seconds_bucket{code="200",handler="/-/ready",method="get",le="0.025"} 1
+alertmanager_http_request_duration_seconds_bucket{code="200",handler="/-/ready",method="get",le="0.05"} 1
+alertmanager_http_request_duration_seconds_bucket{code="200",handler="/-/ready",method="get",le="0.1"} 1
+alertmanager_http_request_duration_seconds_bucket{code="200",handler="/-/ready",method="get",le="0.25"} 1
+alertmanager_http_request_duration_seconds_bucket{code="200",handler="/-/ready",method="get",le="0.5"} 1
+alertmanager_http_request_duration_seconds_bucket{code="200",handler="/-/ready",method="get",le="1"} 1
+alertmanager_http_request_duration_seconds_bucket{code="200",handler="/-/ready",method="get",le="2.5"} 1
+alertmanager_http_request_duration_seconds_bucket{code="200",handler="/-/ready",method="get",le="5"} 1
+alertmanager_http_request_duration_seconds_bucket{code="200",handler="/-/ready",method="get",le="10"} 1
+alertmanager_http_request_duration_seconds_bucket{code="200",handler="/-/ready",method="get",le="+Inf"} 1
+alertmanager_http_request_duration_seconds_sum{code="200",handler="/-/ready",method="get"} 5.7942e-05
+alertmanager_http_request_duration_seconds_count{code="200",handler="/-/ready",method="get"} 1
+alertmanager_http_request_duration_seconds_bucket{code="200",handler="/api/v2/alerts",method="post",le="0.005"} 1
+alertmanager_http_request_duration_seconds_bucket{code="200",handler="/api/v2/alerts",method="post",le="0.01"} 1
+alertmanager_http_request_duration_seconds_bucket{code="200",handler="/api/v2/alerts",method="post",le="0.025"} 1
+alertmanager_http_request_duration_seconds_bucket{code="200",handler="/api/v2/alerts",method="post",le="0.05"} 1
+alertmanager_http_request_duration_seconds_bucket{code="200",handler="/api/v2/alerts",method="post",le="0.1"} 1
+alertmanager_http_request_duration_seconds_bucket{code="200",handler="/api/v2/alerts",method="post",le="0.25"} 1
+alertmanager_http_request_duration_seconds_bucket{code="200",handler="/api/v2/alerts",method="post",le="0.5"} 1
+alertmanager_http_request_duration_seconds_bucket{code="200",handler="/api/v2/alerts",method="post",le="1"} 1
+alertmanager_http_request_duration_seconds_bucket{code="200",handler="/api/v2/alerts",method="post",le="2.5"} 1
+alertmanager_http_request_duration_seconds_bucket{code="200",handler="/api/v2/alerts",method="post",le="5"} 1
+alertmanager_http_request_duration_seconds_bucket{code="200",handler="/api/v2/alerts",method="post",le="10"} 1
+alertmanager_http_request_duration_seconds_bucket{code="200",handler="/api/v2/alerts",method="post",le="+Inf"} 1
+alertmanager_http_request_duration_seconds_sum{code="200",handler="/api/v2/alerts",method="post"} 0.000286855
+alertmanager_http_request_duration_seconds_count{code="200",handler="/api/v2/alerts",method="post"} 1
+alertmanager_http_request_duration_seconds_bucket{code="200",handler="/metrics",method="get",le="0.005"} 1
+alertmanager_http_request_duration_seconds_bucket{code="200",handler="/metrics",method="get",le="0.01"} 1
+alertmanager_http_request_duration_seconds_bucket{code="200",handler="/metrics",method="get",le="0.025"} 1
+alertmanager_http_request_duration_seconds_bucket{code="200",handler="/metrics",method="get",le="0.05"} 1
+alertmanager_http_request_duration_seconds_bucket{code="200",handler="/metrics",method="get",le="0.1"} 1
+alertmanager_http_request_duration_seconds_bucket{code="200",handler="/metrics",method="get",le="0.25"} 1
+alertmanager_http_request_duration_seconds_bucket{code="200",handler="/metrics",method="get",le="0.5"} 1
+alertmanager_http_request_duration_seconds_bucket{code="200",handler="/metrics",method="get",le="1"} 1
+alertmanager_http_request_duration_seconds_bucket{code="200",handler="/metrics",method="get",le="2.5"} 1
+alertmanager_http_request_duration_seconds_bucket{code="200",handler="/metrics",method="get",le="5"} 1
+alertmanager_http_request_duration_seconds_bucket{code="200",handler="/metrics",method="get",le="10"} 1
+alertmanager_http_request_duration_seconds_bucket{code="200",handler="/metrics",method="get",le="+Inf"} 1
+alertmanager_http_request_duration_seconds_sum{code="200",handler="/metrics",method="get"} 0.004186978
+alertmanager_http_request_duration_seconds_count{code="200",handler="/metrics",method="get"} 1
+# HELP alertmanager_http_requests_in_flight Current number of HTTP requests being processed.
+# TYPE alertmanager_http_requests_in_flight gauge
+alertmanager_http_requests_in_flight{method="get"} 1
+# HELP alertmanager_http_response_size_bytes Histogram of response size for HTTP requests.
+# TYPE alertmanager_http_response_size_bytes histogram
+alertmanager_http_response_size_bytes_bucket{handler="/-/ready",method="get",le="100"} 1
+alertmanager_http_response_size_bytes_bucket{handler="/-/ready",method="get",le="1000"} 1
+alertmanager_http_response_size_bytes_bucket{handler="/-/ready",method="get",le="10000"} 1
+alertmanager_http_response_size_bytes_bucket{handler="/-/ready",method="get",le="100000"} 1
+alertmanager_http_response_size_bytes_bucket{handler="/-/ready",method="get",le="1e+06"} 1
+alertmanager_http_response_size_bytes_bucket{handler="/-/ready",method="get",le="1e+07"} 1
+alertmanager_http_response_size_bytes_bucket{handler="/-/ready",method="get",le="1e+08"} 1
+alertmanager_http_response_size_bytes_bucket{handler="/-/ready",method="get",le="+Inf"} 1
+alertmanager_http_response_size_bytes_sum{handler="/-/ready",method="get"} 2
+alertmanager_http_response_size_bytes_count{handler="/-/ready",method="get"} 1
+alertmanager_http_response_size_bytes_bucket{handler="/metrics",method="get",le="100"} 0
+alertmanager_http_response_size_bytes_bucket{handler="/metrics",method="get",le="1000"} 0
+alertmanager_http_response_size_bytes_bucket{handler="/metrics",method="get",le="10000"} 0
+alertmanager_http_response_size_bytes_bucket{handler="/metrics",method="get",le="100000"} 1
+alertmanager_http_response_size_bytes_bucket{handler="/metrics",method="get",le="1e+06"} 1
+alertmanager_http_response_size_bytes_bucket{handler="/metrics",method="get",le="1e+07"} 1
+alertmanager_http_response_size_bytes_bucket{handler="/metrics",method="get",le="1e+08"} 1
+alertmanager_http_response_size_bytes_bucket{handler="/metrics",method="get",le="+Inf"} 1
+alertmanager_http_response_size_bytes_sum{handler="/metrics",method="get"} 12288
+alertmanager_http_response_size_bytes_count{handler="/metrics",method="get"} 1
+# HELP alertmanager_inhibition_rules Number of configured inhibition rules.
+# TYPE alertmanager_inhibition_rules gauge
+alertmanager_inhibition_rules 1
+# HELP alertmanager_integrations Number of configured integrations.
+# TYPE alertmanager_integrations gauge
+alertmanager_integrations 2
+# HELP alertmanager_nflog_gc_duration_seconds Duration of the last notification log garbage collection cycle.
+# TYPE alertmanager_nflog_gc_duration_seconds summary
+alertmanager_nflog_gc_duration_seconds_sum 0
+alertmanager_nflog_gc_duration_seconds_count 0
+# HELP alertmanager_nflog_gossip_messages_propagated_total Number of received gossip messages that have been further gossiped.
+# TYPE alertmanager_nflog_gossip_messages_propagated_total counter
+alertmanager_nflog_gossip_messages_propagated_total 0
+# HELP alertmanager_nflog_maintenance_errors_total How many maintenances were executed for the notification log that failed.
+# TYPE alertmanager_nflog_maintenance_errors_total counter
+alertmanager_nflog_maintenance_errors_total 0
+# HELP alertmanager_nflog_maintenance_total How many maintenances were executed for the notification log.
+# TYPE alertmanager_nflog_maintenance_total counter
+alertmanager_nflog_maintenance_total 0
+# HELP alertmanager_nflog_queries_total Number of notification log queries were received.
+# TYPE alertmanager_nflog_queries_total counter
+alertmanager_nflog_queries_total 11
+# HELP alertmanager_nflog_query_duration_seconds Duration of notification log query evaluation.
+# TYPE alertmanager_nflog_query_duration_seconds histogram
+alertmanager_nflog_query_duration_seconds_bucket{le="0.005"} 11
+alertmanager_nflog_query_duration_seconds_bucket{le="0.01"} 11
+alertmanager_nflog_query_duration_seconds_bucket{le="0.025"} 11
+alertmanager_nflog_query_duration_seconds_bucket{le="0.05"} 11
+alertmanager_nflog_query_duration_seconds_bucket{le="0.1"} 11
+alertmanager_nflog_query_duration_seconds_bucket{le="0.25"} 11
+alertmanager_nflog_query_duration_seconds_bucket{le="0.5"} 11
+alertmanager_nflog_query_duration_seconds_bucket{le="1"} 11
+alertmanager_nflog_query_duration_seconds_bucket{le="2.5"} 11
+alertmanager_nflog_query_duration_seconds_bucket{le="5"} 11
+alertmanager_nflog_query_duration_seconds_bucket{le="10"} 11
+alertmanager_nflog_query_duration_seconds_bucket{le="+Inf"} 11
+alertmanager_nflog_query_duration_seconds_sum 8.184900000000001e-05
+alertmanager_nflog_query_duration_seconds_count 11
+# HELP alertmanager_nflog_query_errors_total Number notification log received queries that failed.
+# TYPE alertmanager_nflog_query_errors_total counter
+alertmanager_nflog_query_errors_total 3
+# HELP alertmanager_nflog_snapshot_duration_seconds Duration of the last notification log snapshot.
+# TYPE alertmanager_nflog_snapshot_duration_seconds summary
+alertmanager_nflog_snapshot_duration_seconds_sum 0
+alertmanager_nflog_snapshot_duration_seconds_count 0
+# HELP alertmanager_nflog_snapshot_size_bytes Size of the last notification log snapshot in bytes.
+# TYPE alertmanager_nflog_snapshot_size_bytes gauge
+alertmanager_nflog_snapshot_size_bytes 0
+# HELP alertmanager_notification_latency_seconds The latency of notifications in seconds.
+# TYPE alertmanager_notification_latency_seconds histogram
+alertmanager_notification_latency_seconds_bucket{integration="webhook",receiver_name="ops-webhook",le="1"} 1
+alertmanager_notification_latency_seconds_bucket{integration="webhook",receiver_name="ops-webhook",le="5"} 1
+alertmanager_notification_latency_seconds_bucket{integration="webhook",receiver_name="ops-webhook",le="10"} 1
+alertmanager_notification_latency_seconds_bucket{integration="webhook",receiver_name="ops-webhook",le="15"} 1
+alertmanager_notification_latency_seconds_bucket{integration="webhook",receiver_name="ops-webhook",le="20"} 1
+alertmanager_notification_latency_seconds_bucket{integration="webhook",receiver_name="ops-webhook",le="+Inf"} 1
+alertmanager_notification_latency_seconds_sum{integration="webhook",receiver_name="ops-webhook"} 0.002844326
+alertmanager_notification_latency_seconds_count{integration="webhook",receiver_name="ops-webhook"} 1
+alertmanager_notification_latency_seconds_bucket{integration="webhook",receiver_name="pager",le="1"} 13
+alertmanager_notification_latency_seconds_bucket{integration="webhook",receiver_name="pager",le="5"} 13
+alertmanager_notification_latency_seconds_bucket{integration="webhook",receiver_name="pager",le="10"} 13
+alertmanager_notification_latency_seconds_bucket{integration="webhook",receiver_name="pager",le="15"} 13
+alertmanager_notification_latency_seconds_bucket{integration="webhook",receiver_name="pager",le="20"} 13
+alertmanager_notification_latency_seconds_bucket{integration="webhook",receiver_name="pager",le="+Inf"} 13
+alertmanager_notification_latency_seconds_sum{integration="webhook",receiver_name="pager"} 0.007120819000000001
+alertmanager_notification_latency_seconds_count{integration="webhook",receiver_name="pager"} 13
+# HELP alertmanager_notification_requests_failed_total The total number of failed notification requests.
+# TYPE alertmanager_notification_requests_failed_total counter
+alertmanager_notification_requests_failed_total{integration="webhook",receiver_name="ops-webhook"} 0
+alertmanager_notification_requests_failed_total{integration="webhook",receiver_name="pager"} 13
+# HELP alertmanager_notification_requests_total The total number of attempted notification requests.
+# TYPE alertmanager_notification_requests_total counter
+alertmanager_notification_requests_total{integration="webhook",receiver_name="ops-webhook"} 1
+alertmanager_notification_requests_total{integration="webhook",receiver_name="pager"} 13
+# HELP alertmanager_notifications_failed_total The total number of failed notifications.
+# TYPE alertmanager_notifications_failed_total counter
+alertmanager_notifications_failed_total{integration="webhook",reason="authError",receiver_name="ops-webhook"} 0
+alertmanager_notifications_failed_total{integration="webhook",reason="authError",receiver_name="pager"} 0
+alertmanager_notifications_failed_total{integration="webhook",reason="clientError",receiver_name="ops-webhook"} 0
+alertmanager_notifications_failed_total{integration="webhook",reason="clientError",receiver_name="pager"} 0
+alertmanager_notifications_failed_total{integration="webhook",reason="configError",receiver_name="ops-webhook"} 0
+alertmanager_notifications_failed_total{integration="webhook",reason="configError",receiver_name="pager"} 0
+alertmanager_notifications_failed_total{integration="webhook",reason="contextCanceled",receiver_name="ops-webhook"} 0
+alertmanager_notifications_failed_total{integration="webhook",reason="contextCanceled",receiver_name="pager"} 0
+alertmanager_notifications_failed_total{integration="webhook",reason="contextDeadlineExceeded",receiver_name="ops-webhook"} 0
+alertmanager_notifications_failed_total{integration="webhook",reason="contextDeadlineExceeded",receiver_name="pager"} 0
+alertmanager_notifications_failed_total{integration="webhook",reason="encodingError",receiver_name="ops-webhook"} 0
+alertmanager_notifications_failed_total{integration="webhook",reason="encodingError",receiver_name="pager"} 0
+alertmanager_notifications_failed_total{integration="webhook",reason="fileReadError",receiver_name="ops-webhook"} 0
+alertmanager_notifications_failed_total{integration="webhook",reason="fileReadError",receiver_name="pager"} 0
+alertmanager_notifications_failed_total{integration="webhook",reason="missingContext",receiver_name="ops-webhook"} 0
+alertmanager_notifications_failed_total{integration="webhook",reason="missingContext",receiver_name="pager"} 0
+alertmanager_notifications_failed_total{integration="webhook",reason="other",receiver_name="ops-webhook"} 0
+alertmanager_notifications_failed_total{integration="webhook",reason="other",receiver_name="pager"} 1
+alertmanager_notifications_failed_total{integration="webhook",reason="rateLimited",receiver_name="ops-webhook"} 0
+alertmanager_notifications_failed_total{integration="webhook",reason="rateLimited",receiver_name="pager"} 0
+alertmanager_notifications_failed_total{integration="webhook",reason="requestError",receiver_name="ops-webhook"} 0
+alertmanager_notifications_failed_total{integration="webhook",reason="requestError",receiver_name="pager"} 0
+alertmanager_notifications_failed_total{integration="webhook",reason="serverError",receiver_name="ops-webhook"} 0
+alertmanager_notifications_failed_total{integration="webhook",reason="serverError",receiver_name="pager"} 0
+alertmanager_notifications_failed_total{integration="webhook",reason="templateError",receiver_name="ops-webhook"} 0
+alertmanager_notifications_failed_total{integration="webhook",reason="templateError",receiver_name="pager"} 0
+# HELP alertmanager_notifications_total The total number of attempted notifications.
+# TYPE alertmanager_notifications_total counter
+alertmanager_notifications_total{integration="webhook",receiver_name="ops-webhook"} 1
+alertmanager_notifications_total{integration="webhook",receiver_name="pager"} 2
+# HELP alertmanager_receivers Number of configured receivers.
+# TYPE alertmanager_receivers gauge
+alertmanager_receivers 3
+# HELP alertmanager_silences How many silences by state.
+# TYPE alertmanager_silences gauge
+alertmanager_silences{state="active"} 0
+alertmanager_silences{state="expired"} 0
+alertmanager_silences{state="pending"} 0
+# HELP alertmanager_silences_gc_duration_seconds Duration of the last silence garbage collection cycle.
+# TYPE alertmanager_silences_gc_duration_seconds summary
+alertmanager_silences_gc_duration_seconds_sum 0
+alertmanager_silences_gc_duration_seconds_count 0
+# HELP alertmanager_silences_gc_errors_total How many silence GC errors were encountered.
+# TYPE alertmanager_silences_gc_errors_total counter
+alertmanager_silences_gc_errors_total 0
+# HELP alertmanager_silences_gossip_messages_propagated_total Number of received gossip messages that have been further gossiped.
+# TYPE alertmanager_silences_gossip_messages_propagated_total counter
+alertmanager_silences_gossip_messages_propagated_total 0
+# HELP alertmanager_silences_maintenance_errors_total How many maintenances were executed for silences that failed.
+# TYPE alertmanager_silences_maintenance_errors_total counter
+alertmanager_silences_maintenance_errors_total 0
+# HELP alertmanager_silences_maintenance_total How many maintenances were executed for silences.
+# TYPE alertmanager_silences_maintenance_total counter
+alertmanager_silences_maintenance_total 0
+# HELP alertmanager_silences_matcher_compile_errors_total How many silence matcher compilations failed.
+# TYPE alertmanager_silences_matcher_compile_errors_total counter
+alertmanager_silences_matcher_compile_errors_total{stage="index"} 0
+alertmanager_silences_matcher_compile_errors_total{stage="load_snapshot"} 0
+# HELP alertmanager_silences_matcher_index_size The number of entries in the matcher cache index.
+# TYPE alertmanager_silences_matcher_index_size gauge
+alertmanager_silences_matcher_index_size 0
+# HELP alertmanager_silences_queries_total How many silence queries were received.
+# TYPE alertmanager_silences_queries_total counter
+alertmanager_silences_queries_total 0
+# HELP alertmanager_silences_query_duration_seconds Duration of silence query evaluation.
+# TYPE alertmanager_silences_query_duration_seconds histogram
+alertmanager_silences_query_duration_seconds_bucket{le="0.005"} 0
+alertmanager_silences_query_duration_seconds_bucket{le="0.01"} 0
+alertmanager_silences_query_duration_seconds_bucket{le="0.025"} 0
+alertmanager_silences_query_duration_seconds_bucket{le="0.05"} 0
+alertmanager_silences_query_duration_seconds_bucket{le="0.1"} 0
+alertmanager_silences_query_duration_seconds_bucket{le="0.25"} 0
+alertmanager_silences_query_duration_seconds_bucket{le="0.5"} 0
+alertmanager_silences_query_duration_seconds_bucket{le="1"} 0
+alertmanager_silences_query_duration_seconds_bucket{le="2.5"} 0
+alertmanager_silences_query_duration_seconds_bucket{le="5"} 0
+alertmanager_silences_query_duration_seconds_bucket{le="10"} 0
+alertmanager_silences_query_duration_seconds_bucket{le="+Inf"} 0
+alertmanager_silences_query_duration_seconds_sum 0
+alertmanager_silences_query_duration_seconds_count 0
+# HELP alertmanager_silences_query_errors_total How many silence received queries did not succeed.
+# TYPE alertmanager_silences_query_errors_total counter
+alertmanager_silences_query_errors_total 0
+# HELP alertmanager_silences_query_silences_scanned_total How many silences were scanned during query evaluation.
+# TYPE alertmanager_silences_query_silences_scanned_total counter
+alertmanager_silences_query_silences_scanned_total 0
+# HELP alertmanager_silences_query_silences_skipped_total How many silences were skipped during query evaluation using the version index.
+# TYPE alertmanager_silences_query_silences_skipped_total counter
+alertmanager_silences_query_silences_skipped_total 0
+# HELP alertmanager_silences_snapshot_duration_seconds Duration of the last silence snapshot.
+# TYPE alertmanager_silences_snapshot_duration_seconds summary
+alertmanager_silences_snapshot_duration_seconds_sum 0
+alertmanager_silences_snapshot_duration_seconds_count 0
+# HELP alertmanager_silences_snapshot_size_bytes Size of the last silence snapshot in bytes.
+# TYPE alertmanager_silences_snapshot_size_bytes gauge
+alertmanager_silences_snapshot_size_bytes 0
+# HELP alertmanager_silences_state_size The number of silences in the state map.
+# TYPE alertmanager_silences_state_size gauge
+alertmanager_silences_state_size 0
+# HELP alertmanager_silences_version_index_size The number of entries in the version index.
+# TYPE alertmanager_silences_version_index_size gauge
+alertmanager_silences_version_index_size 0
+# HELP go_gc_duration_seconds A summary of the wall-time pause (stop-the-world) duration in garbage collection cycles.
+# TYPE go_gc_duration_seconds summary
+go_gc_duration_seconds{quantile="0"} 1.3073e-05
+go_gc_duration_seconds{quantile="0.25"} 1.5477e-05
+go_gc_duration_seconds{quantile="0.5"} 1.9596e-05
+go_gc_duration_seconds{quantile="0.75"} 6.0177e-05
+go_gc_duration_seconds{quantile="1"} 6.0177e-05
+go_gc_duration_seconds_sum 0.000108323
+go_gc_duration_seconds_count 4
+# HELP go_gc_gogc_percent Heap size target percentage configured by the user, otherwise 100. This value is set by the GOGC environment variable, and the runtime/debug.SetGCPercent function. Sourced from /gc/gogc:percent.
+# TYPE go_gc_gogc_percent gauge
+go_gc_gogc_percent 100
+# HELP go_gc_gomemlimit_bytes Go runtime memory limit configured by the user, otherwise math.MaxInt64. This value is set by the GOMEMLIMIT environment variable, and the runtime/debug.SetMemoryLimit function. Sourced from /gc/gomemlimit:bytes.
+# TYPE go_gc_gomemlimit_bytes gauge
+go_gc_gomemlimit_bytes 9.223372036854776e+18
+# HELP go_goroutines Number of goroutines that currently exist.
+# TYPE go_goroutines gauge
+go_goroutines 26
+# HELP go_info Information about the Go environment.
+# TYPE go_info gauge
+go_info{version="go1.27.3"} 1
+# HELP go_memstats_alloc_bytes Number of bytes allocated in heap and currently in use. Equals to /memory/classes/heap/objects:bytes.
+# TYPE go_memstats_alloc_bytes gauge
+go_memstats_alloc_bytes 5.271432e+06
+# HELP go_memstats_alloc_bytes_total Total number of bytes allocated in heap until now, even if released already. Equals to /gc/heap/allocs:bytes.
+# TYPE go_memstats_alloc_bytes_total counter
+go_memstats_alloc_bytes_total 1.2620344e+07
+# HELP go_memstats_buck_hash_sys_bytes Number of bytes used by the profiling bucket hash table. Equals to /memory/classes/profiling/buckets:bytes.
+# TYPE go_memstats_buck_hash_sys_bytes gauge
+go_memstats_buck_hash_sys_bytes 1.453845e+06
+# HELP go_memstats_frees_total Total number of heap objects frees. Equals to /gc/heap/frees:objects + /gc/heap/tiny/allocs:objects.
+# TYPE go_memstats_frees_total counter
+go_memstats_frees_total 79226
+# HELP go_memstats_gc_sys_bytes Number of bytes used for garbage collection system metadata. Equals to /memory/classes/metadata/other:bytes.
+# TYPE go_memstats_gc_sys_bytes gauge
+go_memstats_gc_sys_bytes 3.581168e+06
+# HELP go_memstats_heap_alloc_bytes Number of heap bytes allocated and currently in use, same as go_memstats_alloc_bytes. Equals to /memory/classes/heap/objects:bytes.
+# TYPE go_memstats_heap_alloc_bytes gauge
+go_memstats_heap_alloc_bytes 5.271432e+06
+# HELP go_memstats_heap_idle_bytes Number of heap bytes waiting to be used. Equals to /memory/classes/heap/released:bytes + /memory/classes/heap/free:bytes.
+# TYPE go_memstats_heap_idle_bytes gauge
+go_memstats_heap_idle_bytes 4.05504e+06
+# HELP go_memstats_heap_inuse_bytes Number of heap bytes that are in use. Equals to /memory/classes/heap/objects:bytes + /memory/classes/heap/unused:bytes
+# TYPE go_memstats_heap_inuse_bytes gauge
+go_memstats_heap_inuse_bytes 7.970816e+06
+# HELP go_memstats_heap_objects Number of currently allocated objects. Equals to /gc/heap/objects:objects.
+# TYPE go_memstats_heap_objects gauge
+go_memstats_heap_objects 29322
+# HELP go_memstats_heap_released_bytes Number of heap bytes released to OS. Equals to /memory/classes/heap/released:bytes.
+# TYPE go_memstats_heap_released_bytes gauge
+go_memstats_heap_released_bytes 2.277376e+06
+# HELP go_memstats_heap_sys_bytes Number of heap bytes obtained from system. Equals to /memory/classes/heap/objects:bytes + /memory/classes/heap/unused:bytes + /memory/classes/heap/released:bytes + /memory/classes/heap/free:bytes.
+# TYPE go_memstats_heap_sys_bytes gauge
+go_memstats_heap_sys_bytes 1.2025856e+07
+# HELP go_memstats_last_gc_time_seconds Number of seconds since 1970 of last garbage collection.
+# TYPE go_memstats_last_gc_time_seconds gauge
+go_memstats_last_gc_time_seconds 1.7949583331136296e+09
+# HELP go_memstats_mallocs_total Total number of heap objects allocated, both live and gc-ed. Semantically a counter version for go_memstats_heap_objects gauge. Equals to /gc/heap/allocs:objects + /gc/heap/tiny/allocs:objects.
+# TYPE go_memstats_mallocs_total counter
+go_memstats_mallocs_total 108548
+# HELP go_memstats_mcache_inuse_bytes Number of bytes in use by mcache structures. Equals to /memory/classes/metadata/mcache/inuse:bytes.
+# TYPE go_memstats_mcache_inuse_bytes gauge
+go_memstats_mcache_inuse_bytes 2296
+# HELP go_memstats_mcache_sys_bytes Number of bytes used for mcache structures obtained from system. Equals to /memory/classes/metadata/mcache/inuse:bytes + /memory/classes/metadata/mcache/free:bytes.
+# TYPE go_memstats_mcache_sys_bytes gauge
+go_memstats_mcache_sys_bytes 16072
+# HELP go_memstats_mspan_inuse_bytes Number of bytes in use by mspan structures. Equals to /memory/classes/metadata/mspan/inuse:bytes.
+# TYPE go_memstats_mspan_inuse_bytes gauge
+go_memstats_mspan_inuse_bytes 138240
+# HELP go_memstats_mspan_sys_bytes Number of bytes used for mspan structures obtained from system. Equals to /memory/classes/metadata/mspan/inuse:bytes + /memory/classes/metadata/mspan/free:bytes.
+# TYPE go_memstats_mspan_sys_bytes gauge
+go_memstats_mspan_sys_bytes 146880
+# HELP go_memstats_next_gc_bytes Number of heap bytes when next garbage collection will take place. Equals to /gc/heap/goal:bytes.
+# TYPE go_memstats_next_gc_bytes gauge
+go_memstats_next_gc_bytes 1.075013e+07
+# HELP go_memstats_other_sys_bytes Number of bytes used for other system allocations. Equals to /memory/classes/other:bytes.
+# TYPE go_memstats_other_sys_bytes gauge
+go_memstats_other_sys_bytes 403579
+# HELP go_memstats_stack_inuse_bytes Number of bytes obtained from system for stack allocator in non-CGO environments. Equals to /memory/classes/heap/stacks:bytes.
+# TYPE go_memstats_stack_inuse_bytes gauge
+go_memstats_stack_inuse_bytes 557056
+# HELP go_memstats_stack_sys_bytes Number of bytes obtained from system for stack allocator. Equals to /memory/classes/heap/stacks:bytes + /memory/classes/os-stacks:bytes.
+# TYPE go_memstats_stack_sys_bytes gauge
+go_memstats_stack_sys_bytes 557056
+# HELP go_memstats_sys_bytes Number of bytes obtained from system. Equals to /memory/classes/total:byte.
+# TYPE go_memstats_sys_bytes gauge
+go_memstats_sys_bytes 1.8184456e+07
+# HELP go_sched_gomaxprocs_threads The current runtime.GOMAXPROCS setting, or the number of operating system threads that can execute user-level Go code simultaneously. Sourced from /sched/gomaxprocs:threads.
+# TYPE go_sched_gomaxprocs_threads gauge
+go_sched_gomaxprocs_threads 1
+# HELP go_threads Number of OS threads created.
+# TYPE go_threads gauge
+go_threads 6
+# HELP net_conntrack_dialer_conn_attempted_total Total number of connections attempted by the given dialer a given name.
+# TYPE net_conntrack_dialer_conn_attempted_total counter
+net_conntrack_dialer_conn_attempted_total{dialer_name="webhook"} 14
+# HELP net_conntrack_dialer_conn_closed_total Total number of connections closed which originated from the dialer of a given name.
+# TYPE net_conntrack_dialer_conn_closed_total counter
+net_conntrack_dialer_conn_closed_total{dialer_name="webhook"} 1
+# HELP net_conntrack_dialer_conn_established_total Total number of connections successfully established by the given dialer a given name.
+# TYPE net_conntrack_dialer_conn_established_total counter
+net_conntrack_dialer_conn_established_total{dialer_name="webhook"} 1
+# HELP net_conntrack_dialer_conn_failed_total Total number of connections failed to dial by the dialer a given name.
+# TYPE net_conntrack_dialer_conn_failed_total counter
+net_conntrack_dialer_conn_failed_total{dialer_name="webhook",reason="refused"} 13
+net_conntrack_dialer_conn_failed_total{dialer_name="webhook",reason="resolution"} 0
+net_conntrack_dialer_conn_failed_total{dialer_name="webhook",reason="timeout"} 0
+net_conntrack_dialer_conn_failed_total{dialer_name="webhook",reason="unknown"} 13
+# HELP process_cpu_seconds_total Total user and system CPU time spent in seconds.
+# TYPE process_cpu_seconds_total counter
+process_cpu_seconds_total 0.05
+# HELP process_max_fds Maximum number of open file descriptors.
+# TYPE process_max_fds gauge
+process_max_fds 20000
+# HELP process_network_receive_bytes_total Number of bytes received by the process over the network.
+# TYPE process_network_receive_bytes_total counter
+process_network_receive_bytes_total 4.3466661e+07
+# HELP process_network_transmit_bytes_total Number of bytes sent by the process over the network.
+# TYPE process_network_transmit_bytes_total counter
+process_network_transmit_bytes_total 282536
+# HELP process_open_fds Number of open file descriptors.
+# TYPE process_open_fds gauge
+process_open_fds 9
+# HELP process_resident_memory_bytes Resident memory size in bytes.
+# TYPE process_resident_memory_bytes gauge
+process_resident_memory_bytes 4.0009728e+07
+# HELP process_start_time_seconds Start time of the process since unix epoch in seconds.
+# TYPE process_start_time_seconds gauge
+process_start_time_seconds 1.79495831686e+09
+# HELP process_virtual_memory_bytes Virtual memory size in bytes.
+# TYPE process_virtual_memory_bytes gauge
+process_virtual_memory_bytes 1.328955392e+09
+# HELP process_virtual_memory_max_bytes Maximum amount of virtual memory available in bytes.
+# TYPE process_virtual_memory_max_bytes gauge
+process_virtual_memory_max_bytes 1.8446744073709552e+19
+# HELP promhttp_metric_handler_requests_in_flight Current number of scrapes being served.
+# TYPE promhttp_metric_handler_requests_in_flight gauge
+promhttp_metric_handler_requests_in_flight 1
+# HELP promhttp_metric_handler_requests_total Total number of scrapes by HTTP status code.
+# TYPE promhttp_metric_handler_requests_total counter
+promhttp_metric_handler_requests_total{code="200"} 1
+promhttp_metric_handler_requests_total{code="500"} 0
+promhttp_metric_handler_requests_total{code="503"} 0

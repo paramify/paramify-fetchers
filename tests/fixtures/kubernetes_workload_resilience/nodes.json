@@ -1,0 +1,118 @@
+{
+  "apiVersion": "v1",
+  "items": [
+    {
+      "metadata": {
+        "labels": {
+          "kubernetes.io/hostname": "node-a",
+          "topology.kubernetes.io/zone": "zone-1"
+        },
+        "name": "node-a",
+        "uid": "00000000-0000-0000-0000-000000000026"
+      },
+      "spec": {
+        "taints": [
+          {
+            "effect": "NoSchedule",
+            "key": "node.kubernetes.io/not-ready"
+          }
+        ]
+      },
+      "status": {
+        "daemonEndpoints": {
+          "kubeletEndpoint": {
+            "Port": 0
+          }
+        },
+        "nodeInfo": {
+          "architecture": "",
+          "bootID": "",
+          "containerRuntimeVersion": "",
+          "kernelVersion": "",
+          "kubeProxyVersion": "",
+          "kubeletVersion": "",
+          "machineID": "",
+          "operatingSystem": "",
+          "osImage": "",
+          "systemUUID": ""
+        }
+      }
+    },
+    {
+      "metadata": {
+        "labels": {
+          "kubernetes.io/hostname": "node-b",
+          "topology.kubernetes.io/zone": "zone-2"
+        },
+        "name": "node-b",
+        "uid": "00000000-0000-0000-0000-000000000027"
+      },
+      "spec": {
+        "taints": [
+          {
+            "effect": "NoSchedule",
+            "key": "node.kubernetes.io/not-ready"
+          }
+        ]
+      },
+      "status": {
+        "daemonEndpoints": {
+          "kubeletEndpoint": {
+            "Port": 0
+          }
+        },
+        "nodeInfo": {
+          "architecture": "",
+          "bootID": "",
+          "containerRuntimeVersion": "",
+          "kernelVersion": "",
+          "kubeProxyVersion": "",
+          "kubeletVersion": "",
+          "machineID": "",
+          "operatingSystem": "",
+          "osImage": "",
+          "systemUUID": ""
+        }
+      }
+    },
+    {
+      "metadata": {
+        "labels": {
+          "kubernetes.io/hostname": "node-c",
+          "topology.kubernetes.io/zone": "zone-3"
+        },
+        "name": "node-c",
+        "uid": "00000000-0000-0000-0000-000000000028"
+      },
+      "spec": {
+        "taints": [
+          {
+            "effect": "NoSchedule",
+            "key": "node.kubernetes.io/not-ready"
+          }
+        ]
+      },
+      "status": {
+        "daemonEndpoints": {
+          "kubeletEndpoint": {
+            "Port": 0
+          }
+        },
+        "nodeInfo": {
+          "architecture": "",
+          "bootID": "",
+          "containerRuntimeVersion": "",
+          "kernelVersion": "",
+          "kubeProxyVersion": "",
+          "kubeletVersion": "",
+          "machineID": "",
+          "operatingSystem": "",
+          "osImage": "",
+          "systemUUID": ""
+        }
+      }
+    }
+  ],
+  "kind": "NodeList",
+  "metadata": {}
+}
