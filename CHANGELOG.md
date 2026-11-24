@@ -30,10 +30,14 @@ schemas and the `paramify` CLI — not the internal code.
   fails the run without evidence, so access lost mid-run can't pass as changesets outside the paths. Each entry names
   the work items that link it. `changed_before_approval`, `approved_by_change_author` and `first_linked_change` use
   in-scope changesets only; an item whose changesets were all left out has none to check, as an item linked to
-  nothing, and doesn't hold the summary's change-order lists unknown. New: `results.changeset_inclusion_checks`,
-  `results.changeset_inclusion_recheck`, `results.excluded`, and in the summary `changeset_inclusion_patterns`,
-  `in_scope_changesets`, `not_included_changesets`, `not_readable_changesets` and `changeset_inclusions_rechecked`.
-  Unset, a refused changeset still fails the run and the evidence only gains these keys.
+  nothing, and doesn't hold the summary's change-order lists unknown. Those lists can't cover a refused changeset, so
+  an item that links one reads `unreadable_linked_changesets: true` and is listed in
+  `change_items_with_unreadable_changesets`. New: `results.changeset_inclusion_checks`,
+  `results.changeset_inclusion_recheck`, `results.excluded`, `unreadable_linked_changesets` on each work item, and in
+  the summary `changeset_inclusion_patterns`, `in_scope_changesets` (null when a linked changeset couldn't be read),
+  `not_included_changesets`, `not_readable_changesets`, `changeset_inclusions_rechecked` and
+  `change_items_with_unreadable_changesets`. Unset, a refused changeset still fails the run and the evidence only gains
+  these keys.
 
 ### Added
 

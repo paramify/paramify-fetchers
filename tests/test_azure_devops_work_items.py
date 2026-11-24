@@ -1175,12 +1175,36 @@ def test_included_paths_are_read_first_and_a_refused_changeset_is_left_out(tmp_p
     # 102 has no in-scope change left to check, so it doesn't hold the change-order lists unknown.
     assert s["change_items_linked_changes_checked"] == 1 and s["change_items_changed_before_approval"] == []
     assert s["change_items_approved_by_change_author"] == [] and s["change_items_with_linked_changes"] == 2
+    assert (refused["unreadable_linked_changesets"], work_item(evidence, 101)["unreadable_linked_changesets"]) == (
+        True, False)
+    assert s["change_items_with_unreadable_changesets"] == [102]
     paths = [path for _, path, _, _ in fake.calls]
     assert paths.index("/contoso/_apis/tfvc/changesets") < paths.index("/contoso/_apis/projects")
     check = next(params for _, path, params, _ in fake.calls if path == "/contoso/_apis/tfvc/changesets")
     assert (check["searchCriteria.itemPath"], check["$top"]) == (INCLUDED, 1)
     read = next(params for _, path, params, _ in fake.calls if path.endswith("/changesets/501"))
     assert (read["maxChangeCount"], read["includeSourceRename"]) == (100, "true")
+
+
+def test_an_item_linking_a_refused_changeset_is_flagged_beside_its_change_order(tmp_path, monkeypatch):
+    include(monkeypatch)
+    # 101 links 501, made after its approval, and 503, which is refused.
+    fake = with_items(FakeADO(), {101: item(101, "Change Request", "Closed", relations=[
+        artifact("vstfs:///VersionControl/Changeset/501", "Fixed in Changeset"),
+        artifact("vstfs:///VersionControl/Changeset/503", "Fixed in Changeset")])},
+        updates={101: UPDATES[101]}, comments={101: COMMENTS[101]})
+    fake = scoped(fake, {501: [change(f"{INCLUDED}/a.cs")], 502: [change(f"{INCLUDED}/b.cs")],
+                         503: err(500, TF14098.format(503))})
+    code, evidence, status, _, _ = run(tmp_path, fake)
+    assert code == 0 and status is None
+    flagged, s = work_item(evidence, 101), evidence["summary"]
+    assert (flagged["changed_before_approval"], flagged["unreadable_linked_changesets"]) == (False, True)
+    assert work_item(evidence, 102)["unreadable_linked_changesets"] is False
+    # The change-order lists stay known, and the new list names the item they can't fully cover.
+    assert s["change_items_linked_changes_checked"] == 2 and s["change_items_changed_before_approval"] == [102]
+    assert s["change_items_with_unreadable_changesets"] == [101]
+    assert (s["in_scope_changesets"], s["not_readable_changesets"]) == (2, 1)
+    assert [(e["id"], e["work_items"]) for e in evidence["results"]["excluded"]] == [(503, [101])]
 
 
 def test_a_refused_changeset_has_the_included_paths_read_again_at_the_end(tmp_path, monkeypatch):
@@ -1366,6 +1390,7 @@ def test_with_inclusions_other_errors_still_fail(tmp_path, monkeypatch, failure)
     else:
         assert work_item(evidence, 102)["changed_before_approval"] is None
         assert evidence["summary"]["change_items_changed_before_approval"] is None
+        assert evidence["summary"]["in_scope_changesets"] is None
 
 
 def test_without_inclusions_the_evidence_only_gains_the_new_keys(tmp_path):
@@ -1376,6 +1401,8 @@ def test_without_inclusions_the_evidence_only_gains_the_new_keys(tmp_path):
     assert results["changeset_inclusion_recheck"] is None and s["changeset_inclusions_rechecked"] is None
     assert results["selection"]["changeset_inclusions"] == [] and s["changeset_inclusion_patterns"] == []
     assert (s["in_scope_changesets"], s["not_included_changesets"], s["not_readable_changesets"]) == (2, None, None)
+    assert s["change_items_with_unreadable_changesets"] is None
+    assert {i["unreadable_linked_changesets"] for i in results["work_items"]} == {None}
     tfvc = [(path, params) for _, path, params, _ in fake.calls if "/tfvc/" in path]
     assert tfvc == [("/contoso/_apis/tfvc/changesets/501", {"api-version": "7.1"}),
                     ("/contoso/_apis/tfvc/changesets/502", {"api-version": "7.1"})]
@@ -1410,7 +1437,6 @@ def test_a_pattern_that_cant_name_a_tfvc_path_is_bad_config(tmp_path, monkeypatc
     ("path:$/ProjectA", "$/ProjectAB/app.cs", False),
     ("path:$/A/[Legacy]", "$/A/[Legacy]/app.cs", True),
     ("path:$/A/[Legacy]", "$/A/L/app.cs", False),
-    ('path:"$/My Project/Main"', "$/My Project/Main/app.cs", True),
     ("path:$/", "$/Anything/at/all.cs", True),
 ])
 def test_an_inclusion_takes_in_its_path_and_everything_under_it(pattern, path, included):

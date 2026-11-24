@@ -779,6 +779,9 @@ def link_changes(item: Dict[str, Any], changesets: Dict[int, Optional[Dict[str, 
         bool(c["created_date"]) and c["created_date"] < approval["at"] for c in known)
     item["approved_by_change_author"] = None if not approval or not complete else any(
         same_person(approval["by"], c["author"]) or same_person(approval["by"], c["checked_in_by"]) for c in known)
+    # The checks above can't see a refused changeset, so the item says it links one.
+    item["unreadable_linked_changesets"] = None if left_out is None else any(
+        left_out.get(c) == NOT_READABLE for c in item["links"]["changesets"])
 
 
 def undefined_states(items: Iterable[Dict[str, Any]]) -> List[str]:
@@ -868,7 +871,8 @@ def summarize(items: List[Dict[str, Any]], projects: List[Dict[str, Any]], liste
             history and all(i["approval"]["set_by"] for i in field_approved)),
         "change_items_with_linked_changes": known(sum(1 for i in change if has_change(i))),
         "finished_change_items_without_linked_change": known(ids_of(i for i in finished if not has_change(i))),
-        "in_scope_changesets": known(sum(1 for c in (changesets or {}).values() if c)),
+        "in_scope_changesets": known(sum(1 for c in (changesets or {}).values() if c),
+                                     all((changesets or {}).values())),
         "not_included_changesets": known(sum(1 for r in left_out.values() if r == NOT_INCLUDED), included),
         "not_readable_changesets": known(sum(1 for r in left_out.values() if r == NOT_READABLE), included),
         "changeset_inclusions_rechecked": rechecked if included else None,
@@ -879,6 +883,8 @@ def summarize(items: List[Dict[str, Any]], projects: List[Dict[str, Any]], liste
             ids_of(i for i in change if i["changed_before_approval"] and i["emergency_type"]), every),
         "change_items_approved_by_change_author": known(
             ids_of(i for i in change if i["approved_by_change_author"]), every),
+        "change_items_with_unreadable_changesets": known(
+            ids_of(i for i in change if i.get("unreadable_linked_changesets")), included),
         "tagged_items_open": known(len(tagged_open)),
         "tagged_items_open_by_priority": known(sorted_counts(Counter(
             "unset" if i["priority"] in (None, "") else str(i["priority"]) for i in tagged_open))),
@@ -933,7 +939,7 @@ def collect(client: DevOpsClient, collector: DevOpsCollector) -> Tuple[Dict[str,
                                "lost access")
             return {}, {}
     for item in items:
-        link_changes(item, changesets, left_out)
+        link_changes(item, changesets, left_out if scope else None)
     items.sort(key=lambda i: (str(i["project"]), str(i["id"]).zfill(12)))
     excluded = [excluded_item("changeset", None, None, reason, id=cid,
                               work_items=ids_of(i for i in items if cid in i["links"]["changesets"]),
