@@ -477,7 +477,8 @@ def main() -> int:
             ),
         )
 
-    if not collected["pages"]:
+    listed = bool(collected["pages"])  # a read inventory query always reads at least one page
+    if not listed:
         exclusions.mark_unread()
     exclusions.warn_unmatched(logger)
 
@@ -497,7 +498,7 @@ def main() -> int:
         },
         summary={
             **summarize(resources, collected["defender"], collected["policy"]),
-            **exclusions.summary(excluded, ("resource",), {"resources": len(resources)}),
+            **exclusions.summary(excluded, ("resource",), {"resources": len(resources) if listed else None}),
         },
     )
 

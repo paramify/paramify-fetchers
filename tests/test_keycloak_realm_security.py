@@ -412,3 +412,55 @@ def test_an_account_in_master_is_told_to_use_the_realm_specific_client(keycloak,
     kc.main()
     failure = next(f for f in _evidence(tmp_path)["metadata"]["api_failures"] if f["operation"] == "events configuration")
     assert "the role view-events of the example-realm-realm client in the master realm" in failure["message"]
+
+
+# Keycloak 26 adds an Organization subflow to the built-in browser flow of every new realm but master. Its organization
+# step reuses an SSO session or routes to an identity provider or the forms; it never signs a user in by itself.
+ORGANIZATION = [ex(None, "ALTERNATIVE", subflow=True, name="Organization"),
+                ex(None, "CONDITIONAL", level=1, subflow=True, name="Browser - Conditional Organization"),
+                ex("conditional-user-configured", "REQUIRED", level=2), ex("organization", "ALTERNATIVE", level=2)]
+
+
+def _kc26(*forms, extra=()):
+    return [ex("auth-cookie", "ALTERNATIVE"), ex("auth-spnego", "DISABLED"), ex("identity-provider-redirector", "ALTERNATIVE"),
+            *ORGANIZATION, *extra, ex(None, "ALTERNATIVE", subflow=True, name="forms"), *forms]
+
+
+def test_the_keycloak_26_built_in_browser_flow_with_webauthn_required_counts_as_phishing_resistant():
+    webauthn = _kc26(ex("auth-username-password-form", "REQUIRED", level=1), ex("webauthn-authenticator", "REQUIRED", level=1))
+    assert kc.requires_phishing_resistant(webauthn, kc.NOT_LOCAL_SIGN_IN) is True
+    s = kc.summarize(dict(REALM, browserFlow="browser"), webauthn, RESET, ACTIONS, IDPS, STORAGE, EVENTS)
+    assert s["local_sign_in_requires_phishing_resistant"] is True
+
+
+@pytest.mark.parametrize("flow", [
+    # Kerberos enabled as another way in.
+    _kc26(ex("auth-username-password-form", "REQUIRED", level=1), ex("webauthn-authenticator", "REQUIRED", level=1),
+          extra=(ex("auth-spnego", "ALTERNATIVE"),)),
+    # A password or a passkey.
+    _kc26(ex("auth-username-password-form", "ALTERNATIVE", level=1), ex("webauthn-authenticator-passwordless", "ALTERNATIVE", level=1)),
+    # The flow as shipped: WebAuthn off, OTP only when configured.
+    _kc26(ex("auth-username-password-form", "REQUIRED", level=1), ex("webauthn-authenticator", "DISABLED", level=1),
+          ex(None, "CONDITIONAL", level=1, subflow=True, name="Browser - Conditional OTP"),
+          ex("conditional-user-configured", "REQUIRED", level=2), ex("auth-otp-form", "REQUIRED", level=2)),
+], ids=["kerberos", "password-or-passkey", "as-shipped"])
+def test_the_keycloak_26_flow_still_fails_when_a_local_path_skips_phishing_resistance(flow):
+    assert kc.requires_phishing_resistant(flow, kc.NOT_LOCAL_SIGN_IN) is False
+
+
+def test_a_condition_only_subflow_without_a_routing_step_is_still_a_way_in():
+    # Only a subflow that wraps a left-out step (such as organization) is dropped: an unknown condition-only subflow
+    # is kept as a path, so it still fails the check.
+    unknown = [ex(None, "ALTERNATIVE", subflow=True, name="custom"), ex("conditional-user-role", "REQUIRED", level=1),
+               ex(None, "ALTERNATIVE", subflow=True, name="forms"), ex("webauthn-authenticator", "REQUIRED", level=1)]
+    assert kc.requires_phishing_resistant(unknown, kc.NOT_LOCAL_SIGN_IN) is False
+
+
+@pytest.mark.parametrize("realm, auth_realm, holder", [
+    ("example-realm", "example-realm", "of the realm-management client"),
+    ("example-realm", "master", "of the example-realm-realm client in the master realm"),
+    # Keycloak creates no realm-management client in master; master's own admin roles are on master-realm.
+    ("master", "master", "of the master-realm client in the master realm"),
+])
+def test_a_refusal_names_the_client_that_holds_the_role(realm, auth_realm, holder):
+    assert client_mod.KeycloakClient(BASE, realm, auth_realm, "id", "secret", session=object()).role_holder() == holder

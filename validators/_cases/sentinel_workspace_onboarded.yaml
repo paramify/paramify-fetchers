@@ -1,0 +1,13 @@
+validator: sentinel_workspace_onboarded
+cases:
+  - name: one_sentinel_workspace
+    expect: PASS
+    artifact: '{"metadata": {"exit_code": 0,"status": "success"},"payload": {"results": {"workspaces": [{"data_connectors_total": 1,"name": "law-a","sentinel_onboarded": true,"source_tables": ["AuditLogs","AzureActivity","CommonSecurityLog","Syslog","SigninLogs","SecurityEvent"],"sources_ingesting": 6}]},"summary": {"min_sources_ingesting": 6,"workspaces_collected": 1,"workspaces_with_no_sources": 0,"workspaces_without_sentinel": 0}}}'
+
+  - name: no_sentinel_workspace
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0,"status": "success"},"payload": {"results": {"workspaces": []},"summary": {"min_sources_ingesting": null,"workspaces_collected": 0,"workspaces_with_no_sources": 1,"workspaces_without_sentinel": 1}}}'
+
+  - name: count_renamed
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 0,"status": "success"},"payload": {"results": {"workspaces": [{"data_connectors_total": 1,"name": "law-a","sentinel_onboarded": true,"source_tables": ["AuditLogs","AzureActivity","CommonSecurityLog","Syslog","SigninLogs","SecurityEvent"],"sources_ingesting": 6}]},"summary": {"min_sources_ingesting": 6,"sentinel_workspaces": 1,"workspaces_with_no_sources": 0,"workspaces_without_sentinel": 0}}}'

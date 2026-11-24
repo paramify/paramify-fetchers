@@ -59,6 +59,9 @@ class _Keycloak:
         body = self.data[tail]
         if tail == "/events":
             body = [e for e in body if e["type"] == params.get("type", e["type"])]
+            if "dateTo" in params:  # inclusive of the whole day, as Keycloak reads it
+                end = datetime.strptime(params["dateTo"], "%Y-%m-%d").replace(tzinfo=timezone.utc).timestamp() * 1000 + 86400000
+                body = [e for e in body if e["time"] < end]
         if isinstance(body, list) and "first" in params:
             first, size = int(params["first"]), int(params["max"])
             body = body[first:first + size]
@@ -143,7 +146,7 @@ def test_unread_users_leave_every_count_null(keycloak, tmp_path, assert_summary_
     assert ur.main() == 1
     s = _evidence(tmp_path)["summary"]
     assert s["users_read"] is False
-    assert all(v is None for k, v in s.items() if k not in ("users_read", "inactive_days", "privileged_realm_roles_checked"))
+    assert all(v is None for k, v in s.items() if k not in ("users_read", "inactive_days", "privileged_realm_roles_checked", "realm"))
     assert_summary_documented("keycloak/users_and_roles", s)
 
 
@@ -195,3 +198,89 @@ def test_users_are_read_page_by_page(keycloak, tmp_path, monkeypatch):
     assert ur.main() == 0
     assert [int(p["first"]) for t, p in session.gets if t == "/users"] == [0, 3, 6]
     assert _evidence(tmp_path)["summary"]["users_total"] == 7
+
+
+# --- Todd's review: organizations, linked accounts, unknown inactivity, service-account link, realm scope ---
+
+def _add_user(overrides, uid, username, *, created=1760616000000, creds=("password",), idps=(), admin=(), sa=None):
+    base = f"/users/{uid}"
+    user = {"id": uid, "username": username, "enabled": True, "createdTimestamp": created, "requiredActions": []}
+    if created is None:
+        user.pop("createdTimestamp")
+    if sa:
+        user["serviceAccountClientId"] = sa
+    overrides["/users"] = overrides.get("/users", list(FIXTURE["/users"])) + [user]
+    overrides[f"{base}/credentials"] = [{"id": f"c-{t}", "type": t} for t in creds]
+    overrides[f"{base}/federated-identity"] = [{"identityProvider": i, "userId": "x", "userName": "x"} for i in idps]
+    overrides[f"{base}/groups"] = []
+    overrides[f"{base}/role-mappings/realm/composite"] = []
+    overrides[f"{base}/role-mappings/clients/rm-client-id/composite"] = [{"name": r} for r in admin]
+    return overrides
+
+
+def test_manage_organizations_is_privileged(keycloak, tmp_path):
+    keycloak(overrides=_add_user({}, "00000000-0000-0000-0000-000000000009", "orgadmin", creds=("password", "otp"),
+                                 admin=("manage-organizations",)))
+    assert ur.main() == 0
+    users = {u["username"]: u for u in _evidence(tmp_path)["results"]["users"]}
+    assert users["orgadmin"]["privileged"] is True and users["orgadmin"]["privileged_roles"] == ["manage-organizations"]
+    assert _evidence(tmp_path)["summary"]["privileged_users"] == 4
+
+
+def test_a_linked_account_with_a_local_password_is_in_the_local_mfa_check(keycloak, tmp_path, assert_summary_documented):
+    keycloak(overrides=_add_user({}, "00000000-0000-0000-0000-000000000009", "linked", creds=("password",), idps=("entra",),
+                                 admin=("manage-users",)))
+    assert ur.main() == 0
+    s = _evidence(tmp_path)["summary"]
+    users = {u["username"]: u for u in _evidence(tmp_path)["results"]["users"]}
+    assert (users["linked"]["brokered"], users["linked"]["local_password"], users["linked"]["local_sign_in"]) == (True, True, True)
+    # carol is brokered with no local password: still left out. linked is brokered but can sign in with a password.
+    assert users["carol"]["local_sign_in"] is False
+    assert (s["brokered_users_with_local_password"], s["enabled_local_users_without_second_factor"]) == (1, 3)
+    assert s["privileged_local_users_without_second_factor"] == 2
+    assert_summary_documented("keycloak/users_and_roles", s)
+
+
+def test_an_unknown_account_age_leaves_that_users_inactivity_unknown(keycloak, tmp_path):
+    keycloak(overrides=_add_user({}, "00000000-0000-0000-0000-000000000009", "ageless", created=None))
+    assert ur.main() == 0
+    s = _evidence(tmp_path)["summary"]
+    users = {u["username"]: u for u in _evidence(tmp_path)["results"]["users"]}
+    assert users["ageless"]["inactive"] is None
+    assert (s["enabled_users_age_unknown"], s["enabled_users_inactive"]) == (1, None)
+
+
+def test_history_not_shown_to_reach_the_window_start_leaves_inactivity_unknown(keycloak, tmp_path):
+    # Only events inside the window are stored: storage may have started inside it, so bob's silence proves nothing.
+    recent = [e for e in FIXTURE["/events"] if e["time"] > NOW.timestamp() * 1000 - 90 * 86400 * 1000]
+    session = keycloak(overrides={"/events": recent})
+    assert ur.main() == 0
+    s = _evidence(tmp_path)["summary"]
+    assert (s["sign_in_history_covers_window"], s["enabled_users_inactive"]) == (None, None)
+    assert any(t == "/events" and "dateTo" in p for t, p in session.gets)
+
+
+def test_a_person_whose_username_looks_like_a_service_account_is_still_read(keycloak, tmp_path):
+    keycloak(overrides=_add_user({}, "00000000-0000-0000-0000-000000000009", "service-account-reviewer"))
+    assert ur.main() == 0
+    s = _evidence(tmp_path)["summary"]
+    users = {u["username"]: u for u in _evidence(tmp_path)["results"]["users"]}
+    assert "service-account-reviewer" in users and "service-account-ci-deployer" not in users
+    assert s["service_accounts_skipped"] == 1
+
+
+def test_the_master_realm_is_refused_as_bad_config(keycloak, tmp_path, monkeypatch, assert_summary_documented):
+    session = keycloak()
+    monkeypatch.setenv("KEYCLOAK_REALM", "master")
+    assert ur.main() == 1
+    ev = _evidence(tmp_path)
+    assert ev["metadata"]["api_failures"][0]["operation"] == "config KEYCLOAK_REALM" and not session.gets
+    assert json.loads((tmp_path / "status.json").read_text())["code"] == "bad_config"
+    assert (ev["summary"]["realm"], ev["summary"]["users_read"]) == ("master", False)
+    assert_summary_documented("keycloak/users_and_roles", ev["summary"])
+
+
+def test_the_realm_read_is_named_in_the_summary(keycloak, tmp_path):
+    keycloak()
+    ur.main()
+    assert _evidence(tmp_path)["summary"]["realm"] == "example-realm"

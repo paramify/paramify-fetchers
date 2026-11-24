@@ -111,8 +111,11 @@ class KeycloakClient:
             return self._fail(operation, "ValueError", "response was not JSON; check the base URL", "partial_failure")
 
     def role_holder(self) -> str:
-        """Where the needed role lives: realm-management in the target realm, or <realm>-realm in master for an account
-        in master (Keycloak's realm-specific admin roles)."""
+        """Where the needed role lives: <realm>-realm in master for an account in master (Keycloak's realm-specific
+        admin roles, including master-realm for master itself, which has no realm-management client), or
+        realm-management in the target realm."""
+        if self.auth_realm == "master":
+            return f"of the {self.realm}-realm client in the master realm"
         if self.auth_realm == self.realm:
             return "of the realm-management client"
         return f"of the {self.realm}-realm client in the {self.auth_realm} realm"

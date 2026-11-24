@@ -28,11 +28,13 @@ logger = logging.getLogger(NAME)
 PHISHING_RESISTANT = frozenset({"webauthn-authenticator", "webauthn-authenticator-passwordless", "auth-x509-client-username-form",
                                 "direct-grant-auth-x509-username"})
 TERMS_ACTION = "terms_and_conditions"
-# Not a new sign-in (session reuse) or the federated path, which the external identity provider governs.
 # Settings only the full realm view (view-realm) carries. The reduced view keeps the realm name and a few flags
 # (bruteForceProtected among them, on Keycloak 26.8), so a full view is one with every one of these.
 REALM_FULL_VIEW_KEYS = frozenset({"browserFlow", "ssoSessionIdleTimeout", "registrationAllowed", "rememberMe"})
-NOT_LOCAL_SIGN_IN = frozenset({"auth-cookie", "identity-provider-redirector"})
+# Not a new sign-in: session reuse (auth-cookie), the federated path that the external identity provider governs
+# (identity-provider-redirector), and Keycloak 26's organization step, which reuses a session or routes to an
+# identity provider or to the forms but never signs a user in by itself.
+NOT_LOCAL_SIGN_IN = frozenset({"auth-cookie", "identity-provider-redirector", "organization"})
 MAX_IDLE_ENV = "KEYCLOAK_MAX_IDLE_TIMEOUT_MINUTES"
 USER_STORAGE = "org.keycloak.storage.UserStorageProvider"
 
@@ -77,14 +79,26 @@ def requires_phishing_resistant(executions: List[Dict[str, Any]], exclude: froze
     """True if every way through the flow passes a phishing-resistant authenticator, by Keycloak's rules: where a flow
     has REQUIRED or CONDITIONAL executions its ALTERNATIVE ones are ignored, every REQUIRED one must pass and a
     CONDITIONAL one may be skipped; where it has only ALTERNATIVE executions, any one is enough, so each must require
-    it. Executions whose provider is in `exclude` (and DISABLED ones) are left out."""
+    it. Executions whose provider is in `exclude` (and DISABLED ones) are left out, and so is a subflow that only wraps
+    excluded steps in conditions, such as Keycloak 26's Organization subflow."""
     def node_requires(n):
         if not n["subflow"]:
             return n["provider"] in PHISHING_RESISTANT
         return flow_requires(n["children"])
 
+    def wraps_only_excluded(n):
+        # A subflow with nothing left once its conditions and excluded steps are removed, and at least one excluded
+        # step in it. Any other subflow, even one of conditions only, stays a way in.
+        live = [c for c in n["children"] if c["requirement"] != "DISABLED"]
+        excluded = [c for c in live if not c["subflow"] and c["provider"] in exclude]
+        nested = [c for c in live if c["subflow"]]
+        rest = [c for c in live if not c["subflow"] and c["provider"] not in exclude
+                and not (c["provider"] or "").startswith("conditional-")]
+        return not rest and all(wraps_only_excluded(c) for c in nested) and bool(excluded or nested)
+
     def flow_requires(nodes):
-        live = [n for n in nodes if n["requirement"] != "DISABLED" and n["provider"] not in exclude]
+        live = [n for n in nodes if n["requirement"] != "DISABLED" and n["provider"] not in exclude
+                and not (n["subflow"] and wraps_only_excluded(n))]
         firm = [n for n in live if n["requirement"] in ("REQUIRED", "CONDITIONAL")]
         if firm:
             return any(n["requirement"] == "REQUIRED" and node_requires(n) for n in firm)

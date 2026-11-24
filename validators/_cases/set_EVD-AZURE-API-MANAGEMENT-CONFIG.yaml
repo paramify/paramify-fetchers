@@ -1,0 +1,9 @@
+evidence_set: EVD-AZURE-API-MANAGEMENT-CONFIG
+cases:
+  - name: compliant
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"apis_accepting_http":0,"apis_access_control_unknown":0,"apis_without_access_control":0,"backends_using_http":0,"services_audit_logs_exported":2,"services_audit_logs_unknown":0,"services_with_legacy_tls_or_ssl_enabled":0,"services_with_public_network_access":0,"services_with_weak_ciphers_enabled":0,"total_services":2}}}'
+
+  - name: failed_collection
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":1},"payload":{"results":{},"summary":{"apis_accepting_http":0,"apis_access_control_unknown":0,"apis_without_access_control":0,"backends_using_http":0,"services_audit_logs_exported":2,"services_audit_logs_unknown":0,"services_with_legacy_tls_or_ssl_enabled":0,"services_with_public_network_access":0,"services_with_weak_ciphers_enabled":0,"total_services":2}}}'
