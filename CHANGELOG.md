@@ -258,6 +258,24 @@ schemas and the `paramify` CLI — not the internal code.
     solutions are unread, and `sentinel_onboarded` is null while any are unread
     and none is known to have Sentinel; before, it read false.
 
+- **`azure_alert_rules` 0.4.0: suppression fields are null when the alert
+  processing rule list could not be read.** The run still exits 1 as
+  `partial_failure`. Before, the refused list read as empty, so every rule showed
+  `suppressed: false` and counted as reaching a person. Now each enabled rule's
+  `suppressed` and `reaches_human` are null, and `enabled_rules_suppressed`,
+  `enabled_rules_possibly_suppressed`, `enabled_rules_reaching_human`,
+  `enabled_rules_reaching_human_unknown`, `enabled_rules_not_reaching_human`,
+  `reaching_human_percentage`, `all_enabled_rules_reach_human`,
+  `suppressing_processing_rules_active` and `processing_rules` are null. A
+  list that was read and is empty still gives 0 and false. An enabled rule
+  with no deliverable action group of its own is unknown too, since a
+  processing rule may add one:
+  `routes_to_enabled_receiver` and `routes_to_person` read null, not false, so
+  `reaches_human` is null and the rule counts in
+  `enabled_rules_routing_unknown`. `processing_rule_matches` and
+  `suppressed_by_processing_rules` are null, not `[]`, and
+  `enabled_rules_without_action_groups` is null.
+
 ## [0.7.0-beta] - 2026-11-24
 ### Breaking
 
