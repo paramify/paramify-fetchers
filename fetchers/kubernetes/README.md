@@ -25,7 +25,7 @@ kind: ClusterRole
 metadata: {name: workload-resilience-reader}
 rules:
 - apiGroups: [apps]
-  resources: [deployments, statefulsets]
+  resources: [deployments, replicasets, statefulsets]
   verbs: [list]
 - apiGroups: [policy]
   resources: [poddisruptionbudgets]

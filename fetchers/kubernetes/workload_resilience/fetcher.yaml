@@ -38,14 +38,15 @@ evidence_set:
   instructions: |
     Script: kubernetes/workload_resilience/fetcher.py
 
-    Access: A Kubernetes identity, through a kubeconfig or the in-cluster service account, with a ClusterRole allowing list on deployments and statefulsets (apps), poddisruptionbudgets (policy), horizontalpodautoscalers (autoscaling), and pods and nodes. Nothing else: it reads no secrets, can't exec into pods and writes nothing. On AKS with Microsoft Entra ID, the kubeconfig can sign in through kubelogin.
+    Access: A Kubernetes identity, through a kubeconfig or the in-cluster service account, with a ClusterRole allowing list on deployments, replicasets and statefulsets (apps), poddisruptionbudgets (policy), horizontalpodautoscalers (autoscaling), and pods and nodes. Nothing else: it reads no secrets, can't exec into pods and writes nothing. On AKS with Microsoft Entra ID, the kubeconfig can sign in through kubelogin.
 
     Commands Executed:
     - GET /apis/apps/v1/deployments — every Deployment's replicas, selector, pod template, spread settings and probes, page by page
     - GET /apis/apps/v1/statefulsets — the same for every StatefulSet
     - GET /apis/policy/v1/poddisruptionbudgets — each budget's selector and its minAvailable or maxUnavailable
     - GET /apis/autoscaling/v2/horizontalpodautoscalers — the autoscaler minimum for each workload one targets
-    - GET /api/v1/pods — each pod's labels, node and readiness, to see where a workload's ready pods run
+    - GET /apis/apps/v1/replicasets — which Deployment owns each ReplicaSet, to find a Deployment's own pods
+    - GET /api/v1/pods — each pod's labels, owner, node and readiness, to see where a workload's ready pods run
     - GET /api/v1/nodes — each node's zone label
 
     Output: kubernetes_workload_resilience.json — one record per Deployment and StatefulSet outside the excluded namespaces. Configuration and current placement only: it doesn't show a workload surviving an actual failure.
@@ -56,17 +57,19 @@ evidence_set:
     - workloads — Number of Deployments and StatefulSets outside the excluded namespaces; null if either list could not be read, as are the fields below unless noted
     - workloads_scaled_to_zero — Number set to zero replicas; they are not judged by the fields below
     - workloads_autoscaled — Number targeted by a HorizontalPodAutoscaler; null if the autoscalers could not be read
-    - workloads_single_replica — Number that run fewer than two replicas: the autoscaler's minimum when one targets the workload, otherwise its replica count; null if the autoscalers could not be read
+    - workloads_single_replica — Number that can drop below two replicas: the autoscaler's minimum when one targets the workload (in the apps API group), otherwise its replica count; null if the autoscalers could not be read
     - workloads_single_replica_names — List of those workloads, each as namespace/kind/name
 
     Can a node be drained without an outage?
-    - workloads_without_pdb — List of multi-replica workloads with no PodDisruptionBudget whose selector matches their pods; null if budgets could not be read
-    - workloads_with_pdb_blocking_drains — List of workloads whose budget never allows an eviction (maxUnavailable 0, or minAvailable at least the replica count or 100%), which blocks node drains and so node patching; null if budgets could not be read
+    - workloads_without_pdb — List of workloads set to two or more replicas with no PodDisruptionBudget whose selector matches their pods; null if budgets could not be read. This and the fields below judge the replica count now, not the autoscaler's minimum
+    - workloads_with_pdb_blocking_drains — List of workloads with a budget that allows no eviction even with every pod healthy, which blocks node drains and so node patching. Each budget is judged once, over every pod it selects, as Kubernetes counts them: maxUnavailable 0; an integer minAvailable at least the number of pods it selects; or a percentage minAvailable that, rounded up, is all the replicas of the workloads it selects. Null if budgets could not be read, or if any workload is in the next list
+    - workloads_with_pdb_effect_unknown — List of workloads with a budget whose pod count could not be found: the pods could not be read, or a percentage budget selects a pod whose owner's replica count is unknown; null if budgets could not be read
 
     Are workloads spread across zones?
     - workloads_without_zone_spread_config — List of multi-replica workloads with neither a zone topology spread constraint nor pod anti-affinity across zones; the scheduler still spreads by default, so read it with the next field
-    - workloads_ready_pods_in_one_zone — List of multi-replica workloads whose ready pods all run on nodes in a single zone, from the pods' nodes and those nodes' zone labels; null if pods or nodes could not be read
-    - workloads_without_ready_pods — List of workloads with replicas set but no ready pod; null if pods could not be read
+    - workloads_ready_pods_in_one_zone — List of workloads set to two or more replicas whose own ready pods all run on nodes in a single zone, from the pods' nodes and those nodes' zone labels. A workload's own pods are the ones it controls (pod, ReplicaSet, Deployment; or pod, StatefulSet), not every pod with matching labels. Null if pods, ReplicaSets or nodes could not be read, or if any workload is in the next list, so an empty list always means every workload was judged
+    - workloads_ready_pod_zones_unknown — List of workloads set to two or more replicas whose placement is unknown: a ready pod runs on a node without the zone label or not in the node list, or its ReplicaSet was not in the list, and the known zones don't already show two or more; null if pods, ReplicaSets or nodes could not be read
+    - workloads_without_ready_pods — List of workloads with replicas set but no ready pod of their own; null if pods or ReplicaSets could not be read
     - zones — Number of zones across the cluster's nodes; null if nodes could not be read, as is the field below
     - nodes_without_zone — List of nodes without the zone label, whose pods can't be placed in a zone
 

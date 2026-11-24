@@ -3,7 +3,9 @@ and StatefulSet, and where their ready pods actually run. GET and LIST through t
 
 Zone spread is judged from placement as well as configuration: the scheduler spreads pods across zones by default
 even without an explicit constraint, so the evidence reports workloads whose ready pods all run in one zone, read
-from the pods and their nodes' zone labels.
+from the pods and their nodes' zone labels. A workload's pods are the ones it controls, followed through owner
+references (pod, ReplicaSet, Deployment; or pod, StatefulSet), not every pod its selector matches. A ready pod whose
+zone or owner can't be found makes the workload's placement unknown, never a pass.
 
 Collection-failure convention (docs/authoring_fetcher_guide.md, step 3): a refused or failed call is recorded in
 `api_failures` and leaves the fields that depend on it null; the run exits non-zero when `api_failures` is non-empty.
@@ -29,12 +31,14 @@ PAGE = 500
 TIMEOUT = (10, 60)  # seconds to connect and to read; the client has no default, so a silent API server would hang the run
 DEFAULT_EXCLUDED = "kube-system,kube-public,kube-node-lease"
 DEFAULT_ZONE_LABEL = "topology.kubernetes.io/zone"
+UNRESOLVED = "unresolved"  # a pod's controller is a ReplicaSet the ReplicaSet list didn't hold
 CODES = {401: "auth_failed", 403: "not_authorized"}
 NEEDS = {
     "deployments": "list deployments.apps (cluster-wide)",
     "statefulsets": "list statefulsets.apps (cluster-wide)",
     "poddisruptionbudgets": "list poddisruptionbudgets.policy (cluster-wide)",
     "horizontalpodautoscalers": "list horizontalpodautoscalers.autoscaling (cluster-wide)",
+    "replicasets": "list replicasets.apps (cluster-wide)",
     "pods": "list pods (cluster-wide)",
     "nodes": "list nodes",
 }
@@ -86,79 +90,172 @@ def spreads_by_config(template_spec: Dict[str, Any], zone_label: str) -> bool:
     return any(t.get("topologyKey") == zone_label for t in terms)
 
 
-def blocks_disruption(pdb: Dict[str, Any], replicas: Optional[int]) -> bool:
-    """A budget that never allows a voluntary eviction, which blocks node drains (and so node patching)."""
+def _controller_ref(o: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    return next((r for r in _meta(o).get("ownerReferences") or [] if r.get("controller")), None)
+
+
+def _group(api_version: Any) -> Optional[str]:
+    """The API group of an apiVersion: "apps/v1" is apps and "v1" is the core group (""). None when unset."""
+    return str(api_version).rpartition("/")[0] if api_version else None
+
+
+def hpa_targets(hpa: Dict[str, Any], kind: str, name: Any) -> bool:
+    """An autoscaler whose scaleTargetRef names this apps-group workload, in any version of the group. A same-named
+    Deployment custom resource in another group is a different object."""
+    ref = (hpa.get("spec") or {}).get("scaleTargetRef") or {}
+    return ref.get("kind") == kind and ref.get("name") == name and _group(ref.get("apiVersion")) == "apps"
+
+
+def pod_controller(pod: Dict[str, Any], replicasets: Optional[Dict[str, Dict[str, Any]]]) -> Optional[str]:
+    """The UID of the workload that controls a pod, followed through controller owner references: pod, ReplicaSet,
+    Deployment; or pod, StatefulSet. A ReplicaSet that no Deployment controls is itself the workload. None for a pod
+    with no controller; UNRESOLVED when the pod's ReplicaSet wasn't read (the list was refused, or the ReplicaSet was
+    created after it was read)."""
+    ref = _controller_ref(pod)
+    if ref is None:
+        return None
+    if ref.get("kind") == "ReplicaSet" and _group(ref.get("apiVersion")) == "apps":
+        rs = (replicasets or {}).get(str(ref.get("uid")))
+        if rs is None:
+            return UNRESOLVED
+        top = _controller_ref(rs)
+        if top is not None and top.get("kind") == "Deployment" and _group(top.get("apiVersion")) == "apps":
+            return str(top.get("uid"))
+    return str(ref.get("uid"))
+
+
+def _percent(value: Any) -> Optional[int]:
+    text = str(value).strip()
+    return int(text[:-1]) if text.endswith("%") and text[:-1].isdigit() else None
+
+
+def budget_blocks_drains(pdb: Dict[str, Any], pods: Optional[List[Tuple[Dict[str, Any], Optional[str]]]],
+                         scale: Dict[str, int]) -> Optional[bool]:
+    """Whether a budget allows no voluntary eviction even with every pod healthy, which blocks node drains (and so
+    node patching). Judged once per budget, over every pod it selects, as the disruption controller counts them: an
+    integer minAvailable against the number of selected pods; a percentage against the summed replicas of their
+    controllers, rounded up. `pods` are the budget namespace's pods with their controller UIDs. None when the
+    population can't be established."""
     spec = pdb.get("spec") or {}
-    if "maxUnavailable" in spec:
+    if spec.get("maxUnavailable") is not None:
+        # Rounded up, any maxUnavailable above zero allows at least one eviction.
         return str(spec["maxUnavailable"]).strip() in ("0", "0%")
     minimum = spec.get("minAvailable")
     if minimum is None:
         return False
-    if str(minimum).strip() == "100%":
-        return True
-    return isinstance(minimum, int) and replicas is not None and minimum >= replicas
+    if pods is None:
+        return None
+    selected = [owner for p, owner in pods if selector_matches(spec.get("selector"), _meta(p).get("labels") or {})]
+    if isinstance(minimum, int):
+        expected, desired = len(selected), minimum
+    else:
+        pct, controllers = _percent(minimum), set(selected)
+        if pct is None or any(c is None or c not in scale for c in controllers):
+            return None
+        expected = sum(scale[str(c)] for c in controllers)
+        desired = -(-pct * expected // 100)
+    return expected > 0 and desired >= expected
+
+
+def _any_known(values: List[Optional[bool]]) -> Optional[bool]:
+    """True if any value is True; otherwise None if any is unknown; otherwise False."""
+    return True if any(v is True for v in values) else None if any(v is None for v in values) else False
 
 
 def workload_records(workloads: List[Tuple[str, Dict[str, Any]]], pdbs: Optional[List[Dict[str, Any]]],
                      hpas: Optional[List[Dict[str, Any]]], pods: Optional[List[Dict[str, Any]]],
-                     zones: Optional[Dict[str, Optional[str]]], zone_label: str) -> List[Dict[str, Any]]:
-    """One record per Deployment or StatefulSet: replicas (with any autoscaler minimum), budget, spread, probes and the
-    zones its ready pods run in. Fields that depend on an unread list are None."""
+                     replicasets: Optional[List[Dict[str, Any]]], zones: Optional[Dict[str, Optional[str]]],
+                     zone_label: str) -> List[Dict[str, Any]]:
+    """One record per Deployment or StatefulSet: replicas (with any autoscaler minimum), budgets, spread, probes, and
+    its own ready pods (by controller, not by label) and the zones they run in. A budget selects pods in its own
+    namespace only, and namespaces are excluded whole, so `workloads` holds every controller a budget can count.
+    Fields that depend on an unread list are None."""
+    rs_by_uid = {str(_meta(r).get("uid")): r for r in replicasets} if replicasets is not None else None
+    scale = {str(_meta(o).get("uid")): (o.get("spec") or {}).get("replicas", 1)
+             for o in [w for _, w in workloads] + list(replicasets or [])}
+    by_ns: Dict[Any, List[Tuple[Dict[str, Any], Optional[str]]]] = {}
+    for p in pods or []:
+        by_ns.setdefault(_meta(p).get("namespace"), []).append((p, pod_controller(p, rs_by_uid)))
+    budgets = {id(b): budget_blocks_drains(b, by_ns.get(_meta(b).get("namespace"), []) if pods is not None else None, scale)
+               for b in pdbs or []}
     out = []
     for kind, w in workloads:
         m, spec = _meta(w), w.get("spec") or {}
-        ns, name = m.get("namespace"), m.get("name")
+        ns, name, uid = m.get("namespace"), m.get("name"), str(m.get("uid"))
         template = spec.get("template") or {}
         tspec, tlabels = template.get("spec") or {}, (template.get("metadata") or {}).get("labels") or {}
-        hpa = next((h for h in hpas or [] if _meta(h).get("namespace") == ns
-                    and ((h.get("spec") or {}).get("scaleTargetRef") or {}).get("kind") == kind
-                    and ((h.get("spec") or {}).get("scaleTargetRef") or {}).get("name") == name), None)
+        hpa = next((h for h in hpas or [] if _meta(h).get("namespace") == ns and hpa_targets(h, kind, name)), None)
         replicas = spec.get("replicas", 1)
         effective = ((hpa.get("spec") or {}).get("minReplicas") or 1) if hpa else replicas
         mine = [p for p in pdbs or [] if _meta(p).get("namespace") == ns and selector_matches((p.get("spec") or {}).get("selector"), tlabels)]
         containers = tspec.get("containers") or []
-        ready_pods = [p for p in pods or [] if _meta(p).get("namespace") == ns and _ready(p)
-                      and selector_matches(spec.get("selector"), _meta(p).get("labels") or {})]
-        pod_zones = sorted({z for z in ((zones or {}).get(str((p.get("spec") or {}).get("nodeName") or "")) for p in ready_pods) if z})
+        # A Deployment's pods are found through its ReplicaSets; a StatefulSet controls its pods directly.
+        attributed = pods is not None and (kind == "StatefulSet" or rs_by_uid is not None)
+        local = [(p, o) for p, o in by_ns.get(ns, []) if _ready(p)]
+        owned = [p for p, o in local if o == uid]
+        unattributed = [p for p, o in local if o == UNRESOLVED and kind == "Deployment"
+                        and selector_matches(spec.get("selector"), _meta(p).get("labels") or {})]
+        pod_zones = [(zones or {}).get(str((p.get("spec") or {}).get("nodeName") or "")) for p in owned]
+        placed = attributed and zones is not None
         out.append({
             "workload": _ref(kind, w), "kind": kind, "replicas": replicas, "autoscaled": hpa is not None,
             "effective_min_replicas": effective,
             "pdbs": sorted(str(_meta(p).get("name")) for p in mine) if pdbs is not None else None,
-            "pdb_blocks_disruption": any(blocks_disruption(p, replicas) for p in mine) if pdbs is not None else None,
+            "pdb_blocks_disruption": _any_known([budgets[id(p)] for p in mine]) if pdbs is not None else None,
             "zone_spread_configured": spreads_by_config(tspec, zone_label),
             "containers_without_readiness_probe": sorted(c.get("name") for c in containers if not c.get("readinessProbe")),
             "containers_without_liveness_probe": sorted(c.get("name") for c in containers if not c.get("livenessProbe")),
-            "ready_pods": len(ready_pods) if pods is not None else None,
-            "ready_pod_zones": pod_zones if pods is not None and zones is not None else None,
+            "ready_pods": len(owned) if attributed else None,
+            "ready_pods_unattributed": len(unattributed) if attributed else None,
+            "ready_pod_zones": sorted({z for z in pod_zones if z}) if placed else None,
+            "ready_pods_without_zone": sum(1 for z in pod_zones if not z) if placed else None,
         })
     return out
 
 
+def placement(w: Dict[str, Any]) -> str:
+    """spread (ready pods in two or more known zones), one_zone, none (no ready pods), or unknown: a ready pod's zone
+    or owner couldn't be found and the known zones don't already show a spread."""
+    known = len(w["ready_pod_zones"])
+    if known >= 2:
+        return "spread"
+    if w["ready_pods_without_zone"] or w["ready_pods_unattributed"]:
+        return "unknown"
+    return "one_zone" if known == 1 else "none"
+
+
 def summarize(records: Optional[List[Dict[str, Any]]], zones: Optional[Dict[str, Optional[str]]],
               read: Dict[str, bool]) -> Dict[str, Any]:
-    """Counts and names over the in-scope workloads. A workload at zero replicas is counted apart and not judged."""
-    r = records
+    """Counts and names over the in-scope workloads. A workload at zero replicas is counted apart and not judged.
+    The autoscaler minimum decides single replica; budgets, spread and placement are judged for every workload that
+    runs two or more replicas now."""
     rs: List[Dict[str, Any]] = records or []
     zs: Dict[str, Optional[str]] = zones or {}
     active = [w for w in rs if w["replicas"] != 0]
-    multi = [w for w in active if w["effective_min_replicas"] >= 2]
+    multi = [w for w in active if w["replicas"] >= 2]
 
     def names(items: List[Dict[str, Any]]) -> List[str]:
         return sorted(w["workload"] for w in items)
 
-    wl, pdb, pods, nodes = r is not None, read["poddisruptionbudgets"] and r is not None, read["pods"] and r is not None, zones is not None
-    one_zone = [w for w in multi if w["ready_pod_zones"] is not None and len(w["ready_pod_zones"]) == 1]
+    wl = records is not None
+    hpa, pdb = wl and read["horizontalpodautoscalers"], wl and read["poddisruptionbudgets"]
+    pods = wl and read["pods"] and read["replicasets"]
+    nodes, placed = zones is not None, pods and zones is not None
+    pdb_unknown = names([w for w in active if w["pdb_blocks_disruption"] is None]) if pdb else []
+    zone_unknown = names([w for w in multi if placement(w) == "unknown"]) if placed else []
     return {
         "workloads": len(rs) if wl else None,
         "workloads_scaled_to_zero": sum(1 for w in rs if w["replicas"] == 0) if wl else None,
-        "workloads_autoscaled": sum(1 for w in active if w["autoscaled"]) if wl and read["horizontalpodautoscalers"] else None,
-        "workloads_single_replica": len(active) - len(multi) if wl and read["horizontalpodautoscalers"] else None,
-        "workloads_single_replica_names": names([w for w in active if w not in multi]) if wl and read["horizontalpodautoscalers"] else None,
+        "workloads_autoscaled": sum(1 for w in active if w["autoscaled"]) if hpa else None,
+        "workloads_single_replica": sum(1 for w in active if w["effective_min_replicas"] < 2) if hpa else None,
+        "workloads_single_replica_names": names([w for w in active if w["effective_min_replicas"] < 2]) if hpa else None,
         "workloads_without_pdb": names([w for w in multi if not w["pdbs"]]) if pdb else None,
-        "workloads_with_pdb_blocking_drains": names([w for w in active if w["pdb_blocks_disruption"]]) if pdb else None,
+        "workloads_with_pdb_blocking_drains": names([w for w in active if w["pdb_blocks_disruption"]]) if pdb and not pdb_unknown else None,
+        "workloads_with_pdb_effect_unknown": pdb_unknown if pdb else None,
         "workloads_without_zone_spread_config": names([w for w in multi if not w["zone_spread_configured"]]) if wl else None,
-        "workloads_ready_pods_in_one_zone": names(one_zone) if pods and nodes else None,
-        "workloads_without_ready_pods": names([w for w in active if w["ready_pods"] == 0]) if pods else None,
+        "workloads_ready_pods_in_one_zone": names([w for w in multi if placement(w) == "one_zone"]) if placed and not zone_unknown else None,
+        "workloads_ready_pod_zones_unknown": zone_unknown if placed else None,
+        "workloads_without_ready_pods": names([w for w in active if w["ready_pods"] == 0 and w["ready_pods_unattributed"] == 0]) if pods else None,
         "workloads_without_readiness_probe": names([w for w in active if w["containers_without_readiness_probe"]]) if wl else None,
         "workloads_without_liveness_probe": names([w for w in active if w["containers_without_liveness_probe"]]) if wl else None,
         "zones": len({z for z in zs.values() if z}) if nodes else None,
@@ -206,6 +303,7 @@ def collect(reader: ClusterReader, excluded: Set[str], zone_label: str) -> Dict[
         "poddisruptionbudgets": reader.pages("poddisruptionbudgets", reader.policy.list_pod_disruption_budget_for_all_namespaces, ser(reader.policy)),
         "horizontalpodautoscalers": reader.pages("horizontalpodautoscalers",
                                                  reader.autoscaling.list_horizontal_pod_autoscaler_for_all_namespaces, ser(reader.autoscaling)),
+        "replicasets": reader.pages("replicasets", reader.apps.list_replica_set_for_all_namespaces, ser(reader.apps)),
         "pods": reader.pages("pods", reader.core.list_pod_for_all_namespaces, ser(reader.core)),
         "nodes": reader.pages("nodes", reader.core.list_node, ser(reader.core)),
     }
@@ -219,7 +317,8 @@ def collect(reader: ClusterReader, excluded: Set[str], zone_label: str) -> Dict[
     records = None
     if data["deployments"] is not None and data["statefulsets"] is not None:
         workloads = [("Deployment", d) for d in data["deployments"] if in_scope(d)] + [("StatefulSet", s) for s in data["statefulsets"] if in_scope(s)]
-        records = workload_records(workloads, data["poddisruptionbudgets"], data["horizontalpodautoscalers"], data["pods"], zones, zone_label)
+        records = workload_records(workloads, data["poddisruptionbudgets"], data["horizontalpodautoscalers"], data["pods"],
+                                   data["replicasets"], zones, zone_label)
     read = {k: v is not None for k, v in data.items()}
     return {"results": {"workloads": records, "excluded_namespaces": sorted(excluded), "zone_label": zone_label},
             "summary": summarize(records, zones, read)}

@@ -5,10 +5,21 @@
       "metadata": {
         "labels": {
           "app": "api",
+          "pod-template-hash": "7d9c5b8f102",
           "topology.kubernetes.io/zone": "zone-1"
         },
         "name": "api-3",
         "namespace": "billing",
+        "ownerReferences": [
+          {
+            "apiVersion": "apps/v1",
+            "blockOwnerDeletion": true,
+            "controller": true,
+            "kind": "ReplicaSet",
+            "name": "api-7d9c5b8f102",
+            "uid": "00000000-0000-0000-0000-000000000102"
+          }
+        ],
         "uid": "00000000-0000-0000-0000-000000000012"
       },
       "spec": {
@@ -112,10 +123,21 @@
       "metadata": {
         "labels": {
           "app": "api",
+          "pod-template-hash": "7d9c5b8f102",
           "topology.kubernetes.io/zone": "zone-1"
         },
         "name": "api-4",
         "namespace": "billing",
+        "ownerReferences": [
+          {
+            "apiVersion": "apps/v1",
+            "blockOwnerDeletion": true,
+            "controller": true,
+            "kind": "ReplicaSet",
+            "name": "api-7d9c5b8f102",
+            "uid": "00000000-0000-0000-0000-000000000102"
+          }
+        ],
         "uid": "00000000-0000-0000-0000-000000000013"
       },
       "spec": {
@@ -219,10 +241,21 @@
       "metadata": {
         "labels": {
           "app": "coredns",
+          "pod-template-hash": "7d9c5b8f104",
           "topology.kubernetes.io/zone": "zone-1"
         },
         "name": "coredns-12",
         "namespace": "kube-system",
+        "ownerReferences": [
+          {
+            "apiVersion": "apps/v1",
+            "blockOwnerDeletion": true,
+            "controller": true,
+            "kind": "ReplicaSet",
+            "name": "coredns-7d9c5b8f104",
+            "uid": "00000000-0000-0000-0000-000000000104"
+          }
+        ],
         "uid": "00000000-0000-0000-0000-000000000014"
       },
       "spec": {
@@ -326,10 +359,21 @@
       "metadata": {
         "labels": {
           "app": "coredns",
+          "pod-template-hash": "7d9c5b8f104",
           "topology.kubernetes.io/zone": "zone-1"
         },
         "name": "coredns-13",
         "namespace": "kube-system",
+        "ownerReferences": [
+          {
+            "apiVersion": "apps/v1",
+            "blockOwnerDeletion": true,
+            "controller": true,
+            "kind": "ReplicaSet",
+            "name": "coredns-7d9c5b8f104",
+            "uid": "00000000-0000-0000-0000-000000000104"
+          }
+        ],
         "uid": "00000000-0000-0000-0000-000000000015"
       },
       "spec": {
@@ -433,10 +477,21 @@
       "metadata": {
         "labels": {
           "app": "worker",
+          "pod-template-hash": "7d9c5b8f105",
           "topology.kubernetes.io/zone": "zone-2"
         },
         "name": "worker-5",
         "namespace": "reports",
+        "ownerReferences": [
+          {
+            "apiVersion": "apps/v1",
+            "blockOwnerDeletion": true,
+            "controller": true,
+            "kind": "ReplicaSet",
+            "name": "worker-7d9c5b8f105",
+            "uid": "00000000-0000-0000-0000-000000000105"
+          }
+        ],
         "uid": "00000000-0000-0000-0000-000000000016"
       },
       "spec": {
@@ -540,10 +595,21 @@
       "metadata": {
         "labels": {
           "app": "web",
+          "pod-template-hash": "7d9c5b8f106",
           "topology.kubernetes.io/zone": "zone-1"
         },
         "name": "web-0",
         "namespace": "storefront",
+        "ownerReferences": [
+          {
+            "apiVersion": "apps/v1",
+            "blockOwnerDeletion": true,
+            "controller": true,
+            "kind": "ReplicaSet",
+            "name": "web-7d9c5b8f106",
+            "uid": "00000000-0000-0000-0000-000000000106"
+          }
+        ],
         "uid": "00000000-0000-0000-0000-000000000017"
       },
       "spec": {
@@ -647,10 +713,21 @@
       "metadata": {
         "labels": {
           "app": "web",
+          "pod-template-hash": "7d9c5b8f106",
           "topology.kubernetes.io/zone": "zone-2"
         },
         "name": "web-1",
         "namespace": "storefront",
+        "ownerReferences": [
+          {
+            "apiVersion": "apps/v1",
+            "blockOwnerDeletion": true,
+            "controller": true,
+            "kind": "ReplicaSet",
+            "name": "web-7d9c5b8f106",
+            "uid": "00000000-0000-0000-0000-000000000106"
+          }
+        ],
         "uid": "00000000-0000-0000-0000-000000000018"
       },
       "spec": {
@@ -754,10 +831,21 @@
       "metadata": {
         "labels": {
           "app": "web",
+          "pod-template-hash": "7d9c5b8f106",
           "topology.kubernetes.io/zone": "zone-3"
         },
         "name": "web-2",
         "namespace": "storefront",
+        "ownerReferences": [
+          {
+            "apiVersion": "apps/v1",
+            "blockOwnerDeletion": true,
+            "controller": true,
+            "kind": "ReplicaSet",
+            "name": "web-7d9c5b8f106",
+            "uid": "00000000-0000-0000-0000-000000000106"
+          }
+        ],
         "uid": "00000000-0000-0000-0000-000000000019"
       },
       "spec": {
@@ -865,6 +953,16 @@
         },
         "name": "db-6",
         "namespace": "warehouse",
+        "ownerReferences": [
+          {
+            "apiVersion": "apps/v1",
+            "blockOwnerDeletion": true,
+            "controller": true,
+            "kind": "StatefulSet",
+            "name": "db",
+            "uid": "00000000-0000-0000-0000-000000000008"
+          }
+        ],
         "uid": "00000000-0000-0000-0000-000000000020"
       },
       "spec": {
@@ -972,6 +1070,16 @@
         },
         "name": "db-7",
         "namespace": "warehouse",
+        "ownerReferences": [
+          {
+            "apiVersion": "apps/v1",
+            "blockOwnerDeletion": true,
+            "controller": true,
+            "kind": "StatefulSet",
+            "name": "db",
+            "uid": "00000000-0000-0000-0000-000000000008"
+          }
+        ],
         "uid": "00000000-0000-0000-0000-000000000021"
       },
       "spec": {
@@ -1079,6 +1187,16 @@
         },
         "name": "db-8",
         "namespace": "warehouse",
+        "ownerReferences": [
+          {
+            "apiVersion": "apps/v1",
+            "blockOwnerDeletion": true,
+            "controller": true,
+            "kind": "StatefulSet",
+            "name": "db",
+            "uid": "00000000-0000-0000-0000-000000000008"
+          }
+        ],
         "uid": "00000000-0000-0000-0000-000000000022"
       },
       "spec": {
@@ -1182,10 +1300,21 @@
       "metadata": {
         "labels": {
           "app": "frontend",
+          "pod-template-hash": "7d9c5b8f107",
           "topology.kubernetes.io/zone": "zone-2"
         },
         "name": "frontend-10",
         "namespace": "web",
+        "ownerReferences": [
+          {
+            "apiVersion": "apps/v1",
+            "blockOwnerDeletion": true,
+            "controller": true,
+            "kind": "ReplicaSet",
+            "name": "frontend-7d9c5b8f107",
+            "uid": "00000000-0000-0000-0000-000000000107"
+          }
+        ],
         "uid": "00000000-0000-0000-0000-000000000023"
       },
       "spec": {
@@ -1289,10 +1418,21 @@
       "metadata": {
         "labels": {
           "app": "frontend",
+          "pod-template-hash": "7d9c5b8f107",
           "topology.kubernetes.io/zone": "zone-3"
         },
         "name": "frontend-11",
         "namespace": "web",
+        "ownerReferences": [
+          {
+            "apiVersion": "apps/v1",
+            "blockOwnerDeletion": true,
+            "controller": true,
+            "kind": "ReplicaSet",
+            "name": "frontend-7d9c5b8f107",
+            "uid": "00000000-0000-0000-0000-000000000107"
+          }
+        ],
         "uid": "00000000-0000-0000-0000-000000000024"
       },
       "spec": {
@@ -1396,10 +1536,21 @@
       "metadata": {
         "labels": {
           "app": "frontend",
+          "pod-template-hash": "7d9c5b8f107",
           "topology.kubernetes.io/zone": "zone-1"
         },
         "name": "frontend-9",
         "namespace": "web",
+        "ownerReferences": [
+          {
+            "apiVersion": "apps/v1",
+            "blockOwnerDeletion": true,
+            "controller": true,
+            "kind": "ReplicaSet",
+            "name": "frontend-7d9c5b8f107",
+            "uid": "00000000-0000-0000-0000-000000000107"
+          }
+        ],
         "uid": "00000000-0000-0000-0000-000000000025"
       },
       "spec": {
