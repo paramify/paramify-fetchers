@@ -210,8 +210,9 @@ def position(root: Path) -> dict:
 def is_container(root: Path) -> bool:
     """True inside the deploy image, or any copy of the code without git history.
 
-    deploy/Dockerfile sets PARAMIFY_CONTAINER=1, and .dockerignore leaves .git
-    out of the image, so either signal means there is no clone here to update.
+    deploy/Dockerfile and deploy/Dockerfile.wolfi set PARAMIFY_CONTAINER=1, and
+    .dockerignore leaves .git out of the image, so either signal means there is
+    no clone here to update.
     """
     return bool(os.environ.get(CONTAINER_ENV)) or not (Path(root) / ".git").exists()
 

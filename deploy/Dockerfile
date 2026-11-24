@@ -7,46 +7,52 @@
 # Build (from the REPO ROOT, not deploy/):
 #   docker build -f deploy/Dockerfile -t paramify-fetchers:beta .
 # or just use docker compose (see deploy/docker-compose.yml).
-#
-# The base is Chainguard's Wolfi base image: a minimal, glibc-based image that
-# Chainguard rebuilds daily, so it carries far fewer known CVEs than Debian.
-# Chainguard's free `python` image only has a `latest` tag, and that tag moves
-# to each new Python minor. So we start from wolfi-base and install a fixed
-# Python minor from the Wolfi package repo. The digest pin makes builds
-# repeatable; Dependabot bumps it (see .github/dependabot.yml).
-FROM cgr.dev/chainguard/wolfi-base:latest@sha256:be019c1c74fe69204a42c4e10bc4d886a49bf5403ffa74374ef7baa408fc9a26
+FROM python:3.14-slim@sha256:9aaa474097d094040649f2162a627c0049b408f52138d980916788d80f04802f
 
 # ---------------------------------------------------------------------------
 # System binaries
 # ---------------------------------------------------------------------------
-# python-3.14: keep in step with the newest Python in CI (.github/workflows/ci.yml).
-# coreutils/grep/sed/gawk/findutils: the GNU tools. wolfi-base has only busybox,
-#   and the bash fetchers were written against the GNU versions.
-# aws-cli-2: the current AWS CLI v2. (The `aws-cli-v2` package is an old build.)
-# kubectl-latest: the newest kubectl, as the old curl from stable.txt gave.
-# cronie: the cron daemon for the `scheduler` mode (see entrypoint.sh).
-RUN apk add --no-cache \
-        python-3.14 py3.14-pip \
-        bash coreutils grep sed gawk findutils tzdata \
-        git curl jq \
-        aws-cli-2 kubectl-latest \
-        tini cronie
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        bash git curl jq unzip ca-certificates tini cron \
+ && rm -rf /var/lib/apt/lists/*
+
+# aws-cli v2 — not on pip; use the official installer (arch-aware).
+# Retry + unzip -t: flaky Docker Desktop networking can corrupt the ~50MB zip
+# (unzip then fails with "bad CRC" even though curl exits 0).
+RUN set -eux; \
+    case "$(uname -m)" in \
+      x86_64)  url="https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" ;; \
+      aarch64) url="https://awscli.amazonaws.com/awscli-exe-linux-aarch64.zip" ;; \
+      *) echo "unsupported arch: $(uname -m)" >&2; exit 1 ;; \
+    esac; \
+    for attempt in 1 2 3 4 5; do \
+      curl -fsSL --retry 3 --retry-all-errors --retry-delay 2 "$url" -o /tmp/awscliv2.zip \
+        && unzip -t /tmp/awscliv2.zip >/dev/null \
+        && break; \
+      rm -f /tmp/awscliv2.zip; \
+      if [ "$attempt" -eq 5 ]; then echo "awscli zip download or integrity check failed" >&2; exit 1; fi; \
+      sleep 2; \
+    done; \
+    unzip -q /tmp/awscliv2.zip -d /tmp; \
+    /tmp/aws/install; \
+    rm -rf /tmp/aws /tmp/awscliv2.zip
+
+# kubectl — pinned to the current stable channel (arch-aware).
+RUN set -eux; \
+    case "$(uname -m)" in x86_64) k="amd64" ;; aarch64) k="arm64" ;; esac; \
+    ver="$(curl -fsSL https://dl.k8s.io/release/stable.txt)"; \
+    curl -fsSLo /usr/local/bin/kubectl "https://dl.k8s.io/release/${ver}/bin/linux/${k}/kubectl"; \
+    chmod +x /usr/local/bin/kubectl
 
 # NOTE: one fetcher references `terraform`. Checkov *scans* terraform source
-# statically and does not need the binary; add the Wolfi `terraform` package
-# only if a fetcher actually invokes terraform.
+# statically and does not need the binary; uncomment only if a fetcher actually
+# invokes terraform.
+# RUN curl -fsSLo /tmp/tf.zip https://releases.hashicorp.com/terraform/1.9.8/terraform_1.9.8_linux_amd64.zip \
+#  && unzip -q /tmp/tf.zip -d /usr/local/bin && rm /tmp/tf.zip
 
 # ---------------------------------------------------------------------------
 # The tool + Python deps
 # ---------------------------------------------------------------------------
-# A virtualenv first on PATH gives `python`, `pip` and `paramify` stable names,
-# whatever the Wolfi Python package links into /usr/bin.
-RUN python3.14 -m venv /opt/venv
-ENV PATH=/opt/venv/bin:$PATH
-# The python:*-slim images set this, and the fetchers were tested under it.
-# wolfi-base sets no locale; glibc has C.UTF-8 built in.
-ENV LANG=C.UTF-8
-
 WORKDIR /app
 COPY . .
 
@@ -62,9 +68,8 @@ RUN pip install --no-cache-dir -e ".[${INSTALL_EXTRAS}]"
 # other fetchers also use (boto3), which would otherwise hold them back.
 RUN case ",${INSTALL_EXTRAS}," in \
       *,checkov,*) \
-        python3.14 -m venv /opt/checkov \
+        python -m venv /opt/checkov \
         && /opt/checkov/bin/pip install --no-cache-dir checkov \
-        && mkdir -p /usr/local/bin \
         && ln -s /opt/checkov/bin/checkov /usr/local/bin/checkov ;; \
     esac
 

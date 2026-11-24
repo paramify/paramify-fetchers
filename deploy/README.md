@@ -16,6 +16,7 @@ is a guided run against a test AWS Secrets Manager secret.
 | File | What it is |
 |---|---|
 | `Dockerfile` | The image: Python + the tool + the system binaries fetchers need (`jq`, `aws`, `kubectl`, `git`, `curl`, `checkov`) |
+| `Dockerfile.wolfi` | The same image on Chainguard Wolfi, with far fewer known CVEs (see [Two images](#two-images-debian-and-wolfi)) |
 | `docker-compose.yml` | Two services: `collector` (run-and-exit) and `scheduler` (cron) |
 | `entrypoint.sh` | Runs whatever command you pass; `scheduler` mode starts cron |
 | `crontab` | The schedule — maps a time to a manifest path |
@@ -81,14 +82,33 @@ Three options, in order of preference:
 docker compose -f deploy/docker-compose.yml build
 ```
 
-The image is built on Chainguard's `wolfi-base`. The first build installs Python,
-`aws-cli`, `kubectl` and the other tools from the Wolfi package repo, and (by
-default) installs `checkov` with pip, so it takes a few minutes. For a faster
-local image without the checkov scanners:
+First build pulls `aws-cli`, `kubectl`, and (by default) `checkov`, so it takes a
+few minutes. For a faster local image without the checkov scanners:
 
 ```bash
 docker compose -f deploy/docker-compose.yml build --build-arg INSTALL_EXTRAS=tui
 ```
+
+### Two images: Debian and Wolfi
+
+There are two Dockerfiles. They install the same tools and give the same image
+to use:
+
+| File | Base | Notes |
+|---|---|---|
+| `Dockerfile` | `python:3.14-slim` (Debian) | The default. |
+| `Dockerfile.wolfi` | Chainguard `wolfi-base` | Far fewer known CVEs. Python 3.14 and the tools come from the Wolfi package repo. |
+
+To build the Wolfi image, set `PARAMIFY_DOCKERFILE` before you build:
+
+```bash
+PARAMIFY_DOCKERFILE=Dockerfile.wolfi docker compose -f deploy/docker-compose.yml build
+```
+
+You can also put `PARAMIFY_DOCKERFILE=Dockerfile.wolfi` in `deploy/.env`. Both
+images get the tag `paramify-fetchers:beta`, so the last build is the one that
+runs. The Wolfi image is planned to become the only image, and then
+`Dockerfile` will be removed.
 
 ## 3. Play with it
 
@@ -231,6 +251,7 @@ You don't SSH in — use Docker:
 | `secret … must be a flat JSON object` | The secret isn't `{"VAR":"value", …}` — fix its shape |
 | Fetcher exits with "missing secret" | A `${env:VAR}` in the manifest has no matching key in the secret — align the names |
 | Evidence not on host | Run from the repo root so `./evidence` maps correctly |
+| `unzip` / `bad CRC` during image build (aws-cli step) | Corrupted download of the ~50MB AWS CLI zip — common on fresh Docker Desktop installs. Retry the build; if it persists, `docker builder prune -f` then rebuild. The Dockerfile retries and tests the zip before installing. |
 
 ## Running this in production
 

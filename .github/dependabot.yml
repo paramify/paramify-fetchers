@@ -61,12 +61,12 @@ updates:
       actions:
         patterns: ["*"]
 
-  # --- Docker base image: deploy/Dockerfile -------------------------------------
-  # Watches the digest pin on `FROM cgr.dev/chainguard/wolfi-base:latest@sha256:…`.
-  # Chainguard rebuilds wolfi-base daily, so each bump picks up its fixes. The
-  # Python minor is an apk package in the Dockerfile, not this tag. This one
-  # carries real weight for the security brief: the customer builds their own
-  # image, so base-image currency in THIS repo is what determines the CVE floor
+  # --- Docker base images: deploy/Dockerfile and deploy/Dockerfile.wolfi -------
+  # Watches every Dockerfile* in /deploy: the `python:3.14-slim` digest in
+  # Dockerfile and the `cgr.dev/chainguard/wolfi-base` digest in Dockerfile.wolfi
+  # (rebuilt daily by Chainguard; its Python minor is an apk package, not the tag).
+  # This one carries real weight for the security brief: the customer builds their
+  # own image, so base-image currency in THIS repo is what determines the CVE floor
   # of every image they build from it.
   - package-ecosystem: docker
     directory: "/deploy"

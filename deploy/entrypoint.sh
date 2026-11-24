@@ -64,8 +64,12 @@ case "${1:-}" in
     crontab /app/deploy/crontab
     echo "[entrypoint] installed crontab:"
     crontab -l | sed 's/^/    /'
-    # cronie's daemon is `crond`; -n keeps it in the foreground under tini.
-    exec crond -n
+    # Debian's cron (deploy/Dockerfile) is `cron -f`; cronie on Wolfi
+    # (deploy/Dockerfile.wolfi) is `crond -n`. Both stay in the foreground under tini.
+    if command -v crond >/dev/null 2>&1; then
+      exec crond -n
+    fi
+    exec cron -f
     ;;
   ""|-h|--help)
     echo "usage: <command>            run any command (default: paramify list)"

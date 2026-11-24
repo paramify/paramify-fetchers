@@ -10,12 +10,13 @@ schemas and the `paramify` CLI — not the internal code.
 
 ## [Unreleased]
 
-### Changed
-- **The container image is built on Chainguard's `wolfi-base`** (`deploy/Dockerfile`: `python:3.14-slim` →
-  `cgr.dev/chainguard/wolfi-base`, pinned by digest). Python stays 3.14, now from the Wolfi `python-3.14` package.
-  `aws-cli`, `kubectl` and the other tools come from the Wolfi package repo too, so the build no longer downloads the
-  AWS CLI zip or reads kubectl's `stable.txt`. The scheduler runs cronie's `crond`; the crontab and its env snapshot
-  are unchanged. The image still runs as root.
+### Added
+- **A second container image on Chainguard's `wolfi-base`** (`deploy/Dockerfile.wolfi`, pinned by digest). It has the
+  same tools and settings as `deploy/Dockerfile`, with far fewer known CVEs. Python is 3.14 from the Wolfi
+  `python-3.14` package, and `aws-cli`, `kubectl` and the other tools also come from the Wolfi package repo. Build it
+  with `PARAMIFY_DOCKERFILE=Dockerfile.wolfi`. The scheduler runs cronie's `crond`, and the entrypoint starts the
+  cron daemon that the image has. `deploy/Dockerfile` (Debian) stays the default for now; the Wolfi image is planned
+  to replace it.
 
 ### Fixed
 - **`aws_codebuild_pipeline_config` 0.2.1 and `aws_opensearch_encryption_status` 0.2.1 work with jq 1.8.** Both split
