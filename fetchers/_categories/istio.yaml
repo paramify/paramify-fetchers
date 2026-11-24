@@ -20,13 +20,30 @@ config_schema:
     description: >-
       The kubeconfig context to use. Leave unset to use the kubeconfig's current context, or the in-cluster service
       account when the fetcher runs in a pod.
-  root_namespace:
+  control_plane_namespace:
     type: string
     required: false
     default: istio-system
+    env: ISTIO_CONTROL_PLANE_NAMESPACE
+    description: >-
+      The namespace where istiod runs. The fetcher reads the mesh config ConfigMap, the istio-ca-root-cert ConfigMap
+      and the istiod Deployments here.
+  mesh_configmap:
+    type: string
+    required: false
+    default: istio
+    env: ISTIO_MESH_CONFIGMAP
+    description: >-
+      The name of the mesh config ConfigMap. It is istio for a default install, and istio-<revision> for a
+      revisioned install, such as istio-1-24.
+  root_namespace:
+    type: string
+    required: false
     env: ISTIO_ROOT_NAMESPACE
     description: >-
-      Istio's root namespace, where mesh-wide policies, the mesh configuration and the root certificate live.
+      Istio's root namespace, where mesh-wide policies live. Leave unset: the fetcher uses rootNamespace from the mesh
+      config. It uses this value only when the mesh config cannot be read, and the control-plane namespace when this
+      is unset too.
 
 # No secrets: credentials come from the kubeconfig (such as an AKS kubeconfig that signs in through kubelogin) or from
 # the in-cluster service account. These variables are passed through so either path works.

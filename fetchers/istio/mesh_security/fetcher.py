@@ -38,6 +38,8 @@ OLD_TLS = frozenset({"TLSV1_0", "TLSV1_1"})
 HTTP_PROTOCOLS = frozenset({"HTTP", "HTTP2", "HTTP_PROXY", "GRPC", "GRPC-WEB"})
 TLS_PROTOCOLS = frozenset({"HTTPS", "TLS"})
 DEFAULT_WORKLOAD_CERT_TTL = "24h"  # istiod's default when DEFAULT_WORKLOAD_CERT_TTL is not set
+ISTIO_SYSTEM = "istio-system"  # Istio's default for both the control-plane namespace and meshConfig.rootNamespace
+DEFAULT_MESH_CONFIGMAP = "istio"  # istio-<revision> for a revisioned install
 CODES = {401: "auth_failed", 403: "not_authorized"}
 # What each read needs, so a refusal names the exact permission.
 NEEDS = {
@@ -47,9 +49,9 @@ NEEDS = {
     "gateways": "list gateways.networking.istio.io (cluster-wide)",
     "virtualservices": "list virtualservices.networking.istio.io (cluster-wide)",
     "destinationrules": "list destinationrules.networking.istio.io (cluster-wide)",
-    "mesh config": "get configmaps in the root namespace",
-    "root certificate": "get configmaps in the root namespace",
-    "istiod": "list deployments in the root namespace",
+    "mesh config": "get the mesh config ConfigMap in the control-plane namespace",
+    "root certificate": "get configmaps in the control-plane namespace",
+    "istiod": "list deployments in the control-plane namespace",
 }
 
 logger = logging.getLogger(NAME)
@@ -214,8 +216,22 @@ def mesh_settings(configmap: Dict[str, Any]) -> Dict[str, Any]:
     outbound = mesh.get("outboundTrafficPolicy") or {}
     if not isinstance(outbound, dict):
         raise ValueError("mesh outboundTrafficPolicy is not a mapping")
-    # Istio's default is ALLOW_ANY when the mode isn't set.
-    return {"outbound_traffic_policy": str(outbound.get("mode") or "ALLOW_ANY").upper()}
+    root = mesh.get("rootNamespace")
+    if root is not None and not isinstance(root, str):
+        raise ValueError("mesh rootNamespace is not a string")
+    # Istio's defaults: ALLOW_ANY when the mode isn't set, istio-system when rootNamespace isn't.
+    return {"outbound_traffic_policy": str(outbound.get("mode") or "ALLOW_ANY").upper(),
+            "root_namespace": root or ISTIO_SYSTEM}
+
+
+def policy_root(mesh: Optional[Dict[str, Any]], setting: Optional[str], control_plane: str) -> Tuple[str, str]:
+    """The root namespace for mesh-wide policy, and where it came from. The mesh config is what Istio uses, so it wins
+    when it was read. Without it, the root_namespace setting, else the control-plane namespace."""
+    if mesh is not None:
+        if setting and setting != mesh["root_namespace"]:
+            logger.warning("root_namespace %s ignored: the mesh config sets %s", setting, mesh["root_namespace"])
+        return mesh["root_namespace"], "mesh config"
+    return (setting, "setting") if setting else (control_plane, "control-plane namespace")
 
 
 def root_certificates(configmap: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -249,11 +265,12 @@ def workload_cert_ttl(deployments: Optional[List[Dict[str, Any]]]) -> Tuple[Opti
 
 def summarize(data: Dict[str, Optional[List[Dict[str, Any]]]], mesh: Optional[Dict[str, Any]],
               certs: Optional[List[Dict[str, Any]]], istiod: Optional[List[Dict[str, Any]]], root: str,
-              now: datetime) -> Dict[str, Any]:
+              now: datetime, control_plane: str = ISTIO_SYSTEM) -> Dict[str, Any]:
     """What is configured, never a verdict beyond Istio's own rules. Each group is null when the read behind it failed."""
     ns, pas, aps, gws, vss, drs = (data.get(k) for k in ("namespaces", "peerauthentications", "authorizationpolicies",
                                                            "gateways", "virtualservices", "destinationrules"))
-    workload = [n for n in ns or [] if (n.get("metadata") or {}).get("name") not in SYSTEM_NAMESPACES | {root}]
+    istio_namespaces = SYSTEM_NAMESPACES | {root, control_plane}
+    workload = [n for n in ns or [] if (n.get("metadata") or {}).get("name") not in istio_namespaces]
     meshed = [n for n in workload if in_mesh(n)]
     names = {(n.get("metadata") or {}).get("name") for n in meshed}
     deny_ns = {(p.get("metadata") or {}).get("namespace") for p in aps or [] if is_default_deny(p)}
@@ -367,20 +384,25 @@ class MeshReader:
                                                                                          limit=PAGE, _continue=t)))
 
 
-def collect(reader: MeshReader, root: str, now: Optional[datetime] = None) -> Dict[str, Any]:
+def collect(reader: MeshReader, control_plane: str = ISTIO_SYSTEM, mesh_configmap: str = DEFAULT_MESH_CONFIGMAP,
+            root_setting: Optional[str] = None, now: Optional[datetime] = None) -> Dict[str, Any]:
     now = now or datetime.now(timezone.utc)
     data = {"namespaces": reader.namespaces()}
     for group, plural in (("security.istio.io", "peerauthentications"), ("security.istio.io", "authorizationpolicies"),
                           ("networking.istio.io", "gateways"), ("networking.istio.io", "virtualservices"),
                           ("networking.istio.io", "destinationrules")):
         data[plural] = reader.custom_list(group, plural)
-    mesh_config = reader.configmap("mesh config", "istio", root)
+    mesh_config = reader.configmap("mesh config", mesh_configmap, control_plane)
     mesh = reader.parse("mesh config", lambda: mesh_settings(mesh_config)) if mesh_config is not None else None
-    root_cert = reader.configmap("root certificate", "istio-ca-root-cert", root)
+    root, root_source = policy_root(mesh, root_setting, control_plane)
+    root_cert = reader.configmap("root certificate", "istio-ca-root-cert", control_plane)
     certs = reader.parse("root certificate", lambda: root_certificates(root_cert)) if root_cert is not None else None
-    istiod = reader.istiod(root)
+    istiod = reader.istiod(control_plane)
     results = {
         "root_namespace": root,
+        "root_namespace_source": root_source,
+        "control_plane_namespace": control_plane,
+        "mesh_config": f"{control_plane}/{mesh_configmap}",
         "peer_authentications": [{"ref": _ref(p), "selector": _selects_workloads(p.get("spec") or {}),
                                   "created": (p.get("metadata") or {}).get("creationTimestamp"),
                                   "mode": ((p.get("spec") or {}).get("mtls") or {}).get("mode"),
@@ -394,7 +416,7 @@ def collect(reader: MeshReader, root: str, now: Optional[datetime] = None) -> Di
         "gateway_servers": gateway_servers(data["gateways"]) if data["gateways"] is not None else None,
         "root_certificates": certs,
     }
-    return {"results": results, "summary": summarize(data, mesh, certs, istiod, root, now)}
+    return {"results": results, "summary": summarize(data, mesh, certs, istiod, root, now, control_plane)}
 
 
 def clients(context: Optional[str]) -> Tuple[Any, Any, Any]:
@@ -417,10 +439,13 @@ def main() -> int:
     load_dotenv()
     out_dir = Path(os.environ.get("EVIDENCE_DIR", "./evidence"))
     out_dir.mkdir(parents=True, exist_ok=True)
-    root = (os.environ.get("ISTIO_ROOT_NAMESPACE") or "istio-system").strip()
+    control_plane = (os.environ.get("ISTIO_CONTROL_PLANE_NAMESPACE") or "").strip() or ISTIO_SYSTEM
+    mesh_configmap = (os.environ.get("ISTIO_MESH_CONFIGMAP") or "").strip() or DEFAULT_MESH_CONFIGMAP
+    root_setting = (os.environ.get("ISTIO_ROOT_NAMESPACE") or "").strip() or None
     now = datetime.now(timezone.utc)
-    metadata: Dict[str, Any] = {"datetime": now.strftime("%Y-%m-%dT%H:%M:%SZ"), "root_namespace": root, "api_failures": []}
-    evidence: Dict[str, Any] = {"results": {}, "summary": summarize({}, None, None, None, root, now)}
+    metadata: Dict[str, Any] = {"datetime": now.strftime("%Y-%m-%dT%H:%M:%SZ"), "control_plane_namespace": control_plane,
+                                "root_namespace": root_setting or control_plane, "api_failures": []}
+    evidence: Dict[str, Any] = {"results": {}, "summary": summarize({}, None, None, None, metadata["root_namespace"], now)}
     code = None
     try:
         reader = MeshReader(*clients(os.environ.get("ISTIO_KUBE_CONTEXT")))
@@ -428,7 +453,8 @@ def main() -> int:
         metadata["api_failures"] = [{"operation": "kubernetes config", "type": type(exc).__name__, "message": str(exc)[:300]}]
         code = "bad_config"
     else:
-        evidence = collect(reader, root, now)
+        evidence = collect(reader, control_plane, mesh_configmap, root_setting, now)
+        metadata["root_namespace"] = evidence["results"]["root_namespace"]
         metadata["api_failures"] = reader.api_failures
         code = reader.codes[0] if reader.codes else None
     metadata["partial_failure"] = bool(metadata["api_failures"])

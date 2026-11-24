@@ -46,9 +46,9 @@ class _Api:
 
     api_client = _Serializer()
 
-    def __init__(self, refused=(), page_size=None, istiod=None, configmaps=None):
+    def __init__(self, refused=(), page_size=None, istiod=None, configmaps=None, missing=()):
         self.refused, self.page_size, self.calls = set(refused), page_size, []
-        self.istiod_fixture, self.configmaps = istiod, configmaps or {}
+        self.istiod_fixture, self.configmaps, self.missing = istiod, configmaps or {}, set(missing)
 
     def _page(self, what, body, cont):
         self.calls.append((what, cont))
@@ -66,12 +66,16 @@ class _Api:
         return self._page("namespaces", fx("namespaces"), _continue)
 
     def read_namespaced_config_map(self, name, namespace):
-        what = {"istio": "mesh config", "istio-ca-root-cert": "root certificate"}[name]
-        body = self.configmaps.get(name) or fx("configmap-istio" if name == "istio" else "configmap-root-cert")
+        what = "root certificate" if name == "istio-ca-root-cert" else "mesh config"
+        self.calls.append(("configmap", f"{namespace}/{name}"))
+        if (namespace, name) in self.missing:
+            raise ApiError(404)
+        body = self.configmaps.get(name) or fx("configmap-root-cert" if name == "istio-ca-root-cert" else "configmap-istio")
         return self._page(what, body, None)
 
     # AppsV1Api
     def list_namespaced_deployment(self, namespace, label_selector=None, limit=None, _continue=None):
+        self.calls.append(("deployments", namespace))
         body = self.istiod_fixture if self.istiod_fixture is not None else fx("deployments-istiod")
         return self._page("istiod", body, _continue)
 
@@ -85,9 +89,9 @@ def _reader(**kw):
     return im.MeshReader(api, api, api), api
 
 
-def _summary(**kw):
+def _summary(collect_kw=None, **kw):
     reader, api = _reader(**kw)
-    return im.collect(reader, ROOT, NOW), reader, api
+    return im.collect(reader, now=NOW, **(collect_kw or {})), reader, api
 
 
 def test_real_mesh_gives_every_judgment(assert_summary_documented):
@@ -248,8 +252,45 @@ def test_a_refused_read_names_its_permission_and_leaves_only_its_fields_null():
     assert (s["mesh_mtls_mode"], s["gateways"]) == ("STRICT", 2)
     needs = {f["operation"]: f["message"] for f in reader.api_failures}
     assert needs["authorizationpolicies"] == "needs: list authorizationpolicies.security.istio.io (cluster-wide)"
-    assert needs["root certificate"] == "needs: get configmaps in the root namespace"
+    assert needs["root certificate"] == "needs: get configmaps in the control-plane namespace"
     assert reader.codes == ["not_authorized", "not_authorized"]
+
+
+def test_a_revisioned_install_reads_its_own_mesh_config():
+    ev, reader, api = _summary(collect_kw={"mesh_configmap": "istio-canary"}, missing={(ROOT, "istio")})
+    assert reader.api_failures == [] and ev["summary"]["outbound_traffic_policy"] == "REGISTRY_ONLY"
+    assert ("configmap", f"{ROOT}/istio-canary") in api.calls
+
+
+def test_the_policy_root_comes_from_the_mesh_config_not_the_control_plane_namespace():
+    """istiod and its ConfigMaps in istio-system, mesh-wide policy in policy-root (meshConfig.rootNamespace)."""
+    mesh = {"data": {"mesh": "rootNamespace: policy-root\noutboundTrafficPolicy:\n  mode: REGISTRY_ONLY\n"}}
+    reader, api = _reader(configmaps={"istio": mesh})
+    reader.namespaces = lambda: fx("namespaces")["items"] + [{"metadata": {"name": "policy-root", "labels": {}}}]
+    pas = [{"metadata": {"namespace": "policy-root", "name": "default"}, "spec": {"mtls": {"mode": "STRICT"}}}]
+    aps = [{"metadata": {"namespace": "policy-root", "name": "deny-all"}, "spec": {}}]
+    lists = {"peerauthentications": pas, "authorizationpolicies": aps}
+    reader.custom_list = lambda group, plural: lists.get(plural, fx(plural)["items"])
+    ev = im.collect(reader, control_plane=ROOT, root_setting="istio-system", now=NOW)
+    s, r = ev["summary"], ev["results"]
+    assert (r["root_namespace"], r["root_namespace_source"], r["control_plane_namespace"]) == ("policy-root", "mesh config", ROOT)
+    assert (s["mesh_mtls_mode"], s["strict_mtls_everywhere"], s["mesh_default_deny"]) == ("STRICT", True, True)
+    # The policy root is not a workload namespace, and the ConfigMaps and istiod are still read in the control plane.
+    assert s["namespaces"] == 6 and s["workload_cert_ttl"] == "12h"
+    assert ("configmap", f"{ROOT}/istio") in api.calls and ("deployments", ROOT) in api.calls
+
+
+@pytest.mark.parametrize("mesh, setting, expected", [
+    ({"root_namespace": "policy-root"}, None, ("policy-root", "mesh config")),
+    ({"root_namespace": "policy-root"}, "other", ("policy-root", "mesh config")),
+    (None, "other", ("other", "setting")),
+    (None, None, ("cp", "control-plane namespace"))])
+def test_policy_root_precedence(mesh, setting, expected):
+    assert im.policy_root(mesh, setting, "cp") == expected
+
+
+def test_a_mesh_config_without_root_namespace_uses_istios_default():
+    assert im.mesh_settings({"data": {"mesh": "defaultConfig: {}\n"}})["root_namespace"] == "istio-system"
 
 
 def test_a_missing_istiod_is_said_rather_than_left_blank():

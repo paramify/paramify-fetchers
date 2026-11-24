@@ -33,7 +33,7 @@ evidence_set:
   instructions: |
     Script: istio/mesh_security/fetcher.py
 
-    Access: A Kubernetes identity, through a kubeconfig or the in-cluster service account, with a ClusterRole allowing list on namespaces, on peerauthentications and authorizationpolicies (security.istio.io), and on gateways, virtualservices and destinationrules (networking.istio.io); and a Role in the root namespace allowing get on the configmaps istio and istio-ca-root-cert and list on deployments. Nothing else: it reads no secrets and writes nothing. On AKS with Microsoft Entra ID, the kubeconfig can sign in through kubelogin.
+    Access: A Kubernetes identity, through a kubeconfig or the in-cluster service account, with a ClusterRole allowing list on namespaces, on peerauthentications and authorizationpolicies (security.istio.io), and on gateways, virtualservices and destinationrules (networking.istio.io); and a Role in the control-plane namespace allowing get on the mesh config ConfigMap (istio, or istio-<revision>) and istio-ca-root-cert and list on deployments. Nothing else: it reads no secrets and writes nothing. On AKS with Microsoft Entra ID, the kubeconfig can sign in through kubelogin.
 
     Commands Executed:
     - GET /api/v1/namespaces — every namespace and whether sidecar injection is on (istio-injection=enabled, or an istio.io/rev label), page by page
@@ -42,16 +42,16 @@ evidence_set:
     - GET /apis/networking.istio.io/v1/gateways — each ingress server's protocol, TLS mode, HTTPS redirect and minimum TLS version
     - GET /apis/networking.istio.io/v1/virtualservices — which routes are bound to a gateway
     - GET /apis/networking.istio.io/v1/destinationrules — rules that turn TLS off for a host or port, for all traffic or for a subset
-    - GET /api/v1/namespaces/{root}/configmaps/istio — the mesh configuration's outbound traffic policy
-    - GET /api/v1/namespaces/{root}/configmaps/istio-ca-root-cert — the mesh root certificate (public; no private key)
-    - GET /apis/apps/v1/namespaces/{root}/deployments?labelSelector=app=istiod — istiod's workload certificate lifetime setting
+    - GET /api/v1/namespaces/{control-plane}/configmaps/{mesh config} — the mesh configuration's root namespace and outbound traffic policy
+    - GET /api/v1/namespaces/{control-plane}/configmaps/istio-ca-root-cert — the mesh root certificate (public; no private key)
+    - GET /apis/apps/v1/namespaces/{control-plane}/deployments?labelSelector=app=istiod — istiod's workload certificate lifetime setting
 
-    Output: istio_mesh_security.json — mTLS settings, authorization policies, gateway servers and root certificates, judged by Istio's own rules. Configuration only: it does not show traffic actually encrypted or requests actually denied.
+    Output: istio_mesh_security.json — mTLS settings, authorization policies, gateway servers and root certificates, judged by Istio's own rules. Configuration only: it does not show traffic actually encrypted or requests actually denied. The root namespace for mesh-wide policy is rootNamespace from the mesh config; results.root_namespace_source says where it came from.
 
     Summary fields:
 
     Which namespaces are in the mesh?
-    - namespaces — Number of namespaces other than kube-system, kube-public, kube-node-lease and the root namespace; null if namespaces could not be read, as are the two fields below
+    - namespaces — Number of namespaces other than kube-system, kube-public, kube-node-lease, the root namespace and the control-plane namespace; null if namespaces could not be read, as are the two fields below
     - namespaces_in_mesh — Number of those with sidecar injection on, by the istio-injection=enabled label or an istio.io/rev label
     - namespaces_not_in_mesh — List of the namespaces without sidecar injection; their workloads get no mesh mTLS or authorization
 
@@ -89,4 +89,4 @@ evidence_set:
     - root_certificate_days_remaining — Days until then
     - workload_cert_ttl — istiod's workload certificate lifetime (DEFAULT_WORKLOAD_CERT_TTL), or Istio's default of 24h when not set; null if istiod could not be read or wasn't found
     - workload_cert_ttl_hours — The same, in hours
-    - workload_cert_ttl_source — setting, default, or istiod_not_found when no Deployment labeled app=istiod is in the root namespace (such as a managed control plane elsewhere)
+    - workload_cert_ttl_source — setting, default, or istiod_not_found when no Deployment labeled app=istiod is in the control-plane namespace (such as a managed control plane elsewhere)
