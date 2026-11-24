@@ -177,6 +177,11 @@ the run of `release-draft` in the Actions tab.
 **The failure message arrived.** Open the run link. The last line of the log says
 what to do.
 
+**`release-publish` failed after it pushed the tag.** Run the job again (Actions,
+the failed run, "Re-run jobs"). `publish` sees that the tag is already on the
+reviewed commit, skips the tag, and creates the GitHub Release. It does this only
+when that release does not exist yet.
+
 **A `release/next` branch exists but has no open PR.** The workflow treats it
 as a new draft. The next run replaces the branch.
 

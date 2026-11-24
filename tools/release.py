@@ -33,6 +33,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
@@ -58,6 +59,7 @@ CHANGELOG = "CHANGELOG.md"
 PYPROJECT = "pyproject.toml"
 UNRELEASED = "releases/unreleased.yaml"
 REVIEWER = "21tmccauley"
+BODY_MAX = 120_000  # GitHub refuses a release body over 125,000 characters
 GUIDE = "docs/releasing_guide.md"
 
 Notify = Callable[[str, str], None]
@@ -145,6 +147,18 @@ def _rev(root: Path, ref: str) -> Optional[str]:
         return None
 
 
+def _release_tagged_at(root: Path, ref: str) -> Optional[Tuple[str, dict]]:
+    """(path, doc) of the release whose tag already points at `ref`, if its file is there."""
+    for t in git(root, "tag", "-l", "v*", "--points-at", ref).split():
+        rel = parse_release(t)
+        if rel:
+            path = f"releases/{rel.version}.yaml"
+            doc = _load(read_at(root, ref, [path]).get(path), f"{path} at {ref[:12]}")
+            if isinstance(doc, dict):
+                return path, doc
+    return None
+
+
 def _pending_release(root: Path, ref: str) -> Optional[Tuple[str, dict]]:
     """(path, doc) of the one releases/*.yaml at `ref` whose version has no tag yet."""
     paths = [
@@ -209,6 +223,8 @@ class GitHub:
             raise ReleaseError("gh is not installed or not on PATH") from None
         except subprocess.TimeoutExpired:
             raise ReleaseError(f"gh {args[0]} {args[1]} took longer than 120s; run it again") from None
+        except OSError as e:
+            raise ReleaseError(f"gh {args[0]} {args[1]} could not start: {e.strerror}") from None
         if proc.returncode != 0:
             msg = (proc.stderr or proc.stdout).strip().splitlines()
             raise ReleaseError(f"gh {args[0]} {args[1]} failed: {msg[-1] if msg else proc.returncode}")
@@ -228,9 +244,20 @@ class GitHub:
     def edit_pr(self, number: int, title: str, body: str) -> None:
         self._gh("pr", "edit", str(number), "--title", title, "--body", body)
 
+    def release_exists(self, tag: str) -> bool:
+        try:
+            self._gh("release", "view", tag, "--json", "tagName")
+            return True
+        except ReleaseError:
+            return False
+
     def create_release(self, tag: str, title: str, notes: str, prerelease: bool) -> str:
-        args = ["release", "create", tag, "--verify-tag", "--title", title, "--notes", notes]
-        out = self._gh(*args, *(["--prerelease"] if prerelease else []))
+        # The notes go in a file: a big release body is past the argument limit (v0.7.0-beta was 300 KB).
+        with tempfile.NamedTemporaryFile("w", suffix=".md", encoding="utf-8") as f:
+            f.write(notes)
+            f.flush()
+            args = ["release", "create", tag, "--verify-tag", "--title", title, "--notes-file", f.name]
+            out = self._gh(*args, *(["--prerelease"] if prerelease else []))
         return out.strip().splitlines()[-1]
 
 
@@ -439,19 +466,37 @@ def check(root: Path, ref: str = "HEAD") -> List[str]:
     return release_notes.check_release(found[1], changed, added, _version_of(tag))
 
 
-def render_release_body(doc: dict, changelog_body: str) -> str:
-    """The GitHub Release text: Breaking, New, Fetchers, then the CHANGELOG section folded."""
+def render_release_body(doc: dict, changelog_body: str, changelog_url: str = "") -> str:
+    """The GitHub Release text: Breaking, New, Fetchers, then the CHANGELOG section folded.
+
+    GitHub refuses a body over 125,000 characters. When the CHANGELOG section would pass
+    BODY_MAX it becomes a link to the CHANGELOG; if the fetcher lines alone still pass it,
+    the last ones are counted instead of listed."""
     rows = doc.get("highlights") or []
     breaking = [f"- **{h['title']}**" + (f"\n  Fix: {h['fix']}" if h.get("fix") else "")
                 for h in rows if h.get("tag") == "breaking"]
     new = [f"- {h['title']}" + (f" — {h['detail']}" if h.get("detail") else "")
            for h in rows if h.get("tag") != "breaking"]
     fetchers = [f"- `{f['name']}` {f['version']}: {f['note']}" for f in doc.get("fetchers") or []]
-    parts = [f"## {head}\n\n" + "\n".join(items) for head, items in
-             (("Breaking", breaking), ("New", new), ("Fetchers", fetchers)) if items]
-    if changelog_body.strip():
-        parts.append(f"<details><summary>Full changelog</summary>\n\n{changelog_body.strip()}\n\n</details>")
-    return "\n\n".join(parts) + "\n"
+    link = (f"The full list of changes is in the [CHANGELOG]({changelog_url})." if changelog_url
+            else "The full list of changes is in CHANGELOG.md.")
+
+    def body(fetcher_lines: List[str], tail: str) -> str:
+        parts = [f"## {head}\n\n" + "\n".join(items) for head, items in
+                 (("Breaking", breaking), ("New", new), ("Fetchers", fetcher_lines)) if items]
+        return "\n\n".join(parts + ([tail] if tail else [])) + "\n"
+
+    folded = (f"<details><summary>Full changelog</summary>\n\n{changelog_body.strip()}\n\n</details>"
+              if changelog_body.strip() else "")
+    text = body(fetchers, folded)
+    if len(text) <= BODY_MAX:
+        return text
+    text = body(fetchers, link)
+    keep = len(fetchers)
+    while len(text) > BODY_MAX and keep > 0:
+        keep = max(0, keep - max(1, (len(text) - BODY_MAX) // 100))
+        text = body(fetchers[:keep] + [f"- …and {len(fetchers) - keep} more fetchers; see the CHANGELOG"], link)
+    return text
 
 
 def _refuse(notify: Notify, text: str) -> NoReturn:
@@ -480,7 +525,10 @@ def publish(root: Path, *, head_sha: str, merge_sha: str, gh: GitHub, notify: No
     else:
         _refuse(notify, f"Not published: the tree of {merge_sha[:12]} on main differs from the reviewed "
                         f"{head_sha[:12]}; tag the right commit by hand ({GUIDE}).")
-    found = _pending_release(root, target)
+    resumed = _release_tagged_at(root, target)  # a rerun after the tag got out but the release did not
+    if resumed and gh.release_exists(f"v{resumed[1].get('version')}"):
+        resumed = None  # already published: nothing to finish
+    found = resumed or _pending_release(root, target)
     if found is None:
         _refuse(notify, f"Not published: {target[:12]} has no release file without a tag; "
                         "merge a release/next pull request first.")
@@ -491,10 +539,12 @@ def publish(root: Path, *, head_sha: str, merge_sha: str, gh: GitHub, notify: No
         _refuse(notify, f"v{version} not published: {path} still has {_plural(marks, 'draft mark')}; "
                         "remove them in a pull request to main, then run publish on that merge.")
     tag = f"v{version}"
-    git(root, "tag", "-a", tag, "-m", tag, target)
-    git(root, "push", "--quiet", "origin", tag)
+    if not resumed:
+        git(root, "tag", "-a", tag, "-m", tag, target)
+    git(root, "push", "--quiet", "origin", tag)  # a no-op when the tag is already there
     sections = release_notes.changelog_sections(read_at(root, target, [CHANGELOG])[CHANGELOG] or "")
-    notes = render_release_body(doc, sections.get(version, {}).get("body", ""))
+    notes = render_release_body(doc, sections.get(version, {}).get("body", ""),
+                                f"{repo_web_url(root)}/blob/{tag}/{CHANGELOG}")
     url = gh.create_release(tag, tag, notes, "-" in version)
     notify(f"{tag} is out.", url)
     return tag
