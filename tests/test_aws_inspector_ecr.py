@@ -12,7 +12,6 @@ import importlib.util
 import io
 import json
 import os
-import shutil
 import signal
 import subprocess
 import sys
@@ -125,8 +124,15 @@ print(json.dumps(response))
 
 # The Python collectors call boto3. This stand-in answers from the same fixtures
 # as FAKE_AWS and logs each call in the same shape, plus the client's region.
-FAKE_BOTO3 = r"""import json, os, threading
+FAKE_BOTO3 = r"""import json, os, re, threading
 _lock = threading.Lock()
+
+class ClientError(RuntimeError):
+    # botocore's ClientError carries the AWS error code in .response.
+    def __init__(self, message):
+        super().__init__(message)
+        match = re.search(r'\w+Exception', message)
+        self.response = {'Error': {'Code': match.group(0) if match else message}}
 
 class Session:
     def __init__(self, profile_name=None):
@@ -155,8 +161,11 @@ class _Client:
                 repo = params.get('repositoryName') or (
                     params['filterCriteria']['ecrImageRepositoryName'][0]['value'])
                 response = response['_by_repository'][repo]
+            if isinstance(response, dict) and '_configs' in response:
+                response = {'scanningConfigurations': [
+                    response['_configs'][name] for name in reversed(params['repositoryNames'])]}
             if isinstance(response, dict) and '_error' in response:
-                raise RuntimeError(response['_error'])
+                raise ClientError(response['_error'])
             return dict(response, ResponseMetadata={'HTTPStatusCode': 200})
         return call
 """
@@ -200,10 +209,9 @@ def run_fetcher(tmp_path, data=None, name="inspector_ecr_report", **settings):
         AWS_DEFAULT_REGION=REGION,
     )
     env.update(settings)
-    shell = name == "ecr_image_scanning"
-    entry = ROOT / "fetchers/aws" / name / ("fetcher.sh" if shell else "fetcher.py")
+    entry = ROOT / "fetchers/aws" / name / "fetcher.py"
     result = subprocess.run(
-        ["bash" if shell else sys.executable, str(entry)],
+        [sys.executable, str(entry)],
         cwd=tmp_path,
         env=env,
         text=True,
@@ -241,6 +249,7 @@ def test_all_pages_and_severities_keep_distinct_findings(tmp_path):
     assert json.loads(rows[0]["Affected Packages"])[0]["fixedInVersion"] == "1.1"
     assert len({r["ID"] for r in rows}) == 3
     assert rows[0]["Asset ID"] == f"{ACCOUNT}/{REGION}/example@{DIGEST}"
+    assert {r["Repository ARN"] for r in rows} == {REPO}
     lists = [c for c in calls if c["args"][:2] == ["inspector2", "list-findings"]]
     assert len(lists) == 2
     assert lists[1]["params"]["nextToken"] == "second"
@@ -529,6 +538,60 @@ def test_evidence_exposes_coverage_gaps_but_report_refuses_them(tmp_path, case):
     assert not files
 
 
+def test_report_separates_no_matched_images_from_coverage_gaps(tmp_path):
+    data = responses()
+    data["inspector2 list-coverage"]["coveredResources"] = []
+    result, files, _ = run_fetcher(tmp_path / "gap", data, AWS_INSPECTOR_ALLOW_EMPTY="true")
+    assert result.returncode == 1 and not files
+    status = json.loads((tmp_path / "gap/status.json").read_text())
+    assert "1 of 1 selected images have missing or inactive scan coverage" in status["error"]
+    assert status["code"] == "partial_failure"
+
+    result, files, _ = run_fetcher(
+        tmp_path / "none", AWS_INSPECTOR_IMAGE_TAGS='["no-such-tag"]', AWS_INSPECTOR_ALLOW_EMPTY="true"
+    )
+    assert result.returncode == 1 and not files
+    status = json.loads((tmp_path / "none/status.json").read_text())
+    assert "No images matched the scope (1 images in the selected repositories)" in status["error"]
+    assert status["code"] == "bad_config"
+
+
+def test_no_matched_images_is_allowed_only_with_allow_empty(tmp_path):
+    result, files, calls = run_fetcher(
+        tmp_path / "alone", AWS_INSPECTOR_IMAGE_TAGS='["no-such-tag"]', AWS_INSPECTOR_ALLOW_NO_IMAGES="true"
+    )
+    assert result.returncode == 1 and not files and not calls
+    status = json.loads((tmp_path / "alone/status.json").read_text())
+    assert "requires allow_empty=true" in status["error"] and status["code"] == "bad_config"
+
+    result, files, _ = run_fetcher(
+        tmp_path / "both",
+        AWS_INSPECTOR_IMAGE_TAGS='["no-such-tag"]',
+        AWS_INSPECTOR_ALLOW_NO_IMAGES="true",
+        AWS_INSPECTOR_ALLOW_EMPTY="true",
+    )
+    assert result.returncode == 0, result.stderr
+    assert list(csv.DictReader(io.StringIO(files[0].read_text()))) == []
+    assert "1 in the selected repositories, 0 matched the scope" in result.stderr
+
+    # The opt-in never excuses a coverage gap.
+    data = responses()
+    data["inspector2 list-coverage"]["coveredResources"] = []
+    result, files, _ = run_fetcher(
+        tmp_path / "gap", data, AWS_INSPECTOR_ALLOW_NO_IMAGES="true", AWS_INSPECTOR_ALLOW_EMPTY="true"
+    )
+    assert result.returncode == 1 and not files
+
+
+def test_summary_counts_repository_images_before_filters(tmp_path):
+    result, files, _ = run_fetcher(
+        tmp_path, None, "inspector_ecr_findings", AWS_INSPECTOR_IMAGE_TAGS='["no-such-tag"]'
+    )
+    assert result.returncode == 0, result.stderr
+    summary = json.loads(files[0].read_text())["results"]["summary"]
+    assert summary["repository_image_count"] == 1 and summary["image_count"] == 0
+
+
 def test_zero_findings_requires_explicit_opt_in(tmp_path):
     data = responses()
     data["inspector2 list-findings"] = {"findings": []}
@@ -622,22 +685,22 @@ def test_same_vulnerability_on_two_images_retains_distinct_resources_and_raw_fie
     assert evidence["summary"]["findings_by_vulnerability"] == {"CVE-2026-10001": 2}
 
 
-@pytest.mark.skipif(not shutil.which("jq"), reason="requires jq")
 def test_scan_configuration_failure_is_not_basic_scanning(tmp_path):
     data = responses()
     data["ecr get-registry-scanning-configuration"] = {"_error": "AccessDeniedException"}
     data["ecr batch-get-repository-scanning-configuration"] = {
         "failures": [{"repositoryName": "example", "failureCode": "REPOSITORY_NOT_FOUND"}]
     }
-    data["ecr describe-images"] = None
+    data["ecr describe-images"] = {"imageDetails": []}
     result, files, _ = run_fetcher(tmp_path, data, "ecr_image_scanning")
     assert result.returncode == 1
     evidence = json.loads(files[0].read_text())["results"]
     assert evidence["registry_scanning"]["scan_type"] is None
+    # Not read, so unknown: [] would claim the registry has no rules.
+    assert evidence["registry_scanning"]["rules"] is None
     assert evidence["repositories"][0]["scan_frequency"] is None
 
 
-@pytest.mark.skipif(not shutil.which("jq"), reason="requires jq")
 def test_ecr_config_batches_join_the_correct_repository_once(tmp_path):
     data = responses()
     data["ecr get-registry-scanning-configuration"] = {
@@ -657,7 +720,7 @@ def test_ecr_config_batches_join_the_correct_repository_once(tmp_path):
         }
     data["ecr describe-repositories"] = {"repositories": repositories}
     data["ecr batch-get-repository-scanning-configuration"] = {"_configs": configs}
-    data["ecr describe-images"] = None
+    data["ecr describe-images"] = {"imageDetails": []}
     result, files, calls = run_fetcher(tmp_path, data, "ecr_image_scanning")
     assert result.returncode == 0, result.stderr
     collected = json.loads(files[0].read_text())["results"]["repositories"]
@@ -676,7 +739,6 @@ def test_ecr_config_batches_join_the_correct_repository_once(tmp_path):
     ]
 
 
-@pytest.mark.skipif(not shutil.which("jq"), reason="requires jq")
 def test_ecr_partial_batch_preserves_successful_config_and_failure_reason(tmp_path):
     data = responses()
     data["ecr get-registry-scanning-configuration"] = {
@@ -701,7 +763,7 @@ def test_ecr_partial_batch_preserves_successful_config_and_failure_reason(tmp_pa
             }
         ],
     }
-    data["ecr describe-images"] = None
+    data["ecr describe-images"] = {"imageDetails": []}
     result, files, _ = run_fetcher(tmp_path, data, "ecr_image_scanning")
     assert result.returncode == 1
     repos = json.loads(files[0].read_text())["results"]["repositories"]
@@ -711,7 +773,6 @@ def test_ecr_partial_batch_preserves_successful_config_and_failure_reason(tmp_pa
     assert "REPOSITORY_NOT_FOUND" in error and "gone" in error and "deleted" in error
 
 
-@pytest.mark.skipif(not shutil.which("jq"), reason="requires jq")
 def test_ecr_batch_error_identifies_request_and_aws_reason(tmp_path):
     data = responses()
     data["ecr get-registry-scanning-configuration"] = {
@@ -720,7 +781,7 @@ def test_ecr_batch_error_identifies_request_and_aws_reason(tmp_path):
     data["ecr batch-get-repository-scanning-configuration"] = {
         "_error": "AccessDeniedException: missing ecr:BatchGetRepositoryScanningConfiguration"
     }
-    data["ecr describe-images"] = None
+    data["ecr describe-images"] = {"imageDetails": []}
     result, _, _ = run_fetcher(tmp_path, data, "ecr_image_scanning")
     assert result.returncode == 1
     status = json.loads((tmp_path / "status.json").read_text())
@@ -729,7 +790,6 @@ def test_ecr_batch_error_identifies_request_and_aws_reason(tmp_path):
     assert "missing ecr:BatchGetRepositoryScanningConfiguration" in status["error"]
 
 
-@pytest.mark.skipif(not shutil.which("jq"), reason="requires jq")
 @pytest.mark.parametrize(
     "scan_type,frequency",
     [("ENHANCED", "CONTINUOUS_SCAN"), ("BASIC", "MANUAL"), ("BASIC", "SCAN_ON_PUSH")],
@@ -742,8 +802,6 @@ def test_ecr_scan_results_do_not_depend_on_scan_on_push(tmp_path, scan_type, fre
     data["ecr batch-get-repository-scanning-configuration"] = {
         "scanningConfigurations": [{"repositoryName": "example", "scanFrequency": frequency}]
     }
-    # The shell requests a global newest-image query with JSON output.
-    data["ecr describe-images"] = DIGEST
     data["ecr describe-image-scan-findings"] = {
         "imageId": {"imageDigest": DIGEST},
         "imageScanStatus": {"status": "ACTIVE"},
@@ -762,11 +820,10 @@ def test_ecr_scan_results_do_not_depend_on_scan_on_push(tmp_path, scan_type, fre
         "informational": 0,
         "untriaged": 1,
     }
-    args = next(c["args"] for c in calls if c["args"][:2] == ["ecr", "describe-images"])
-    assert args[args.index("--output") + 1] == "json"
+    params = next(c["params"] for c in calls if c["args"][:2] == ["ecr", "describe-images"])
+    assert params["maxResults"] == 1000
 
 
-@pytest.mark.skipif(not shutil.which("jq"), reason="requires jq")
 def test_enhanced_scan_counts_every_finding_not_the_page_summary(tmp_path):
     # With enhanced (Inspector) scanning, ECR's findingSeverityCounts covers only
     # the findings on the returned page (verified live, 2026-11-10: a page of 1
@@ -779,7 +836,6 @@ def test_enhanced_scan_counts_every_finding_not_the_page_summary(tmp_path):
     data["ecr batch-get-repository-scanning-configuration"] = {
         "scanningConfigurations": [{"repositoryName": "example", "scanFrequency": "CONTINUOUS_SCAN"}]
     }
-    data["ecr describe-images"] = DIGEST
     severities = ["CRITICAL", "HIGH", "HIGH", "MEDIUM", "LOW", "INFORMATIONAL", "UNTRIAGED", "HIGH"]
     data["ecr describe-image-scan-findings"] = {
         "imageId": {"imageDigest": DIGEST},
@@ -789,7 +845,16 @@ def test_enhanced_scan_counts_every_finding_not_the_page_summary(tmp_path):
             "vulnerabilitySourceUpdatedAt": "2026-11-10T15:45:36Z",
             # What AWS returns for the first page only; must not be trusted.
             "findingSeverityCounts": {"MEDIUM": 1},
-            "enhancedFindings": [{"severity": s} for s in severities],
+            "enhancedFindings": [{"severity": s} for s in severities[:3]],
+        },
+        "nextToken": "page-2",
+    }
+    data["ecr describe-image-scan-findings:page-2"] = {
+        "imageId": {"imageDigest": DIGEST},
+        "imageScanStatus": {"status": "ACTIVE"},
+        "imageScanFindings": {
+            "findingSeverityCounts": {"HIGH": 1},
+            "enhancedFindings": [{"severity": s} for s in severities[3:]],
         },
     }
     result, files, calls = run_fetcher(tmp_path, data, "ecr_image_scanning")
@@ -803,12 +868,11 @@ def test_enhanced_scan_counts_every_finding_not_the_page_summary(tmp_path):
         "informational": 1,
         "untriaged": 1,
     }
-    args = next(c["args"] for c in calls if c["args"][:2] == ["ecr", "describe-image-scan-findings"])
-    assert "--no-paginate" not in args
-    assert "--max-results" not in args
+    pages = [c["params"] for c in calls if c["args"][:2] == ["ecr", "describe-image-scan-findings"]]
+    assert [p.get("nextToken") for p in pages] == [None, "page-2"]
+    assert all(p["maxResults"] == 1000 for p in pages)
 
 
-@pytest.mark.skipif(not shutil.which("jq"), reason="requires jq")
 def test_enhanced_scan_with_no_findings_reports_zero_not_unknown(tmp_path):
     data = responses()
     data["ecr get-registry-scanning-configuration"] = {
@@ -817,7 +881,6 @@ def test_enhanced_scan_with_no_findings_reports_zero_not_unknown(tmp_path):
     data["ecr batch-get-repository-scanning-configuration"] = {
         "scanningConfigurations": [{"repositoryName": "example", "scanFrequency": "CONTINUOUS_SCAN"}]
     }
-    data["ecr describe-images"] = DIGEST
     data["ecr describe-image-scan-findings"] = {
         "imageId": {"imageDigest": DIGEST},
         "imageScanStatus": {"status": "ACTIVE"},
@@ -831,7 +894,6 @@ def test_enhanced_scan_with_no_findings_reports_zero_not_unknown(tmp_path):
     )
 
 
-@pytest.mark.skipif(not shutil.which("jq"), reason="requires jq")
 @pytest.mark.parametrize(
     "scan",
     [
@@ -853,7 +915,6 @@ def test_unavailable_scan_counts_never_look_clean(tmp_path, scan):
             {"repositoryName": "example", "scanFrequency": "CONTINUOUS_SCAN"}
         ]
     }
-    data["ecr describe-images"] = DIGEST
     data["ecr describe-image-scan-findings"] = (
         {"_error": scan}
         if scan.endswith("Exception")
@@ -979,10 +1040,11 @@ def test_runner_to_paramify_intake_preserves_rows_and_does_not_reupload(tmp_path
 
     class Response:
         status_code = 200
-        text = ""
+        headers: dict = {}
 
         def __init__(self, body):
             self.body = body
+            self.text = json.dumps(body)
 
         def json(self):
             return self.body
@@ -991,21 +1053,24 @@ def test_runner_to_paramify_intake_preserves_rows_and_does_not_reupload(tmp_path
         def __init__(self):
             self.headers = {}
 
-        def post(self, url, **kwargs):
-            posts.append((url, kwargs))
-            if url.endswith("/intake"):
-                return Response({"artifact": {"id": "artifact-1"}})
-            assert url.endswith("/process")
-            return Response({"id": "job-1", "status": "COMPLETED", "type": "PROCESS"})
-
-        def get(self, url, **kwargs):
+        def request(self, method, url, **kwargs):
+            if method == "POST":
+                posts.append((url, kwargs))
+                if url.endswith("/intake"):
+                    return Response({"artifact": {"id": "artifact-1"}})
+                assert url.endswith("/process")
+                return Response({"id": "job-1", "status": "COMPLETED", "type": "PROCESS"})
             assert url.endswith("/pipeline-jobs/job-1")
             return Response({"id": "job-1", "status": "COMPLETED", "type": "PROCESS"})
 
-    monkeypatch.setattr(uploader.requests, "Session", Session)
+    from framework.paramify.client import Client
+    from framework.paramify.pipelines import Pipelines
+
+    base_url = "https://paramify.example/api/v0"
+    pipelines = Pipelines(Client("synthetic-token", base_url, session=Session()))
     for _ in range(2):
         upload = uploader.upload_run(
-            run_dir, token="synthetic-token", base_url="https://paramify.example/api/v0", wait=False
+            run_dir, token="synthetic-token", base_url=base_url, wait=False, pipelines=pipelines,
         )
         assert upload["errors"] == 0, upload
     assert len(posts) == 2  # second upload uses the existing intake log

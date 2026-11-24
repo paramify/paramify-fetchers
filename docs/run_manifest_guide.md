@@ -74,6 +74,27 @@ paramify manifest add-target gitlab_project_summary project_id=<second group/pro
 A fetcher whose target fields are all optional, like every AWS fetcher, needs
 no targets. It collects wherever it runs.
 
+Targets run one after another. To run several at once, set `concurrency` on
+the entry. Results, envelopes and `_run_metadata.json` keep target order, and a
+file name two targets share still fails the later target. Live output lines
+start with the target, such as `[profile=prod, region=us-east-1]`.
+
+```yaml
+run:
+  fetchers:
+  - use: aws_inspector_ecr_findings
+    concurrency: 6          # 1 to 32; default 1
+    targets:
+    - {profile: prod, region: us-east-1}
+    - {profile: prod, region: us-west-2}
+```
+
+Each concurrent target writes to its own staging directory, which is then moved
+into the run directory. So a fetcher cannot read or delete another target's
+files while it runs. A fetcher's "Evidence saved to …" line names its staging
+directory, which is removed when the entry ends; look for the file in the run
+directory instead.
+
 ## 4. Set shared config once
 
 Wiz needs its API endpoint, which all Wiz fetchers share. `set-platform-config`
@@ -161,6 +182,23 @@ paramify doctor daily
 </details>
 
 The manifest is runnable. Next: [run it, then upload](cli_guide.md#collect-then-upload).
+
+### Choose the validators each fetcher tracks
+
+By default an entry tracks every Paramify-made validator for its evidence set
+and none of the community-made ones. To change that, open the TUI's
+**Validators** tab (key `4`), pick a fetcher, and tick or untick validators
+with `space`. `enter` shows a validator's regex and rules. The tab writes the
+exact list to the entry:
+
+```yaml
+  - use: fedramp_marketplace_vendor_certification_status
+    validators: [collection_succeeded, fedramp_feed_fresh, fedramp_vendor_certified]
+```
+
+Delete the `validators:` line (or press `a` on the tab) to go back to the
+defaults. The Paramify tab's counts and `paramify validators sync -m` only
+cover tracked validators. Untracking doesn't remove anything from Paramify.
 
 ---
 

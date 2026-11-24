@@ -88,6 +88,7 @@ CSV_COLUMNS = [
     "Region",
     "Asset ID",
     "Repository",
+    "Repository ARN",
     "Image Digest",
     "Image Tags",
     "First Observed At",
@@ -772,6 +773,7 @@ def collect(aws, scope, *, allow_partial=False, now=None):
                 if complete
                 else None,
                 "vulnerability_count": len(per_vulnerability) if complete else None,
+                "repository_image_count": len(ecr_images) if not failures else None,
                 "image_count": len(inventory) if not failures else None,
                 "index_digest_count": index_digests if not failures else None,
                 "coverage_gap_count": len(gaps) if not failures else None,
@@ -795,6 +797,7 @@ def collect(aws, scope, *, allow_partial=False, now=None):
 def csv_rows(evidence):
     meta = evidence["metadata"]
     vulnerabilities = evidence["results"]["vulnerabilities"]
+    repository_arns = {i["repository"]: i["repository_arn"] for i in evidence["results"]["images"]}
     for compact in evidence["results"]["findings"]:
         finding = expand_finding(compact, vulnerabilities)
         package = finding["packageVulnerabilityDetails"]
@@ -813,6 +816,7 @@ def csv_rows(evidence):
                 "Region": meta["region"],
                 "Asset ID": asset,
                 "Repository": image["repositoryName"],
+                "Repository ARN": repository_arns[image["repositoryName"]],
                 "Image Digest": image["imageHash"],
                 "Image Tags": json.dumps(image.get("imageTags", [])),
                 "First Observed At": finding.get("firstObservedAt", ""),
@@ -852,16 +856,25 @@ def scope_suffix(meta, scope):
     return hashlib.sha256(text.encode()).hexdigest()[:12]
 
 
-def write_output(evidence, report, directory, allow_empty=False):
+def write_output(evidence, report, directory, allow_empty=False, allow_no_images=False):
     results = evidence["results"]
     if report:
         if not results["collection_complete"] or evidence["metadata"].get("partial_failure"):
             raise CollectionError("Inspector collection is incomplete; no issue report written")
         if results["findings_collection_status"] != "collected":
             raise CollectionError("Inspector ECR scanning is not enabled; no issue report written")
-        if not results["images"] or results["coverage_gaps"]:
+        if not results["images"] and not allow_no_images:
+            total = results.get("summary", {}).get("repository_image_count")
             raise CollectionError(
-                "Selected images have missing/inactive scan coverage, or none matched; no issue report written"
+                f"No images matched the scope ({total} images in the selected repositories); "
+                "set allow_no_images=true and allow_empty=true only after verifying scope",
+                "bad_config",
+            )
+        if results["coverage_gaps"]:
+            gaps = results["coverage_gaps"]
+            raise CollectionError(
+                f"{len(gaps)} of {len(results['images'])} selected images have missing or inactive "
+                f"scan coverage (first: {', '.join(gaps[:3])}); no issue report written"
             )
         if results["findings_missing_from_inventory"]:
             raise CollectionError(
@@ -923,15 +936,26 @@ def main(report=False):
     load_dotenv()
     try:
         scope = read_scope()
-        allow_empty = os.environ.get("AWS_INSPECTOR_ALLOW_EMPTY", "false").lower()
-        if allow_empty not in ("true", "false"):
-            raise CollectionError("allow_empty must be true or false", "bad_config")
+        allow_empty = read_bool("AWS_INSPECTOR_ALLOW_EMPTY")
+        allow_no_images = read_bool("AWS_INSPECTOR_ALLOW_NO_IMAGES")
+        if report and allow_no_images and not allow_empty:
+            raise CollectionError(
+                "allow_no_images=true requires allow_empty=true: a report with no images has no findings",
+                "bad_config",
+            )
         evidence = collect(Aws(), scope, allow_partial=not report)
+        summary = evidence["results"]["summary"]
+        logging.info(
+            "Images: %s in the selected repositories, %s matched the scope",
+            summary["repository_image_count"],
+            summary["image_count"],
+        )
         dest = write_output(
             evidence,
             report,
             Path(os.environ.get("EVIDENCE_DIR", "./evidence")),
-            allow_empty == "true",
+            allow_empty,
+            allow_no_images,
         )
     except CollectionError as exc:
         report_failure(str(exc), exc.code)

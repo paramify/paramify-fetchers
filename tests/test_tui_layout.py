@@ -41,8 +41,8 @@ def _problems(pane) -> list:
     return problems
 
 
-@pytest.mark.parametrize("keys", [("1",), ("2",), ("3",), ("4",), ("5",)],
-                         ids=["fetchers", "run", "evidence", "paramify", "pipelines"])
+@pytest.mark.parametrize("keys", [("1",), ("2",), ("3",), ("4",), ("5",), ("6",)],
+                         ids=["fetchers", "run", "evidence", "validators", "paramify", "pipelines"])
 def test_page_fits_160x50(keys, demo_workspace, no_network):
     async def drive() -> list:
         app = FetcherApp(manifest_path="manifests/demo.yaml", root_override=str(demo_workspace.root))
@@ -89,7 +89,7 @@ def test_paramify_page_holds_fifty_fetchers(size, demo_workspace, no_network, mo
     async def drive():
         app = FetcherApp(manifest_path="manifests/demo.yaml", root_override=str(demo_workspace.root))
         async with app.run_test(size=size) as pilot:
-            await pilot.press("4")
+            await pilot.press("5")
             await asyncio.wait_for(app.workers.wait_for_complete(), 30)
             await pilot.pause()
             await pilot.pause()
@@ -119,7 +119,7 @@ def _paramify_at(size, monkeypatch, demo_workspace, keys=()):
     async def drive():
         app = FetcherApp(manifest_path="manifests/demo.yaml", root_override=str(demo_workspace.root))
         async with app.run_test(size=size) as pilot:
-            await pilot.press("4")
+            await pilot.press("5")
             await asyncio.wait_for(app.workers.wait_for_complete(), 30)
             await pilot.pause()
             for key in keys:
@@ -142,6 +142,44 @@ def test_paramify_grid_keeps_its_rows_on_80x24(demo_workspace, no_network, monke
     assert rows >= 7, f"the grid shows only {rows} rows"
     assert "pf-detail" not in shown, "a detail with no room to show anything"
     assert [p for p in problems if "too wide" not in p] == []
+
+
+def test_paramify_fit_measures_a_list_the_detail_has_squeezed(demo_workspace, no_network, monkeypatch):
+    """A fit that runs while the row under the list still has its CSS height (13
+    rows, before any fit sized it) finds the list squeezed to no rows. It must
+    still measure, not keep the detail: no later fit is sure to come once its own
+    height change is laid out (whether one does depended on timing, so the 80x24
+    page showed a one-row list about half the time)."""
+    from framework import api
+    from framework.tui.screens.paramify import ParamifyPage
+
+    monkeypatch.setattr(api, "paramify_status", lambda *a, **k: _fifty())
+    monkeypatch.setattr(api, "list_artifacts", lambda set_id: [])
+
+    async def drive():
+        app = FetcherApp(manifest_path="manifests/demo.yaml", root_override=str(demo_workspace.root))
+        async with app.run_test(size=SHORT) as pilot:
+            await pilot.press("5")
+            await asyncio.wait_for(app.workers.wait_for_complete(), 30)
+            for _ in range(4):
+                await pilot.pause()
+            page = app.screen.query_one(ParamifyPage)
+            detail = page.query_one("#pf-detail")
+            # The state a fit can meet: the detail shown at its CSS height, the list squeezed.
+            detail.styles.height = 13
+            detail.display = True
+            for _ in range(2):
+                await pilot.pause()
+            squeezed = page.query_one("#pf-grid", DataTable).size.height
+            page._fit()
+            for _ in range(2):
+                await pilot.pause()
+            return squeezed, detail.display, page.query_one("#pf-grid", DataTable).size.height - 1
+
+    squeezed, detail_shown, rows = asyncio.run(asyncio.wait_for(drive(), 60))
+    assert squeezed == 0, "the setup did not squeeze the list"
+    assert not detail_shown, "the fit kept a detail with no room"
+    assert rows >= 7, f"the grid shows only {rows} rows"
 
 
 def test_paramify_log_fits_on_80x24(demo_workspace, no_network, monkeypatch):
@@ -173,7 +211,7 @@ def test_capability_view_holds_fifty_fetchers(size, demo_workspace, no_network, 
     async def drive():
         app = FetcherApp(manifest_path="manifests/demo.yaml", root_override=str(demo_workspace.root))
         async with app.run_test(size=size) as pilot:
-            await pilot.press("4")
+            await pilot.press("5")
             await asyncio.wait_for(app.workers.wait_for_complete(), 30)
             await pilot.pause()
             await pilot.press("right_square_bracket")
@@ -206,7 +244,7 @@ def test_capability_view_keeps_its_rows_on_a_short_terminal(size, demo_workspace
     async def drive():
         app = FetcherApp(manifest_path="manifests/demo.yaml", root_override=str(demo_workspace.root))
         async with app.run_test(size=size) as pilot:
-            await pilot.press("4")
+            await pilot.press("5")
             await asyncio.wait_for(app.workers.wait_for_complete(), 30)
             await pilot.pause()
             await pilot.press("right_square_bracket")

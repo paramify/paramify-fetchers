@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "paramify-fetchers"
-version = "0.6.0"
+version = "0.7.0"
 description = "Paramify evidence fetcher framework — discover, build, run, and inspect evidence fetchers."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -88,6 +88,8 @@ azure = [
     "azure-keyvault-certificates>=4.11.3,<5",
     # <7 is load-bearing: 7.0.0 ships no diagnostic_settings operations at all.
     "azure-mgmt-monitor>=6.0.2,<7",
+    # Blob list responses (azure_velero_backups) are XML; parsed with entities and external references refused.
+    "defusedxml",
     "azure-mgmt-loganalytics>=14.0.0,<15",
     "azure-mgmt-recoveryservices>=4.1.0,<5",
     "azure-mgmt-recoveryservicesbackup>=10.0.0,<12",

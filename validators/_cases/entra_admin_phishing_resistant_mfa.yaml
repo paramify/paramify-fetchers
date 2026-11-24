@@ -1,0 +1,29 @@
+validator: entra_admin_phishing_resistant_mfa
+cases:
+  - name: all_admins_phishing_resistant
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"admin_users":3,"admin_users_without_phishing_resistant":0,"phishing_resistant_admin_users":3}}}'
+
+  - name: one_admin_without
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"admin_users":3,"admin_users_without_phishing_resistant":1,"phishing_resistant_admin_users":2}}}'
+
+  - name: no_admins_found
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"admin_users":0,"admin_users_without_phishing_resistant":0,"phishing_resistant_admin_users":0}}}'
+
+  - name: unreadable
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"admin_users":null,"admin_users_without_phishing_resistant":null,"phishing_resistant_admin_users":null}}}'
+
+  - name: many_admins_all
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"admin_users":15,"admin_users_without_phishing_resistant":0,"phishing_resistant_admin_users":15}}}'
+
+  - name: registration_report_unreadable
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":1},"payload":{"results":{},"summary":{"admin_users":3,"admin_users_without_phishing_resistant":null,"phishing_resistant_admin_users":null}}}'
+
+  - name: field_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"admin_users":3,"admins_without_phishing_resistant":0}}}'

@@ -7,7 +7,7 @@
 # Build (from the REPO ROOT, not deploy/):
 #   docker build -f deploy/Dockerfile -t paramify-fetchers:beta .
 # or just use docker compose (see deploy/docker-compose.yml).
-FROM python:3.14-slim
+FROM python:3.14-slim@sha256:9aaa474097d094040649f2162a627c0049b408f52138d980916788d80f04802f
 
 # ---------------------------------------------------------------------------
 # System binaries
@@ -72,6 +72,11 @@ RUN case ",${INSTALL_EXTRAS}," in \
         && /opt/checkov/bin/pip install --no-cache-dir checkov \
         && ln -s /opt/checkov/bin/checkov /usr/local/bin/checkov ;; \
     esac
+
+# Tells `paramify update` it is running in this image. The image is a copy of
+# the clone with no .git (see .dockerignore), so there is nothing to update in
+# here: update the clone on the host, then rebuild the image.
+ENV PARAMIFY_CONTAINER=1
 
 # Collected evidence lands here; mount a volume to persist it to the host.
 ENV EVIDENCE_DIR=/app/evidence

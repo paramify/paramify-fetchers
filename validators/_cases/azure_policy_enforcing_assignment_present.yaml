@@ -1,0 +1,14 @@
+validator: azure_policy_enforcing_assignment_present
+cases:
+  - name: six_enforcing_assignments
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"policy_assignments":[]},"summary":{"actually_enforcing_assignments":6,"actually_enforcing_percentage":35,"total_policy_assignments":17}}}'
+
+  - name: audit_only_estate
+    expect: FAIL
+    note: every assignment audits or is DoNotEnforce, so nothing is automatically enforced
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"policy_assignments":[]},"summary":{"actually_enforcing_assignments":0,"actually_enforcing_percentage":0,"total_policy_assignments":17}}}'
+
+  - name: rollup_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"policy_assignments":[]},"summary":{"enforcing_assignments":6,"actually_enforcing_percentage":35,"total_policy_assignments":17}}}'

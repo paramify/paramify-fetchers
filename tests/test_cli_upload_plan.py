@@ -21,6 +21,7 @@ from framework import api, paramify_auth
 from framework.cli import app
 from framework.paramify.client import ApiError, ErrorKind
 from framework.sync import upload as upload_mod
+from framework.sync.model import Plan
 from tests.test_api_upload_engine import fake, no_env, root, submits, two_files  # noqa: F401  (fixtures)
 
 runner = CliRunner()
@@ -192,6 +193,22 @@ def test_stack_and_validators_reach_upload_run(no_env, tmp_path, monkeypatch):  
     assert res.exit_code == 0, res.output
     assert seen["stack"] == "Prod" and seen["with_validators"] is True and seen["custom_tags"] is False
     assert seen["owner"] == "alice"
+
+
+def test_no_waf_check_is_accepted_and_does_nothing(no_env, tmp_path, monkeypatch):  # noqa: F811
+    # Kept so scripts that pass it still run; the upload no longer checks for WAF strings.
+    seen: Dict[str, Any] = {}
+
+    def fake_plan(run_dir, _root, config_path, **kw):
+        seen.update(kw)
+        return Plan()
+
+    monkeypatch.setenv(paramify_auth.UPLOAD_TOKEN_ENV, "tok")
+    monkeypatch.setattr(api, "plan_upload", fake_plan)
+    res = cli("upload", str(two_files(tmp_path)), "--plan", "--no-waf-check")
+    assert res.exit_code == 0, res.output
+    assert "waf_check" not in seen
+    assert "--no-waf-check does nothing now" in res.output
 
 
 def test_stack_override_is_applied(fake, tmp_path):  # noqa: F811
@@ -593,3 +610,36 @@ def test_an_ordinary_entry_still_takes_a_run_level_direct_in_the_notes(no_env, r
     assert api.plan_upload(run, repo_root, online=False, manifest_path=m).notes == [
         f"the manifest now sets no_request: direct for {use}; this run was made with evidence. "
         "Run the manifest again to use it."]
+
+
+# ---- manifest set-frequency ------------------------------------------------------
+
+def test_set_frequency_for_the_manifest_keeps_its_time(tmp_path):
+    path = manifest_file(tmp_path, a_fetcher())
+    m = read(path)
+    m["run"]["schedule"] = {"every": "WEEKLY", "at": "02:00"}
+    path.write_text(yaml.safe_dump(m))
+    res = cli("manifest", "set-frequency", str(path), "daily")
+    assert res.exit_code == 0, res.output
+    assert read(path)["run"]["schedule"] == {"every": "DAILY", "at": "02:00"}
+    assert cli("manifest", "set-frequency", str(path), "").exit_code == 0
+    assert "schedule" not in read(path)["run"]
+
+
+def test_set_frequency_for_one_fetcher_and_removing_it(tmp_path):
+    use = a_fetcher()
+    path = manifest_file(tmp_path, use)
+    assert cli("manifest", "set-frequency", str(path), "MONTHLY", "--fetcher", use).exit_code == 0
+    m = read(path)
+    assert m["run"]["fetchers"][0]["paramify"] == {"frequency": "MONTHLY"} and "schedule" not in m["run"]
+    assert cli("manifest", "set-frequency", str(path), "", "--fetcher", use).exit_code == 0
+    assert read(path)["run"]["fetchers"][0]["paramify"] == {}
+
+
+@pytest.mark.parametrize("value", ["hourly", "NOT_SET"])
+def test_set_frequency_refuses_an_unknown_value(tmp_path, value):
+    path = manifest_file(tmp_path, a_fetcher())
+    res = cli("manifest", "set-frequency", str(path), value)
+    assert res.exit_code == 1 and "isn't a frequency" in res.output and "DAILY" in res.output
+    assert "schedule" not in read(path)["run"]
+

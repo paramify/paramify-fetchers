@@ -7,6 +7,7 @@ import logging
 import os
 import sys
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from dotenv import load_dotenv
 
@@ -88,18 +89,37 @@ def scope_level(scope) -> str:
     return "root"
 
 
+def issuer_host(issuer) -> str:
+    """The lower-case host name of an issuer URL ("" when there is none).
+
+    A value with no scheme is read as a host, so "accounts.google.com" gives the
+    same host as "https://accounts.google.com".
+    """
+    value = str(issuer or "").strip()
+    if "://" not in value:
+        value = "https://" + value
+    try:
+        return (urlsplit(value).hostname or "").lower()
+    except ValueError:  # a malformed URL, for example a bad IPv6 literal
+        return ""
+
+
 def issuer_kind(issuer) -> str:
-    """A label for well-known federation issuers; the issuer itself is always kept."""
-    value = str(issuer or "").lower()
-    if "token.actions.githubusercontent.com" in value:
+    """A label for well-known federation issuers; the issuer itself is always kept.
+
+    The label comes from the host name only. A known host name in the path or
+    the query (https://example.com/accounts.google.com) does not match.
+    """
+    host = issuer_host(issuer)
+    if host == "token.actions.githubusercontent.com":
         return "github_actions"
-    if "vstoken.dev.azure.com" in value or "app.vstoken.visualstudio.com" in value:
+    if host in ("vstoken.dev.azure.com", "app.vstoken.visualstudio.com"):
         return "azure_devops"
-    if ".oic.prod-aks.azure.com" in value or "oidc.prod-aks.azure.com" in value:
+    if host.endswith(".oic.prod-aks.azure.com") or host == "oidc.prod-aks.azure.com":
         return "aks_workload_identity"
-    if "accounts.google.com" in value:
+    if host == "accounts.google.com":
         return "google"
-    if "amazonaws.com" in value or "cognito-identity" in value:
+    if host == "amazonaws.com" or host.endswith(".amazonaws.com"):
         return "aws"
     return "other"
 

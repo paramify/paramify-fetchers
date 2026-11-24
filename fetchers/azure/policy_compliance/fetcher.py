@@ -1382,6 +1382,13 @@ def main() -> int:
         exclusions.mark_unread()
     exclusions.warn_unmatched(logger)
 
+    def count(rows, operation):
+        """len(rows), None when its list wasn't read; with the provider unregistered there is nothing to read."""
+        failed = (f"policyinsights.{operation}", "policyinsights.PolicyInsightsClient (init)")
+        listed = registration == NOT_REGISTERED or read and not any(
+            f["operation"].startswith(failed) for f in collector.failures)
+        return len(rows) if listed else None
+
     service_results = collected["subscription_results"]
     subscription_results, assignments = service_results, collected["assignments"]
     summary = {
@@ -1443,9 +1450,11 @@ def main() -> int:
             ),
             "provider_registration_status": registration,
             **exclusions.summary(collected["excluded"], EXCLUDED_KINDS, {
-                "policy_assignments": len(collected["assignments"]), "policy_states": len(collected["states"]),
-                "remediation_tasks": len(collected["remediations"]),
-                "remediation_deployments": len(collected["deployments"])}),
+                "policy_assignments": count(collected["assignments"], "policy_states.summarize_for_subscription"),
+                "policy_states": count(collected["states"], "policy_states.list_query_results_for_subscription"),
+                "remediation_tasks": count(collected["remediations"], "remediations.list_for_subscription"),
+                "remediation_deployments": len(collected["deployments"])
+                if registration == NOT_REGISTERED or read and collected["deployments_complete"] else None}),
         },
     )
 

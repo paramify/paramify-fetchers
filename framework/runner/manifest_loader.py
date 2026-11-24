@@ -57,10 +57,11 @@ def parse_manifest(data: dict) -> Manifest:
             secrets=entry.get("secrets") or {},
             targets=targets,
             paramify=entry.get("paramify") or {},
+            concurrency=entry.get("concurrency") or 1,
         ))
 
     return Manifest(output_dir=output_dir, entries=entries, platforms=platforms,
-                    paramify=run.get("paramify") or {})
+                    paramify=run.get("paramify") or {}, schedule=run.get("schedule") or {})
 
 
 def entry_keys(entries: Sequence[ManifestEntry]) -> List[str]:

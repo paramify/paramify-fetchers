@@ -450,12 +450,15 @@ def main() -> int:
     resources.warn_unmatched(logger)
     zone_counts = {"public_dns_zones": None if public is None else len(public),
                    "private_dns_zones": None if private is None else len(private)}
+    records_read = public is not None and all(z["record_sets"] is not None for z in public)
     public, private = public or [], private or []
     # Scope exclusions apply to the record sets of the zones left in scope.
     exclusions = ScopeExclusions.from_env(SCOPE_EXCLUSIONS_ENV)
     exclusions.record_invalid(collector, SCOPE_EXCLUSIONS_ENV)
     public, excluded_records = exclude_record_sets(public, exclusions)
     excluded += excluded_records
+    if not records_read:
+        exclusions.mark_unread()
     exclusions.warn_unmatched(logger)
 
     evidence = build_payload(
@@ -470,7 +473,7 @@ def main() -> int:
         },
         summary={**summarize(public, private), "provider_registration_status": registration,
                  **exclusions.summary(excluded, ("record_set",), {
-                     "record_sets": sum(len(z["record_sets"] or []) for z in public)}),
+                     "record_sets": sum(len(z["record_sets"]) for z in public) if records_read else None}),
                  **resources.summary(excluded, RESOURCE_KINDS, zone_counts)},
     )
     filename = f"azure_dns_configuration_{sanitize_for_filename(subscription_id or 'unknown')}.json"

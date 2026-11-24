@@ -255,6 +255,12 @@ class GitHubClient:
         self.last_message = ""  # GitHub's message for the last non-2xx; bodies of non-2xx are never returned
         # Fine-grained and classic personal tokens; an App installation token is ghs_. Some endpoints serve Apps only.
         self.personal_token = token.startswith(("github_pat_", "ghp_"))
+        # An App installation token acts with the installation's permissions alone; it has no user and no role.
+        self.installation_token = token.startswith("ghs_")
+        # The target's repository filters, lower-cased, for a fetcher that reads organization-wide records which
+        # name a repository (the audit log). run() fills them; both empty means no filter.
+        self.repositories_filter: List[str] = []
+        self.exclude_repositories: List[str] = []
 
     def fail(self, operation: str, type_: str, message: str, code: str) -> None:
         self.failures.append({"operation": operation, "type": type_, "message": message})
@@ -579,8 +585,15 @@ def _explain(resp: requests.Response, message: str) -> str:
 
 # --- repositories ------------------------------------------------------------
 
-def list_repos(client: GitHubClient, org: dict, allowlist: List[str], include_archived: bool) -> Optional[List[dict]]:
-    """The organization's repositories, filtered by allowlist and archive state, checked against the org's counts."""
+def list_repos(client: GitHubClient, org: dict, allowlist: List[str], include_archived: bool,
+               exclude: Optional[List[str]] = None, excluded: Optional[Dict[str, Any]] = None) -> Optional[List[dict]]:
+    """The organization's repositories, filtered by allowlist, exclusions and archive state, checked against the org's counts.
+
+    `exclude` names repositories to leave out, matched without regard to case as GitHub does. They are taken out after
+    the count check and before the archive filter, so an archived repository still counts as matched. When `excluded`
+    is given it is filled with what happened: `repositories_excluded` (the names taken out) and
+    `exclude_repositories_unmatched` (names that matched no repository, such as a typo).
+    """
     login = org["login"]
     repos: Optional[List[dict]]
     if allowlist:
@@ -603,15 +616,72 @@ def list_repos(client: GitHubClient, org: dict, allowlist: List[str], include_ar
         # public_repos is visible to anyone; total_private_repos only to members who can see them.
         expected = (org.get("public_repos") or 0) + (org.get("total_private_repos") or 0)
         client.expect("repositories", len(repos), expected if org.get("public_repos") is not None else None)
+    if exclude:
+        wanted = {name.lower(): name for name in exclude}
+        taken = sorted((r["name"] for r in repos if r["name"].lower() in wanted), key=str.lower)
+        found = {name.lower() for name in taken}
+        repos = [r for r in repos if r["name"].lower() not in wanted]
+        if excluded is not None:
+            excluded["repositories_excluded"] = taken
+            excluded["exclude_repositories_unmatched"] = sorted(n for k, n in wanted.items() if k not in found)
     if not include_archived:
         repos = [r for r in repos if not r.get("archived")]
     return sorted(repos, key=lambda r: r["name"].lower())
 
 
+# --- reads shared by several fetchers -----------------------------------------
+
+WORKFLOW_FILES = ('object(expression: "HEAD:.github/workflows") { ... on Tree { entries { name type '
+                  'object { ... on Blob { text isBinary isTruncated } } } } }')
+
+
+def workflow_file_texts(client: GitHubClient, org: str, repos: List[dict]) -> Optional[Dict[str, List[Tuple[str, Optional[str]]]]]:
+    """{repository: [(file name, text)]} for the workflow files on each default branch, or None on failure.
+
+    GitHub runs only .yml and .yaml files directly in .github/workflows. text is None where GraphQL returned no
+    readable content (a binary or truncated file): its content is unknown, not empty.
+    """
+    found = client.graphql_repos("GraphQL workflow files", org, [r["name"] for r in repos], WORKFLOW_FILES)
+    if found is None:
+        return None
+    out: Dict[str, List[Tuple[str, Optional[str]]]] = {}
+    for name, data in found.items():
+        entries = (data.get("object") or {}).get("entries") or []
+        rows: List[Tuple[str, Optional[str]]] = []
+        for e in sorted(entries, key=lambda e: e.get("name") or ""):
+            if e.get("type") != "blob" or not str(e.get("name")).endswith((".yml", ".yaml")):
+                continue
+            blob = e.get("object") or {}
+            unreadable = blob.get("text") is None or blob.get("isTruncated") or blob.get("isBinary")
+            rows.append((e["name"], None if unreadable else blob["text"]))
+        out[name] = rows
+    return out
+
+
+def newest_since(client: GitHubClient, path: str, key: str, since: float, cap: int, what: str,
+                 env: str) -> Optional[List[dict]]:
+    """Items of a newest-first list created since `since`. None on failure or when more than `cap` are in the window.
+
+    Walked page by page rather than filtered with `created=`: a filtered list stops at 1,000 results and then reports
+    an empty page and total_count 0 (measured), which would read as a quiet window.
+    """
+    seen: List[dict] = []
+    found = client.paginate_required(path, key=key,
+                                     until=lambda x: seen.append(x) or (to_epoch(x.get("created_at")) or since) < since
+                                     or len(seen) > cap)
+    if found is None:
+        return None
+    if len(seen) > cap and (to_epoch(seen[-1].get("created_at")) or since) >= since:
+        client.fail(f"GET {path}", "Truncated", f"more than {cap} {what} in the window; raise {env}", "partial_failure")
+        return None
+    return found
+
+
 # --- the entry point ---------------------------------------------------------
 
 def run(name: str, collect: Callable[[GitHubClient, dict, List[dict], Dict[str, Any]], Optional[dict]],
-        config: Optional[Config] = None, inventory: bool = False) -> int:
+        config: Optional[Config] = None, inventory: bool = False,
+        check: Optional[Callable[[Dict[str, Any]], Optional[str]]] = None) -> int:
     """Run one fetcher against the organization in the environment and write its evidence. Returns the exit code.
 
     An inventory's `collect` returns its records under "data". Any failure withholds every record (`data: []`,
@@ -629,21 +699,32 @@ def run(name: str, collect: Callable[[GitHubClient, dict, List[dict], Dict[str, 
     except ValueError as exc:
         report_failure(str(exc), "bad_config")
         return 1
+    # Settings that conflict with each other fail before the first API call, like a value of the wrong type.
+    problem = check(settings) if check else None
+    if problem:
+        report_failure(problem, "bad_config")
+        return 1
 
     filters_ignored = []
     if inventory:
         # include_archived is false by default; it narrows only when someone set it.
         archived_set = bool(os.environ.get("GITHUB_INCLUDE_ARCHIVED", "").strip())
         filters_ignored = [key for key, narrows in (("repositories", bool(target["repositories"])),
+                                                    ("exclude_repositories", bool(target["exclude_repositories"])),
                                                     ("include_archived", archived_set and not target["include_archived"]))
                            if narrows]
-        target = {**target, "repositories": [], "include_archived": True}
+        target = {**target, "repositories": [], "exclude_repositories": [], "include_archived": True}
     client = GitHubClient(target["api_url"], target["token"])
+    client.repositories_filter = [name.lower() for name in target["repositories"]]
+    client.exclude_repositories = [name.lower() for name in target["exclude_repositories"]]
     result: Dict[str, Any] = {}
     org: Dict[str, Any] = {}
+    # Filled by list_repos; null until the repository list is read, so an unread list never looks like "none excluded".
+    excluded: Dict[str, Any] = {"repositories_excluded": None, "exclude_repositories_unmatched": None}
     try:
         org = client.get(f"orgs/{target['org']}") or {}
-        repos = list_repos(client, org, target["repositories"], target["include_archived"]) if org else None
+        repos = list_repos(client, org, target["repositories"], target["include_archived"],
+                           target["exclude_repositories"], excluded) if org else None
         if repos is not None:
             result = collect(client, org, repos, settings) or {}
     except Exception as exc:  # noqa: BLE001 - an unexpected response must still leave evidence and a reason
@@ -658,6 +739,8 @@ def run(name: str, collect: Callable[[GitHubClient, dict, List[dict], Dict[str, 
             "api_url": target["api_url"],
             "plan": (org.get("plan") or {}).get("name"),
             "repositories_filter": target["repositories"] or None,
+            "exclude_repositories": target["exclude_repositories"] or None,
+            **(excluded if target["exclude_repositories"] else {}),
             "include_archived": target["include_archived"],
             **({"filters_ignored": filters_ignored} if inventory else {}),
             **settings,
@@ -700,11 +783,17 @@ def _target_from_env() -> Dict[str, Any]:
     include_archived = as_bool(os.environ.get("GITHUB_INCLUDE_ARCHIVED") or "false")
     if include_archived is None:
         raise ValueError("GITHUB_INCLUDE_ARCHIVED must be true or false")
+    repositories = split_list(os.environ.get("GITHUB_REPOSITORIES"))
+    exclude = split_list(os.environ.get("GITHUB_EXCLUDE_REPOSITORIES"))
+    if repositories and exclude:
+        # Two filters that disagree about what is in scope: say so rather than guess which one wins.
+        raise ValueError("set GITHUB_REPOSITORIES or GITHUB_EXCLUDE_REPOSITORIES, not both")
     return {
         "org": os.environ["GITHUB_ORG"].strip(),
         "api_url": api_url.rstrip("/"),
         "token": os.environ["GITHUB_TOKEN"].strip(),
-        "repositories": split_list(os.environ.get("GITHUB_REPOSITORIES")),
+        "repositories": repositories,
+        "exclude_repositories": exclude,
         "include_archived": include_archived,
     }
 

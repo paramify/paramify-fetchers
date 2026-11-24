@@ -1,0 +1,19 @@
+key: github_image_signature_verification_present
+name: GitHub Image Signature Verification Present
+type: AUTOMATED
+role: configuration
+source: community
+statement: >-
+  At least one workflow on a default branch runs a cosign verify step. Does not assert the step can fail
+  the run or that every deployed image is verified.
+regex: '"verification_steps":\s*(?<verification_steps>[1-9]\d*)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0
+validation_rules:
+- regexOperation:
+    type: MATCH_COUNT
+  criteria: NOT_EQUALS
+  value:
+    type: CUSTOM_TEXT
+    customText: '0'
+evidence_sets:
+- EVD-GITHUB-IMAGE-SIGNING

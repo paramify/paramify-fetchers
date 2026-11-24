@@ -102,6 +102,15 @@ def test_a_field_with_no_prefixes_refuses_any_prefix():
     assert patterns.check([patterns.Item("www")], (), True) == []
 
 
+def test_a_literal_field_refuses_wildcards_and_reads_brackets_as_characters():
+    literal = [patterns.Item("path:$/A/*"), patterns.Item("path:$/A?"), patterns.Item("path:$/A/[Legacy]")]
+    assert patterns.check(literal, ("path",), False, globs=False) == [
+        f"pattern {p!r} has a wildcard (* or ?); this field takes literal patterns only" for p in ("path:$/A/*", "path:$/A?")]
+    assert patterns.check(literal, ("path",), False) == []
+    assert patterns.problems(["path:$/A/*"], ("path",), False, globs=False)
+    assert api.grammar_text(("path",), False, globs=False) == "path: patterns without wildcards"
+
+
 @pytest.mark.parametrize("value", ["${env:AZURE_RESOURCE_EXCLUSIONS}", "rg:a ${env:MORE}"])
 def test_an_env_reference_is_refused_as_the_whole_value_or_part_of_it(value):
     assert patterns.problems(value, RESOURCE, False) == [patterns.ENV_REF_REFUSAL]

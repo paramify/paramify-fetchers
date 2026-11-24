@@ -30,6 +30,7 @@ from typer.testing import CliRunner
 
 from framework import api, cli
 from framework.cli import app
+from tests.paramify_fake import reads_through
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 runner = CliRunner()
@@ -113,7 +114,7 @@ def test_workspace_lookups_read_token_from_dotenv(tmp_path, monkeypatch):
         os.environ["PARAMIFY_API_BASE_URL"] = "https://example.test/api/v0"
         return True
 
-    monkeypatch.setattr("dotenv.load_dotenv", fake_load_dotenv)
+    monkeypatch.setattr(api, "load_dotenv", fake_load_dotenv)
 
     seen: dict = {}
 
@@ -129,7 +130,7 @@ def test_workspace_lookups_read_token_from_dotenv(tmp_path, monkeypatch):
         seen["url"] = url
         return _Resp()
 
-    monkeypatch.setattr("requests.get", fake_get)
+    monkeypatch.setattr("framework.paramify.client.requests.Session", lambda: reads_through(fake_get))
     api.list_assessments()
     assert seen["auth"] == "Bearer from-dotenv"
     assert seen["url"].startswith("https://example.test/api/v0/")
@@ -352,6 +353,10 @@ API_TO_CLI = {
     "sync_validators": "validators sync",
     "list_artifacts": "artifacts list",
     "find_repo_root": "<implicit: every command>",
+    "update_notice": "update",
+    "update_plan": "update",
+    "apply_update": "update",
+    "rollback_update": "update",
     "discover": "<implicit: one fetcher-tree scan shared across a redraw>",
     "catalog": "list / catalog / describe",
     "list_manifests": "manifests",
@@ -385,6 +390,14 @@ API_TO_CLI = {
     "list_stacks": "stacks",
     "set_stack": "manifest set-stack",
     "set_owner": "manifest set-owner",
+    "generate_env": "env",
+    "set_schedule": "manifest set-frequency",
+    "validator_results": "artifacts list",
+    "latest_validator_results": "<implicit: the newest result per validator, from artifacts list>",
+    "result_for": "<implicit: one validator's row of artifacts list>",
+    "newest_pipeline_files": "<implicit: the files a local validator test reads; paramify runs lists the runs>",
+    "entry_frequency": "<implicit: the entry detail's frequency row; upload --plan shows the result>",
+    "default_upload_values": "<implicit: the default upload.yaml the frequency row reads; upload reads it too>",
     "list_channel_owners": "manifest set-owner",  # and `validate --online`, and the TUI's owner picker
     "owner_notes": "validate",  # --online
     "manifest_owners": "validate",  # --online: only a manifest that sets an owner lists the owners
@@ -1743,7 +1756,7 @@ def workspace_reads(monkeypatch):
             return _Resp(_ARTIFACT_PAYLOAD)
         raise AssertionError(f"unexpected GET {url}")
 
-    monkeypatch.setattr("requests.get", fake_get)
+    monkeypatch.setattr("framework.paramify.client.requests.Session", lambda: reads_through(fake_get))
     return seen
 
 
@@ -1818,7 +1831,8 @@ def test_artifacts_list_sorts_newest_first(workspace_reads):
     assert result.exit_code == 0, result.output
     artifacts = json.loads(result.output)["artifacts"]
     assert [a["title"] for a in artifacts] == ["Newer", "Older"]
-    assert artifacts[0]["validators"] == [{"name": "All encrypted", "result": "PASS"}]
+    # The validator id is kept (blank when the API leaves it out) so results match by id, then name.
+    assert artifacts[0]["validators"] == [{"id": "", "name": "All encrypted", "result": "PASS"}]
 
 
 def test_pull_artifact_does_not_send_the_api_token_to_s3(workspace_reads, tmp_path, monkeypatch):
@@ -2054,3 +2068,12 @@ def test_status_exits_2_for_a_manifest_that_does_not_exist(monkeypatch, tmp_path
     monkeypatch.setattr(api, "paramify_status", lambda *a, **k: pytest.fail("no manifest to read"))
     result = runner.invoke(app, ["status", str(tmp_path / "no-such.yaml")])
     assert result.exit_code == 2
+
+
+def test_scripts_sync_refuses_a_missing_default_manifest(tmp_path, monkeypatch):
+    """Read as empty, the default manifest scoped the sweep to nothing; the
+    message points at the way out instead."""
+    monkeypatch.setattr(api, "find_repo_root", lambda *a, **k: tmp_path)
+    result = runner.invoke(app, ["scripts", "sync", "--dry-run", "--json"])
+    assert result.exit_code == 1
+    assert "--all" in json.loads(result.output)["errors"][0]

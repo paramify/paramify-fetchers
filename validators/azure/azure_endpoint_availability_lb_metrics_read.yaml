@@ -1,0 +1,21 @@
+key: azure_endpoint_availability_lb_metrics_read
+name: 'Azure Endpoint Availability: Every Load Balancer''s Metrics Read'
+type: AUTOMATED
+role: integrity
+source: community
+statement: >
+  Every Standard load balancer's data-path and health-probe metrics were read
+  (load_balancers_metrics_unread is 0). Does not check whether the collection run succeeded.
+
+regex: '"load_balancers_metrics_unread":\s*(?<load_balancers_metrics_unread>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # load_balancers_metrics_unread
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-ENDPOINT-AVAILABILITY
