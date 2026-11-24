@@ -112,9 +112,10 @@ def _on_branch_edit(clone: Path, version: str, edit, message: str = "Tate's edit
 
 
 class FakeGitHub:
-    def __init__(self, open_pr=None):
+    def __init__(self, open_pr=None, published=("v0.6.0-beta",)):
         self.open_pr = open_pr
         self.calls: list = []
+        self.published = set(published)  # the fixture's v0.6.0-beta already has its GitHub Release
 
     def open_release_pr(self):
         return self.open_pr
@@ -126,6 +127,9 @@ class FakeGitHub:
 
     def edit_pr(self, number, title, body):
         self.calls.append(("edit_pr", number, title, body))
+
+    def release_exists(self, tag):
+        return tag in self.published
 
     def create_release(self, tag, title, notes, prerelease):
         self.calls.append(("create_release", tag, title, notes, prerelease))
@@ -640,3 +644,66 @@ def test_a_garbled_webhook_reply_is_printed_and_does_not_raise(monkeypatch, caps
         thread.join(5)
         listener.close()
     assert "slack: could not send" in capsys.readouterr().out
+
+
+# --- publish: a body GitHub accepts, and a rerun after a half-done publish --------------------
+
+def test_create_release_passes_the_notes_as_a_file(tmp_path, monkeypatch):
+    seen = {}
+
+    def fake_gh(self, *args):
+        seen["args"] = args
+        i = args.index("--notes-file")
+        seen["body"] = Path(args[i + 1]).read_text()
+        return "https://example.test/releases/tag/v1\n"
+
+    monkeypatch.setattr(release.GitHub, "_gh", fake_gh)
+    body = "x" * 300_000  # far past the argument limit that broke v0.7.0-beta's publish
+    url = release.GitHub(tmp_path).create_release("v1", "v1", body, True)
+    assert url == "https://example.test/releases/tag/v1"
+    assert "--notes" not in seen["args"] and "--prerelease" in seen["args"]
+    assert seen["body"] == body
+
+
+def test_gh_that_cannot_start_is_a_one_line_error(tmp_path, monkeypatch):
+    def boom(*a, **k):
+        raise OSError(7, "Argument list too long", "gh")
+
+    monkeypatch.setattr(release.subprocess, "run", boom)
+    with pytest.raises(release.ReleaseError, match="could not start: Argument list too long"):
+        release.GitHub(tmp_path).create_release("v1", "v1", "notes", False)
+
+
+def test_render_release_body_links_a_changelog_too_big_for_github():
+    doc = {"highlights": [dict(NEW_ROW)], "fetchers": [{"name": "demo_alpha", "version": "0.2.0", "note": "n"}]}
+    url = "https://github.com/o/r/blob/v1/CHANGELOG.md"
+    small = release.render_release_body(doc, "### Added\n\n- small\n", url)
+    assert "<details>" in small
+    big = release.render_release_body(doc, "- " + "y" * 300_000, url)
+    assert len(big) <= release.BODY_MAX and "<details>" not in big and url in big
+    many = {"highlights": [], "fetchers": [{"name": f"f{i}", "version": "1.0.0", "note": "z" * 100}
+                                           for i in range(2000)]}
+    trimmed = release.render_release_body(many, "", url)
+    assert len(trimmed) <= release.BODY_MAX and "more fetchers" in trimmed
+
+
+def test_publish_rerun_after_the_tag_was_pushed_creates_the_release(clone, week, upstream):
+    head = _reviewed_branch(clone)
+    _git(clone, "switch", "-q", "-C", "main", "origin/main")
+    _git(clone, "merge", "-q", "--no-ff", "-m", "merge", "release/next")
+    merge = _sha(clone)
+
+    class FailingGitHub(FakeGitHub):
+        def create_release(self, tag, title, notes, prerelease):
+            raise release.ReleaseError("gh release create failed: boom")
+
+    with pytest.raises(release.ReleaseError):
+        release.publish(clone, head_sha=head, merge_sha=merge, gh=FailingGitHub(), notify=lambda t, u: None)
+    assert _upstream_tag(upstream, "v0.7.0-beta") == head      # the tag got out before the failure
+
+    gh, notes = FakeGitHub(), []
+    tag = release.publish(clone, head_sha=head, merge_sha=merge, gh=gh, notify=lambda t, u: notes.append(t))
+    assert tag == "v0.7.0-beta"
+    assert [c[0] for c in gh.calls] == ["create_release"]
+    assert "CHANGELOG.md" in gh.calls[0][3] or "<details>" in gh.calls[0][3]
+    assert notes == ["v0.7.0-beta is out."]
