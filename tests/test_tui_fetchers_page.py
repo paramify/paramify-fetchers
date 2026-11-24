@@ -586,3 +586,46 @@ def test_the_catalog_cursor_stays_bright_while_the_filter_drives_it(tmp_path, ru
     assert focus == "manifest-entries"
     assert _rgb(in_filter) == _rgb(primary), "the catalog cursor is gray while the filter drives it"
     assert _rgb(elsewhere) != _rgb(primary), "the catalog cursor stays bright with focus in the manifest"
+
+
+def _button_text(app, button) -> str:
+    """What the button shows on screen: the screen's cells across its region,
+    so a label clipped by a button too narrow for it reads clipped here too."""
+    r = button.region
+    line = app.screen._compositor.render_strips()[r.y]
+    return line.crop(r.x, r.right).text.strip()
+
+
+def test_a_settings_button_grows_to_its_new_label(tmp_path, run_tui, monkeypatch):
+    """Picking an owner or a frequency shows the whole value, not its first
+    letter in a button still sized for the dash it showed before."""
+    from framework.tui.modals import FormModal, PickerModal
+
+    monkeypatch.setattr(api, "upload_readiness", lambda *a, **k: {"token_present": True})
+    monkeypatch.setattr(api, "list_channel_owners", lambda *a, **k: [{"owner": "tate.mccauley", "sets": 2}])
+
+    async def body(app, pilot):
+        await _settle(app, pilot)
+        q = app.screen.query_one
+        before = (_button_text(app, q("#manifest-owner")), _button_text(app, q("#manifest-schedule")))
+
+        q("#manifest-owner").press()
+        await _settle(app, pilot)
+        assert isinstance(app.screen, PickerModal)
+        app.screen.dismiss("tate.mccauley")
+        await _settle(app, pilot)
+
+        q = app.screen.query_one
+        q("#manifest-schedule").press()
+        await _settle(app, pilot)
+        assert isinstance(app.screen, FormModal)
+        app.screen.dismiss({"frequency": {"every": "DAILY"}})
+        await _settle(app, pilot)
+
+        q = app.screen.query_one
+        return before, _button_text(app, q("#manifest-owner")), _button_text(app, q("#manifest-schedule"))
+
+    before, owner, schedule = run_tui(body, _manifest_with(tmp_path, "demo_hello"))
+    assert before == ("—", "—")
+    assert owner == "tate.mccauley"
+    assert schedule == "daily"

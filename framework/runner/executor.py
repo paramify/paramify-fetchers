@@ -340,7 +340,7 @@ def merged_config(
             var = env_var_name(value)
             if resolved and fdef.type == patterns.TYPE:
                 # Written in the manifest only: a ${env:} reference is refused, never resolved.
-                problems = patterns.problems(value, fdef.prefixes, fdef.bare)
+                problems = patterns.problems(value, fdef.prefixes, fdef.bare, fdef.globs)
                 if problems:
                     errors[name] = f"config '{name}': " + "; ".join(problems)
             elif resolved and isinstance(value, (list, dict)):

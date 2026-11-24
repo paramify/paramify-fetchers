@@ -1,0 +1,35 @@
+# Set-level: every validator naming EVD-AZURE-CHANGE-PROVENANCE, combined the way
+# Paramify combines them. A count-based validator cannot cover its own drift, so
+# only the set can.
+evidence_set: EVD-AZURE-CHANGE-PROVENANCE
+cases:
+  - name: only_pipeline_changes
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"lookback_days":14},"summary":{"total_changes":40,"changes_via_deployment":30,"direct_changes":2,"direct_changes_by_changed_by_type":{"Application":2},"manual_deployment_changes":0}}}'
+
+  - name: person_edited_directly
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"lookback_days":14},"summary":{"total_changes":40,"changes_via_deployment":30,"direct_changes":3,"direct_changes_by_changed_by_type":{"Application":2,"User":1},"manual_deployment_changes":0}}}'
+
+  - name: breakdown_renamed_upstream
+    expect: FAIL
+    note: >
+      The case the integrity role exists for. azure_no_direct_human_changes finds
+      neither field and ALONE reports PASS on an artifact that hides human
+      changes; azure_change_provenance_breakdown_present fails because the fields
+      it proves are gone, so the set fails. Delete the integrity validator and
+      this case goes green.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"lookback_days":14},"summary":{"total_changes":40,"changes_via_deployment":30,"direct_changes":3,"direct_changes_by_caller_type":{"Application":2,"User":1},"manual_deployments":4}}}'
+
+  - name: collection_failed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":1,"status":"failed","error":"auth_failed"},"payload":{"results":{"lookback_days":14},"summary":{"total_changes":40,"direct_changes_by_changed_by_type":{},"manual_deployment_changes":0}}}'
+
+  - name: one_day_window_with_no_human_changes
+    expect: FAIL
+    note: Reviewer's reproduction. A 1-day lookback with no human changes passed the set before azure_change_provenance_full_window; only that validator fails here.
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"lookback_days":1},"summary":{"total_changes":5,"changes_via_deployment":5,"direct_changes":0,"direct_changes_by_changed_by_type":{},"manual_deployment_changes":0}}}'
+
+  - name: empty_read
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0,"status":"success"},"payload":{"results":{"lookback_days":14},"summary":{"total_changes":0,"direct_changes":0,"direct_changes_by_changed_by_type":{},"manual_deployment_changes":0}}}'

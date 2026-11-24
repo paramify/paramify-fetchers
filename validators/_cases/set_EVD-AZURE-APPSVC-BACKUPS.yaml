@@ -1,0 +1,9 @@
+evidence_set: EVD-AZURE-APPSVC-BACKUPS
+cases:
+  - name: compliant
+    expect: PASS
+    artifact: '{"metadata": {"exit_code": 0, "status": "success"}, "payload": {"metadata": {"partial_failure": false}, "results": {"settings": {"recovery_point_objective_hours": 24}}, "summary": {"all_web_apps_backed_up": true, "all_web_apps_meet_recovery_point_objective": true, "apps_meeting_recovery_point_objective": 3, "recovery_point_objective_hours": 24, "total_web_apps": 3}}}'
+
+  - name: collection_failed
+    expect: FAIL
+    artifact: '{"metadata": {"exit_code": 1, "status": "failed"}, "payload": {}}'

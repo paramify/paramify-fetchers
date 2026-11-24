@@ -20,12 +20,12 @@ organization, each with its own token and API host.
 | `github_secret_scanning` | Scanning and push protection per repository, every alert (never the secret), push-protection bypasses | SVC-ASM |
 | `github_org_security_settings` | Two-factor requirement and members without it, member defaults, Actions token rights, security configuration coverage | IAM-APM, IAM-ELP, CNA-EIS |
 | `github_access_review` | Owners, members, outside collaborators, invitations, teams and their repository grants, repository admins | IAM-ELP, IAM-AAM |
-| `github_non_user_credentials` | Deploy keys, installed apps, fine-grained tokens, Actions secrets by age, webhook TLS and signing | IAM-SNU, SVC-ASM |
+| `github_non_user_credentials` | Deploy keys, installed apps, fine-grained tokens, Actions secret names and ages when the token can list them, webhook TLS and signing | IAM-SNU, SVC-ASM |
 | `github_repository_inventory` | **Inventory** (`kind: inventory`): one record per repository with visibility, state, security features and custom property values; all or nothing | PIY-GIV |
 | `github_actions_security` | Allowed actions and SHA pinning policy, the workflow token's default, fork PR approval, self-hosted runners and runner groups, OIDC subject claims, and what each workflow file does (unpinned actions, permissions blocks, privileged triggers checking out PR code, untrusted input in scripts, OIDC) | SCR-MIT, CMT-VTD, IAM-SNU, CNA-MAT |
 | `github_release_integrity` | Build provenance on each release asset (by digest), immutable releases, release tags locked by tag rulesets | SVC-VRI, SCR-MIT |
 | `github_deployment_controls` | Environments' reviewers, self-review, wait timers, branch policies and admin bypass; production deployments in a window with commit, creator, whether Actions made them and who approved them | CMT-RMV, CMT-VTD, CMT-LMC |
-| `github_workflow_runs` | Every workflow run in a window with its trigger, branch, commit, actor and result, and the artifacts each run kept (metadata only) | CMT-VTD, CMT-RMV |
+| `github_workflow_runs` | Every workflow run in a window with its trigger, branch, commit, actor (none on scheduled runs) and result, and the artifacts each run kept (metadata only) | CMT-VTD, CMT-RMV |
 | `github_image_signing` | The cosign sign and verify steps in each workflow file: the kind of signing key, whether the image is named by digest, whether the step can be skipped; and how each signing workflow ran in a window | SVC-VRI |
 | `github_vulnerability_disclosure` | Private vulnerability reporting, security policy, repository security advisories with state and age | PIY-RVD |
 | `github_significant_change_notifications` | FedRAMP SCN objects from pull requests flagged as significant changes, schema-validated and checked against SCN-CSO-INF | CMT-LMC |
@@ -73,11 +73,11 @@ a missing grant is reported as e.g. `(needs: administration=read)`.
 | Dependabot alerts (repository) | `vulnerability_alerts` | dependabot_alerts |
 | Code scanning alerts (repository) | `security_events` | code_scanning_alerts |
 | Secret scanning alerts (repository) | `secret_scanning_alerts` | secret_scanning |
-| Secrets (repository) | `secrets` | non_user_credentials |
+| Secrets (repository) | `secrets` | optional. `non_user_credentials` lists Actions secret names and ages only with this grant. Without it the fetcher still runs: those lists are `null` and metadata says why. The API never returns secret values |
 | Webhooks (repository) | `repository_hooks` | non_user_credentials |
 | Administration (organization) | `organization_administration` | org_security_settings, non_user_credentials (installations), actions_security (Actions policy, OIDC subject template), release_integrity (immutable releases), audit_log |
 | Members (organization) | `members` | access_review, org_security_settings |
-| Secrets (organization) | `organization_secrets` | non_user_credentials |
+| Secrets (organization) | `organization_secrets` | optional, same as repository Secrets |
 | Webhooks (organization) | `organization_hooks` | non_user_credentials |
 | Personal access tokens (organization) | `organization_personal_access_tokens` | non_user_credentials, **GitHub App tokens only**: the token page offers no such permission, and GitHub answers a personal token with 403 whatever it holds. Run with a personal token, `fine_grained_tokens` is `null` and the metadata says why |
 | Custom properties (organization) | `organization_custom_properties` | repository_inventory (or set `include_custom_properties: false`) |
@@ -113,6 +113,39 @@ organization; a `repositories` filter narrows only the per-repository
 section. Set `scope_to_repositories: true` to keep only the teams and roles
 that reach the collected repositories, and `include_members: false` to
 leave the member list out (the count stays).
+
+`non_user_credentials` reads installed apps, fine-grained tokens and
+organization Actions secrets across the whole organization; a `repositories`
+filter narrows only the per-repository section (deploy keys, repository
+secrets and webhooks). Set `scope_to_repositories: true` to keep only those
+that can reach the collected repositories. An item is left out only when it
+is shown not to reach any of them. One whose reach cannot be told stays in
+with `reaches_collected_repositories: null` and is named in the summary's
+`*_reach_unknown` lists:
+
+- An organization secret says which repositories may use it (`all`,
+  `private` or `selected`), and a `selected` secret's repositories are read.
+  Whether `private` also covers internal repositories is not measured, so
+  with only internal repositories collected such a secret stays as unknown.
+- A fine-grained token says `all`, `subset` or `none`, and a `subset` token's
+  repositories are read (GitHub App tokens only, like the token list itself).
+- An app on `all` repositories reaches every one. For an app on `selected`
+  repositories GitHub gives the list to that app alone
+  (`GET /installation/repositories` with its own token), so its reach is
+  unknown to this fetcher. An organization owner can see it under the app's
+  *Configure* page. When the organization has confirmed an app's access, name
+  its slug in `apps_confirmed_reaching` or `apps_confirmed_not_reaching`: the
+  app is kept with `reach_source: organization_confirmation`, or left out and
+  named in `metadata.apps_left_out_by_confirmation`, and
+  `metadata.apps_confirmation_note` says this came from the settings, not from
+  GitHub. A confirmation never overrides what GitHub shows (an app on `all`
+  repositories stays, listed in `apps_confirmation_contradicted`), slugs that
+  match no installed app are listed in `apps_confirmed_unmatched`, and naming
+  one app in both settings fails the run.
+
+Organization webhooks are not scoped. A token's `subset` repository list has
+been read on a live organization; a `selected` secret's list is covered by
+unit tests only.
 
 A **GitHub App installation token** holding the same read-only permissions
 produced the same evidence as a personal token for those fifteen, with two
@@ -235,6 +268,14 @@ repositories; each returns well-formed, misleading data without an error.
   `total_count` is 0 (measured on cli/cli). That looks like a quiet window.
   `workflow_runs` does not filter. It reads the newest runs first and stops at
   the first run older than the window.
+- **A scheduled run's actor is not who started it.** No person starts a
+  scheduled run. GitHub reports as its `actor` the user who last changed the
+  workflow's `cron` schedule, or the repository's default branch (GitHub's
+  documentation of the `schedule` event), so one person appears to have
+  started every scheduled run. `workflow_runs` leaves `actor` null on
+  scheduled runs. `triggering_actor` is null on the first attempt and names
+  who re-ran the run on a later one. `include_actors: false` leaves both
+  fields out of every run.
 - **A fork's branch can have the default branch's name.** A pull request from
   a fork's `trunk` runs with `head_branch: trunk` (measured on cli/cli). So
   `workflow_runs` counts a run as on the default branch only when its head

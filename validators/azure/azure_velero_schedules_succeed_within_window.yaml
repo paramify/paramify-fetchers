@@ -1,0 +1,25 @@
+key: azure_velero_schedules_succeed_within_window
+name: 'Azure Velero: Every Schedule Succeeded Within the Daily Window'
+type: AUTOMATED
+role: configuration
+source: community
+statement: >
+  Every Velero schedule seen in backup storage (at least one) has a Completed backup within its
+  window: a schedule listed in expected_schedules gets its own interval plus 10% (at least 2 hours, so
+  26 hours for daily:24), and any other schedule gets success_window_hours (26 hours by default). This
+  is the daily check, kept apart from the recovery point objective so a missed daily run shows before
+  the objective is exceeded. Does not prove the backup can be restored. Does not check whether the
+  collection run succeeded.
+
+regex: '"schedules_observed":\s*(?<schedules_observed>[1-9]\d*)[\s\S]*?"schedules_with_success_within_window":\s*(?<schedules_with_success_within_window>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS MATCH_GROUP[2]
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # schedules_observed
+    criteria: EQUALS
+    value: { type: MATCH_GROUP, groupNumber: 2 }            # schedules_with_success_within_window
+
+evidence_sets:
+  - EVD-AZURE-VELERO-BACKUPS

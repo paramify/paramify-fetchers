@@ -209,7 +209,7 @@ def _config_descriptor(f: ConfigField) -> dict:
         "env": f.env,
     }
     if f.type == patterns.TYPE:
-        d.update(prefixes=list(f.prefixes), bare=f.bare)
+        d.update(prefixes=list(f.prefixes), bare=f.bare, globs=f.globs)
     return d
 
 
@@ -1066,11 +1066,11 @@ def pick_pattern_field(fields: Mapping[str, ConfigField], pattern: str, field: O
     if field is not None:
         if field not in fields:
             raise ValueError(f"{field!r} is not a pattern list here; pattern lists: {', '.join(fields) or 'none'}")
-        problem = patterns.check([patterns.Item(pattern)], fields[field].prefixes, fields[field].bare)
+        problem = patterns.check([patterns.Item(pattern)], fields[field].prefixes, fields[field].bare, fields[field].globs)
         if problem:
             raise ValueError(f"{field}: {problem[0]}")
         return field
-    fits = [n for n, d in fields.items() if not patterns.check([patterns.Item(pattern)], d.prefixes, d.bare)]
+    fits = [n for n, d in fields.items() if not patterns.check([patterns.Item(pattern)], d.prefixes, d.bare, d.globs)]
     if len(fits) == 1:
         return fits[0]
     if fits:
@@ -1078,17 +1078,19 @@ def pick_pattern_field(fields: Mapping[str, ConfigField], pattern: str, field: O
     kind, sep, _ = pattern.partition(":")
     owner = next((n for n, d in fields.items() if sep and kind.lower() in d.prefixes), None)
     if owner:
-        raise ValueError(f"{owner}: {patterns.check([patterns.Item(pattern)], fields[owner].prefixes, fields[owner].bare)[0]}")
-    takes = "; ".join(f"{n} takes {grammar_text(d.prefixes, d.bare)}" for n, d in fields.items())
+        found = patterns.check([patterns.Item(pattern)], fields[owner].prefixes, fields[owner].bare, fields[owner].globs)
+        raise ValueError(f"{owner}: {found[0]}")
+    takes = "; ".join(f"{n} takes {grammar_text(d.prefixes, d.bare, d.globs)}" for n, d in fields.items())
     raise ValueError(f"no pattern list here takes {pattern!r} ({takes or 'none declared'})")
 
 
-def grammar_text(prefixes, bare: bool = True) -> str:
+def grammar_text(prefixes, bare: bool = True, globs: bool = True) -> str:
     """What a patterns field takes, in words: "rg:, location: or id: patterns", "route: or unprefixed patterns"."""
     named = [f"{p}:" for p in prefixes] + (["unprefixed"] if bare else [])
     if not named:
         return "no patterns"
-    return (", ".join(named[:-1]) + " or " + named[-1] if len(named) > 1 else named[0]) + " patterns"
+    text = (", ".join(named[:-1]) + " or " + named[-1] if len(named) > 1 else named[0]) + " patterns"
+    return text if globs else text + " without wildcards"
 
 
 def _pattern_holder(m: dict, scope: str, target: str) -> dict:
@@ -1903,6 +1905,7 @@ def sync_validators(
     reference_ids=None,
     dry_run: bool = False,
     update: bool = False,
+    pair_existing: bool = False,
     lock_path: Optional[str] = None,
     on_event: Optional[Callable[[dict], None]] = None,
     custom_tags: bool = True,
@@ -1910,8 +1913,10 @@ def sync_validators(
     """Sync registry validators to Paramify and associate them to evidence sets.
 
     Scope precedence: explicit `reference_ids` > `manifest_path`'s fetchers'
-    sets > whole registry. Create-or-skip; associates on create only; `update`
-    opt-in patches existing. Fires sync_start / sync_validator / sync_complete.
+    sets > whole registry. Create-or-skip; associates on create; `update`
+    opt-in patches an existing validator that differs; `pair_existing` opt-in
+    pairs an existing one with the in-scope sets it isn't paired with yet.
+    Fires sync_start / sync_validator / sync_complete.
     Raises ValueError for setup errors. A rejected token mid-sweep stops it: the
     summary's `stopped` says why, and the lock still records what was created.
     """
@@ -1928,6 +1933,7 @@ def sync_validators(
         config=config,
         dry_run=dry_run,
         update=update,
+        pair_existing=pair_existing,
         lock_path=lock_path,
         on_event=on_event,
         display_names=category_display_names(root),

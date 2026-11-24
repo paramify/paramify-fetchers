@@ -958,16 +958,17 @@ def summarize(apps: list[dict], scan_enabled: bool = False) -> dict:
 # --- collection (lazy azure imports) ---
 
 def collect_web_apps(subscription_id, cred, collector: Collector, scan_secrets: bool = False,
-                     exclusions: ResourceExclusions | None = None, excluded: list | None = None) -> list[dict]:
+                     exclusions: ResourceExclusions | None = None, excluded: list | None = None) -> list[dict] | None:
     """One web_apps.list(), then Reader GETs per app (`config/web`, `config/authsettingsV2`, publishing
     policies, Key Vault references); with `scan_secrets`, the config/list POSTs for the literal-secret scan.
-    Apps the exclusions take out are appended to `excluded` and get none of the per-app reads.
+    Apps the exclusions take out are appended to `excluded` and get none of the per-app reads. None when the app
+    list couldn't be read.
     """
     client = web_client(subscription_id, cred, collector)
     if client is None:
         if exclusions is not None:
             exclusions.mark_unread()
-        return []
+        return None
 
     def _list():
         # ItemPaged: the SDK follows nextLink itself, so pagination is handled.
@@ -979,9 +980,9 @@ def collect_web_apps(subscription_id, cred, collector: Collector, scan_secrets: 
 
     apps = collector.guard("web.web_apps.list", _list, default=None)
     if apps is None:
-        apps = []
         if exclusions is not None:
             exclusions.mark_unread()
+        return None
     if exclusions:
         apps, out = exclusions.split(apps, "web_app")
         if excluded is not None:
@@ -1161,7 +1162,7 @@ def main() -> int:
     subscription_id = sub["subscription_id"]
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
-    apps: list[dict] = []
+    apps: list[dict] | None = None
     excluded: list[dict] = []
     exclusions = ResourceExclusions.from_env()
     exclusions.record_invalid(collector)
@@ -1188,7 +1189,9 @@ def main() -> int:
                 "ambient Azure credential that can list subscriptions)"
             ),
         )
-    if not (subscription_id and cred is not None):
+    listed = apps is not None
+    apps = apps or []
+    if not listed:
         exclusions.mark_unread()
     exclusions.warn_unmatched(logger)
 
@@ -1215,7 +1218,7 @@ def main() -> int:
         summary={
             **summarize(apps, scan_secrets),
             "provider_registration_status": registration,
-            **exclusions.summary(excluded, ("web_app",), {"web_apps": len(apps)}),
+            **exclusions.summary(excluded, ("web_app",), {"web_apps": len(apps) if listed else None}),
         },
     )
 
