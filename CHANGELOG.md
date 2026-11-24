@@ -228,6 +228,36 @@ schemas and the `paramify` CLI — not the internal code.
     query failed, and `remediation_deployments_truncated` reads null when the
     task list or a task's deployment list was not read, not false.
 
+- **Four Azure monitoring fetchers give null counts, not 0 or false, when a
+  list could not be read.** The run still exits 1 as `partial_failure`.
+  - `azure_activity_log_alerts` 0.5.0: when the alert rule list is not read,
+    every alert count, both coverage maps and every coverage verdict
+    (`all_monitored_operations_covered`, `service_health_alert_configured`,
+    `all_change_operations_covered`) are null. Before they read 0 and false.
+    The two operation totals stay 12 and 4. When the processing rule list is
+    not read, `suppressed` and `reaches_human` are null per alert, and
+    `alerts_suppressed`, `alerts_possibly_suppressed`, `alerts_reaching_human`,
+    the change coverage fields and `monitored_operation_coverage_reaching_human`
+    are null. Before they read as if no rule suppressed anything. An enabled
+    alert with no deliverable action group of its own is unknown too, since a
+    processing rule may add one: `routes_to_enabled_receiver` and
+    `routes_to_person` read null, not false, so `reaches_human` is null and the
+    alert counts in `alerts_routing_unknown` and `alerts_reaching_human_unknown`.
+    `processing_rule_matches` and `suppressed_by_processing_rules` are null, not
+    `[]`.
+  - `azure_diagnostic_settings` 0.2.0: when the settings are not read,
+    `activity_log_exported`, the counts, the coverage map and the required
+    category verdicts are null. Before, `activity_log_exported` read false.
+  - `azure_resource_diagnostic_settings` 0.5.0: when Resource Graph is not
+    read, the resource, coverage and ingestion counts and verdicts and the
+    destination counts are null. Before they read 0.
+  - `azure_log_analytics_workspaces` 0.4.0: when the workspace list is not
+    read, every count is null. A workspace whose tables or data exports are
+    not read makes `total_tables`, `min_table_total_retention_in_days` and the
+    data export counts null. `sentinel_onboarded_workspaces` is null while any workspace's
+    solutions are unread, and `sentinel_onboarded` is null while any are unread
+    and none is known to have Sentinel; before, it read false.
+
 ## [0.7.0-beta] - 2026-11-24
 ### Breaking
 
