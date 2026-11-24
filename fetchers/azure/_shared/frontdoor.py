@@ -691,16 +691,16 @@ def read_lists(collected: dict) -> dict:
     """
     unread = {name for name, rows in collected.items() if rows is None}
     endpoints = collected.get("endpoints") or []
-    if "endpoints" in unread or any(e["routes"] is None for e in endpoints):
+    if "endpoints" in unread or any(e.get("routes") is None for e in endpoints):
         unread.add("routes")
     rule_sets = collected.get("rule_sets") or {}
-    if any(rs["rules"] is None for rs in rule_sets.values()):
+    if any(rs.get("rules") is None for rs in rule_sets.values()):
         unread.add("rule_sets")
     result = {name: ({} if name == "rule_sets" else []) if rows is None else rows for name, rows in collected.items()}
     if "endpoints" in result:
-        result["endpoints"] = [{**e, "routes": e["routes"] or []} for e in endpoints]
+        result["endpoints"] = [{**e, "routes": e.get("routes") or []} for e in endpoints]
     if "rule_sets" in result:
-        result["rule_sets"] = {k: {**rs, "rules": rs["rules"] or []} for k, rs in rule_sets.items()}
+        result["rule_sets"] = {k: {**rs, "rules": rs.get("rules") or []} for k, rs in rule_sets.items()}
     return {**result, "unread": frozenset(unread)}
 
 

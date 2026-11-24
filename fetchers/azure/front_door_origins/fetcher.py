@@ -710,6 +710,13 @@ def exclude_apps(apps: list[dict], all_app_origins: list[dict], app_origins: lis
     return kept, excluded
 
 
+def app_scope_unread(scoped_profiles: list[dict], profiles: list[dict]) -> bool:
+    """Whether an app's scope can't be told: an in-scope profile's group scope is unknown, or a profile (an excluded one
+    too, since its groups keep an app in scope) has an unread origin group or origin list."""
+    return any(sp["in_scope"]["origin_groups"] is None for sp in scoped_profiles) or any(
+        c.get("unread", frozenset()) & {"origin_groups", "origins"} for c in profiles)
+
+
 def summarize_app_services(app_origins: list[dict], apps: list[dict], production_tag: str | None) -> dict:
     serving = [r for r in app_origins if r["serving"]]
 
@@ -1198,20 +1205,23 @@ def collect_profiles(subscription_id, cred, collector: Collector) -> tuple[list[
             f"cdn.afd_origin_groups.list_by_profile({name})",
             lambda: [project_origin_group(g) for g in cdn_origins.afd_origin_groups.list_by_profile(rg, name)],
         )
+        origins_unread = False
         for group in groups or []:
-            group["origins_projected"] = collector.guard(
+            origins = collector.guard(
                 f"cdn.afd_origins.list_by_origin_group({name}/{group['name']})",
                 lambda: [project_origin(o) for o in cdn_origins.afd_origins.list_by_origin_group(rg, name, group["name"])],
-                default=[],
             )
-        collected.append(read_lists({
+            group["origins_projected"] = origins or []
+            origins_unread |= origins is None
+        read = read_lists({
             "profile": profile,
             "endpoints": endpoints_with_routes(cdn, collector, profile),
             # Custom-domain host names only matter to scope exclusions and the in-scope host count.
             "custom_domains": custom_domains(cdn, collector, profile),
             "rule_sets": rule_sets_with_rules(cdn, collector, profile),
             "origin_groups": None if groups is None else sorted(groups, key=lambda g: arm_key(g["id"])),
-        }))
+        })
+        collected.append({**read, "unread": read["unread"] | {"origins"}} if origins_unread else read)
     return collected, skipped
 
 
@@ -1344,7 +1354,8 @@ def main() -> int:
                      **{name: n if listed else None for name, n in {
                          **in_scope_totals([sp["in_scope"] for sp in scoped_profiles]),
                          "origin_groups": total(sp["in_scope"]["origin_groups"] for sp in scoped_profiles)}.items()},
-                     "apps": len(apps) if apps_listed else None}),
+                     "apps": len(apps) if apps_listed and not app_scope_unread(scoped_profiles, collected + outside)
+                     else None}),
                  # in_scope_apps already counts the production apps left after both kinds of exclusion.
                  **resources.summary(excluded, RESOURCE_KINDS, {"profiles": len(profiles) if listed else None}),
                  **({} if apps_listed else {"excluded_production_apps": None})},

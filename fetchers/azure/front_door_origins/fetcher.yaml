@@ -167,13 +167,13 @@ evidence_set:
     - excluded_endpoints — Number of endpoints whose own host name matches a pattern; null when the profile list or any in-scope profile's endpoint list could not be read
     - excluded_routes — Number of routes out of scope: a route: pattern matches their name, or every host they serve is out of scope; null when the profile list or any in-scope profile's endpoint, route or custom domain list could not be read
     - excluded_origin_groups — Number of origin groups out of scope because every route reaching them is; each is listed under excluded with its routes and origins, and no other count includes them, their origins or their health; null when the profile list or any in-scope profile's endpoint, route, custom domain, rule set or origin group list could not be read
-    - excluded_apps — Number of production apps out of scope because only out-of-scope origin groups reach them; null when the app list could not be read
+    - excluded_apps — Number of production apps out of scope because only out-of-scope origin groups reach them; null when the app list could not be read, or when an in-scope origin group count is null or any profile's origin group or origin list could not be read, since which groups reach an app is then unknown
     - in_scope_hosts — Number of custom domains and endpoints whose host name no pattern matches; 0 means the patterns took out every host, which a check can catch by requiring more than 0; null when the profile list or any in-scope profile's custom domain or endpoint list could not be read
     - in_scope_custom_domains — Number of custom domains whose host name no pattern matches; null when the profile list or any in-scope profile's custom domain list could not be read
     - in_scope_endpoints — Number of endpoints whose own host name no pattern matches; null when the profile list or any in-scope profile's endpoint list could not be read
     - in_scope_routes — Number of routes in scope; null when the profile list or any in-scope profile's endpoint, route or custom domain list could not be read
     - in_scope_origin_groups — Number of origin groups in scope; null when the profile list or any in-scope profile's endpoint, route, custom domain, rule set or origin group list could not be read
-    - in_scope_apps — Number of production apps in scope, after both resource_exclusions and scope_exclusions; null when the app list could not be read
+    - in_scope_apps — Number of production apps in scope, after both resource_exclusions and scope_exclusions; null when the app list could not be read, or when an in-scope origin group count is null or any profile's origin group or origin list could not be read, since which groups reach an app is then unknown
 
     Does more than one region serve traffic?
     - serving_regions — List of regions holding an active origin in a serving group (active = enabled at the group's best priority)

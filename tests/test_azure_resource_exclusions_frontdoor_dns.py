@@ -831,6 +831,21 @@ def test_origin_groups_in_scope_are_null_when_one_profiles_rule_sets_or_groups_a
         assert (summary["in_scope_routes"], summary["in_scope_hosts"]) == (2, 4)
 
 
+@pytest.mark.parametrize("refuse", [
+    ROUTES_REFUSED,
+    "cdn.afd_origin_groups.list_by_profile(fd-named)",
+    # fd-out is excluded, but its groups still keep an app in scope.
+    "cdn.afd_origins.list_by_origin_group(fd-out/g)",
+    None,
+], ids=["routes", "origin_groups", "excluded_profiles_origins", "none"])
+def test_app_counts_are_null_when_which_groups_reach_an_app_is_unknown(refuse, monkeypatch, tmp_path):
+    code, evidence = _run_profile_reads(origins, monkeypatch, tmp_path, refuse)
+    summary = evidence["summary"]
+    apps = (summary["in_scope_apps"], summary["excluded_apps"])
+    assert code == (1 if refuse else 0)
+    assert (apps == (None, None)) if refuse else all(isinstance(n, int) for n in apps)
+
+
 def test_shared_reads_return_none_for_an_unread_list():
     collector = Collector(logging.getLogger("frontdoor_reads_under_test"))
     profile = {"id": f"{IN_RG}/providers/Microsoft.Cdn/profiles/fd", "name": "fd"}

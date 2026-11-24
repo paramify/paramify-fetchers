@@ -48,7 +48,9 @@ schemas and the `paramify` CLI — not the internal code.
   `in_scope_endpoints` the endpoint lists, `in_scope_hosts` both, and `in_scope_routes` the endpoint, route and
   custom domain lists. `azure_front_door_tls` 0.6.3 (`in_scope_secrets` also needs the secret lists),
   `azure_front_door_waf_coverage` 0.6.3 (`in_scope_host_routes` needs what `in_scope_routes` does) and
-  `azure_front_door_origins` 0.8.3 (`in_scope_origin_groups` also needs the rule set and origin group lists).
+  `azure_front_door_origins` 0.8.3 (`in_scope_origin_groups` also needs the rule set and origin group lists;
+  `in_scope_apps` and `excluded_apps` are null when `in_scope_origin_groups` is, or when any profile's origin group
+  or origin list wasn't read, excluded profiles included).
   `azure_front_door_waf_policies` doesn't read these lists and is unchanged.
 
 - **In-scope counts read null, not 0, when their list couldn't be read.** A failed sign-in or list call left
