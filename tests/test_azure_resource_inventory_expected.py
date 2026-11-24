@@ -81,7 +81,7 @@ def test_required_ids_are_compared_without_case(monkeypatch, tmp_path):
 
 
 def test_a_missing_required_vnet_is_not_satisfied_by_an_allowed_subnet(monkeypatch, tmp_path):
-    # Todd's first case: the VNet is gone, its subnet is returned and allowed. The VNet is still missing.
+    # First reported case: the VNet is gone, its subnet is returned and allowed. The VNet is still missing.
     resources = [r for r in base.INVENTORY_TABLES["Resources"] if r["id"] != VNET]
     resources.append(base._resource(SUBNET, "microsoft.network/virtualnetworks/subnets"))
     _, s, results, _ = run(monkeypatch, tmp_path, required=ALL, allowed=f"id:{VNET}/subnets/*", resources=resources)
@@ -99,7 +99,7 @@ def test_a_child_alone_does_not_satisfy_its_required_parent(monkeypatch, tmp_pat
 
 
 def test_an_unlisted_resource_beside_a_required_one_is_unexpected(monkeypatch, tmp_path):
-    # Todd's second case: kv-extra shares rg-in with required resources but is neither required nor allowed.
+    # Second reported case: kv-extra shares rg-in with required resources but is neither required nor allowed.
     resources = base.INVENTORY_TABLES["Resources"] + [base._resource(EXTRA, "microsoft.keyvault/vaults")]
     _, s, results, _ = run(monkeypatch, tmp_path, required=ALL, allowed="id:*/providers/microsoft.compute/snapshots/velero-*",
                            resources=resources)
