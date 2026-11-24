@@ -1,0 +1,74 @@
+{
+  "value": [
+    {
+      "id": "/subscriptions/ffffffff-ffff-ffff-ffff-ffffffffffff/resourceGroups/TestGroup/providers/Microsoft.DBforMySQL/flexibleServers/mysqltestserver/backups/daily-20260101t000000-00000000-0000-0000-0000-000000000000",
+      "name": "daily-20260101t000000-00000000-0000-0000-0000-000000000000",
+      "properties": {
+        "backupType": "FULL",
+        "completedTime": "2026-01-01T00:00:00+00:00",
+        "source": "Automatic"
+      },
+      "type": "Microsoft.DBforMySQL/flexibleServers/backups"
+    },
+    {
+      "id": "/subscriptions/ffffffff-ffff-ffff-ffff-ffffffffffff/resourceGroups/TestGroup/providers/Microsoft.DBforMySQL/flexibleServers/mysqltestserver/backups/daily-20260102t000000-00000000-0000-0000-0000-000000000000",
+      "name": "daily-20260102t000000-00000000-0000-0000-0000-000000000000",
+      "properties": {
+        "backupType": "FULL",
+        "completedTime": "2026-01-02T00:00:00+00:00",
+        "source": "Automatic"
+      },
+      "type": "Microsoft.DBforMySQL/flexibleServers/backups"
+    },
+    {
+      "id": "/subscriptions/ffffffff-ffff-ffff-ffff-ffffffffffff/resourceGroups/TestGroup/providers/Microsoft.DBforMySQL/flexibleServers/mysqltestserver/backups/daily-20260103t000000-00000000-0000-0000-0000-000000000000",
+      "name": "daily-20260103t000000-00000000-0000-0000-0000-000000000000",
+      "properties": {
+        "backupType": "FULL",
+        "completedTime": "2026-01-03T00:00:00+00:00",
+        "source": "Automatic"
+      },
+      "type": "Microsoft.DBforMySQL/flexibleServers/backups"
+    },
+    {
+      "id": "/subscriptions/ffffffff-ffff-ffff-ffff-ffffffffffff/resourceGroups/TestGroup/providers/Microsoft.DBforMySQL/flexibleServers/mysqltestserver/backups/daily-20260104t000000-00000000-0000-0000-0000-000000000000",
+      "name": "daily-20260104t000000-00000000-0000-0000-0000-000000000000",
+      "properties": {
+        "backupType": "FULL",
+        "completedTime": "2026-01-04T00:00:00+00:00",
+        "source": "Automatic"
+      },
+      "type": "Microsoft.DBforMySQL/flexibleServers/backups"
+    },
+    {
+      "id": "/subscriptions/ffffffff-ffff-ffff-ffff-ffffffffffff/resourceGroups/TestGroup/providers/Microsoft.DBforMySQL/flexibleServers/mysqltestserver/backups/daily-20260105t000000-00000000-0000-0000-0000-000000000000",
+      "name": "daily-20260105t000000-00000000-0000-0000-0000-000000000000",
+      "properties": {
+        "backupType": "FULL",
+        "completedTime": "2026-01-05T00:00:00+00:00",
+        "source": "Automatic"
+      },
+      "type": "Microsoft.DBforMySQL/flexibleServers/backups"
+    },
+    {
+      "id": "/subscriptions/ffffffff-ffff-ffff-ffff-ffffffffffff/resourceGroups/TestGroup/providers/Microsoft.DBforMySQL/flexibleServers/mysqltestserver/backups/daily-20260106t000000-00000000-0000-0000-0000-000000000000",
+      "name": "daily-20260106t000000-00000000-0000-0000-0000-000000000000",
+      "properties": {
+        "backupType": "FULL",
+        "completedTime": "2026-01-06T00:00:00+00:00",
+        "source": "Automatic"
+      },
+      "type": "Microsoft.DBforMySQL/flexibleServers/backups"
+    },
+    {
+      "id": "/subscriptions/ffffffff-ffff-ffff-ffff-ffffffffffff/resourceGroups/TestGroup/providers/Microsoft.DBforMySQL/flexibleServers/mysqltestserver/backups/daily-20260107t000000-00000000-0000-0000-0000-000000000000",
+      "name": "daily-20260107t000000-00000000-0000-0000-0000-000000000000",
+      "properties": {
+        "backupType": "FULL",
+        "completedTime": "2026-01-07T00:00:00+00:00",
+        "source": "Automatic"
+      },
+      "type": "Microsoft.DBforMySQL/flexibleServers/backups"
+    }
+  ]
+}
