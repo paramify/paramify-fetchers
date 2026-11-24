@@ -10,6 +10,8 @@ from pathlib import Path
 from types import ModuleType
 from types import SimpleNamespace as NS
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 AZURE = REPO_ROOT / "fetchers" / "azure"
 sys.path.insert(0, str(AZURE / "_shared"))
@@ -598,6 +600,16 @@ def test_nsg_refused_vnet_list_nulls_subnet_nic_coverage_and_east_west(monkeypat
     nics = {n["name"]: n for n in results["network_interfaces"]}
     assert [(nics[n]["protected_by_nsg"], nics[n]["nsg_protection_source"], nics[n]["subnet_nsg_ids"])
             for n in ("nic-own", "nic-subnet", "nic-none")] == [(True, None, None), (None, None, None), (None, None, None)]
+
+
+@pytest.mark.parametrize("refuse", [{"network_interfaces"}, {"network_security_groups", "virtual_networks"}],
+                         ids=["nic_list", "group_and_vnet_lists"])
+def test_nsg_refused_lists_null_exactly_the_counts_built_from_them(monkeypatch, tmp_path, refuse):
+    code, evidence = _nsg_main(monkeypatch, tmp_path, refuse=refuse, rows=_nsg_models())
+    summary = evidence["summary"]
+    unread = _fields(*refuse)
+    assert code == 1 and {k: summary[k] for k in unread} == dict.fromkeys(unread)
+    assert all(summary[k] is not None for k in _fields(*NSG_LISTS) - unread)
 
 
 def test_nsg_all_lists_read_give_numbers(monkeypatch, tmp_path):
