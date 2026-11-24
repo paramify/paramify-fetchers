@@ -1,0 +1,34 @@
+display_name: OpenSCAP
+description: >-
+  OpenSCAP scan results (XCCDF or ARF files written by oscap xccdf eval), read from an Azure Blob Storage container or
+  a local directory: per target, the profile evaluated and its rule results.
+
+requires:
+  python_packages:
+    - requests
+    - python-dotenv
+    - defusedxml
+    - azure-identity
+
+# Shared by every openscap fetcher. The runner injects these env vars for any fetcher with category: openscap.
+config_schema:
+  results_container_url:
+    type: string
+    env: OPENSCAP_RESULTS_CONTAINER_URL
+    description: >-
+      The https URL of the Azure Blob Storage container the scans write their results to, such as
+      https://account.blob.core.windows.net/scan-results. Read with the run's Azure identity (Storage Blob Data
+      Reader on the container). Set this or results_dir.
+  results_dir:
+    type: string
+    env: OPENSCAP_RESULTS_DIR
+    description: >-
+      A local directory holding the result files, read recursively, for results copied next to the runner. Set this
+      or results_container_url.
+  results_prefix:
+    type: string
+    env: OPENSCAP_RESULTS_PREFIX
+    description: >-
+      Only read files whose path in the container or directory starts with this prefix, such as scans/.
+
+secrets: []

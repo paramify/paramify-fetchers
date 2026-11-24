@@ -1,0 +1,22 @@
+key: azure_flexible_server_backups_restore_dates_known
+name: 'Azure PostgreSQL and MySQL Backups: Every Restored Server Has a Known Date'
+type: AUTOMATED
+role: integrity
+source: community
+statement: >
+  Every server created by a point-in-time restore has a creation date (restored_servers_date_unknown
+  is 0). A restored server without a date never counts as recent. Does not check whether the
+  collection run succeeded.
+
+regex: '"restored_servers_date_unknown":\s*(?<restored_servers_date_unknown>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # restored_servers_date_unknown
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-FLEXIBLE-SERVER-BACKUPS

@@ -496,7 +496,7 @@ def main() -> int:
                 assessments, sla_days, registration_status != UNKNOWN,
                 not any(f["operation"] == SEVERITY_OPERATION for f in collector.failures),
             ),
-            **exclusions.summary(excluded, ("assessment",), {"assessments": len(assessments)}),
+            **exclusions.summary(excluded, ("assessment",), {"assessments": len(assessments) if registration_status != UNKNOWN else None}),
         },
     )
 

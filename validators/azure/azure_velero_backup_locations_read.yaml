@@ -1,0 +1,22 @@
+key: azure_velero_backup_locations_read
+name: 'Azure Velero: Every Backup Storage Location Read'
+type: AUTOMATED
+role: integrity
+source: community
+statement: >
+  At least one Velero backup storage location was found and every one of them had its backups listed
+  (backup_locations_read equals backup_locations). Without this, the backup counts below are
+  incomplete or null. Does not check whether the collection run succeeded.
+
+regex: '"backup_locations":\s*(?<backup_locations>[1-9]\d*)[\s\S]*?"backup_locations_read":\s*(?<backup_locations_read>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS MATCH_GROUP[2]
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # backup_locations
+    criteria: EQUALS
+    value: { type: MATCH_GROUP, groupNumber: 2 }            # backup_locations_read
+
+evidence_sets:
+  - EVD-AZURE-VELERO-BACKUPS

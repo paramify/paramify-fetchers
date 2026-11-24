@@ -1,0 +1,12 @@
+{
+  "apiVersion": "v1",
+  "data": {
+    "mesh": "outboundTrafficPolicy:\n  mode: REGISTRY_ONLY\ndefaultConfig:\n  discoveryAddress: istiod.istio-system.svc:15012\n"
+  },
+  "kind": "ConfigMap",
+  "metadata": {
+    "name": "istio",
+    "namespace": "istio-system",
+    "uid": "00000000-0000-0000-0000-000000000025"
+  }
+}

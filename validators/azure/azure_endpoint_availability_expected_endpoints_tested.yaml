@@ -1,0 +1,23 @@
+key: azure_endpoint_availability_expected_endpoints_tested
+name: 'Azure Endpoint Availability: Every Expected Endpoint Has a Test'
+type: AUTOMATED
+role: completeness
+source: community
+statement: >
+  Every URL listed in expected_endpoints is requested by an enabled, in-scope availability test
+  (expected_endpoints_untested is 0), so the measured availability covers the endpoints the offering
+  names and a missing test is not hidden by the others. Fails while no expected endpoints are listed.
+  Does not check whether the collection run succeeded.
+
+regex: '"expected_endpoints_untested":\s*(?<expected_endpoints_untested>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }   # expected_endpoints_untested
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-ENDPOINT-AVAILABILITY

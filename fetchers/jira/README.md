@@ -104,6 +104,7 @@ curl -sS -u "$JIRA_EMAIL:$JIRA_API_TOKEN" -H 'Accept: application/json' \
 |---|---|---|---|
 | `lookback_days` | `JIRA_LOOKBACK_DAYS` | `90` | Collect issues updated in the last N days |
 | `jql` | `JIRA_ISSUE_JQL` | — | Explicit JQL; overrides `lookback_days` |
+| `projects` | `JIRA_PROJECTS` | none | Comma-separated project keys or exact names (case-insensitive). Limits projects, issue types, statuses, service desks and issues to these projects; see below |
 | `max_issues` | `JIRA_MAX_ISSUES` | `2000` | Issue cap; `metadata.issues_truncated` records whether it was hit |
 
 ### `jira_remediation_items`
@@ -280,6 +281,20 @@ Change and incident tickets are picked out by issue-type name — the Jira Servi
 Management defaults (`Change`, `Normal/Standard/Emergency Change`, `Incident`,
 `Major Incident`, …). A site that names them differently still has every issue
 in `issues`; narrow `jql` to the relevant projects to shape the evidence.
+
+With `projects` set, the inventory covers only the named projects. The other
+projects are left out and only counted (`metadata.projects_left_out`); issue
+types are the ones those projects list, statuses come from
+`GET /rest/api/3/project/{id}/statuses` for each of them (instead of the
+site-wide `/status`), and service desks are those of the named projects.
+Priorities stay site-wide (`metadata.priorities_scope: site`). The issue query
+becomes `project in (<ids>) AND (<jql or lookback>)`, so a `jql` that names
+other projects can narrow the result but never widen it; `metadata.jql` is the
+query that ran (null when the run stopped before any query). A value is matched
+as a project key first and as a name only when it is no project's key, and
+`metadata.projects_selected` lists the keys that were matched. A name that matches no project the account can see fails the
+run as `bad_config` before any issue is read, and if the project list cannot be
+read in full nothing else is collected.
 
 ## Output
 

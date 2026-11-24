@@ -88,6 +88,13 @@ More integrations are in progress. To ask for a new platform or fetcher, post in
   <tr>
     <td align="center" width="128"><img src="fetchers/logos/qualys.svg" alt="SSL Labs" width="48" height="48"><br><sub>SSL Labs</sub></td>
     <td align="center" width="128"><picture><source media="(prefers-color-scheme: dark)" srcset="fetchers/logos/tenable-dark.svg"><img src="fetchers/logos/tenable.svg" alt="Tenable" width="48" height="48"></picture><br><sub>Tenable</sub></td>
+    <td align="center" width="128"><img src="fetchers/logos/alertmanager.svg" alt="Alertmanager" width="48" height="48"><br><sub>Alertmanager</sub></td>
+    <td align="center" width="128"><img src="fetchers/logos/istio.svg" alt="Istio" width="48" height="48"><br><sub>Istio</sub></td>
+    <td align="center" width="128"><img src="fetchers/logos/keycloak.svg" alt="Keycloak" width="48" height="48"><br><sub>Keycloak</sub></td>
+    <td align="center" width="128"><img src="fetchers/logos/loki.svg" alt="Loki" width="48" height="48"><br><sub>Loki</sub></td>
+  </tr>
+  <tr>
+    <td align="center" width="128"><picture><source media="(prefers-color-scheme: dark)" srcset="fetchers/logos/openscap-dark.svg"><img src="fetchers/logos/openscap.svg" alt="OpenSCAP" width="48" height="48"></picture><br><sub>OpenSCAP</sub></td>
   </tr>
 </table>
 

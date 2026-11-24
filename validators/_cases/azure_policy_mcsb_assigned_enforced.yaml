@@ -1,0 +1,44 @@
+validator: azure_policy_mcsb_assigned_enforced
+# Records carry the fetcher's sorted key order (actually_enforces first), with a nested
+# parameters object and policy_definition block between the anchors, as real evidence does.
+cases:
+  - name: mcsb_enforced_on_subscription
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"policy_assignments":[{"actually_enforces":true,"effect_class":"audit_only","enforced":true,"enforcement_mode":"Default","enforcing_effects_not_enforced":false,"excluded_scope_count":0,"name":"diag","not_scopes":[],"parameters":{"effect":"DeployIfNotExists"},"policy_definition":{"kind":"policy_definition","name":"bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"},"policy_definition_id":"/providers/Microsoft.Authorization/policyDefinitions/bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb","policy_effects":{"members":[{"effect":"deployIfNotExists","policy_definition_name":"bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"}]},"scope_kind":"subscription"},{"actually_enforces":false,"effect_class":"audit_only","enforced":true,"enforcement_mode":"Default","enforcing_effects_not_enforced":false,"excluded_scope_count":0,"name":"SecurityCenterBuiltIn","not_scopes":[],"parameters":{},"policy_definition":{"display_name":"Microsoft cloud security benchmark","kind":"policy_set_definition","name":"1f3afdf9-d0c9-4c3d-847f-89da613e70a8"},"policy_definition_id":"/providers/Microsoft.Authorization/policySetDefinitions/1f3afdf9-d0c9-4c3d-847f-89da613e70a8","policy_effects":{"members":[{"effect":"audit","policy_definition_name":"a"}]},"scope_kind":"subscription"}]},"summary":{"security_center_builtin_enforced":true}}}'
+
+  - name: mcsb_inherited_from_management_group_upper_cased_path
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"policy_assignments":[{"actually_enforces":false,"effect_class":"audit_only","enforced":true,"enforcement_mode":null,"enforcing_effects_not_enforced":false,"excluded_scope_count":0,"name":"mcsb-mg","not_scopes":[],"parameters":{},"policy_definition":{"kind":"policy_set_definition","name":"1F3AFDF9-D0C9-4C3D-847F-89DA613E70A8"},"policy_definition_id":"/PROVIDERS/MICROSOFT.AUTHORIZATION/POLICYSETDEFINITIONS/1F3AFDF9-D0C9-4C3D-847F-89DA613E70A8","policy_effects":{"members":[]},"scope_kind":"management_group"}]},"summary":{}}}'
+
+  - name: mcsb_donotenforce_after_an_enforced_record_no_splice
+    expect: FAIL
+    note: the first record is enforced and unexcluded but not the benchmark; the guard stops it splicing onto the DoNotEnforce benchmark record
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"policy_assignments":[{"actually_enforces":true,"effect_class":"audit_only","enforced":true,"enforcement_mode":"Default","enforcing_effects_not_enforced":false,"excluded_scope_count":0,"name":"diag","not_scopes":[],"parameters":{"effect":"DeployIfNotExists"},"policy_definition":{"kind":"policy_definition","name":"bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"},"policy_definition_id":"/providers/Microsoft.Authorization/policyDefinitions/bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb","policy_effects":{"members":[]},"scope_kind":"subscription"},{"actually_enforces":false,"effect_class":"audit_only","enforced":false,"enforcement_mode":"DoNotEnforce","enforcing_effects_not_enforced":false,"excluded_scope_count":0,"name":"SecurityCenterBuiltIn","not_scopes":[],"parameters":{},"policy_definition":{"kind":"policy_set_definition","name":"1f3afdf9-d0c9-4c3d-847f-89da613e70a8"},"policy_definition_id":"/providers/Microsoft.Authorization/policySetDefinitions/1f3afdf9-d0c9-4c3d-847f-89da613e70a8","policy_effects":{"members":[]},"scope_kind":"subscription"}]},"summary":{}}}'
+
+  - name: mcsb_with_excluded_resource_groups
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"policy_assignments":[{"actually_enforces":false,"effect_class":"audit_only","enforced":true,"enforcement_mode":"Default","enforcing_effects_not_enforced":false,"excluded_scope_count":2,"name":"SecurityCenterBuiltIn","not_scopes":["/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-a","/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-b"],"parameters":{},"policy_definition":{"kind":"policy_set_definition","name":"1f3afdf9-d0c9-4c3d-847f-89da613e70a8"},"policy_definition_id":"/providers/Microsoft.Authorization/policySetDefinitions/1f3afdf9-d0c9-4c3d-847f-89da613e70a8","policy_effects":{"members":[]},"scope_kind":"subscription"}]},"summary":{}}}'
+
+  - name: mcsb_every_member_disabled
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"policy_assignments":[{"actually_enforces":false,"effect_class":"disabled","enforced":true,"enforcement_mode":"Default","enforcing_effects_not_enforced":false,"excluded_scope_count":0,"name":"SecurityCenterBuiltIn","not_scopes":[],"parameters":{"effect":"Disabled"},"policy_definition":{"kind":"policy_set_definition","name":"1f3afdf9-d0c9-4c3d-847f-89da613e70a8"},"policy_definition_id":"/providers/Microsoft.Authorization/policySetDefinitions/1f3afdf9-d0c9-4c3d-847f-89da613e70a8","policy_effects":{"members":[{"effect":"disabled"}]},"scope_kind":"subscription"}]},"summary":{}}}'
+
+  - name: mcsb_effects_unresolved
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"policy_assignments":[{"actually_enforces":false,"effect_class":"unresolved","enforced":true,"enforcement_mode":"Default","enforcing_effects_not_enforced":false,"excluded_scope_count":0,"name":"SecurityCenterBuiltIn","not_scopes":[],"parameters":{},"policy_definition":{"kind":"policy_set_definition","name":"1f3afdf9-d0c9-4c3d-847f-89da613e70a8"},"policy_definition_id":"/providers/Microsoft.Authorization/policySetDefinitions/1f3afdf9-d0c9-4c3d-847f-89da613e70a8","policy_effects":null,"scope_kind":"subscription"}]},"summary":{}}}'
+
+  - name: mcsb_enforcing_class_passes
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"policy_assignments":[{"actually_enforces":true,"effect_class":"enforcing","enforced":true,"enforcement_mode":"Default","enforcing_effects_not_enforced":false,"excluded_scope_count":0,"name":"mcsb","not_scopes":[],"parameters":{},"policy_definition":{"kind":"policy_set_definition","name":"1f3afdf9-d0c9-4c3d-847f-89da613e70a8"},"policy_definition_id":"/providers/Microsoft.Authorization/policySetDefinitions/1f3afdf9-d0c9-4c3d-847f-89da613e70a8","policy_effects":{"members":[{"effect":"deployIfNotExists"}]},"scope_kind":"subscription"}]},"summary":{}}}'
+
+  - name: mcsb_not_assigned
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"policy_assignments":[{"actually_enforces":false,"effect_class":"audit_only","enforced":true,"enforcement_mode":"Default","enforcing_effects_not_enforced":false,"excluded_scope_count":0,"name":"cis","not_scopes":[],"parameters":{},"policy_definition":{"kind":"policy_set_definition","name":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"},"policy_definition_id":"/providers/Microsoft.Authorization/policySetDefinitions/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","policy_effects":{"members":[]},"scope_kind":"subscription"}]},"summary":{}}}'
+
+  - name: definition_id_key_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"policy_assignments":[{"actually_enforces":false,"effect_class":"audit_only","enforced":true,"enforcement_mode":"Default","enforcing_effects_not_enforced":false,"excluded_scope_count":0,"name":"SecurityCenterBuiltIn","not_scopes":[],"parameters":{},"policy_definition":{"kind":"policy_set_definition","name":"1f3afdf9-d0c9-4c3d-847f-89da613e70a8"},"policy_set_definition_id":"/providers/Microsoft.Authorization/policySetDefinitions/1f3afdf9-d0c9-4c3d-847f-89da613e70a8","policy_effects":{"members":[]},"scope_kind":"subscription"}]},"summary":{}}}'
+
+  - name: enforced_key_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"policy_assignments":[{"actually_enforces":false,"effect_class":"audit_only","is_enforced":true,"enforcement_mode":"Default","enforcing_effects_not_enforced":false,"excluded_scope_count":0,"name":"SecurityCenterBuiltIn","not_scopes":[],"parameters":{},"policy_definition":{"kind":"policy_set_definition","name":"1f3afdf9-d0c9-4c3d-847f-89da613e70a8"},"policy_definition_id":"/providers/Microsoft.Authorization/policySetDefinitions/1f3afdf9-d0c9-4c3d-847f-89da613e70a8","policy_effects":{"members":[]},"scope_kind":"subscription"}]},"summary":{}}}'

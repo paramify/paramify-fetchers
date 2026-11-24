@@ -17,13 +17,14 @@ A field spec is a plain dict:
 secret value); the caller turns it into a ${env:VAR} reference via api.set_secret.
 
 `kind == "patterns"` is a text area, one `pattern  # reason` per line (see
-patterns.to_lines). Its spec adds "prefixes" and "bare" (the field's grammar)
+patterns.to_lines). Its spec adds "prefixes", "bare" and "globs" (the field's grammar)
 and "note" (where the list comes from). get_value() is None while the text
 holds the patterns it opened with, else the list as manifest items.
 """
 
 from __future__ import annotations
 
+import re
 from typing import Any, Optional
 
 from textual.app import ComposeResult
@@ -64,14 +65,9 @@ class FieldRow(Vertical):
         req = " [b red]*[/]" if spec.get("required") else ""
         help_text = spec.get("help") or ""
 
-        if kind == "secret":
-            # Make it unmistakable: this field holds the NAME of an env var, not
-            # the credential itself.
+        if kind == "secret" and not help_text:
+            # The group label already says this field holds an env var's name, not the secret.
             yield Label(f"{head}{req}", classes="field-label")
-            note = "the env var NAME — not the secret value; the runner reads the value from it at run time"
-            if help_text:
-                note = f"{note}  ·  {help_text}"
-            yield Label(note, classes="field-note")
         else:
             suffix = f"  [dim]{help_text}[/]" if help_text else ""
             yield Label(f"{head}{req}{suffix}", classes="field-label")
@@ -102,14 +98,21 @@ class FieldRow(Vertical):
             )
 
     def problems(self) -> list:
-        """What stops this row from being saved; only a pattern list is checked here."""
+        """What stops this row from being saved: a text value that misses the spec's
+        `pattern` (its `pattern_help` says why), or a bad pattern list."""
+        if self.spec.get("pattern"):
+            value = self.get_value()
+            if value and not re.fullmatch(self.spec["pattern"], str(value)):
+                return [self.spec.get("pattern_help") or "isn't valid"]
+            return []
         if self.spec.get("kind") != "patterns":
             return []
         items, shape = patterns.from_lines(self.query_one(TextArea).text)
         if shape or self.get_value() is None:
             # An untouched list writes nothing, so what it already holds is validate's to report, not the form's.
             return shape
-        return patterns.check(items, self.spec.get("prefixes", ()), self.spec.get("bare", True))
+        return patterns.check(items, self.spec.get("prefixes", ()), self.spec.get("bare", True),
+                              self.spec.get("globs", True))
 
     def get_value(self) -> Any:
         kind = self.spec.get("kind", "text")

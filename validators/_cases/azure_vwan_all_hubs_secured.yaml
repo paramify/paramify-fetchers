@@ -1,0 +1,17 @@
+validator: azure_vwan_all_hubs_secured
+cases:
+  - name: compliant
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"secured_hubs":2,"total_virtual_hubs":2}}}'
+
+  - name: secured_hubs_short
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"secured_hubs":1,"total_virtual_hubs":2}}}'
+
+  - name: no_total_virtual_hubs
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"secured_hubs":0,"total_virtual_hubs":0}}}'
+
+  - name: secured_hubs_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"secured_hubs_renamed":2,"total_virtual_hubs":2}}}'

@@ -1,0 +1,110 @@
+name: loki_log_ingestion
+version: 0.1.0
+description: >-
+  Shows whether each expected log source is arriving in Loki and how recently, from line counts, stream counts and the newest entry time, without copying log lines.
+category: loki
+source: community
+
+supports_targets: false
+
+runtime:
+  type: python
+  entry: fetcher.py
+
+output:
+  type: json
+  path: loki_log_ingestion.json
+
+config_schema:
+  expected_sources:
+    type: string
+    required: true
+    env: LOKI_EXPECTED_SOURCES
+    description: >
+      The log sources Loki should be receiving, as name={stream selector} entries separated by semicolons, such as
+      kubernetes_pods={namespace=~".+", container!=""}; falco={namespace="falco"}; keycloak={app="keycloak"}. Each
+      selector is a LogQL stream selector in braces, optionally followed by line filters (|= != |~ !~ with a quoted
+      string), so one kind of line in a stream can be its own source, such as a heartbeat. No other pipeline stage is
+      allowed, and a semicolon can't appear inside an entry. Use the labels your log shipper sets. An entry that is not
+      name={selector}, has another pipeline stage, or repeats a name, fails the run as bad_config.
+  quiet_sources:
+    type: string
+    required: false
+    env: LOKI_QUIET_SOURCES
+    description: >
+      Expected sources whose silence is normal, such as an alerting tool that logs only when something happens, as
+      comma-separated quiet:heartbeat pairs, such as falco:falco_heartbeat. The heartbeat is another expected source
+      that must keep arriving, such as the quiet tool's periodic health or metrics lines picked out with a line filter;
+      the quiet source is judged by it rather than by its own lines. A quiet source listed without a heartbeat keeps
+      all_expected_sources_ingesting null, since its silence can't be told apart from a broken collection path. A name
+      that is not an expected source, or a heartbeat that is itself quiet, fails the run as bad_config.
+  window_minutes:
+    type: integer
+    required: false
+    default: 60
+    env: LOKI_WINDOW_MINUTES
+    description: >
+      The recent window, in minutes, over which lines and streams are counted. A source with no line in it is not
+      ingesting. A whole number from 1 to 1440.
+  search_hours:
+    type: integer
+    required: false
+    default: 24
+    env: LOKI_SEARCH_HOURS
+    description: >
+      How far back, in hours, to look for each source's newest line. A source with no line in this window is reported
+      as not seen. A whole number from 1 to 720.
+  max_age_minutes:
+    type: integer
+    required: false
+    env: LOKI_MAX_AGE_MINUTES
+    description: >
+      The adopted maximum age, in minutes, of a source's newest line. There is no default: while it is unset,
+      sources_stale is null rather than judged against an age nobody adopted, and each source's age is still
+      reported. A whole number from 1 to 43200.
+
+secrets: []          # the optional token comes from the category (fetchers/_categories/loki.yaml)
+
+evidence_set:
+  reference_id: EVD-LOKI-LOG-INGESTION
+  name: Loki Log Ingestion
+  description: >-
+    For each expected log source, the lines and streams Loki received in a recent window and the time of its newest
+    line, with no log content copied.
+  instructions: |
+    Script: loki/log_ingestion/fetcher.py
+
+    Access: Network access to Loki's query API (or the gateway in front of it), with the tenant set when Loki is multi-tenant. Loki has no authentication of its own; set the optional token only when a proxy in front of it requires one. Every call is a GET.
+
+    Commands Executed:
+    - GET /loki/api/v1/query with sum(count_over_time({selector and line filters} [window])) — the number of lines each source sent in the window
+    - GET /loki/api/v1/query_range with the selector and line filters, limit 1, direction backward — the time of each source's newest line within the search window; the line itself is not kept
+    - GET /loki/api/v1/series with the stream selector alone — the number of streams (distinct label sets, such as one per pod and container) carrying each source in the window; the series API takes no line filters, so a filtered source's streams are counted before filtering
+
+    Output: loki_log_ingestion.json — each expected source's name and selector, lines and streams in the window, newest line time and age, whether it is ingesting and stale, and, for a quiet source, its heartbeat and whether its collection path is live. Log lines and stream labels are never copied. A response that is not the shape Loki documents counts as a failed read, recorded in api_failures, and leaves the source unread; a well-formed empty response means no matching lines. Staleness compares the exact age with max_age_minutes; the age is rounded to a tenth of a minute only for display. A source arriving in Loki shows it is collected and stored; whether anyone reviews it or alerts on it needs its own evidence.
+
+    Summary fields:
+
+    Which sources are expected?
+    - expected_sources — List of the expected source names, from the expected_sources setting
+    - expected_sources_count — Number of expected sources
+    - sources_unread — Number of sources at least one query failed for or answered in a malformed shape; while above 0, every judged field below is null
+
+    Are they arriving?
+    - window_minutes — The window_minutes setting
+    - sources_ingesting — Number of sources, quiet sources aside, with at least one line in the window
+    - sources_not_ingesting — Number of sources, quiet sources aside, with no line in the window
+    - sources_not_ingesting_names — List of the names of those sources
+    - all_expected_sources_ingesting — True if every expected source other than a quiet one has at least one line in the window and every quiet source's heartbeat is live; null if any source could not be read, a quiet source has no heartbeat, or none is set
+
+    Are the quiet sources' collection paths live?
+    - quiet_sources — List of the sources named in quiet_sources
+    - quiet_sources_without_heartbeat — List of quiet sources with no heartbeat; while not empty, all_expected_sources_ingesting is null
+    - quiet_sources_heartbeat_not_live — List of quiet sources whose heartbeat has no line in the window, or (once max_age_minutes is set) is stale
+
+    How recently?
+    - search_hours — The search_hours setting
+    - sources_not_seen_in_search_window — Number of sources, quiet sources aside, with no line at all in the search window
+    - longest_minutes_since_newest_entry — Minutes since the newest line of the source, quiet sources aside, that has gone longest without one, among sources seen in the search window; null if none was seen
+    - max_age_minutes — The max_age_minutes setting; null when unset
+    - sources_stale — Number of sources, quiet sources aside, whose newest line is older than max_age_minutes, or that were not seen in the search window; null when it is unset

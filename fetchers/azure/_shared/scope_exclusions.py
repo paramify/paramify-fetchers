@@ -11,6 +11,10 @@ from typing import Iterable, Optional
 SEPARATORS = re.compile(r"[\s,]+")
 
 
+def plural(kind: str) -> str:
+    return kind[:-1] + "ies" if kind.endswith("y") and kind[-2:-1] not in "aeiou" else kind + "s"
+
+
 def normalize(name: str) -> str:
     # DNS names compare without case or the root's trailing dot.
     return str(name).strip().lower().rstrip(".")
@@ -48,6 +52,7 @@ class ScopeExclusions:
         self.kinds = tuple(kinds)  # the prefixes this fetcher matches on, such as "route"
         self._keys = [split_kind(p) for p in self.patterns]
         self._matched: set = set()
+        self._unread = False
 
     @classmethod
     def from_env(cls, env_var: str, kinds: Iterable[str] = ()) -> "ScopeExclusions":
@@ -77,21 +82,27 @@ class ScopeExclusions:
             collector.record(f"config {env_var}", ValueError(
                 f"scope exclusion pattern {pattern!r} has an unknown prefix or nothing after it (known prefixes: {known})"))
 
-    def unmatched(self) -> list[str]:
-        return [p for p in self.patterns if p not in self._matched]
+    def mark_unread(self) -> None:
+        """A list was not read: no pattern was compared to it, so none can be called unmatched."""
+        self._unread = True
+
+    def unmatched(self) -> Optional[list[str]]:
+        return None if self._unread else [p for p in self.patterns if p not in self._matched]
 
     def summary(self, excluded: list[dict], kinds: Iterable[str], in_scope: dict) -> dict:
-        """The patterns, the ones that matched nothing, how many items of each kind were excluded, and how many of each
-        stayed in scope (in_scope maps a plural name to a count), so a check can require some to remain."""
+        """The patterns, the unmatched ones, and per-kind excluded and in-scope counts; None for a list not read."""
+        if any(count is None for count in in_scope.values()):
+            self.mark_unread()
         return {
             "scope_exclusion_patterns": list(self.patterns),
             "scope_exclusion_patterns_unmatched": self.unmatched(),
-            **{f"excluded_{kind}s": sum(1 for e in excluded if e["kind"] == kind) for kind in kinds},
+            **{f"excluded_{plural(kind)}": None if in_scope.get(plural(kind), 0) is None
+               else sum(1 for e in excluded if e["kind"] == kind) for kind in kinds},
             **{f"in_scope_{name}": count for name, count in in_scope.items()},
         }
 
     def warn_unmatched(self, logger: logging.Logger) -> None:
-        for pattern in self.unmatched():
+        for pattern in self.unmatched() or ():
             logger.warning("scope exclusion pattern %r matched nothing", pattern)
 
 

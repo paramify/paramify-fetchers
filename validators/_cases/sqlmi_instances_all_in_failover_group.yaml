@@ -1,0 +1,32 @@
+validator: sqlmi_instances_all_in_failover_group
+cases:
+  - name: every_instance_in_a_group
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"managed_instances":[{"name":"mi-a","in_failover_group":true,"failover_groups":["fg-1"]},{"name":"mi-b","in_failover_group":true,"failover_groups":["fg-1"]}]}}}'
+
+  - name: every_instance_in_a_group_pretty_printed
+    expect: PASS
+    artifact: |
+      {
+        "metadata": {"exit_code": 0},
+        "payload": {"results": {"managed_instances": [
+          {"failover_groups": ["fg-1"], "in_failover_group": true, "name": "mi-a"},
+          {"failover_groups": ["fg-1"], "in_failover_group": true, "name": "mi-b"}
+        ]}}
+      }
+
+  - name: one_instance_in_no_group
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"managed_instances":[{"name":"mi-a","in_failover_group":true,"failover_groups":["fg-1"]},{"name":"mi-c","in_failover_group":false,"failover_groups":[]}]}}}'
+
+  - name: group_list_unread
+    expect: FAIL
+    note: in_failover_group is null when the failover group list for the instance's region failed.
+    artifact: '{"metadata":{"exit_code":1},"payload":{"results":{"managed_instances":[{"name":"mi-a","in_failover_group":null,"failover_groups":[]}]}}}'
+
+  - name: flag_renamed_ALONE_THIS_PASSES
+    expect: PASS
+    note: >
+      Deliberate. Counting violations cannot tell "none" from "key gone".
+      sqlmi_backups_failover_fields_present fails here; see set_EVD-AZURE-SQLMI-BACKUPS.yaml.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{"managed_instances":[{"name":"mi-c","is_in_failover_group":false}]}}}'

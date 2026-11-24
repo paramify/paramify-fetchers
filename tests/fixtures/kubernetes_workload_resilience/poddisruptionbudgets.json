@@ -1,0 +1,49 @@
+{
+  "apiVersion": "policy/v1",
+  "items": [
+    {
+      "metadata": {
+        "name": "web",
+        "namespace": "storefront",
+        "uid": "00000000-0000-0000-0000-000000000009"
+      },
+      "spec": {
+        "minAvailable": 2,
+        "selector": {
+          "matchLabels": {
+            "app": "web"
+          }
+        }
+      },
+      "status": {
+        "currentHealthy": 0,
+        "desiredHealthy": 0,
+        "disruptionsAllowed": 0,
+        "expectedPods": 0
+      }
+    },
+    {
+      "metadata": {
+        "name": "db",
+        "namespace": "warehouse",
+        "uid": "00000000-0000-0000-0000-000000000010"
+      },
+      "spec": {
+        "maxUnavailable": 0,
+        "selector": {
+          "matchLabels": {
+            "app": "db"
+          }
+        }
+      },
+      "status": {
+        "currentHealthy": 0,
+        "desiredHealthy": 0,
+        "disruptionsAllowed": 0,
+        "expectedPods": 0
+      }
+    }
+  ],
+  "kind": "PodDisruptionBudgetList",
+  "metadata": {}
+}

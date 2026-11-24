@@ -431,7 +431,9 @@ def main() -> int:
         )
 
     unread_ops = ("network.NetworkManagementClient (init)", "network.private_endpoints.list_by_subscription")
-    if not (subscription_id and cred is not None) or any(f["operation"].startswith(unread_ops) for f in collector.failures):
+    listed = bool(subscription_id and cred is not None) and not any(
+        f["operation"].startswith(unread_ops) for f in collector.failures)
+    if not listed:
         exclusions.mark_unread()
     exclusions.warn_unmatched(logger)
 
@@ -444,7 +446,7 @@ def main() -> int:
         summary={
             **summarize(endpoints),
             "provider_registration_status": registration,
-            **exclusions.summary(excluded, ("private_endpoint",), {"private_endpoints": len(endpoints)}),
+            **exclusions.summary(excluded, ("private_endpoint",), {"private_endpoints": len(endpoints) if listed else None}),
         },
     )
     filename = f"azure_private_endpoint_configuration_{sanitize_for_filename(subscription_id or 'unknown')}.json"

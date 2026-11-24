@@ -1,5 +1,5 @@
 name: azure_app_service_plans
-version: 0.3.1
+version: 0.3.2
 description: >-
   Shows whether each App Service plan, and the web and function apps on it, would survive losing an instance or an availability zone.
 category: azure
@@ -81,10 +81,10 @@ evidence_set:
     Which resources are left out of scope?
     - resource_exclusion_patterns — List of the configured resource_exclusions patterns (rg:, location: or id:); empty when none are set, so every resource is in scope
     - resource_exclusion_patterns_unmatched — List of configured patterns that matched no plan or site, such as a mistyped name; null when the plan list or the site list could not be read
-    - excluded_app_service_plans — Number of plans left out of scope because a pattern matched their resource group, region or id and no in-scope site runs on them; each is listed under excluded with the pattern, and no other count includes it. A matched plan that an in-scope site runs on stays in scope and in every plan count, is not listed under excluded, and its pattern counts as matched
-    - excluded_sites — Number of web apps and function apps left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern
-    - in_scope_app_service_plans — Number of plans read and in scope, matched plans that an in-scope site runs on included; 0 means none was read or the patterns took out every plan
-    - in_scope_sites — Number of web apps and function apps read and in scope; 0 when none was read or the patterns took out every site
+    - excluded_app_service_plans — Number of plans left out of scope because a pattern matched their resource group, region or id and no in-scope site runs on them; each is listed under excluded with the pattern, and no other count includes it. A matched plan that an in-scope site runs on stays in scope and in every plan count, is not listed under excluded, and its pattern counts as matched; null when the plan list could not be read
+    - excluded_sites — Number of web apps and function apps left out of scope because a pattern matched their resource group, region or id; each is listed under excluded with the pattern; null when the site list could not be read
+    - in_scope_app_service_plans — Number of plans read and in scope, matched plans that an in-scope site runs on included; null when the plan list could not be read; 0 means there are none or the patterns took out every plan
+    - in_scope_sites — Number of web apps and function apps read and in scope; null when the site list could not be read; 0 when there are none or the patterns took out every site
 
     What was checked?
     - total_app_service_plans — Number of in-scope plans
