@@ -130,6 +130,28 @@ def test_default_deny_and_allow_all_follow_istio_semantics(policy, deny, allow_a
     assert (im.is_default_deny(p), im.allows_all(p)) == (deny, allow_all)
 
 
+def test_a_plaintext_server_on_any_non_tls_protocol_is_reported():
+    gws = fx("gateways")["items"]
+    gws[1]["spec"]["servers"] += [{"hosts": ["*"], "port": {"name": "grpc", "number": 9000, "protocol": "GRPC"}},
+                                  {"hosts": ["*"], "port": {"name": "mongo", "number": 27017, "protocol": "MONGO"}}]
+    servers = im.gateway_servers(gws)
+    assert len(servers) == 6
+    assert sorted(s["server"] for s in servers if s["plaintext"]) == ["ingress/legacy-admin:8080", "ingress/public:27017",
+                                                                      "ingress/public:9000"]
+
+
+@pytest.mark.parametrize("protocol, tls, plaintext", [
+    ("HTTP", None, True), ("HTTP", {"httpsRedirect": True}, False),
+    # Istio never terminates TLS on an HTTP-family port, so a tls mode there does not make it encrypted.
+    ("HTTP", {"mode": "SIMPLE"}, True), ("GRPC", None, True), ("GRPC-WEB", None, True), ("HTTP2", None, True),
+    ("TCP", None, True), ("MONGO", None, True), ("MYSQL", None, True), ("REDIS", None, True),
+    # A non-HTTP server with a tls block is a TLS server (PASSTHROUGH when no mode is set).
+    ("TCP", {"mode": "SIMPLE"}, False), ("TCP", {}, False),
+    ("HTTPS", {"mode": "SIMPLE"}, False), ("TLS", {"mode": "PASSTHROUGH"}, False)])
+def test_plaintext_follows_istio_gateway_semantics(protocol, tls, plaintext):
+    assert im.is_plaintext(protocol, tls) is plaintext
+
+
 def test_lists_are_read_page_by_page():
     ev, _, api = _summary(page_size=2)
     assert ev["summary"]["namespaces"] == 6 and ev["summary"]["authorization_policies"] == 5

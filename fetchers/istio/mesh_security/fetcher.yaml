@@ -72,7 +72,7 @@ evidence_set:
     Is ingress encrypted?
     - gateways — Number of Istio Gateways; null if they could not be read, as are the fields below
     - gateway_servers — Number of servers across the gateways
-    - gateway_servers_plaintext — List of servers taking HTTP or TCP without TLS and without an HTTPS redirect, each as namespace/gateway:port
+    - gateway_servers_plaintext — List of servers that take traffic without TLS, each as namespace/gateway:port. This is any server whose protocol is not HTTPS or TLS, unless it redirects HTTP to HTTPS. A TCP, MONGO, MYSQL or REDIS server with a tls block is not in the list.
     - gateway_servers_weak_tls — List of servers whose minimum TLS version is below 1.2 (TLSV1_0 or TLSV1_1); unset means Istio's default of 1.2
     - virtual_services_on_gateways — Number of VirtualServices bound to a gateway, the routes ingress exposes; null if they could not be read
 

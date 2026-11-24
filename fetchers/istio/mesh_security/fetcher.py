@@ -33,6 +33,10 @@ PAGE = 500
 SYSTEM_NAMESPACES = frozenset({"kube-system", "kube-public", "kube-node-lease"})
 WEAK_MTLS = frozenset({"PERMISSIVE", "DISABLE"})
 OLD_TLS = frozenset({"TLSV1_0", "TLSV1_1"})
+# Istio's HTTP-family protocols (protocol.IsHTTP): a server with one of these never terminates TLS, whatever its tls
+# block says; only tls.httpsRedirect changes what it does. Istio's validation rejects any other TLS setting on them.
+HTTP_PROTOCOLS = frozenset({"HTTP", "HTTP2", "HTTP_PROXY", "GRPC", "GRPC-WEB"})
+TLS_PROTOCOLS = frozenset({"HTTPS", "TLS"})
 DEFAULT_WORKLOAD_CERT_TTL = "24h"  # istiod's default when DEFAULT_WORKLOAD_CERT_TTL is not set
 CODES = {401: "auth_failed", 403: "not_authorized"}
 # What each read needs, so a refusal names the exact permission.
@@ -102,8 +106,19 @@ def allows_all(p: Dict[str, Any]) -> bool:
     return (spec.get("action") or "ALLOW").upper() == "ALLOW" and any(r == {} for r in spec.get("rules") or [])
 
 
+def is_plaintext(protocol: str, tls: Optional[Dict[str, Any]]) -> bool:
+    """Whether a Gateway server takes traffic without TLS, by Istio's rules (pkg/config/gateway):
+    HTTPS and TLS servers use TLS; an HTTP-family server (HTTP, HTTP2, GRPC, GRPC-WEB) is plaintext unless it redirects
+    to HTTPS; any other protocol (TCP, MONGO, MYSQL, REDIS) is plaintext unless it has a tls block."""
+    if protocol in TLS_PROTOCOLS:
+        return False
+    if protocol in HTTP_PROTOCOLS:
+        return not (tls or {}).get("httpsRedirect")
+    return tls is None
+
+
 def gateway_servers(gateways: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Each Gateway server: plaintext when HTTP without an HTTPS redirect; weak TLS when its minimum is below TLS 1.2."""
+    """Each Gateway server: plaintext by is_plaintext; weak TLS when its minimum is below TLS 1.2."""
     out = []
     for g in gateways:
         for s in (g.get("spec") or {}).get("servers") or []:
@@ -112,7 +127,7 @@ def gateway_servers(gateways: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             protocol = (port.get("protocol") or "").upper()
             out.append({"server": f"{_ref(g)}:{port.get('number')}", "protocol": protocol, "tls_mode": tls.get("mode"),
                         "https_redirect": bool(tls.get("httpsRedirect")), "min_tls_version": tls.get("minProtocolVersion"),
-                        "plaintext": protocol in ("HTTP", "HTTP2", "TCP") and not tls.get("httpsRedirect") and not tls.get("mode"),
+                        "plaintext": is_plaintext(protocol, s.get("tls")),
                         "weak_tls": (tls.get("minProtocolVersion") or "").upper() in OLD_TLS})
     return out
 
