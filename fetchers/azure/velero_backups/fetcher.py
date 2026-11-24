@@ -246,7 +246,7 @@ def classify_history(backups: List[Dict[str, Any]], restores: List[Dict[str, Any
     restore named <name><retry_suffix> that finished later without errors. A failed retry, or none, leaves it current.
 
     A Failed or PartiallyFailed backup is resolved once its schedule has a Completed backup that finished after it; a
-    backup with no schedule is never resolved, since a later manual backup may cover other namespaces. A scheduled
+    backup with no schedule is resolved only by its own retry, since a later manual backup may cover other namespaces. A scheduled
     backup with incomplete volume snapshots is
     resolved once a later Completed backup of the same schedule completed every snapshot it attempted. A restore with
     errors is resolved only by its own retry, since storage doesn't record which backup a restore used. A failure without a readable time is never
@@ -275,7 +275,8 @@ def classify_history(backups: List[Dict[str, Any]], restores: List[Dict[str, Any
     for b in backups:
         t = when(b)
         later_done, later_full = newest_done.get(b["schedule"]), newest_full.get(b["schedule"])
-        # A backup with no schedule label is never resolved: a later manual backup may cover other namespaces entirely.
+        # A backup with no schedule label is resolved only by its own retry: a later manual backup may cover other
+        # namespaces entirely.
         scheduled = b["schedule"] is not None
         by_retry = bool(t and retried_done.get(b["name"]) and retried_done[b["name"]] > t)
         by_full_retry = bool(t and retried_full.get(b["name"]) and retried_full[b["name"]] > t)
