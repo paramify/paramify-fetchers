@@ -17,6 +17,9 @@ read fails with HTTP 404 and all the Istio fields are null.
 | `mesh_configmap` | `ISTIO_MESH_CONFIGMAP` | `istio` | The mesh config ConfigMap. For a revisioned install, set it to `istio-<revision>`. |
 | `root_namespace` | `ISTIO_ROOT_NAMESPACE` | unset | Where mesh-wide policies live. Leave it unset. The fetcher uses `rootNamespace` from the mesh config. It uses this setting only when it cannot read the mesh config. |
 
+With more than one istiod revision, the fetcher reads every istiod Deployment in the control-plane namespace.
+`workload_cert_ttl` is the longest lifetime among them.
+
 ## Access
 
 The fetcher reads the kubeconfig in `KUBECONFIG` (or `~/.kube/config`), with the context in `ISTIO_KUBE_CONTEXT` when

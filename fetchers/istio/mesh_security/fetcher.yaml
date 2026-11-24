@@ -87,6 +87,6 @@ evidence_set:
     - root_certificates — Number of certificates in istio-ca-root-cert (more than one during a root rotation); null if it could not be read or parsed, as are the two fields below
     - root_certificate_expires — When the earliest-expiring root certificate expires
     - root_certificate_days_remaining — Days until then
-    - workload_cert_ttl — istiod's workload certificate lifetime (DEFAULT_WORKLOAD_CERT_TTL), or Istio's default of 24h when not set; null if istiod could not be read or wasn't found
+    - workload_cert_ttl — istiod's workload certificate lifetime (DEFAULT_WORKLOAD_CERT_TTL), or Istio's default of 24h when not set. With more than one istiod revision, the longest of them; results.istiod lists each. Null if istiod could not be read or wasn't found
     - workload_cert_ttl_hours — The same, in hours
-    - workload_cert_ttl_source — setting, default, or istiod_not_found when no Deployment labeled app=istiod is in the control-plane namespace (such as a managed control plane elsewhere)
+    - workload_cert_ttl_source — setting or default, for the revision in workload_cert_ttl, or istiod_not_found when no Deployment labeled app=istiod is in the control-plane namespace (such as a managed control plane elsewhere)

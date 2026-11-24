@@ -327,6 +327,25 @@ def test_istiod_without_the_setting_uses_istios_default():
     assert im.workload_cert_ttl(d["items"]) == ("24h", "default")
 
 
+def _istiod(name, rev, ttl):
+    env = [{"name": "DEFAULT_WORKLOAD_CERT_TTL", "value": ttl}] if ttl else []
+    return {"metadata": {"namespace": ROOT, "name": name, "labels": {"app": "istiod", "istio.io/rev": rev}},
+            "spec": {"template": {"spec": {"containers": [{"name": "discovery", "env": env}]}}}}
+
+
+@pytest.mark.parametrize("revisions, expected", [
+    ([("istiod-1-27", "1-27", "720h"), ("istiod-1-28", "1-28", None)], ("720h", "setting")),
+    ([("istiod-1-27", "1-27", None), ("istiod-1-28", "1-28", "720h")], ("720h", "setting")),
+    ([("istiod-1-27", "1-27", "12h"), ("istiod-1-28", "1-28", None)], ("24h", "default")),
+    ([("istiod-1-27", "1-27", None), ("istiod-1-28", "1-28", "12h")], ("24h", "default")),
+    ([("istiod-1-27", "1-27", "1d"), ("istiod-1-28", "1-28", "720h")], ("1d", "setting"))])
+def test_with_two_revisions_the_longest_lifetime_is_reported(revisions, expected):
+    deployments = [_istiod(*r) for r in revisions]
+    assert im.workload_cert_ttl(deployments) == expected
+    ev, _, _ = _summary(istiod={"items": deployments, "metadata": {}})
+    assert [(r["revision"], r["workload_cert_ttl"]) for r in ev["results"]["istiod"]] == [(r[1], r[2] or "24h") for r in revisions]
+
+
 @pytest.mark.parametrize("value, hours", [("24h", 24.0), ("90m", 1.5), ("1h30m", 1.5), ("2160h", 2160.0), ("", None), ("1d", None), ("12", None)])
 def test_go_durations(value, hours):
     assert im.go_duration_hours(value) == hours

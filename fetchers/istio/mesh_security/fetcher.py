@@ -253,17 +253,35 @@ def go_duration_hours(value: Optional[str]) -> Optional[float]:
     return round(sum(float(n) * {"h": 1, "m": 1 / 60, "s": 1 / 3600}[u] for n, u in parts), 3)
 
 
-def workload_cert_ttl(deployments: Optional[List[Dict[str, Any]]]) -> Tuple[Optional[str], Optional[str]]:
-    """istiod's workload certificate lifetime and where it came from (setting or default); (None, None) when unread."""
-    if deployments is None:
-        return None, None
+def istiod_cert_ttls(deployments: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Each istiod Deployment (one per revision) with its workload certificate lifetime and where it came from."""
+    out = []
     for d in deployments:
+        value = None
         for c in (((d.get("spec") or {}).get("template") or {}).get("spec") or {}).get("containers") or []:
             for e in c.get("env") or []:
                 if e.get("name") == "DEFAULT_WORKLOAD_CERT_TTL" and e.get("value"):
-                    return e["value"], "setting"
-    # No istiod in the root namespace (such as a managed control plane elsewhere): say so rather than leave it blank.
-    return (DEFAULT_WORKLOAD_CERT_TTL, "default") if deployments else (None, "istiod_not_found")
+                    value = e["value"]
+        out.append({"deployment": _ref(d), "revision": ((d.get("metadata") or {}).get("labels") or {}).get("istio.io/rev"),
+                    "workload_cert_ttl": value or DEFAULT_WORKLOAD_CERT_TTL, "source": "setting" if value else "default"})
+    return out
+
+
+def workload_cert_ttl(deployments: Optional[List[Dict[str, Any]]]) -> Tuple[Optional[str], Optional[str]]:
+    """The longest workload certificate lifetime any istiod revision issues, and where it came from (setting or
+    default); (None, None) when unread. A value that is not a Go duration can't be compared, so it is the one reported."""
+    if deployments is None:
+        return None, None
+    if not deployments:
+        # No istiod in the control-plane namespace (such as a managed control plane elsewhere): say so.
+        return None, "istiod_not_found"
+
+    def length(r: Dict[str, Any]) -> Tuple[bool, float, bool]:
+        hours = go_duration_hours(r["workload_cert_ttl"])
+        return hours is None, hours or 0.0, r["source"] == "setting"
+
+    longest = max(istiod_cert_ttls(deployments), key=length)
+    return longest["workload_cert_ttl"], longest["source"]
 
 
 def summarize(data: Dict[str, Optional[List[Dict[str, Any]]]], mesh: Optional[Dict[str, Any]],
@@ -418,6 +436,7 @@ def collect(reader: MeshReader, control_plane: str = ISTIO_SYSTEM, mesh_configma
         if data["authorizationpolicies"] is not None else None,
         "gateway_servers": gateway_servers(data["gateways"]) if data["gateways"] is not None else None,
         "root_certificates": certs,
+        "istiod": istiod_cert_ttls(istiod) if istiod is not None else None,
     }
     return {"results": results, "summary": summarize(data, mesh, certs, istiod, root, now, control_plane)}
 
