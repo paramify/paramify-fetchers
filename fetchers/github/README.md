@@ -22,6 +22,9 @@ organization, each with its own token and API host.
 | `github_access_review` | Owners, members, outside collaborators, invitations, teams and their repository grants, repository admins | IAM-ELP, IAM-AAM |
 | `github_non_user_credentials` | Deploy keys, installed apps, fine-grained tokens, Actions secret names and ages when the token can list them, webhook TLS and signing | IAM-SNU, SVC-ASM |
 | `github_repository_inventory` | **Inventory** (`kind: inventory`): one record per repository with visibility, state, security features and custom property values; all or nothing | PIY-GIV |
+| `github_dependabot_report` | **Issue report** (`kind: issue_report`): every open Dependabot alert as one CSV row, linked to the inventory by `Asset ID`; all or nothing ([alert reports](#alert-reports)) | none |
+| `github_code_scanning_report` | **Issue report**: every open code scanning alert on each default branch as one CSV row, linked to the inventory by `Asset ID`; all or nothing ([alert reports](#alert-reports)) | none |
+| `github_secret_scanning_report` | **Issue report**: every open secret scanning alert as one CSV row (metadata only, never the secret), linked to the inventory by `Asset ID`; all or nothing ([alert reports](#alert-reports)) | none |
 | `github_actions_security` | Allowed actions and SHA pinning policy, the workflow token's default, fork PR approval, self-hosted runners and runner groups, OIDC subject claims, and what each workflow file does (unpinned actions, permissions blocks, privileged triggers checking out PR code, untrusted input in scripts, OIDC) | SCR-MIT, CMT-VTD, IAM-SNU, CNA-MAT |
 | `github_release_integrity` | Build provenance on each release asset (by digest), immutable releases, release tags locked by tag rulesets | SVC-VRI, SCR-MIT |
 | `github_deployment_controls` | Environments' reviewers, self-review, wait timers, branch policies and admin bypass; production deployments in a window with commit, creator, whether Actions made them and who approved them | CMT-RMV, CMT-VTD, CMT-LMC |
@@ -70,9 +73,9 @@ a missing grant is reported as e.g. `(needs: administration=read)`.
 | Attestations (repository) | `attestations` | release_integrity |
 | Repository security advisories (repository) | `repository_advisories` | vulnerability_disclosure. **Without it GitHub lists published advisories only, with no error**: drafts and private reports disappear and nothing says so |
 | Commit statuses (repository) | `statuses` | pull_request_checks |
-| Dependabot alerts (repository) | `vulnerability_alerts` | dependabot_alerts |
-| Code scanning alerts (repository) | `security_events` | code_scanning_alerts |
-| Secret scanning alerts (repository) | `secret_scanning_alerts` | secret_scanning |
+| Dependabot alerts (repository) | `vulnerability_alerts` | dependabot_alerts, dependabot_report |
+| Code scanning alerts (repository) | `security_events` | code_scanning_alerts, code_scanning_report |
+| Secret scanning alerts (repository) | `secret_scanning_alerts` | secret_scanning, secret_scanning_report |
 | Secrets (repository) | `secrets` | optional. `non_user_credentials` lists Actions secret names and ages only with this grant. Without it the fetcher still runs: those lists are `null` and metadata says why. The API never returns secret values |
 | Webhooks (repository) | `repository_hooks` | non_user_credentials |
 | Administration (organization) | `organization_administration` | org_security_settings, non_user_credentials (installations), actions_security (Actions policy, OIDC subject template), release_integrity (immutable releases), audit_log |
@@ -152,6 +155,51 @@ produced the same evidence as a personal token for those fifteen, with two
 differences, both measured: it can list the organization's fine-grained
 tokens, and GitHub does not show it who may bypass a ruleset, so those
 rulesets appear in `bypass_actors_unreadable` rather than as bypass-free.
+
+## Alert reports
+
+The alert reports are issue reports (`kind: issue_report`): `github_dependabot_report`,
+`github_code_scanning_report` and `github_secret_scanning_report`.
+Each one writes the open alerts of one kind to a CSV file for a Paramify
+vulnerability assessment, one row for each alert. Each report reads the same
+target, the same repositories and the same token as the evidence fetchers. It
+also uses the same client, so the pagination, retry and feature-state rules
+below are the same. The README of each report gives its columns.
+
+- **Inventory link.** The `Asset ID` column holds the repository's REST URL by
+  numeric id, for example `https://api.github.com/repositories/123456789`. It
+  is equal to the `unique_asset_identifier` of `github_repository_inventory`,
+  because one function (`repository_asset_id`) makes both values. In the
+  vulnerability preset, choose `Asset ID` as the inventory mapping column.
+- **Row identity.** The `ID` column is the Asset ID, the REST path of the alert
+  kind, and the alert number, for example
+  `https://api.github.com/repositories/123456789/dependabot/alerts/7`. It is
+  unique for each host, alert kind, repository and alert, and a rename does
+  not change it. Use it as the unique key for deduplication.
+- **Open alerts only.** Paramify closes each issue that the latest report does
+  not contain. Thus, when an alert is fixed or dismissed, it leaves the report
+  and Paramify closes its issue.
+- **All or nothing.** The fetcher reads every page for every repository. If one
+  read fails, or the token sees fewer repositories than the organization
+  reports, the fetcher writes no file and exits non-zero. Thus a failed run
+  cannot look like "all alerts resolved". The file is published by rename, so
+  a partial file never appears in the output directory.
+- **Feature off.** A repository where the feature is off, or not on the plan,
+  adds no rows, and the run does not fail. The evidence fetchers record the
+  same answer as "disabled", not as a failure. The fetcher logs these
+  repositories as a warning. If someone turns a feature off, its alerts leave
+  the report and Paramify closes their issues.
+- **No open alerts.** A run with no open alerts fails with `bad_config`,
+  because an empty report closes every open issue in the assessment. After you
+  check the scope, set `allow_empty: true` to write a report with only the
+  header.
+- **Scope.** `repositories`, `exclude_repositories` and `include_archived`
+  narrow a report in the same way as the evidence. An alert outside the scope
+  leaves the report, and Paramify closes its issue. Use the same scope in each
+  run that goes to one assessment.
+- **Formula cells.** A text cell that starts with `=`, `+`, `-` or `@` gets a
+  leading apostrophe, as in `aws_inspector_ecr_report`, so that a spreadsheet
+  does not run it as a formula.
 
 ## Wiring into a manifest
 

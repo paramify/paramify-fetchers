@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "_shared"))
-from github_client import PLAN_UNAVAILABLE, run  # noqa: E402
+from github_client import PLAN_UNAVAILABLE, repository_asset_id, run  # noqa: E402
 
 NAME = "github_repository_inventory"
 INVENTORY = True
@@ -43,8 +43,8 @@ def custom_properties(client, org):
 def record(client, repo, properties):
     security = repo.get("security_and_analysis")  # present only to an admin of the repository
     out = {
-        # The repository's REST URL by numeric id: unique per host, stable across renames and transfers.
-        "unique_asset_identifier": f"{client.api_url}/repositories/{repo['id']}",
+        # The alert reports build their Asset ID column with the same helper, so their rows link to these records.
+        "unique_asset_identifier": repository_asset_id(client.api_url, repo["id"]),
         "name": repo.get("name"),
         "full_name": repo.get("full_name"),
         "url": repo.get("html_url"),

@@ -6,20 +6,18 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "_shared"))
 from github_client import (  # noqa: E402
+    GENERIC_SECRET_TYPES,
     days_between,
     iso,
     now_epoch,
     run,
+    secret_scanning_alerts,
     to_epoch,
 )
 
 NAME = "github_secret_scanning"
 SETTINGS = ("secret_scanning", "secret_scanning_push_protection", "secret_scanning_non_provider_patterns",
             "secret_scanning_validity_checks")
-GENERIC_TYPES = ",".join(("ec_private_key", "generic_private_key", "http_basic_authentication_header",
-                          "http_bearer_authentication_header", "mongodb_connection_string", "mysql_connection_url",
-                          "openssh_private_key", "pgp_private_key", "postgres_connection_string", "rsa_private_key",
-                          "password"))
 
 
 def alert_record(alert, now):
@@ -52,12 +50,7 @@ def repo_record(client, org, repo, now):
     sa = repo.get("security_and_analysis")
     # Only an admin or security manager sees security_and_analysis; absent means unreadable, never "disabled".
     settings = None if sa is None else {k: (sa.get(k) or {}).get("status") for k in SETTINGS}
-    state, alerts = client.paginate(f"{base}/secret-scanning/alerts", {"hide_secret": "true"})
-    if state is None:
-        # Without secret_type GitHub returns provider patterns only; non-provider and generic ones must be named.
-        state, generic = client.paginate(f"{base}/secret-scanning/alerts",
-                                         {"hide_secret": "true", "secret_type": GENERIC_TYPES})
-        alerts = list({a.get("number"): a for a in (alerts or []) + (generic or [])}.values())
+    state, alerts = secret_scanning_alerts(client, base)
     if state == "failed":
         return {**record, "collected": False, "settings": settings}
     alerts = [alert_record(a, now) for a in alerts or []]
@@ -101,9 +94,8 @@ def summarize(records):
 def collect(client, org, repos, config):
     now = now_epoch()
     records = [repo_record(client, org["login"], repo, now) for repo in repos]
-    # GitHub returns generic (non-provider) alerts only for the types secret_type names, and has no "all types"
-    # value, so the run names the ones it asked for: a type GitHub adds later is not requested.
-    return {"metadata": {"as_of": iso(now), "generic_secret_types_requested": GENERIC_TYPES.split(",")},
+    # The run names the generic types it asked for: a type GitHub adds later is not requested.
+    return {"metadata": {"as_of": iso(now), "generic_secret_types_requested": GENERIC_SECRET_TYPES.split(",")},
             "summary": summarize(records), "repositories": records}
 
 

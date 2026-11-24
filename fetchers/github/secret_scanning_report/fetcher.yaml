@@ -1,0 +1,82 @@
+name: github_secret_scanning_report
+version: 0.1.0
+description: >-
+  Every open secret scanning alert in a GitHub organization as one CSV row,
+  never the secret, keyed to the repository inventory, for a Paramify
+  vulnerability assessment.
+category: github
+
+kind: issue_report
+status: beta
+pipeline:
+  type: vulnerability
+  id_scheme: github-repository-url
+  asset_id_field: Asset ID
+
+supports_targets: true
+
+target_schema:
+  org:
+    type: string
+    required: true
+    env: GITHUB_ORG
+    description: Organization login, as in github.com/<org>.
+  api_url:
+    type: string
+    required: false
+    default: https://api.github.com
+    env: GITHUB_API_URL
+    description: >-
+      REST API base URL. https://api.github.com for github.com,
+      https://api.<subdomain>.ghe.com for GHE.com, https://<host>/api/v3 for
+      GitHub Enterprise Server.
+  repositories:
+    type: string
+    required: false
+    env: GITHUB_REPOSITORIES
+    description: >-
+      Comma-separated repository names to collect. Unset collects every
+      repository the token can see; a name the token cannot see fails the run.
+  exclude_repositories:
+    type: string
+    required: false
+    env: GITHUB_EXCLUDE_REPOSITORIES
+    description: >-
+      Comma-separated repository names to leave out, matched without regard
+      to case. Cannot be combined with repositories. Their alerts leave the
+      report, and Paramify closes those issues.
+  include_archived:
+    type: boolean
+    required: false
+    default: false
+    env: GITHUB_INCLUDE_ARCHIVED
+    description: >-
+      Include archived repositories. Left out, their open alerts leave the
+      report, and Paramify closes those issues.
+
+runtime:
+  type: python
+  entry: fetcher.py
+  timeout: 1800
+
+output:
+  type: csv
+  path: github_secret_scanning_report.csv
+  aggregation: per_target
+
+config_schema:
+  allow_empty:
+    type: boolean
+    required: false
+    default: false
+    env: GITHUB_REPORT_ALLOW_EMPTY
+    description: >-
+      Write a header-only report when the organization has no open alerts.
+      Off by default, because an empty report closes every open issue in the
+      assessment.
+
+secrets: []
+
+issue_report:
+  assessment_type: VULNERABILITY
+  title: GitHub Secret Scanning Alerts

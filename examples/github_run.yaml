@@ -73,3 +73,14 @@ run:
     # It always lists every repository, archived ones too, whatever the target sets.
     - use: github_repository_inventory
       targets: [*github_target]
+
+    # Issue reports: the open alerts as CSV for a Paramify VULNERABILITY
+    # assessment, linked to the inventory by their Asset ID column. Choose the
+    # assessment with `paramify assessments select <fetcher>`, then send with
+    # `paramify issues upload`. See fetchers/github/README.md#alert-reports.
+    # - use: github_dependabot_report
+    #   targets: [*github_target]
+    # - use: github_code_scanning_report
+    #   targets: [*github_target]
+    # - use: github_secret_scanning_report
+    #   targets: [*github_target]
