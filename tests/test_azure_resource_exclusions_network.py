@@ -486,19 +486,79 @@ def test_nsg_unread_list_leaves_unmatched_null(monkeypatch, tmp_path, caplog):
     assert "matched nothing" not in caplog.text
 
 
-def test_private_endpoints_unread_list_leaves_unmatched_null(monkeypatch, tmp_path, caplog):
+NSG_LISTS = ("network_security_groups", "virtual_networks", "network_interfaces")
+
+
+def _run_nsg_reads(monkeypatch, tmp_path, refuse=(), sign_in=True):
+    """The real collect_network over an SDK whose lists are empty, a list in `refuse` raising."""
     network = ModuleType("azure.mgmt.network")
 
-    def refuse():
-        raise RuntimeError("403")
+    def lister(name):
+        def list_all():
+            if name in refuse:
+                raise RuntimeError("403")
+            return []
+        return NS(list_all=list_all)
 
-    network.NetworkManagementClient = lambda **kw: NS(private_endpoints=NS(list_by_subscription=refuse))
+    network.NetworkManagementClient = lambda **kw: NS(**{name: lister(name) for name in NSG_LISTS})
+    monkeypatch.setitem(sys.modules, "azure.mgmt.network", network)
+    monkeypatch.setattr(nsg, "provider_registration_status", lambda *a: "registered")
+    monkeypatch.setattr(nsg, "load_dotenv", lambda: None)
+    monkeypatch.setattr(nsg, "resolve_subscription", lambda c: {"subscription_id": "s1", "subscription_source": "env"})
+
+    def credential():
+        if not sign_in:
+            raise RuntimeError("sign-in failed")
+        return object()
+
+    monkeypatch.setattr(nsg, "credential", credential)
+    monkeypatch.setenv("EVIDENCE_DIR", str(tmp_path))
+    monkeypatch.setenv(ENV, "rg:rg-out")
+    code = nsg.main()
+    summary = json.loads((tmp_path / "azure_network_security_groups_s1.json").read_text())["summary"]
+    return code, {name: (summary[f"in_scope_{name}"], summary[f"excluded_{name}"]) for name in NSG_LISTS}
+
+
+def test_nsg_in_scope_counts_are_null_when_sign_in_fails(monkeypatch, tmp_path):
+    code, counts = _run_nsg_reads(monkeypatch, tmp_path, sign_in=False)
+    assert code == 1 and counts == dict.fromkeys(NSG_LISTS, (None, None))
+
+
+def test_nsg_in_scope_count_is_null_only_for_the_list_that_failed(monkeypatch, tmp_path):
+    code, counts = _run_nsg_reads(monkeypatch, tmp_path, refuse={"virtual_networks"})
+    assert code == 1
+    assert counts == {"network_security_groups": (0, 0), "virtual_networks": (None, None), "network_interfaces": (0, 0)}
+
+
+def test_nsg_in_scope_counts_are_zero_when_the_lists_are_read_and_empty(monkeypatch, tmp_path):
+    code, counts = _run_nsg_reads(monkeypatch, tmp_path)
+    assert code == 0 and counts == dict.fromkeys(NSG_LISTS, (0, 0))
+
+
+def _run_pe_list(monkeypatch, tmp_path, list_by_subscription):
+    network = ModuleType("azure.mgmt.network")
+    network.NetworkManagementClient = lambda **kw: NS(private_endpoints=NS(list_by_subscription=list_by_subscription))
     monkeypatch.setitem(sys.modules, "azure.mgmt.network", network)
     monkeypatch.setattr(pe, "resource_graph_client", lambda cred: object())
     monkeypatch.setattr(pe, "readable_scopes", lambda cred, collector: None)
-    code, evidence = _run(pe, monkeypatch, tmp_path, "rg:typo", "azure_private_endpoint_configuration")
-    assert code == 1 and evidence["summary"]["resource_exclusion_patterns_unmatched"] is None
+    return _run(pe, monkeypatch, tmp_path, "rg:typo", "azure_private_endpoint_configuration")
+
+
+def test_private_endpoints_unread_list_leaves_unmatched_null(monkeypatch, tmp_path, caplog):
+    def refuse():
+        raise RuntimeError("403")
+
+    code, evidence = _run_pe_list(monkeypatch, tmp_path, refuse)
+    summary = evidence["summary"]
+    assert code == 1 and summary["resource_exclusion_patterns_unmatched"] is None
     assert "matched nothing" not in caplog.text
+    assert (summary["in_scope_private_endpoints"], summary["excluded_private_endpoints"]) == (None, None)
+
+
+def test_private_endpoints_empty_list_reads_zero_in_scope(monkeypatch, tmp_path):
+    code, evidence = _run_pe_list(monkeypatch, tmp_path, lambda: [])
+    assert code == 0
+    assert (evidence["summary"]["in_scope_private_endpoints"], evidence["summary"]["excluded_private_endpoints"]) == (0, 0)
 
 
 def test_private_dns_unread_list_leaves_unmatched_null(monkeypatch, tmp_path, caplog):
@@ -506,6 +566,14 @@ def test_private_dns_unread_list_leaves_unmatched_null(monkeypatch, tmp_path, ca
     code, evidence = _run(dns, monkeypatch, tmp_path, "rg:typo", "azure_private_dns_zone_configuration")
     assert code == 1 and evidence["summary"]["resource_exclusion_patterns_unmatched"] is None
     assert "matched nothing" not in caplog.text
+    assert (evidence["summary"]["in_scope_private_dns_zones"], evidence["summary"]["excluded_private_dns_zones"]) == (None, None)
+
+
+def test_private_dns_empty_zone_list_reads_zero_in_scope(monkeypatch, tmp_path):
+    monkeypatch.setattr(dns, "collect_zones", lambda sub, cred, collector: ([], [], "target_subscription"))
+    code, evidence = _run(dns, monkeypatch, tmp_path, "rg:typo", "azure_private_dns_zone_configuration")
+    assert code == 0
+    assert (evidence["summary"]["in_scope_private_dns_zones"], evidence["summary"]["excluded_private_dns_zones"]) == (0, 0)
 
 
 def test_egress_unread_list_leaves_unmatched_null_but_a_peering_failure_does_not(monkeypatch, tmp_path, caplog):
