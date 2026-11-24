@@ -307,6 +307,93 @@ def test_slot_write_counts_for_change_coverage(reaches, expected):
     assert ala.coverage_reaching_human([alert], ala.CHANGE_OPERATIONS)["create_update_web_app"] is expected
 
 
+@pytest.mark.parametrize("reaches, expected", [(True, True), (None, None), (False, False)])
+def test_an_alert_on_clearing_a_legal_hold_covers_log_storage_protection(reaches, expected):
+    # ARM echoes the operation in whatever case it was written; coverage compares case-folded.
+    alert = {"enabled": True, "reaches_human": reaches,
+             "monitored_operations": ["microsoft.storage/storageaccounts/blobservices/containers/clearlegalhold/action"]}
+    coverage = ala.coverage_reaching_human([alert], ala.LOG_STORAGE_PROTECTION_OPERATIONS)
+    assert coverage["clear_legal_hold"] is expected
+    assert coverage["delete_immutability_policy"] is False
+
+
+def test_log_storage_protection_summary_counts_and_verdict():
+    ops = [o.lower() for ops in ala.LOG_STORAGE_PROTECTION_OPERATIONS.values() for o in ops]
+    every = {"enabled": True, "monitored_operations": ops, "reaches_human": True}
+    summary = ala.routing_summary([every])
+    assert (summary["log_storage_protection_operations_covered"], summary["log_storage_protection_operations_total"],
+            summary["all_log_storage_protection_operations_covered"]) == (5, 5, True)
+    assert summary["uncovered_log_storage_protection_operations"] == []
+
+    maybe = {"enabled": True, "monitored_operations": ops[:1], "reaches_human": None}
+    summary = ala.routing_summary([maybe])
+    assert (summary["log_storage_protection_operations_possibly_covered"],
+            summary["all_log_storage_protection_operations_covered"]) == (1, False)
+    assert summary["uncovered_log_storage_protection_operations"] == [
+        "change_immutability_policy", "clear_legal_hold", "delete_blob_container", "delete_storage_account"]
+
+    disabled = {"enabled": False, "monitored_operations": [], "reaches_human": None}
+    assert ala.routing_summary([disabled])["all_log_storage_protection_operations_covered"] is False
+
+
+STORAGE = f"{RG}/providers/Microsoft.Storage/storageAccounts/logs1"
+CONTAINER = f"{STORAGE}/blobServices/default/containers/audit"
+PROTECTION_OPS = [o for ops in ala.LOG_STORAGE_PROTECTION_OPERATIONS.values() for o in ops]
+
+
+def _protection_alert(scopes=(SUB,), extra_conditions=(), reaches=True):
+    condition = {"all_of": [{"field": "operationName", "equals": None, "contains_any": PROTECTION_OPS, "any_of": []},
+                            *extra_conditions]}
+    record = ala.alert_record({"id": f"{RG}/providers/Microsoft.Insights/activityLogAlerts/protect", "name": "protect",
+                               "location": "Global", "enabled": True, "scopes": list(scopes), "condition": condition,
+                               "action_groups": [AG_EMAIL]})
+    return {**record, "reaches_human": reaches}
+
+
+def test_an_unread_alert_list_leaves_log_storage_protection_unknown_not_uncovered():
+    summary = ala.routing_summary([], {"activity_log_alerts": False, "action_groups": True, "processing_rules": True})
+    assert set(summary["log_storage_protection_coverage"].values()) == {None}
+    for key in ("log_storage_protection_operations_covered", "log_storage_protection_operations_possibly_covered",
+                "all_log_storage_protection_operations_covered", "uncovered_log_storage_protection_operations"):
+        assert summary[key] is None, key
+    # With the list read and empty, every change is uncovered.
+    assert ala.routing_summary([], {"activity_log_alerts": True})["all_log_storage_protection_operations_covered"] is False
+
+
+@pytest.mark.parametrize("unread", ["action_groups", "processing_rules"])
+def test_unread_routing_or_suppression_rules_make_a_sure_match_only_possible(unread):
+    read = {"activity_log_alerts": True, "action_groups": True, "processing_rules": True, unread: False}
+    coverage = ala.protection_coverage([_protection_alert()], read)
+    assert set(coverage.values()) == {None}
+    assert set(ala.protection_coverage([_protection_alert()], {k: True for k in read}).values()) == {True}
+
+
+@pytest.mark.parametrize("field, value", [("status", "Succeeded"), ("subStatus", "OK"), ("level", "Informational")])
+def test_an_outcome_filtered_alert_counts_only_as_possible(field, value):
+    alert = _protection_alert(extra_conditions=[{"field": field, "equals": value, "contains_any": None, "any_of": []}])
+    assert alert["outcome_filters"] == [field.lower()]
+    summary = ala.routing_summary([alert], {"activity_log_alerts": True})
+    assert (summary["log_storage_protection_operations_covered"], summary["log_storage_protection_operations_possibly_covered"],
+            summary["all_log_storage_protection_operations_covered"]) == (0, 5, None)
+
+
+def test_a_container_scoped_alert_gets_no_credit_for_deleting_the_storage_account():
+    for alert in (_protection_alert(scopes=(CONTAINER,)),
+                  _protection_alert(extra_conditions=[{"field": "resourceId", "equals": CONTAINER, "contains_any": None,
+                                                       "any_of": []}])):
+        assert alert["scoped_below_storage_account"] is True
+        coverage = ala.protection_coverage([alert], {"activity_log_alerts": True})
+        assert coverage["delete_storage_account"] is False and coverage["clear_legal_hold"] is True
+    account = _protection_alert(scopes=(STORAGE,))
+    assert account["scoped_below_storage_account"] is False
+    assert ala.protection_coverage([account])["delete_storage_account"] is True
+
+
+def test_log_storage_protection_leaves_the_cis_totals_alone():
+    assert len(ala.MONITORED_OPERATIONS) == 12
+    assert not set(ala.LOG_STORAGE_PROTECTION_OPERATIONS) & set(ala.MONITORED_OPERATIONS)
+
+
 # --- resource_diagnostic_settings ---
 
 LOGS = [

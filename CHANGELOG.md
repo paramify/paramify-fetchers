@@ -12,6 +12,75 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`keycloak_service_accounts` fetcher.** Lists every Keycloak client with a service account, GET only with
+  view-clients and view-users: its authenticator (shared secret or signed key and certificate), the secret's age,
+  expiry and any rotated secret still valid, its owner from a configurable client attribute, other sign-in flows it
+  allows, and its effective realm and admin roles. Counts secrets older than `max_secret_age_days` and service
+  accounts without an owner only when those settings are set. An authenticator the fetcher doesn't recognize is never
+  assumed to have no secret: it is counted in `service_accounts_unrecognized_authenticator` and leaves the over-age
+  count null. Secrets and keys are never copied.
+- **`keycloak_users_and_roles` fetcher.** Lists every user in a Keycloak realm, GET only with view-users, view-clients
+  and view-events: enabled state, required actions, LDAP federation and linked identity providers, OTP and WebAuthn
+  authenticators, groups, and effective realm and admin roles through groups and composites. Counts privileged users
+  (realm-management admin roles, `manage-organizations` included, plus any realm roles set in `privileged_roles`), users
+  who can sign in with a Keycloak-checked credential (local, or brokered but still holding a local password) without a
+  second factor, and enabled accounts with no stored sign-in in `inactive_days` (default 90). Inactivity is judged only
+  when sign-ins are kept that long and a stored event predates the window, and stays null for an account with no
+  creation time. Service accounts are left out by their client link, not their username. The realm is named in the
+  summary, and the master realm is refused as `bad_config`. Email addresses, names, attributes and credential data are
+  never copied.
+- **`keycloak_admin_events` fetcher.** Reads the sign-in and admin events Keycloak has stored over a window (default 7
+  days), GET only with view-events: successful, failed and blocked sign-ins counted apart, brute-force lockouts, users
+  created and disabled, password resets, role grants and other privileged changes, and how recently events arrived,
+  leaving out the fetcher's own token requests. Usernames, IP addresses and changed objects are never copied. More
+  than 20,000 events in a window leaves counts null rather than undercounted. The window ends when the run starts, and
+  an event read twice while paging counts once. `newest_login_event` counts only `LOGIN` and `LOGIN_ERROR`.
+  `users_disabled` is null when admin event details are off or a user update has no changed object. Client scope
+  assignments count as privileged changes.
+- **`keycloak` category and `keycloak_realm_security` fetcher.** Reads a Keycloak realm through the Admin REST API with a
+  read-only service-account client: session and token lifetimes, brute-force lockout, password policy, the browser
+  and reset-credentials flows with each step's effective requirement (so a phishing-resistant authenticator counts
+  only when every sign-in must pass it), required actions such as terms and conditions, identity providers, user
+  federation, and login and admin event logging. Client secrets and bind credentials are never written to the
+  evidence, and an unreadable section leaves its fields null rather than empty. The local sign-in check leaves out
+  session reuse, the identity provider redirector and the Organization step that Keycloak 26 adds to new realms. A
+  refused call names the client that holds the missing role, `master-realm` when the realm read is `master`.
+- **`kubernetes_workload_resilience` fetcher and `kubernetes` category.** Reads any cluster's Kubernetes API (GET and
+  LIST only) through a kubeconfig, including AKS with kubelogin, or the in-cluster service account. For each Deployment
+  and StatefulSet: replicas with any autoscaler minimum, PodDisruptionBudget coverage and budgets that block node drains,
+  zone spread as configured and where ready pods actually run (the scheduler spreads by default, so placement decides),
+  and readiness and liveness probes. A workload's pods are the ones it owns, found through its ReplicaSets, not every
+  pod with matching labels. Each budget is judged once, over every pod it selects, with Kubernetes' rounding. When a
+  pod's zone or owner, or a budget's pod count, can't be found, the workload is listed as unknown and the matching list
+  is null, not empty. An API server that can't be reached is recorded as `target_unreachable`, and each call times
+  out. System namespaces are left out by default. The README has the least-privilege RBAC.
+- **`alertmanager_alert_delivery` fetcher and `alertmanager` category.** Reads Prometheus Alertmanager's v2 API and
+  metrics endpoint, GET only: the route tree and receivers (names and integration types only, never receiver
+  settings), active, silenced and inhibited alerts, silences, and the notifications started and the notifications that
+  failed after all their retries. Counts are per receiver when Alertmanager runs with receiver-name-in-metrics,
+  otherwise per integration type. Routes written with the older `match` and `match_re` keys show those as matchers.
+  Reports receivers and routes that deliver nowhere. The counts do not show that an integration accepted a
+  notification, or that a person received it. `counters_since` is when the counts started: the process start, or with
+  receiver names the last successful configuration reload, which also resets them. An unread endpoint, or a response
+  that is not the shape Alertmanager documents, is a failed read: its fields are null, not 0, and the run exits 1. This
+  includes a `/metrics` page without `alertmanager_build_info`, a missing notification counter, a counter value that
+  is not a number, and a status without its configuration.
+- **`istio_mesh_security` fetcher and `istio` category.** Reads an Istio mesh (1.22 or later) through the Kubernetes
+  API (GET and LIST only), with a kubeconfig (including AKS with kubelogin) or the in-cluster service account: mesh-wide
+  mTLS mode and weaker namespace, workload or port overrides; allow-nothing default-deny policies and allow-all rules;
+  plaintext and sub-TLS 1.2 gateway servers; DestinationRules turning TLS off; the outbound traffic policy; the root
+  certificate's expiry and istiod's workload certificate lifetime. A refused call names the permission it needs; the
+  README has the least-privilege RBAC.
+  - Judgments follow Istio's own rules. No mesh-wide policy means PERMISSIVE. When there are several, the oldest one
+    is in effect. A dry-run AuthorizationPolicy enforces nothing. A gateway server on any protocol but HTTPS or TLS is
+    plaintext unless it redirects to HTTPS. A DestinationRule subset can turn TLS off.
+  - Ambient namespaces count as in the mesh, as do sidecar-injected ones.
+  - Settings: `control_plane_namespace` (istiod, its ConfigMaps), `mesh_configmap` (`istio-<revision>` for a revisioned
+    install) and `root_namespace` (taken from the mesh config; the setting is a fallback).
+  - With more than one istiod revision, the longest workload certificate lifetime is reported.
+  - A ConfigMap that can't be parsed, or a call that times out, is a recorded failure that leaves only its own fields
+    null.
+
 - **Literal pattern lists.** A `type: patterns` field can declare `globs: false`; `validate`, the run and the TUI then
   refuse a pattern holding `*` or `?`, and `describe` says the field takes patterns without wildcards.
 
@@ -38,7 +107,86 @@ schemas and the `paramify` CLI — not the internal code.
   `change_items_with_unreadable_changesets`. Unset, a refused changeset still fails the run and the evidence only gains
   these keys.
 
+### Changed
+
+- **`azure_entra_sign_in_logs` 0.4.0: 50053 sign-in rejections.** `sign_ins_rejected_50053` counts interactive
+  sign-ins Entra rejected with ResultType 50053, and `users_rejected_50053` counts the users they belong to. Entra logs
+  both smart lockout and sign-ins from a malicious IP address under that code, so the counts are evidence, not a
+  pass or fail on smart lockout. With the sign-in logs unread, both are null.
+
+- **`azure_activity_log_alerts` 0.4.0: alerts on attempts to alter protected log storage.** A new fixed map,
+  `log_storage_protection_coverage`, shows whether an alert that reaches a person fires on deleting or changing a
+  container's immutability policy, clearing a legal hold, or deleting a blob container or storage account. An alert
+  with no outcome filter fires on the attempt, so one Azure denies is seen too; one filtered on status, subStatus or
+  level counts only as possible, as does any match while the action groups or processing rules are unread. With the
+  alert list unread, the map and its counts are null, not uncovered. An alert scoped below the storage account gets
+  no credit for deleting the account. It is kept apart from the 12 CIS operations, so their totals do not move.
+  `all_log_storage_protection_operations_covered` gives one verdict.
+
+- **`azure_resource_inventory` 0.5.0: reconciled against an expected population.** Two new settings work together.
+  `required_resources` takes exact ARM ids (`id:` only, compared without case, no globs): each must itself be in the
+  in-scope inventory, and no child, sibling or pattern match stands in for it; a resource group id is checked against
+  the subscription's resource groups. `allowed_resources` takes `rg:`, `location:` and `id:` globs for families whose
+  ids change, such as backup snapshots; a family may be empty. Resource groups are reconciled in both directions
+  under the same `resource_exclusions` as resources: an excluded required group is missing, and an in-scope group
+  that is neither required nor allowed, even an empty one, is unexpected. Missing required ids are counted and listed
+  (`required_resources_missing`), resources and resource groups neither required nor allowed are counted by type
+  (`unexpected_resources`), each records what expects it, and `inventory_matches_expected` gives one verdict.
+  Unset, the fields stay null.
+
 ### Fixed
+
+- **Front Door counts and verdicts read null when a list they're built from wasn't read.** Before, a refused list
+  inside one profile (endpoints, routes, custom domains, rule sets, secrets, security policies, diagnostic settings,
+  origin groups, origins, metrics), or the profile list itself, read as empty: counts came out short or 0, verdicts
+  were judged against nothing, and `scope_exclusion_patterns_unmatched` could name a pattern never compared with a
+  profile's routes. Now every summary field reads null when any in-scope profile has an unread list it's built from;
+  each fetcher's `fetcher.yaml` names those lists field by field.
+  - In-scope counts follow the same rule, and each `excluded_*` count and `scope_exclusion_patterns_unmatched` read
+    null with them. `in_scope_routes` needs the endpoint, route and custom domain lists, since a route leaves scope
+    when every host it serves is excluded.
+  - Records: each profile's own counts (`route_count`, `endpoint_count`, `custom_domain_count`, `secret_count`,
+    `rule_set_count`, `origin_group_count`, `origin_count`) are null when their list wasn't read. A route that
+    accepts HTTP and carries a rule set has a null `https_only` while the profile's rule sets weren't all read.
+  - `azure_front_door_tls` 0.6.3: a custom domain's `routed` and `served` are null while its profile's routes
+    weren't read, and its certificate status and expiry are null when it names a secret and the secret list wasn't
+    read.
+  - `azure_front_door_waf_coverage` 0.6.3:
+    - A host-route whose profile's security policies weren't read has `effective_scope: unknown` and `protected`
+      null.
+    - A WAF policy that can't be found while the WAF policy list wasn't read is unknown, not `waf_unresolved`, and
+      a policy whose blocking is unknown leaves `waf_blocking` and `protected` null. Such host-routes count in
+      `unknown_host_routes`.
+    - A profile's `waf_log_exported`, `access_log_exported`, `captured_log_categories` and `waf_log_destinations`
+      are null when either log list wasn't read, and `waf_in_use` is null rather than false while its routes
+      weren't read.
+    - `endpoints_without_routes` and `unrouted_custom_domains` no longer list anything from a profile whose routes
+      weren't read.
+  - `azure_front_door_origins` 0.8.3:
+    - An origin group's origin fields and connection verdict are null when its origin list wasn't read, and
+      `serving`, `protocols_to_origin` and `connection_protected` are null when a route or rule set reaching it
+      wasn't read. An excluded group lists `origins: null` then.
+    - `in_scope_apps` and `excluded_apps` are null when the origin group scope is unknown, or when any profile's
+      origin group or origin list wasn't read, excluded profiles included.
+    - A group's `enabled_regions` and `active_regions` are null when its origin list wasn't read.
+    - Health records read health and traffic null, for the group and each origin, region and hour, when that
+      profile's metrics weren't read; `traffic_shift_count` and `traffic_shifts` too when its request metrics weren't.
+    - The production app counts are also null when an excluded profile's endpoint, route or rule set list wasn't
+      read, since its groups can put an app behind Front Door.
+  - `azure_front_door_waf_policies` 0.2.2: when the managed rule set definitions weren't read, a default rule set's
+    `rule_definition_found` is null instead of false, so the policy is no longer reported as
+    `rule_definition_not_found`. Its `blocking` is null unless another reason already makes it false. The blocking,
+    rule group and newest-version counts read null, and every count reads null when the policy list wasn't read.
+
+- **`azure_network_security_groups` 0.6.2: every count and verdict from an unread list reads null, not 0.** When the
+  network security group list isn't read, the group and rule counts (`total_network_security_groups`,
+  `total_security_rules`, the open-to-Internet and outbound counts) and the east-west verdicts read null. When the
+  virtual network list isn't read, the subnet counts, the east-west verdicts and the NIC coverage counts that need a
+  subnet's group (`nics_protected_by_subnet_nsg_only`, `nics_without_any_nsg`, `nic_nsg_coverage_percentage`) read
+  null; each NIC's `subnet_nsg_ids`, `unresolved_subnet_ids` and `nsg_protection_source` are null, and
+  `protected_by_nsg` is true for a NIC with its own group and null otherwise. When the network interface list isn't
+  read, the NIC counts read null. Each subnet's east-west fields are null while the group list is unread. Before, these
+  read 0 or were judged against an empty list.
 
 - **In-scope counts read null, not 0, when their list couldn't be read.** A failed sign-in or list call left
   `in_scope_*` at 0, as if the subscription had none. Each now reads null when the list it counts wasn't read, and 0
@@ -82,7 +230,7 @@ schemas and the `paramify` CLI — not the internal code.
 
 - **Four Azure monitoring fetchers give null counts, not 0 or false, when a
   list could not be read.** The run still exits 1 as `partial_failure`.
-  - `azure_activity_log_alerts` 0.4.0: when the alert rule list is not read,
+  - `azure_activity_log_alerts` 0.5.0: when the alert rule list is not read,
     every alert count, both coverage maps and every coverage verdict
     (`all_monitored_operations_covered`, `service_health_alert_configured`,
     `all_change_operations_covered`) are null. Before they read 0 and false.
@@ -161,6 +309,21 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`loki_log_ingestion` 0.1.0 and the `loki` category: whether expected log sources are arriving in Loki.** Each
+  expected source is a name and a LogQL stream selector (`LOKI_EXPECTED_SOURCES`). For each one the fetcher counts the
+  lines and streams in a recent window and finds the time of the newest line within a longer search window, through
+  GET calls to Loki's query API. `max_age_minutes` has no default, so `sources_stale` stays null until it is set, and
+  staleness compares the exact age, not the rounded one. A response that is not the shape Loki documents is a failed
+  read, not 0. A source whose silence is normal can be marked quiet (`LOKI_QUIET_SOURCES`) and judged by a heartbeat
+  source, which can pick out one kind of line with a line filter; a quiet source without a heartbeat leaves the
+  overall verdict null. Log lines and stream labels are never copied. The category sends `LOKI_TENANT_ID` as
+  `X-Scope-OrgID` and an optional bearer token for a proxy.
+- **`openscap_benchmark_results` 0.1.0 and the `openscap` category: each target's latest OpenSCAP benchmark
+  result.** Reads XCCDF results and ARF reports written by `oscap xccdf eval`, gzipped or not, from an Azure Blob
+  Storage container (GET only, with the run's Azure identity) or a local directory. For each target's newest scan it
+  reports the profile, rule results, failed rules by severity, errors and waived rules. `expected_targets` and
+  `max_age_days` have no default, so their fields stay null until set. Rule text is never copied, and XML is parsed
+  with defusedxml.
 - **The TUI shows which environment variables a manifest is missing, and stops a run that would fail on them.**
   - The manifest settings row has an `env` button (`✓ all set` or `✗ 2 missing`), each fetcher's status names what it
     needs (`✗ needs OKTA_API_TOKEN`), and the line under the table splits what a run needs from what only an upload needs.

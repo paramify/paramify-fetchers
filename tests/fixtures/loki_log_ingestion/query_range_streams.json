@@ -1,0 +1,22 @@
+{
+  "status": "success",
+  "data": {
+    "resultType": "streams",
+    "result": [
+      {
+        "stream": {
+          "namespace": "falco",
+          "pod": "falco-abcde",
+          "container": "falco"
+        },
+        "values": [
+          [
+            "1763599910000000000",
+            "{\"rule\":\"Terminal shell in container\",\"output\":\"SECRET-LINE\"}"
+          ]
+        ]
+      }
+    ],
+    "stats": {}
+  }
+}
