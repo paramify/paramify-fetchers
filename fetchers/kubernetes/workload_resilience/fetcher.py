@@ -26,6 +26,7 @@ from fetcher_status import report_failure  # noqa: E402
 NAME = "kubernetes_workload_resilience"
 OUTPUT = "kubernetes_workload_resilience.json"
 PAGE = 500
+TIMEOUT = (10, 60)  # seconds to connect and to read; the client has no default, so a silent API server would hang the run
 DEFAULT_EXCLUDED = "kube-system,kube-public,kube-node-lease"
 DEFAULT_ZONE_LABEL = "topology.kubernetes.io/zone"
 CODES = {401: "auth_failed", 403: "not_authorized"}
@@ -180,10 +181,10 @@ class ClusterReader:
         token = None
         while True:
             try:
-                page = ser(call(limit=PAGE, _continue=token))
+                page = ser(call(limit=PAGE, _continue=token, _request_timeout=TIMEOUT))
             except Exception as exc:  # noqa: BLE001 - boundary: record, don't crash the run
                 status = getattr(exc, "status", None)
-                detail = f"needs: {NEEDS.get(operation, operation)}" if status == 403 else (getattr(exc, "reason", None) or str(exc))[:300]
+                detail = f"needs: {NEEDS.get(operation, operation)}" if status == 403 else str(getattr(exc, "reason", None) or exc)[:300]
                 self.api_failures.append({"operation": operation, "type": f"HTTP {status}" if status else type(exc).__name__,
                                           "message": str(detail)})
                 self.codes.append(CODES.get(int(status), "partial_failure") if status else "target_unreachable")

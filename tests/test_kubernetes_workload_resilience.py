@@ -11,6 +11,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from urllib3.exceptions import MaxRetryError, NewConnectionError
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 FIXTURES = REPO_ROOT / "tests" / "fixtures" / "kubernetes_workload_resilience"
@@ -40,16 +41,25 @@ class _Serializer:
         return obj
 
 
+def unreachable(what):
+    """What the Kubernetes client raises when nothing answers: urllib3's MaxRetryError, whose reason is an exception."""
+    return MaxRetryError(None, f"/{what}", reason=NewConnectionError(None, "Failed to establish a new connection: [Errno 61] Connection refused"))
+
+
 class _Api:
-    """The four Kubernetes clients over the captured responses; `refused` names lists that answer 403."""
+    """The four Kubernetes clients over the captured responses; `refused` names lists that answer 403, and
+    `unreachable` makes every list fail as an API server that can't be reached does."""
 
     api_client = _Serializer()
 
-    def __init__(self, refused=(), page_size=None):
-        self.refused, self.page_size, self.calls = set(refused), page_size, []
+    def __init__(self, refused=(), page_size=None, unreachable=False):
+        self.refused, self.page_size, self.unreachable, self.calls, self.timeouts = set(refused), page_size, unreachable, [], []
 
-    def _list(self, what, cont):
+    def _list(self, what, cont, timeout):
         self.calls.append((what, cont))
+        self.timeouts.append(timeout)
+        if self.unreachable:
+            raise unreachable(what)
         if what in self.refused:
             raise ApiError(403)
         body = fx(what)
@@ -59,23 +69,23 @@ class _Api:
         more = start + self.page_size < len(body["items"])
         return {**body, "items": body["items"][start:start + self.page_size], "metadata": {"continue": str(start + self.page_size) if more else None}}
 
-    def list_deployment_for_all_namespaces(self, limit=None, _continue=None):
-        return self._list("deployments", _continue)
+    def list_deployment_for_all_namespaces(self, limit=None, _continue=None, _request_timeout=None):
+        return self._list("deployments", _continue, _request_timeout)
 
-    def list_stateful_set_for_all_namespaces(self, limit=None, _continue=None):
-        return self._list("statefulsets", _continue)
+    def list_stateful_set_for_all_namespaces(self, limit=None, _continue=None, _request_timeout=None):
+        return self._list("statefulsets", _continue, _request_timeout)
 
-    def list_pod_disruption_budget_for_all_namespaces(self, limit=None, _continue=None):
-        return self._list("poddisruptionbudgets", _continue)
+    def list_pod_disruption_budget_for_all_namespaces(self, limit=None, _continue=None, _request_timeout=None):
+        return self._list("poddisruptionbudgets", _continue, _request_timeout)
 
-    def list_horizontal_pod_autoscaler_for_all_namespaces(self, limit=None, _continue=None):
-        return self._list("horizontalpodautoscalers", _continue)
+    def list_horizontal_pod_autoscaler_for_all_namespaces(self, limit=None, _continue=None, _request_timeout=None):
+        return self._list("horizontalpodautoscalers", _continue, _request_timeout)
 
-    def list_pod_for_all_namespaces(self, limit=None, _continue=None):
-        return self._list("pods", _continue)
+    def list_pod_for_all_namespaces(self, limit=None, _continue=None, _request_timeout=None):
+        return self._list("pods", _continue, _request_timeout)
 
-    def list_node(self, limit=None, _continue=None):
-        return self._list("nodes", _continue)
+    def list_node(self, limit=None, _continue=None, _request_timeout=None):
+        return self._list("nodes", _continue, _request_timeout)
 
 
 def _collect(excluded=EXCLUDED, **kw):
@@ -170,3 +180,21 @@ def test_without_a_kubeconfig_or_a_cluster_the_run_is_bad_config(monkeypatch, tm
     assert ev["metadata"]["api_failures"][0]["operation"] == "kubernetes config"
     assert all(v is None for v in ev["summary"].values())
     assert json.loads((tmp_path / "status.json").read_text())["code"] == "bad_config"
+
+
+def test_every_list_call_has_a_timeout():
+    _, _, api = _collect()
+    assert api.timeouts and all(t == wr.TIMEOUT for t in api.timeouts)
+
+
+def test_an_unreachable_api_server_still_writes_evidence(monkeypatch, tmp_path):
+    monkeypatch.setenv("EVIDENCE_DIR", str(tmp_path))
+    monkeypatch.setenv("FETCHER_STATUS_FILE", str(tmp_path / "status.json"))
+    api = _Api(unreachable=True)
+    monkeypatch.setattr(wr, "clients", lambda context: (api, api, api, api))
+    assert wr.main() == 1
+    ev = json.loads((tmp_path / "kubernetes_workload_resilience.json").read_text())
+    first = ev["metadata"]["api_failures"][0]
+    assert first["type"] == "MaxRetryError" and "Connection refused" in first["message"]
+    assert all(v is None for v in ev["summary"].values())
+    assert json.loads((tmp_path / "status.json").read_text())["code"] == "target_unreachable"
