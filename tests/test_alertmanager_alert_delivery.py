@@ -45,8 +45,9 @@ class _Resp:
 class _Alertmanager:
     """requests.Session that only implements GET, so any write attempt fails the test."""
 
-    def __init__(self, metrics="metrics.txt", refused=(), flaky=()):
+    def __init__(self, metrics="metrics.txt", refused=(), flaky=(), bodies=None):
         self.metrics, self.refused, self.flaky = metrics, set(refused), dict.fromkeys(flaky, 1)
+        self.bodies = bodies or {}  # path -> body served instead of the fixture
         self.gets = []
 
     def get(self, url, timeout=None, allow_redirects=True, headers=None):
@@ -59,6 +60,7 @@ class _Alertmanager:
             return _Resp(403, "forbidden")
         bodies = {"/api/v2/status": _load("status.json"), "/api/v2/alerts": _load("alerts.json"),
                   "/api/v2/silences": _load("silences.json"), "/metrics": _load(self.metrics)}
+        bodies.update(self.bodies)
         return _Resp(200, bodies[path]) if path in bodies else _Resp(404, "not found")
 
 
@@ -94,7 +96,9 @@ def test_real_responses_give_routing_alerts_and_delivery(alertmanager, tmp_path,
     # Without receiver names in the metrics, the failure can only be pinned to the webhook integration type.
     assert (s["notifications_attempted"], s["notifications_failed"]) == (4, 2)  # the closed-port receiver retried once more
     assert (s["notification_failures_by"], s["notification_failures"]) == ("integration", ["webhook"])
-    assert (s["counters_since"], s["cluster_status"], s["cluster_peers"]) == ("2026-11-17T23:31:05Z", "disabled", 0)
+    # Without receiver names only a restart resets the counters, so they date from the process start.
+    assert (s["process_started"], s["counters_since"]) == ("2026-11-17T23:31:05Z", "2026-11-17T23:31:05Z")
+    assert (s["cluster_status"], s["cluster_peers"]) == ("disabled", 0)
     assert_summary_documented("alertmanager/alert_delivery", s)
 
 
@@ -131,14 +135,14 @@ def test_unreadable_metrics_leave_only_delivery_fields_null(alertmanager, tmp_pa
 
 
 def test_unreadable_status_leaves_routing_null_not_zero():
-    s = am.summarize(None, _load("alerts.json"), None, None, NOW)
+    s = am.summarize(None, None, _load("alerts.json"), None, None, NOW)
     assert (s["config_read"], s["receivers_total"], s["default_receiver_has_integrations"]) == (None, None, None)
     assert (s["alerts_active"], s["alerts_active_to_receivers_without_integrations"], s["silences_active"]) == (3, None, None)
 
 
 def test_a_default_route_to_a_receiver_without_integrations_is_reported():
     status = {"config": {"original": "route:\n  receiver: blackhole\nreceivers:\n  - name: blackhole\n"}}
-    s = am.summarize(status, [], [], {"by": "integration", "attempts": {}, "failures": {}}, NOW)
+    s = am.summarize(status, am.parse_config(status), [], [], {"by": "integration", "attempts": {}, "failures": {}}, NOW)
     assert (s["default_receiver"], s["default_receiver_has_integrations"], s["receivers_without_integrations"]) == ("blackhole", False, 1)
     assert (s["notifications_attempted"], s["notifications_failed"], s["notification_failures"]) == (0, 0, [])
 
@@ -158,3 +162,136 @@ def test_a_missing_base_url_is_bad_config(alertmanager, tmp_path, monkeypatch):
     assert am.main() == 1
     assert json.loads((tmp_path / "status.json").read_text())["code"] == "bad_config"
     assert _evidence(tmp_path)["summary"]["config_read"] is None
+
+
+# --- review fixes (PR 392) ---
+
+BUILD_INFO = 'alertmanager_build_info{version="0.35.0"} 1\n'
+STATUS_NULL_ONLY = {**_load("status.json"), "config": {"original": (
+    "route:\n  receiver: \"null\"\nreceivers:\n  - name: \"null\"\n")}}
+
+
+def _delivery(s):
+    return (s["notifications_attempted"], s["notifications_failed"], s["notification_failures"], s["counters_since"])
+
+
+def _assert_metrics_failed(tmp_path, reason):
+    ev = _evidence(tmp_path)
+    s = ev["summary"]
+    assert _delivery(s) == (None, None, None, None)
+    assert ev["results"]["notifications"] is None
+    # The reads that did work are kept.
+    assert (s["config_read"], s["alerts_active"], s["routes_total"]) == (True, 3, 2)
+    assert ev["metadata"]["partial_failure"] is True
+    failure = ev["metadata"]["api_failures"][0]
+    assert (failure["operation"], failure["type"]) == ("metrics", "MetricsError")
+    assert reason in failure["message"], failure["message"]
+    assert json.loads((tmp_path / "status.json").read_text())["code"] == "partial_failure"
+
+
+def test_a_proxy_page_at_metrics_is_a_failed_read_not_zero_failures(alertmanager, tmp_path):
+    # A reverse proxy that forwards only /api/ answers /metrics with its own 200 page.
+    alertmanager(bodies={"/metrics": "<html><body><h1>Welcome to nginx!</h1></body></html>"})
+    assert am.main() == 1
+    _assert_metrics_failed(tmp_path, "alertmanager_build_info")
+
+
+@pytest.mark.parametrize("body, reason", [
+    # Build info and a started notification, but no failure counter: failures unknown, not 0.
+    (BUILD_INFO + 'alertmanager_notifications_total{integration="webhook"} 1\n',
+     "alertmanager_notifications_failed_total is not"),
+    (BUILD_INFO + 'alertmanager_notifications_failed_total{integration="webhook",reason="other"} 1\n',
+     "alertmanager_notifications_total is not"),
+    # A value that is not a number is not skipped.
+    (BUILD_INFO + 'alertmanager_notifications_total{integration="webhook"} 1\n'
+     'alertmanager_notifications_failed_total{integration="webhook",reason="other"} invalid\n', "not a number"),
+    # One that float() refuses does not crash the run or lose the other evidence.
+    (BUILD_INFO + 'alertmanager_notifications_total{integration="webhook"} 1\n'
+     'alertmanager_notifications_failed_total{integration="webhook",reason="other"} 1e+\n', "not a number"),
+    (BUILD_INFO + 'alertmanager_notifications_total{integration="webhook"} NaN\n'
+     'alertmanager_notifications_failed_total{integration="webhook",reason="other"} 0\n', "not a finite count"),
+    # Some series name the receiver and some only the integration: attribution is not knowable.
+    (BUILD_INFO + 'alertmanager_notifications_total{integration="webhook",receiver_name="pager"} 2\n'
+     'alertmanager_notifications_failed_total{integration="webhook",reason="other"} 1\n', "some do not"),
+    (BUILD_INFO + 'alertmanager_notifications_total{reason="other"} 2\n'
+     'alertmanager_notifications_failed_total{integration="webhook",reason="other"} 1\n', "neither"),
+    # No counters at all while a routed receiver has an integration.
+    (BUILD_INFO, "a routed receiver has an integration"),
+])
+def test_partial_or_malformed_metrics_are_a_failed_read(alertmanager, tmp_path, body, reason):
+    alertmanager(bodies={"/metrics": body})
+    assert am.main() == 1
+    _assert_metrics_failed(tmp_path, reason)
+
+
+def test_no_counters_with_no_routed_integration_is_zero_not_a_failure(alertmanager, tmp_path):
+    # With receiver-name-in-metrics, Alertmanager creates no counters when no routed receiver has an integration.
+    body = BUILD_INFO + "alertmanager_config_last_reload_success_timestamp_seconds 1.7949583171216176e+09\n"
+    alertmanager(bodies={"/api/v2/status": STATUS_NULL_ONLY, "/metrics": body})
+    assert am.main() == 0
+    s = _evidence(tmp_path)["summary"]
+    assert _delivery(s) == (0, 0, [], "2026-11-17T23:31:57Z")
+    assert s["notification_failures_by"] == "receiver"
+
+
+def test_receiver_named_counters_date_from_the_last_reload_not_the_process_start(alertmanager, tmp_path):
+    # With receiver names, a configuration reload resets the counters without a restart. The fixture's process
+    # started at 23:31:05 (status uptime); here the configuration was reloaded an hour later.
+    reloaded = datetime(2026, 11, 18, 0, 31, 5, tzinfo=timezone.utc).timestamp()
+    text = "\n".join(f"alertmanager_config_last_reload_success_timestamp_seconds {reloaded!r}"
+                     if line.startswith("alertmanager_config_last_reload_success_timestamp_seconds") else line
+                     for line in _load("metrics-receiver-name.txt").splitlines())
+    alertmanager(bodies={"/metrics": text})
+    assert am.main() == 0
+    s = _evidence(tmp_path)["summary"]
+    assert (s["process_started"], s["counters_since"]) == ("2026-11-17T23:31:05Z", "2026-11-18T00:31:05Z")
+    assert (s["notification_failures_by"], s["notification_failures"]) == ("receiver", ["pager"])
+
+
+def test_receiver_named_counters_without_a_reload_time_have_no_start():
+    text = "\n".join(line for line in _load("metrics-receiver-name.txt").splitlines()
+                     if not line.startswith("alertmanager_config_last_reload_success_timestamp_seconds"))
+    s = am.summarize(_load("status.json"), am.parse_config(_load("status.json")), [], [], am.parse_metrics(text), NOW)
+    assert (s["process_started"], s["counters_since"], s["hours_since_counters_started"]) == ("2026-11-17T23:31:05Z", None, None)
+
+
+def test_failed_notifications_count_once_not_per_retry():
+    # The closed-port receiver made 13 requests (alertmanager_notification_requests_failed_total) for 1 notification.
+    text = _load("metrics-receiver-name.txt")
+    assert 'alertmanager_notification_requests_failed_total{integration="webhook",receiver_name="pager"} 13' in text
+    s = am.summarize(None, None, None, None, am.parse_metrics(text), NOW)
+    assert (s["notifications_attempted"], s["notifications_failed"]) == (3, 1)
+    described = (REPO_ROOT / "fetchers" / "alertmanager" / "alert_delivery" / "fetcher.yaml").read_text()
+    assert "retries included" not in described and "accepted or rejected" not in described
+
+
+def test_older_match_and_match_re_keys_are_kept_as_matchers():
+    status = {"config": {"original": (
+        "route:\n  receiver: ops\n  routes:\n"
+        "    - receiver: \"null\"\n      match:\n        alertname: Watchdog\n"
+        "    - receiver: pager\n      match_re:\n        severity: critical|page\n      continue: true\n"
+        "    - receiver: pager\n      matchers: ['team=\"db\"']\n      match:\n        env: prod\n"
+        "receivers:\n  - name: ops\n  - name: pager\n  - name: \"null\"\n")}}
+    routes = am.route_records(am.parse_config(status)["route"])
+    assert [r["matchers"] for r in routes] == [
+        None, ['alertname="Watchdog"'], ['severity=~"critical|page"'], ['team="db"', 'env="prod"']]
+
+
+def test_a_status_without_its_configuration_is_a_failed_read(alertmanager, tmp_path):
+    status = {k: v for k, v in _load("status.json").items() if k != "config"}
+    alertmanager(bodies={"/api/v2/status": status})
+    assert am.main() == 1
+    ev = _evidence(tmp_path)
+    s = ev["summary"]
+    assert (s["config_read"], s["receivers_total"], s["default_receiver_has_integrations"]) == (False, None, None)
+    assert ev["metadata"]["api_failures"][0]["operation"] == "status configuration"
+    # The status itself was read: the process start and cluster still come from it, and the metrics still count.
+    assert (s["process_started"], s["cluster_status"], s["notifications_failed"]) == ("2026-11-17T23:31:05Z", "disabled", 2)
+
+
+def test_alerts_that_are_not_a_list_are_a_failed_read(alertmanager, tmp_path):
+    alertmanager(bodies={"/api/v2/alerts": {"message": "ok"}})
+    assert am.main() == 1
+    ev = _evidence(tmp_path)
+    assert (ev["summary"]["alerts_active"], ev["results"]["alerts"]) == (None, None)
+    assert ev["metadata"]["api_failures"][0]["operation"] == "alerts"

@@ -1,7 +1,7 @@
 name: alertmanager_alert_delivery
 version: 0.1.0
 description: >-
-  Shows whether Alertmanager routes alerts to receivers that can deliver them, what is firing or suppressed, and how many notifications integrations accepted or rejected.
+  Shows whether Alertmanager routes alerts to receivers that can deliver them, what is firing or suppressed, and how many notifications were started and how many finally failed.
 category: alertmanager
 source: community
 
@@ -25,25 +25,25 @@ evidence_set:
   reference_id: EVD-ALERTMANAGER-ALERT-DELIVERY
   name: Alertmanager Alert Delivery
   description: >-
-    Alertmanager's routing, receivers, active and suppressed alerts, silences, and notification delivery attempts and
-    failures per receiver or integration type.
+    Alertmanager's routing, receivers, active and suppressed alerts, silences, and the notifications started and finally
+    failed per receiver or integration type.
   instructions: |
     Script: alertmanager/alert_delivery/fetcher.py
 
     Access: Network access to the Alertmanager API and its metrics endpoint. Alertmanager has no authentication of its own; set the optional token only when a proxy in front of it requires one. Every call is a GET: the fetcher never creates, changes or expires silences or alerts.
 
     Commands Executed:
-    - GET /api/v2/status — the loaded configuration, cluster status and start time. Only receiver names, integration types and the route tree are kept; receiver settings, which hold webhook URLs and API keys, are never copied
+    - GET /api/v2/status — the loaded configuration, cluster status and start time. Only receiver names, integration types and the route tree are kept; receiver settings, which hold webhook URLs and API keys, are never copied. Route matchers written with the older match and match_re keys are shown as name="value" and name=~"value"
     - GET /api/v2/alerts — every alert with its state, silences, inhibitions and receivers
     - GET /api/v2/silences — every silence with its state and end time
-    - GET /metrics — notification attempts and failures since the process started, per receiver when Alertmanager runs with receiver-name-in-metrics, otherwise per integration type
+    - GET /metrics — notifications started and notifications that finally failed, per receiver when Alertmanager runs with receiver-name-in-metrics, otherwise per integration type
 
-    Output: alertmanager_alert_delivery.json — receivers, routes, alerts, silences and notification counts. A delivered notification means the integration's API accepted it; whether a person received it is not visible to Alertmanager and needs its own evidence.
+    Output: alertmanager_alert_delivery.json — receivers, routes, alerts, silences and notification counts. The counts do not show that an integration's API accepted a notification, and whether a person received it is not visible to Alertmanager. Both need their own evidence. A response that is not the shape Alertmanager documents is a failed read, not 0: a status without its configuration, a metrics page without alertmanager_build_info (such as a proxy's own page), a counter value that is not a number, only one of the two notification counters, or counters where only some carry receiver names. A failed read is listed in metadata.api_failures, leaves the fields that depend on it null, and the run exits 1.
 
     Summary fields:
 
     Is anything configured to deliver alerts?
-    - config_read — True if the loaded configuration was read and parsed; null if the status could not be read, as is every routing field below
+    - config_read — True if the loaded configuration was read and parsed; false if the status had no configuration that could be parsed; null if the status could not be read. Every routing field below is null unless this is true
     - receivers_total — Number of receivers in the configuration
     - receivers_without_integrations — Number of receivers with no integration, so alerts sent to them go nowhere (often deliberate, such as a receiver for a heartbeat alert)
     - receivers_without_integrations_names — List of the names of those receivers
@@ -63,11 +63,12 @@ evidence_set:
     - silences_active — Number of silences in effect; null if the silences could not be read
 
     Were notifications delivered?
-    - notifications_attempted — Number of notification attempts since the process started, retries included; a notification counts when the integration's API accepts it, which is not proof that a person received it; null if the metrics could not be read, as is every delivery field below
-    - notifications_failed — Number of failed notification attempts since the process started, retries included
+    - notifications_attempted — Number of notifications Alertmanager started to send since counters_since (alertmanager_notifications_total). A notification counts when sending starts, before the integration answers. It is not the number the integration's API accepted: some may still be retrying, and a resolved-only notification to an integration with send_resolved off counts without a request. Null if the metrics could not be read, as is every field down to hours_since_counters_started
+    - notifications_failed — Number of notifications that failed after all their retries since counters_since (alertmanager_notifications_failed_total). Each failed notification counts once, however many requests it took
     - notification_failures_by — receiver if the metrics name each receiver (receiver-name-in-metrics), otherwise integration, when failures can only be attributed to an integration type such as webhook
-    - notification_failures — List of the receivers (or integration types) with at least one failed attempt
-    - counters_since — When the Alertmanager process started; every notification count covers the time since then, so a restart resets them
+    - notification_failures — List of the receivers (or integration types) with at least one failed notification
+    - process_started — When the Alertmanager process started; null if the status could not be read
+    - counters_since — When the notification counts started. Without receiver names in the metrics, this is process_started, as only a restart resets them. With receiver names, Alertmanager also resets them on every successful configuration reload, so this is the last successful reload (alertmanager_config_last_reload_success_timestamp_seconds). Null when that time is not known
     - hours_since_counters_started — Hours since counters_since
-    - cluster_status — ready, settling or disabled (a single instance); with high availability, each member keeps its own counters
-    - cluster_peers — Number of cluster members this instance sees
+    - cluster_status — ready, settling or disabled (a single instance); with high availability, each member keeps its own counters; null if the status could not be read
+    - cluster_peers — Number of cluster members this instance sees; null if the status could not be read
