@@ -6,6 +6,7 @@ start to finish.
 ## Run fetchers
 
 - [The `paramify` CLI](cli_guide.md): every command, from manifests to uploads
+- [The terminal UI](tui_guide.md): each tab of `paramify tui` and its keys
 - [Build a run manifest](run_manifest_guide.md)
 - [Give a fetcher its config and secrets](config_injection_guide.md)
 - [Read an evidence envelope](envelope_guide.md)

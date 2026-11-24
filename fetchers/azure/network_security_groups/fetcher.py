@@ -230,19 +230,23 @@ def virtual_network_record(vnet: dict) -> dict:
 _arm_id_key = arm_id_key
 
 
-def network_interface_record(nic: dict, subnet_nsg_by_id: dict) -> dict:
+def network_interface_record(nic: dict, subnet_nsg_by_id: dict | None) -> dict:
     """Normalize one NIC and resolve its effective NSG coverage.
 
     Traffic to a NIC is filtered by the NSG on the NIC AND the NSG on its subnet, so
     either one counts as protected. `subnet_nsg_by_id` maps lower-cased subnet ids
     from this subscription's VNets to their NSG id (or None). A subnet absent from it
     (a VNet in another subscription) is listed in `unresolved_subnet_ids` and does not
-    count as protection: the evidence cannot show an NSG it did not read.
+    count as protection: the evidence cannot show an NSG it did not read. None means
+    the VNet list was not read: the subnet side is then null, and protected_by_nsg is
+    True only for a NIC with its own NSG.
     """
-    resource_id = nic.get("id")
     subnet_ids = sorted(
         {c["subnet_id"] for c in (nic.get("ip_configurations") or []) if c.get("subnet_id")}
     )
+    nic_nsg = nic.get("nsg_id")
+    if subnet_nsg_by_id is None:
+        return _nic_fields(nic, subnet_ids, None, None, None, True if nic_nsg else None)
     subnet_nsg_ids = sorted(
         {
             subnet_nsg_by_id[_arm_id_key(s)]
@@ -251,7 +255,6 @@ def network_interface_record(nic: dict, subnet_nsg_by_id: dict) -> dict:
         }
     )
     unresolved = [s for s in subnet_ids if _arm_id_key(s) not in subnet_nsg_by_id]
-    nic_nsg = nic.get("nsg_id")
     if nic_nsg and subnet_nsg_ids:
         source = "nic_and_subnet"
     elif nic_nsg:
@@ -260,6 +263,11 @@ def network_interface_record(nic: dict, subnet_nsg_by_id: dict) -> dict:
         source = "subnet"
     else:
         source = "none"
+    return _nic_fields(nic, subnet_ids, subnet_nsg_ids, unresolved, source, source != "none")
+
+
+def _nic_fields(nic: dict, subnet_ids, subnet_nsg_ids, unresolved, source, protected) -> dict:
+    resource_id = nic.get("id")
     return {
         "id": resource_id,
         "name": nic.get("name"),
@@ -267,7 +275,7 @@ def network_interface_record(nic: dict, subnet_nsg_by_id: dict) -> dict:
         "resource_group": resource_group_from_id(resource_id),
         "virtual_machine_id": nic.get("virtual_machine_id"),
         "attached": bool(nic.get("virtual_machine_id")),
-        "nsg_id": nic_nsg,
+        "nsg_id": nic.get("nsg_id"),
         "subnet_ids": subnet_ids,
         "subnet_nsg_ids": subnet_nsg_ids,
         "unresolved_subnet_ids": unresolved,
@@ -275,7 +283,7 @@ def network_interface_record(nic: dict, subnet_nsg_by_id: dict) -> dict:
             c.get("public_ip_address_id") for c in (nic.get("ip_configurations") or [])
         ),
         "nsg_protection_source": source,
-        "protected_by_nsg": source != "none",
+        "protected_by_nsg": protected,
     }
 
 
@@ -508,16 +516,21 @@ NO_EAST_WEST = {
     "segmented_from_subnets": [],
     "undetermined_from_subnets": [],
 }
+UNREAD_EAST_WEST = dict.fromkeys(NO_EAST_WEST)
 
 
-def with_east_west(virtual_networks: list[dict], security_groups: list[dict]) -> list[dict]:
-    """Each VNet with every subnet's east-west verdict; platform subnets are left out on both ends."""
-    groups_by_id = {_arm_id_key(g["id"]): g for g in security_groups}
+def with_east_west(virtual_networks: list[dict], security_groups: list[dict] | None) -> list[dict]:
+    """Each VNet with every subnet's east-west verdict; platform subnets are left out on both ends.
+
+    `security_groups` None means the NSG list was not read: every verdict field is then null.
+    """
+    groups_by_id = {_arm_id_key(g["id"]): g for g in security_groups or []}
     result = []
     for vnet in virtual_networks:
         workload = [s for s in vnet["subnets"] if not s["platform_subnet"]]
         subnets = [
             {**s, **NO_EAST_WEST} if s["platform_subnet"]
+            else {**s, **UNREAD_EAST_WEST} if security_groups is None
             else {**s, **east_west_record(s, [p for p in workload if p["id"] != s["id"]], groups_by_id)}
             for s in vnet["subnets"]
         ]
@@ -525,15 +538,50 @@ def with_east_west(virtual_networks: list[dict], security_groups: list[dict]) ->
     return result
 
 
+# Summary fields by the lists they are built from; each reads null when any of its lists was not read.
+FIELDS_BY_LISTS = (
+    (("network_security_groups",), (
+        "total_network_security_groups", "total_security_rules", "inbound_allow_rules", "internet_sourced_allow_rules",
+        *(f"{label}_open_to_internet_groups" for label in ADMIN_PORTS), "outbound_allow_rules", "outbound_deny_rules",
+        "internet_destined_allow_rules", "unrestricted_internet_outbound_groups", "restricted_internet_outbound_groups",
+    )),
+    (("virtual_networks",), (
+        "total_virtual_networks", "ddos_protected_virtual_networks", "total_subnets", "subnets_with_nsg",
+        "subnets_without_nsg", "subnet_nsg_coverage_percentage",
+    )),
+    (("network_interfaces",), ("total_network_interfaces", "nics_with_nic_nsg")),
+    (("network_interfaces", "virtual_networks"), (
+        "nics_protected_by_subnet_nsg_only", "nics_without_any_nsg", "nic_nsg_coverage_percentage",
+    )),
+    (("virtual_networks", "network_security_groups"), (
+        "workload_subnets_by_east_west_segmentation", "east_west_subnet_pairs", "open_east_west_subnet_pairs",
+    )),
+)
+
+
 def summarize(
-    security_groups: list[dict],
-    virtual_networks: list[dict],
-    network_interfaces: list[dict] | None = None,
+    security_groups: list[dict] | None,
+    virtual_networks: list[dict] | None,
+    network_interfaces: list[dict] | None,
 ) -> dict:
     """Counts a reviewer reads first: admin ports exposed, subnets and NICs left
     unprotected, and how much Internet egress the NSGs allow.
+
+    A list passed as None was not read: every count built from it is null, not 0.
     """
-    nics = network_interfaces or []
+    summary = _counts(security_groups or [], virtual_networks or [], network_interfaces or [])
+    unread = {
+        "network_security_groups": security_groups is None,
+        "virtual_networks": virtual_networks is None,
+        "network_interfaces": network_interfaces is None,
+    }
+    for lists, fields in FIELDS_BY_LISTS:
+        if any(unread[name] for name in lists):
+            summary.update(dict.fromkeys(fields))
+    return summary
+
+
+def _counts(security_groups: list[dict], virtual_networks: list[dict], nics: list[dict]) -> dict:
     rules = [rule for g in security_groups for rule in g["security_rules"]]
     subnets = [s for v in virtual_networks for s in v["subnets"]]
     associated = sum(1 for s in subnets if s["nsg_id"])
@@ -677,9 +725,9 @@ def collect_network(
         "network.network_interfaces.list_all",
         lambda: [project_network_interface(n) for n in client.network_interfaces.list_all()],
     )
-    subnet_index = subnet_nsg_index(vnets or [])
+    subnet_index = None if vnets is None else subnet_nsg_index(vnets)
     nics = None if raw_nics is None else [network_interface_record(n, subnet_index) for n in raw_nics]
-    vnets = None if vnets is None else with_east_west(vnets, groups or [])
+    vnets = None if vnets is None else with_east_west(vnets, groups)
 
     def _sorted(rows):
         return None if rows is None else sorted(rows, key=lambda r: r.get("id") or "")
@@ -758,7 +806,9 @@ def main() -> int:
             "excluded": excluded,
         },
         summary={
-            **summarize(security_groups, virtual_networks, network_interfaces),
+            **summarize(*(rows if read[name] else None for name, rows in (
+                ("network_security_groups", security_groups), ("virtual_networks", virtual_networks),
+                ("network_interfaces", network_interfaces)))),
             "provider_registration_status": registration,
             **exclusions.summary(excluded, ("network_security_group", "virtual_network", "network_interface"), {
                 name: len(rows) if read[name] else None for name, rows in (

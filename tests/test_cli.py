@@ -493,12 +493,17 @@ def fetchers():
     assert allf, "no fetchers discovered — cannot run parity smoke tests"
     # A fetcher whose only requirements are its secrets: wiring them must make the
     # manifest valid. One with required config that has no default (a portal URL,
-    # a course list) would still be invalid, so it is skipped.
+    # a course list) would still be invalid, so it is skipped. The catalog lists a
+    # category's secrets on each fetcher, but the category's config only in its
+    # platform block, so both lists are checked.
     with_secret = next(
         (
-            f for f in allf
+            f for cat_ in cat["categories"] for f in cat_["fetchers"]
             if f["secrets"] and not f["supports_targets"]
-            and not any(c.get("required") and c.get("default") is None for c in f["config"])
+            and not any(
+                c.get("required") and c.get("default") is None
+                for c in [*f["config"], *((cat_.get("platform") or {}).get("config") or [])]
+            )
         ),
         None,
     )
