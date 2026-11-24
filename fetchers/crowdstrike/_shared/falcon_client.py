@@ -691,6 +691,47 @@ def evidence_error(message: str, api_failures: Optional[List[Dict[str, Any]]] = 
         "retrieved_at": current_timestamp(),
     }
 
+
+def failure_summary(failures: List[Dict[str, Any]]) -> str:
+    """One line naming how many calls failed and the first one's reason."""
+    first = failures[0]
+    detail = first.get("message") or first.get("error") or "see api_failures"
+    return (
+        f"{len(failures)} API failure(s) during collection; first: "
+        f"{first.get('endpoint', 'unknown endpoint')}: {detail}"
+    )
+
+
+# --- the pipeline pair -------------------------------------------------------
+#
+# crowdstrike_host_inventory and crowdstrike_spotlight_vulnerability_report feed
+# Paramify pipelines, which link a finding to an Inventory item only when the
+# report's Host ID equals the inventory's unique_asset_identifier exactly. Both
+# write the ID through host_id(), so the two files cannot drift apart in format.
+
+
+def host_id(value: Any) -> Optional[str]:
+    """
+    A Falcon host ID in the one format both pipeline fetchers write: trimmed
+    and lowercase. The hosts API calls it `device_id` and Spotlight calls it
+    `aid`; both are the sensor's agent ID, 32 hex characters. None when empty.
+    """
+    if not isinstance(value, str):
+        return None
+    return value.strip().lower() or None
+
+
+def failure_code(failures: List[Dict[str, Any]]) -> str:
+    """The fetcher contract's failure category for a list of `api_failures`."""
+    statuses = {f.get("status_code") for f in failures}
+    if 401 in statuses:
+        return "auth_failed"
+    if 403 in statuses:
+        return "not_authorized"
+    if 429 in statuses:
+        return "rate_limited"
+    return "partial_failure"
+
 # --- the fetcher entry point, shared -----------------------------------------
 #
 # All seven fetchers in this category ended with the same 32 lines, differing by
@@ -801,11 +842,7 @@ def run_fetcher(
     failures = result.get("api_failures") or []
     if failures:
         first = failures[0]
-        detail = first.get("message") or first.get("error") or "see api_failures"
-        message = (
-            f"{len(failures)} API failure(s) during collection; first: "
-            f"{first.get('endpoint', 'unknown endpoint')}: {detail}"
-        )
+        message = failure_summary(failures)
         # Falcon's own exception type / HTTP status, which is NOT one of the
         # contract's categories, so report_failure drops it and metadata.error_code
         # stays empty. Passed through rather than invented: mapping these onto the

@@ -1,0 +1,66 @@
+name: crowdstrike_host_inventory
+version: 0.1.0
+description: >-
+  Lists every host that runs the CrowdStrike Falcon sensor, one record each, keyed by its Falcon host ID for a Paramify inventory pipeline.
+category: crowdstrike
+
+kind: inventory
+status: beta
+pipeline:
+  type: inventory
+  id_scheme: crowdstrike-device-id
+supports_targets: false
+
+runtime:
+  type: python
+  entry: fetcher.py
+  timeout: 900
+
+output:
+  type: json
+  path: crowdstrike_host_inventory.json
+
+secrets:
+  - name: client_id
+    env: CROWDSTRIKE_CLIENT_ID
+    description: >-
+      Client ID of a Falcon API client with READ on the Hosts scope
+      (Support and resources → API clients and keys).
+  - name: client_secret
+    env: CROWDSTRIKE_CLIENT_SECRET
+    description: Client secret of the same Falcon API client. Falcon shows it once.
+
+config_schema:
+  api_base_url:
+    type: string
+    required: false
+    env: CROWDSTRIKE_API_BASE_URL
+    description: Full Falcon API base URL. Overrides cloud_region.
+  cloud_region:
+    type: string
+    required: false
+    env: CROWDSTRIKE_CLOUD_REGION
+    description: >-
+      Falcon cloud the tenant lives in — us-1, us-2, us-3, eu-1, us-gov-1,
+      us-gov-2. Defaults to us-1 (commercial). FedRAMP tenants are typically us-gov-1.
+
+ksis:
+  - KSI-PIY-GIV
+
+evidence_set:
+  reference_id: EVD-CS-HOST-INVENTORY
+  name: CrowdStrike Falcon Host Inventory
+  instructions: |
+    Script: crowdstrike/host_inventory/fetcher.py
+
+    Access: A Falcon API client with READ on the Hosts scope.
+
+    Commands Executed:
+    - POST /oauth2/token — exchanges the client ID and secret for a bearer token
+    - GET /devices/queries/devices-scroll/v1 (every page) — lists the ID of every host that runs the Falcon sensor
+    - POST /devices/entities/devices/v2 (batches of 100) — reads each host's details
+
+    Output: crowdstrike_host_inventory.json — one record per host, keyed by its Falcon host ID (device_id, lowercase), with hostname, primary and external IP address, MAC address, operating system, product type, serial number, sensor version, reduced functionality mode, containment status, first and last seen times, cloud provider, account and instance, and tags; a run that could not collect every host writes no records, and the uploader does not send it.
+  description: >-
+    Lists every host that runs the CrowdStrike Falcon sensor, one record each,
+    with the attributes Falcon records for it.
