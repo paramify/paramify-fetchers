@@ -1,0 +1,778 @@
+# What `paramify update` shows for v0.7.0-beta. The full list is the
+# CHANGELOG's [0.7.0-beta] section; this is the part a user acts on.
+# Format and rules: releases/README.md.
+version: 0.7.0-beta
+date: 2026-11-24
+highlights:
+- tag: cli
+  title: paramify update brings your clone up to date, and checks it first
+  detail: Follows main or a pinned release, and tells you which of your fetchers change
+  try: paramify update --check
+  draft: true
+- tag: cli
+  title: paramify status shows what each fetcher has in Paramify
+  detail: Evidence set, artifact count and validators for every fetcher in a manifest
+  try: paramify status <manifest>
+  draft: true
+- tag: fetcher
+  title: GitHub, Oracle Cloud, Qualys and Sophos categories
+  detail: Over fifty new fetchers, plus many more for Azure
+  try: paramify catalog
+  draft: true
+- tag: new
+  title: paramify upload --plan shows what an upload would do
+  detail: Reads the workspace and changes nothing; uploads now go out as batches
+  try: paramify upload --plan
+  draft: true
+- tag: cli
+  title: Shell tab completion
+  try: paramify --install-completion
+  draft: true
+- tag: breaking
+  title: An inventory fetcher needs a pipeline block in fetcher.yaml
+  fix: 'Add pipeline: {type: inventory, id_scheme: <scheme>} to your kind: inventory fetchers'
+  custom_fetchers: true
+  draft: true
+- tag: breaking
+  title: Inventory records must carry asset_type
+  fix: Set a non-empty asset_type, such as endpoint, on every record your fetcher writes
+  custom_fetchers: true
+  draft: true
+- tag: breaking
+  title: Datadog evidence fields were removed, renamed or changed meaning
+  fix: Re-check validators that read Datadog fields; a failed page now gives null counts
+  fetchers:
+  - datadog_*
+  draft: true
+- tag: tui
+  title: The TUI tells you when an update is waiting, and applies it
+  detail: Press U for the plan paramify update shows; apply it or roll back from there
+  try: paramify tui
+  draft: true
+- tag: fetcher
+  title: GitHub credentials evidence no longer needs Secrets read
+  detail: Actions secret names and ages are collected only when the token has that grant
+  fetchers:
+  - github_non_user_credentials
+  draft: true
+fetchers:
+- name: aws_config_inventory
+  version: 0.1.0
+  note: 'TODO: say what changed for the user'
+  draft: true
+- name: aws_ecr_image_scanning
+  version: 0.5.0
+  note: runs on boto3
+  draft: true
+- name: aws_inspector_ecr_findings
+  version: 0.3.0
+  note: image counts and an opt-in for an empty scope
+  draft: true
+- name: aws_inspector_ecr_report
+  version: 0.3.0
+  note: image counts and an opt-in for an empty scope
+  draft: true
+- name: aws_organizations_scp
+  version: 0.3.0
+  note: can record the SCPs that apply to each account
+  draft: true
+- name: aws_route53_resolver_dns_security
+  version: 0.1.0
+  note: say that Route 53 Profile settings are not read
+  draft: true
+- name: azure_activity_log_alerts
+  version: 0.3.1
+  note: activity log alert rules, action groups and alert processing rules
+  draft: true
+- name: azure_ai_hub_configuration
+  version: 0.2.1
+  note: hubs, projects and other Machine Learning workspaces; an excluded workspace's connections, datastores…
+  draft: true
+- name: azure_ai_services_configuration
+  version: 0.2.2
+  note: names its search service counts
+  draft: true
+- name: azure_aks_cluster_configuration
+  version: 0.7.0
+  note: node security per agent pool
+  draft: true
+- name: azure_aks_workload_security
+  version: 0.1.0
+  note: 'TODO: say what changed for the user'
+  draft: true
+- name: azure_alert_rules
+  version: 0.3.2
+  note: alert rules, action groups and alert processing rules; routing is still worked out against every action group…
+  draft: true
+- name: azure_api_management_configuration
+  version: 0.2.1
+  note: services, with their APIs, products, backends, hostnames and certificates, none of them read
+  draft: true
+- name: azure_app_gateway_backend_tls
+  version: 0.2.1
+  note: 'TODO: say what changed for the user'
+  draft: true
+- name: azure_app_gateway_tls_listeners
+  version: 0.2.1
+  note: 'TODO: say what changed for the user'
+  draft: true
+- name: azure_app_gateway_waf
+  version: 0.2.2
+  note: '`total_waf_policies` is null when the WAF policy list could not be read'
+  draft: true
+- name: azure_app_service_backups
+  version: 0.3.3
+  note: an app with no restore point misses the RPO
+  draft: true
+- name: azure_app_service_configuration
+  version: 0.5.2
+  note: cipher suites, basic-auth publishing, Key Vault references and runtime end of support
+  draft: true
+- name: azure_app_service_deployments
+  version: 0.3.2
+  note: web apps, function apps and deployment slots (a slot follows its app), taken out before the per-app reads, so…
+  draft: true
+- name: azure_app_service_plans
+  version: 0.3.2
+  note: plans and the web and function apps on them
+  draft: true
+- name: azure_backup_recovery_status
+  version: 0.4.1
+  note: restore jobs
+  draft: true
+- name: azure_backup_vault_protection
+  version: 0.1.1
+  note: 'TODO: say what changed for the user'
+  draft: true
+- name: azure_bastion_configuration
+  version: 0.1.1
+  note: 'TODO: say what changed for the user'
+  draft: true
+- name: azure_change_provenance
+  version: 0.3.1
+  note: before and after values for direct edits and manual deployments
+  draft: true
+- name: azure_container_registry_configuration
+  version: 0.2.1
+  note: registries, which then get no diagnostic-settings reads
+  draft: true
+- name: azure_container_workloads_configuration
+  version: 0.2.1
+  note: Container Apps environments, apps and jobs, and container groups; an app or job also leaves with its…
+  draft: true
+- name: azure_cosmosdb_configuration
+  version: 0.2.1
+  note: database accounts
+  draft: true
+- name: azure_data_services_configuration
+  version: 0.3.0
+  note: a service list that was not read gives null counts, and a MongoDB cluster with public access Disabled reads…
+  draft: true
+- name: azure_databricks_workspace_configuration
+  version: 0.2.1
+  note: workspaces
+  draft: true
+- name: azure_ddos_protection
+  version: 0.2.1
+  note: public IPs, DDoS protection plans and virtual networks
+  draft: true
+- name: azure_defender_assessments
+  version: 0.4.1
+  note: days open and past-SLA counts
+  draft: true
+- name: azure_defender_plans
+  version: 0.3.1
+  note: security contacts
+  draft: true
+- name: azure_defender_vulnerability_findings
+  version: 0.1.1
+  note: key findings to the parent Azure resource, CVE-shaped ids only as CVEs, unique paging ids, open count after…
+  draft: true
+- name: azure_devops_audit_streams
+  version: 0.1.1
+  note: no longer reads unlisted streams as no streams
+  draft: true
+- name: azure_devops_identities
+  version: 0.1.0
+  note: restore the disabled-status, threshold and unread-group details in the summary text
+  draft: true
+- name: azure_devops_permissions
+  version: 0.2.0
+  note: lists who can override check-in validation
+  draft: true
+- name: azure_devops_service_connections
+  version: 0.1.1
+  note: variable groups list their projects
+  draft: true
+- name: azure_devops_work_items
+  version: 0.3.0
+  note: approval from a person field, and types approved after the change
+  draft: true
+- name: azure_disk_encryption_status
+  version: 0.3.0
+  note: managed disks; a disk encryption set in an excluded group doesn't change an in-scope disk's verdict
+  draft: true
+- name: azure_dns_configuration
+  version: 0.6.2
+  note: public record sets
+  draft: true
+- name: azure_endpoint_availability
+  version: 0.1.0
+  note: fetcher
+  draft: true
+- name: azure_entra_access_reviews
+  version: 0.1.0
+  note: fail a read Graph asks to wait over 180s, and null a series' figures when its runs weren't read
+  draft: true
+- name: azure_entra_app_registrations
+  version: 0.2.1
+  note: each credential's issued lifetime
+  draft: true
+- name: azure_entra_authentication_policy
+  version: 0.3.1
+  note: trusted certificate authorities and certificate mapping
+  draft: true
+- name: azure_entra_conditional_access_policies
+  version: 0.3.0
+  note: judges authentication strengths by their allowed sign-in methods
+  draft: true
+- name: azure_entra_diagnostic_settings
+  version: 0.1.0
+  note: '`azure_sentinel_playbooks`, `azure_entra_diagnostic_settings` and `azure_entra_risky_users`'
+  draft: true
+- name: azure_entra_dormant_identities
+  version: 0.3.0
+  note: finds service principals that hold a directory role
+  draft: true
+- name: azure_entra_emergency_accounts
+  version: 0.2.0
+  note: a synced passkey counts as a phishing-resistant method
+  draft: true
+- name: azure_entra_groups
+  version: 0.1.0
+  note: User.Read.All is optional
+  draft: true
+- name: azure_entra_mfa_status
+  version: 0.4.0
+  note: a phishing-resistant count
+  draft: true
+- name: azure_entra_pim_assignments
+  version: 0.2.0
+  note: an approved principals setting
+  draft: true
+- name: azure_entra_privileged_roles
+  version: 0.3.0
+  note: an approved principals setting
+  draft: true
+- name: azure_entra_risky_users
+  version: 0.3.0
+  note: '`azure_sentinel_playbooks`, `azure_entra_diagnostic_settings` and `azure_entra_risky_users`'
+  draft: true
+- name: azure_entra_service_principals
+  version: 0.2.0
+  note: owners and granted API permissions
+  draft: true
+- name: azure_entra_sign_in_logs
+  version: 0.3.0
+  note: count a user once, by Entra object id
+  draft: true
+- name: azure_entra_sign_ins
+  version: 0.1.0
+  note: say where Windows device logons count, and name their row count like the rest
+  draft: true
+- name: azure_firewall_configuration
+  version: 0.1.1
+  note: 'TODO: say what changed for the user'
+  draft: true
+- name: azure_flexible_server_backups
+  version: 0.1.0
+  note: fetcher
+  draft: true
+- name: azure_front_door_origins
+  version: 0.8.2
+  note: Kudu and silent regions
+  draft: true
+- name: azure_front_door_tls
+  version: 0.6.2
+  note: run on Azure Government
+  draft: true
+- name: azure_front_door_waf_coverage
+  version: 0.6.2
+  note: run on Azure Government
+  draft: true
+- name: azure_front_door_waf_policies
+  version: 0.2.1
+  note: Standard and Premium WAF policies (global)
+  draft: true
+- name: azure_function_app_configuration
+  version: 0.2.1
+  note: function apps, which then get no configuration, key or app-setting reads
+  draft: true
+- name: azure_key_vault_configuration
+  version: 0.5.0
+  note: key vaults; an excluded vault's diagnostic settings are not read
+  draft: true
+- name: azure_key_vault_key_rotation
+  version: 0.6.2
+  note: covers certificates
+  draft: true
+- name: azure_log_analytics_deletion_rights
+  version: 0.2.1
+  note: 'TODO: say what changed for the user'
+  draft: true
+- name: azure_log_analytics_query_audit
+  version: 0.2.1
+  note: 'TODO: say what changed for the user'
+  draft: true
+- name: azure_log_analytics_workspaces
+  version: 0.3.2
+  note: workspaces; an excluded workspace's tables, data exports and solutions are not read, and excluding the…
+  draft: true
+- name: azure_log_storage_immutability
+  version: 0.2.1
+  note: storage accounts, whose containers are then not read; an `id:` pattern can take a single log container out of…
+  draft: true
+- name: azure_managed_identity_configuration
+  version: 0.3.0
+  note: an unread list gives null counts, not 0, and an unread federated-credential list no longer counts an identity…
+  draft: true
+- name: azure_managed_redis_configuration
+  version: 0.3.0
+  note: a list that could not be read gives null counts, not 0
+  draft: true
+- name: azure_monitor_fired_alerts
+  version: 0.2.2
+  note: alert rules by their own resource group or id, and fired alerts by their target resource; alerts on the…
+  draft: true
+- name: azure_mysql_configuration
+  version: 0.3.0
+  note: flexible servers, whose parameters are then not read
+  draft: true
+- name: azure_network_flow_logs
+  version: 0.3.0
+  note: flow log counts are null when a flow-log list was not read
+  draft: true
+- name: azure_network_security_groups
+  version: 0.6.0
+  note: only a catch-all Internet Deny that covers every source restricts Internet egress
+  draft: true
+- name: azure_network_traffic_activity
+  version: 0.1.0
+  note: drop the App Service management-address exemption
+  draft: true
+- name: azure_pim_activations
+  version: 0.1.0
+  note: unknown PIM state after two failed lists, match the licence codes only, CHANGELOG
+  draft: true
+- name: azure_policy_assignments
+  version: 0.4.1
+  note: policy exemptions
+  draft: true
+- name: azure_policy_compliance
+  version: 0.5.2
+  note: in-scope compliant counts under resource_exclusions
+  draft: true
+- name: azure_postgresql_configuration
+  version: 0.3.0
+  note: flexible servers; their parameters, firewall rules and Entra administrators are not read
+  draft: true
+- name: azure_private_dns_zone_configuration
+  version: 0.4.1
+  note: matches a record's IP only in the networks its zone resolves for
+  draft: true
+- name: azure_private_endpoint_configuration
+  version: 0.3.2
+  note: reports unread IPs as unknown
+  draft: true
+- name: azure_rbac_custom_roles
+  version: 0.3.0
+  note: a list that could not be read gives null counts, not 0
+  draft: true
+- name: azure_rbac_role_assignments
+  version: 0.4.3
+  note: PIM eligibility, standing and activation rules
+  draft: true
+- name: azure_redis_cache_configuration
+  version: 0.3.0
+  note: a list that could not be read gives null counts, not 0
+  draft: true
+- name: azure_residual_resources
+  version: 0.3.1
+  note: orphaned resources (an empty resource group through its own id) and role assignments by their scope (they…
+  draft: true
+- name: azure_resource_diagnostic_settings
+  version: 0.4.1
+  note: shows whether resource logs arrive
+  draft: true
+- name: azure_resource_inventory
+  version: 0.4.1
+  note: resources by resource group, region or id
+  draft: true
+- name: azure_resource_locks
+  version: 0.1.1
+  note: 'TODO: say what changed for the user'
+  draft: true
+- name: azure_sentinel_analytics_rules
+  version: 0.4.0
+  note: alert connections the tenant confirms
+  draft: true
+- name: azure_sentinel_automation_rules
+  version: 0.2.1
+  note: 'TODO: say what changed for the user'
+  draft: true
+- name: azure_sentinel_data_sources
+  version: 0.4.1
+  note: Basic and Auxiliary tables can be measured
+  draft: true
+- name: azure_sentinel_incidents
+  version: 0.3.1
+  note: response timeline, monthly metrics, rules and entities
+  draft: true
+- name: azure_sentinel_playbooks
+  version: 0.3.0
+  note: '`azure_sentinel_playbooks`, `azure_entra_diagnostic_settings` and `azure_entra_risky_users`'
+  draft: true
+- name: azure_service_availability
+  version: 0.1.1
+  note: resource_exclusions is a pattern list
+  draft: true
+- name: azure_service_health_advisories
+  version: 0.1.1
+  note: resource_exclusions is a pattern list
+  draft: true
+- name: azure_service_log_records
+  version: 0.2.1
+  note: App Service apps and slots, and SQL managed instances, which get no diagnostic-setting, slot or database…
+  draft: true
+- name: azure_sql_encryption_status
+  version: 0.2.1
+  note: logical servers, whose databases leave with them; an in-scope server whose key sits in an excluded vault…
+  draft: true
+- name: azure_sql_managed_instance_backups
+  version: 0.5.0
+  note: failover history
+  draft: true
+- name: azure_sql_managed_instance_configuration
+  version: 0.5.1
+  note: subnet rules and routes, maintenance window and data classification
+  draft: true
+- name: azure_sql_managed_instance_encryption
+  version: 0.4.0
+  note: when the instance list is not read, every count is null (`total_managed_instances` and…
+  draft: true
+- name: azure_sql_server_configuration
+  version: 0.2.1
+  note: logical servers; their firewall rules and audit, alert and vulnerability settings are not read
+  draft: true
+- name: azure_storage_encryption_status
+  version: 0.5.0
+  note: adds geo-replication, access-key age and containers
+  draft: true
+- name: azure_velero_backups
+  version: 0.1.0
+  note: fetcher
+  draft: true
+- name: azure_virtual_wan_configuration
+  version: 0.2.1
+  note: virtual WANs, hubs, hub VPN gateways (with their connections), VPN sites, point-to-site gateways and VPN…
+  draft: true
+- name: azure_vm_hardening_status
+  version: 0.3.1
+  note: OS patch settings
+  draft: true
+- name: azure_vnet_egress_routing
+  version: 0.3.2
+  note: virtual networks, subnets, route tables, network interfaces, Azure Firewalls and Virtual WAN hubs; a subnet…
+  draft: true
+- name: azure_vpn_gateway_configuration
+  version: 0.3.0
+  note: '`active_active_gateways` and `p2s_enabled_gateways` count only Vpn-type gateways'
+  draft: true
+- name: azure_waf_ddos_activity
+  version: 0.2.0
+  note: DDoS figures include IPs protected by a network-level DDoS plan
+  draft: true
+- name: azure_zone_redundancy
+  version: 0.1.1
+  note: 'TODO: say what changed for the user'
+  draft: true
+- name: checkov_bicep
+  version: 0.3.0
+  note: the TFVC source signs in with Entra when no token is set
+  draft: true
+- name: checkov_kubernetes
+  version: 0.2.1
+  note: 'TODO: say what changed for the user'
+  draft: true
+- name: checkov_terraform
+  version: 0.2.1
+  note: 'TODO: say what changed for the user'
+  draft: true
+- name: cornerstone_incident_response_training
+  version: 0.1.0
+  note: 'TODO: say what changed for the user'
+  draft: true
+- name: cornerstone_role_based_training
+  version: 0.1.0
+  note: 'TODO: say what changed for the user'
+  draft: true
+- name: cornerstone_secure_development_training
+  version: 0.1.0
+  note: 'TODO: say what changed for the user'
+  draft: true
+- name: cornerstone_security_awareness_training
+  version: 0.1.0
+  note: 'TODO: say what changed for the user'
+  draft: true
+- name: datadog_apm_services
+  version: 0.1.1
+  note: 'TODO: say what changed for the user'
+  draft: true
+- name: datadog_incident_timelines
+  version: 0.2.0
+  note: each timeline cell keeps its `content` text, `important` flag and `id`
+  draft: true
+- name: datadog_incidents_list
+  version: 0.2.0
+  note: '`postmortem_id`, `summary.incidents_with_postmortem` and `summary.resolved_without_postmortem_ids` are `null`'
+  draft: true
+- name: datadog_infra_agent_checks
+  version: 0.1.1
+  note: 'TODO: say what changed for the user'
+  draft: true
+- name: datadog_log_archives
+  version: 0.1.1
+  note: '`summary.enabled_archives` counts archives in state `WORKING` or `WORKING_AUTH_LEGACY`'
+  draft: true
+- name: datadog_log_indexes
+  version: 0.2.0
+  note: '`summary.audit_indexes_below_90_days` is `null`, not 0, when no audit index has a retention to check'
+  draft: true
+- name: datadog_monitors_list
+  version: 0.1.1
+  note: '`thresholds`, `notify_no_data` and `no_data_timeframe` come from `options`'
+  draft: true
+- name: datadog_siem_configuration
+  version: 0.2.0
+  note: reads the documented endpoints and no longer reports Cloud SIEM as off by mistake
+  draft: true
+- name: datadog_siem_detection_rules
+  version: 0.2.0
+  note: the evidence holds only custom Cloud SIEM rules (`isDefault` false, type `log_detection` or…
+  draft: true
+- name: datadog_siem_signals
+  version: 0.2.0
+  note: '`status` is now the signal''s triage state (`open`, `under_review` or `archived`), and `summary.status_counts`…'
+  draft: true
+- name: fedramp_marketplace_vendor_certification_status
+  version: 0.1.0
+  note: 'TODO: say what changed for the user'
+  draft: true
+- name: fedramp_marketplace_workspace_vendor_certification_status
+  version: 0.1.0
+  note: 'TODO: say what changed for the user'
+  draft: true
+- name: github_access_review
+  version: 0.3.0
+  note: accept the invitations 404 only from an App token or an owner
+  draft: true
+- name: github_actions_security
+  version: 0.3.0
+  note: records runner groups and OIDC subject claims
+  draft: true
+- name: github_audit_log
+  version: 0.2.0
+  note: apply the repository filters to the events
+  draft: true
+- name: github_branch_protection
+  version: 0.2.0
+  note: 'TODO: say what changed for the user'
+  draft: true
+- name: github_code_scanning_alerts
+  version: 0.2.0
+  note: 'TODO: say what changed for the user'
+  draft: true
+- name: github_dependabot_alerts
+  version: 0.2.0
+  note: 'TODO: say what changed for the user'
+  draft: true
+- name: github_deployment_controls
+  version: 0.3.0
+  note: records who approved each production deployment
+  draft: true
+- name: github_image_signing
+  version: 0.2.0
+  note: shows whether GitHub Actions signs and verifies container images with cosign
+  draft: true
+- name: github_non_user_credentials
+  version: 0.3.0
+  note: limit to collected repositories
+  draft: true
+- name: github_org_security_settings
+  version: 0.3.0
+  note: 'TODO: say what changed for the user'
+  draft: true
+- name: github_pull_request_checks
+  version: 0.2.0
+  note: 'TODO: say what changed for the user'
+  draft: true
+- name: github_release_integrity
+  version: 0.2.0
+  note: 'TODO: say what changed for the user'
+  draft: true
+- name: github_repository_inventory
+  version: 0.3.0
+  note: 'TODO: say what changed for the user'
+  draft: true
+- name: github_secret_scanning
+  version: 0.2.0
+  note: 'TODO: say what changed for the user'
+  draft: true
+- name: github_significant_change_notifications
+  version: 0.2.0
+  note: 'TODO: say what changed for the user'
+  draft: true
+- name: github_vulnerability_disclosure
+  version: 0.2.0
+  note: 'TODO: say what changed for the user'
+  draft: true
+- name: github_workflow_runs
+  version: 0.3.0
+  note: gives the GitHub Actions run history
+  draft: true
+- name: gitlab_significant_change_notifications
+  version: 0.1.1
+  note: 'TODO: say what changed for the user'
+  draft: true
+- name: jira_site_inventory
+  version: 0.2.0
+  note: limit to named projects
+  draft: true
+- name: nist_cmvp_module_validation_status
+  version: 0.1.0
+  note: 'TODO: say what changed for the user'
+  draft: true
+- name: oci_audit_logging_events
+  version: 0.1.0
+  note: 'TODO: say what changed for the user'
+  draft: true
+- name: oci_bastion_sessions
+  version: 0.1.0
+  note: 'TODO: say what changed for the user'
+  draft: true
+- name: oci_block_volume_encryption
+  version: 0.1.0
+  note: 'TODO: say what changed for the user'
+  draft: true
+- name: oci_certificates
+  version: 0.1.0
+  note: 'TODO: say what changed for the user'
+  draft: true
+- name: oci_cloud_guard_posture
+  version: 0.1.0
+  note: 'TODO: say what changed for the user'
+  draft: true
+- name: oci_compute_instances
+  version: 0.1.0
+  note: 'TODO: say what changed for the user'
+  draft: true
+- name: oci_data_service_exposure
+  version: 0.1.0
+  note: 'TODO: say what changed for the user'
+  draft: true
+- name: oci_dependency_vulnerabilities
+  version: 0.1.0
+  note: 'TODO: say what changed for the user'
+  draft: true
+- name: oci_iam_password_policy
+  version: 0.1.0
+  note: 'TODO: say what changed for the user'
+  draft: true
+- name: oci_iam_policies
+  version: 0.1.0
+  note: 'TODO: say what changed for the user'
+  draft: true
+- name: oci_iam_users_credentials
+  version: 0.1.0
+  note: 'TODO: say what changed for the user'
+  draft: true
+- name: oci_network_exposure
+  version: 0.1.0
+  note: 'TODO: say what changed for the user'
+  draft: true
+- name: oci_object_storage_buckets
+  version: 0.1.0
+  note: 'TODO: say what changed for the user'
+  draft: true
+- name: oci_vault_keys
+  version: 0.1.0
+  note: 'TODO: say what changed for the user'
+  draft: true
+- name: oci_zpr_policies
+  version: 0.1.0
+  note: 'TODO: say what changed for the user'
+  draft: true
+- name: qualys_scan_coverage
+  version: 0.1.0
+  note: each host's last vulnerability scan and last authenticated scan against `scan_window_days` (default 31, so a…
+  draft: true
+- name: qualys_scan_schedules
+  version: 0.1.0
+  note: active scan schedules and their longest gap between runs, whether each option profile enables authentication…
+  draft: true
+- name: qualys_stig_compliance_report
+  version: 0.1.0
+  note: 'TODO: say what changed for the user'
+  draft: true
+- name: qualys_vmdr_vulnerability_findings
+  version: 0.1.0
+  note: 'TODO: say what changed for the user'
+  draft: true
+- name: qualys_vulnerability_findings
+  version: 0.1.0
+  note: open detections (New, Active, Re-Opened) by severity and type, with each one's age against `remediation_days`
+  draft: true
+- name: qualys_vulnerability_remediation
+  version: 0.1.0
+  note: detections fixed within the lookback, fixed within or after their timeframe, and the detections reopened in…
+  draft: true
+- name: servicenow_after_action_reports
+  version: 0.1.0
+  note: 'TODO: say what changed for the user'
+  draft: true
+- name: servicenow_cases
+  version: 0.2.0
+  note: have `evidence_set` blocks
+  draft: true
+- name: servicenow_changes
+  version: 0.2.0
+  note: have `evidence_set` blocks
+  draft: true
+- name: sophos_agent_updates
+  version: 0.1.0
+  note: for each endpoint, the days since its agent last updated, and whether its protection package is current
+  draft: true
+- name: sophos_endpoint_check_in
+  version: 0.1.0
+  note: for each endpoint, the hours since its agent last communicated, and whether it is online
+  draft: true
+- name: sophos_endpoint_inventory
+  version: 0.2.0
+  note: every endpoint, one inventory record each
+  draft: true
+- name: sophos_endpoint_protection
+  version: 0.1.0
+  note: for each endpoint, whether its protection services run, whether tamper protection is on, whether Intercept X…
+  draft: true
+- name: sophos_threat_protection_policies
+  version: 0.1.0
+  note: for each threat protection policy, whether a scheduled scan is configured and whether on-access scanning is on
+  draft: true
+- name: wiz_inventory
+  version: 0.1.0
+  note: 'TODO: say what changed for the user'
+  draft: true
+- name: wiz_vulnerability_findings
+  version: 0.4.0
+  note: SLA columns
+  draft: true
