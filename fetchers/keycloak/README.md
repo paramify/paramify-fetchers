@@ -24,6 +24,7 @@ client-credentials grant as a dedicated service-account client, then issues only
 | Fetcher | Evidence set | Shows |
 | --- | --- | --- |
 | `realm_security` | `EVD-KEYCLOAK-REALM-SECURITY` | Sessions, lockout, password policy, browser and recovery flows, required actions, federation, event logging |
+| `admin_events` | `EVD-KEYCLOAK-ADMIN-EVENTS` | Stored sign-in and admin events over a window: sign-ins, lockouts, user, role and client changes. Needs only `view-events` |
 
 Client secrets in identity provider configs and bind credentials in user federation configs are never written to
 the evidence.
