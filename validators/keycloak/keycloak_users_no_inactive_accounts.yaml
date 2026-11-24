@@ -5,8 +5,9 @@ role: configuration
 source: community
 statement: >
   No enabled user created before the window has gone without a stored sign-in for inactive_days
-  (enabled_users_inactive is 0). Fails while successful sign-ins are not stored, or are kept for less
-  than the window, since inactivity cannot then be judged. A brokered user signing in through an
+  (enabled_users_inactive is 0). Fails while successful sign-ins are not stored, are kept for less
+  than the window, or no stored event predates the window, and while any enabled user's creation
+  time is unknown, since inactivity cannot then be judged. A brokered user signing in through an
   external identity provider still records a sign-in in Keycloak. Does not check whether the
   collection run succeeded.
 
