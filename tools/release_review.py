@@ -257,6 +257,7 @@ class ReleaseReview(App):
         self.sub_title = f"{self.path.name} · v{self.version}"
         self.refill(keep=None)
         self.query_one("#rows", OptionList).focus()
+        self.call_after_refresh(self.relabel)  # the list's width is known only after the first layout
 
     # -- the list -------------------------------------------------------- #
 
@@ -283,8 +284,13 @@ class ReleaseReview(App):
         w = self.query_one("#rows", OptionList).size.width
         return w - 3 if w > 20 else 78
 
+    def relabel(self) -> None:
+        ol = self.query_one("#rows", OptionList)
+        for i, (k, r) in enumerate(self.listed):
+            ol.replace_option_prompt_at_index(i, label(k, r, self.label_width()))
+
     def on_resize(self) -> None:
-        self.refill(keep=self.current[1] if self.current else None)
+        self.call_after_refresh(self.relabel)
 
     def on_option_list_option_highlighted(self, event: OptionList.OptionHighlighted) -> None:
         if 0 <= event.option_index < len(self.listed):
