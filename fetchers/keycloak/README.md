@@ -28,6 +28,7 @@ client-credentials grant as a dedicated service-account client, then issues only
 | `realm_security` | `EVD-KEYCLOAK-REALM-SECURITY` | Sessions, lockout, password policy, browser and recovery flows, required actions, federation, event logging |
 | `admin_events` | `EVD-KEYCLOAK-ADMIN-EVENTS` | Stored sign-in and admin events over a window: sign-ins, lockouts, user, role and client changes. Needs only `view-events` |
 | `users_and_roles` | `EVD-KEYCLOAK-USERS-AND-ROLES` | Every user's state, authenticators, groups, effective roles and recent sign-ins; privileged users, missing second factors, inactive accounts |
+| `service_accounts` | `EVD-KEYCLOAK-SERVICE-ACCOUNTS` | Every service-account client's authenticator, secret age and expiry, owner, other sign-in flows and effective roles |
 
 Client secrets in identity provider configs and bind credentials in user federation configs are never written to
 the evidence.

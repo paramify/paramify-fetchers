@@ -1,0 +1,269 @@
+{
+ "/clients": [
+  {
+   "attributes": {},
+   "bearerOnly": true,
+   "clientAuthenticatorType": "client-secret",
+   "clientId": "realm-management",
+   "directAccessGrantsEnabled": false,
+   "enabled": true,
+   "id": "c0",
+   "implicitFlowEnabled": false,
+   "protocol": "openid-connect",
+   "publicClient": false,
+   "serviceAccountsEnabled": false,
+   "standardFlowEnabled": false
+  },
+  {
+   "attributes": {},
+   "bearerOnly": false,
+   "clientAuthenticatorType": "client-secret",
+   "clientId": "account",
+   "directAccessGrantsEnabled": false,
+   "enabled": true,
+   "id": "c1",
+   "implicitFlowEnabled": false,
+   "protocol": "openid-connect",
+   "publicClient": true,
+   "serviceAccountsEnabled": false,
+   "standardFlowEnabled": true
+  },
+  {
+   "attributes": {},
+   "bearerOnly": false,
+   "clientAuthenticatorType": "client-secret",
+   "clientId": "admin-cli",
+   "directAccessGrantsEnabled": true,
+   "enabled": true,
+   "id": "c2",
+   "implicitFlowEnabled": false,
+   "protocol": "openid-connect",
+   "publicClient": true,
+   "serviceAccountsEnabled": false,
+   "standardFlowEnabled": false
+  },
+  {
+   "attributes": {
+    "client.secret.creation.time": "1792584000",
+    "owner": "grc-team"
+   },
+   "bearerOnly": false,
+   "clientAuthenticatorType": "client-secret",
+   "clientId": "paramify-reader",
+   "directAccessGrantsEnabled": false,
+   "enabled": true,
+   "id": "c3",
+   "implicitFlowEnabled": false,
+   "protocol": "openid-connect",
+   "publicClient": false,
+   "secret": "secret-value-paramify-reader",
+   "serviceAccountsEnabled": true,
+   "standardFlowEnabled": false
+  },
+  {
+   "attributes": {
+    "client.secret.creation.time": "1760616000"
+   },
+   "bearerOnly": false,
+   "clientAuthenticatorType": "client-secret",
+   "clientId": "ci-deployer",
+   "directAccessGrantsEnabled": false,
+   "enabled": true,
+   "id": "c4",
+   "implicitFlowEnabled": false,
+   "protocol": "openid-connect",
+   "publicClient": false,
+   "secret": "secret-value-ci-deployer",
+   "serviceAccountsEnabled": true,
+   "standardFlowEnabled": false
+  },
+  {
+   "attributes": {
+    "jwt.credential.certificate": "MIIC-certificate-body",
+    "owner": "platform"
+   },
+   "bearerOnly": false,
+   "clientAuthenticatorType": "client-jwt",
+   "clientId": "platform-operator",
+   "directAccessGrantsEnabled": false,
+   "enabled": true,
+   "id": "c5",
+   "implicitFlowEnabled": false,
+   "protocol": "openid-connect",
+   "publicClient": false,
+   "serviceAccountsEnabled": true,
+   "standardFlowEnabled": false
+  },
+  {
+   "attributes": {
+    "client.secret.expiration.time": "1797768000",
+    "client.secret.rotated": "rotated-secret-value",
+    "client.secret.rotated.creation.time": "1777896000",
+    "owner": "integrations"
+   },
+   "bearerOnly": false,
+   "clientAuthenticatorType": "client-secret",
+   "clientId": "legacy-sync",
+   "directAccessGrantsEnabled": true,
+   "enabled": true,
+   "id": "c6",
+   "implicitFlowEnabled": false,
+   "protocol": "openid-connect",
+   "publicClient": false,
+   "secret": "secret-value-legacy-sync",
+   "serviceAccountsEnabled": true,
+   "standardFlowEnabled": true
+  },
+  {
+   "attributes": {
+    "client.secret.creation.time": "1717416000"
+   },
+   "bearerOnly": false,
+   "clientAuthenticatorType": "client-secret",
+   "clientId": "old-batch",
+   "directAccessGrantsEnabled": false,
+   "enabled": false,
+   "id": "c7",
+   "implicitFlowEnabled": false,
+   "protocol": "openid-connect",
+   "publicClient": false,
+   "secret": "secret-value-old-batch",
+   "serviceAccountsEnabled": true,
+   "standardFlowEnabled": false
+  },
+  {
+   "attributes": {},
+   "bearerOnly": false,
+   "clientAuthenticatorType": "client-secret",
+   "clientId": "web-portal",
+   "directAccessGrantsEnabled": false,
+   "enabled": true,
+   "id": "c8",
+   "implicitFlowEnabled": false,
+   "protocol": "openid-connect",
+   "publicClient": true,
+   "serviceAccountsEnabled": false,
+   "standardFlowEnabled": true
+  }
+ ],
+ "/clients/c3/service-account-user": {
+  "enabled": true,
+  "id": "sa-user-3",
+  "serviceAccountClientId": "paramify-reader",
+  "username": "service-account-paramify-reader"
+ },
+ "/clients/c4/service-account-user": {
+  "enabled": true,
+  "id": "sa-user-4",
+  "serviceAccountClientId": "ci-deployer",
+  "username": "service-account-ci-deployer"
+ },
+ "/clients/c5/service-account-user": {
+  "enabled": true,
+  "id": "sa-user-5",
+  "serviceAccountClientId": "platform-operator",
+  "username": "service-account-platform-operator"
+ },
+ "/clients/c6/service-account-user": {
+  "enabled": true,
+  "id": "sa-user-6",
+  "serviceAccountClientId": "legacy-sync",
+  "username": "service-account-legacy-sync"
+ },
+ "/clients/c7/service-account-user": {
+  "enabled": true,
+  "id": "sa-user-7",
+  "serviceAccountClientId": "old-batch",
+  "username": "service-account-old-batch"
+ },
+ "/users/sa-user-3/role-mappings/clients/c0/composite": [
+  {
+   "clientRole": true,
+   "composite": false,
+   "id": "role-view-users",
+   "name": "view-users"
+  },
+  {
+   "clientRole": true,
+   "composite": false,
+   "id": "role-view-clients",
+   "name": "view-clients"
+  }
+ ],
+ "/users/sa-user-3/role-mappings/realm/composite": [
+  {
+   "clientRole": false,
+   "composite": false,
+   "id": "role-default-roles-example-realm",
+   "name": "default-roles-example-realm"
+  }
+ ],
+ "/users/sa-user-4/role-mappings/clients/c0/composite": [
+  {
+   "clientRole": true,
+   "composite": false,
+   "id": "role-manage-clients",
+   "name": "manage-clients"
+  },
+  {
+   "clientRole": true,
+   "composite": false,
+   "id": "role-view-clients",
+   "name": "view-clients"
+  }
+ ],
+ "/users/sa-user-4/role-mappings/realm/composite": [
+  {
+   "clientRole": false,
+   "composite": false,
+   "id": "role-default-roles-example-realm",
+   "name": "default-roles-example-realm"
+  }
+ ],
+ "/users/sa-user-5/role-mappings/clients/c0/composite": [
+  {
+   "clientRole": true,
+   "composite": false,
+   "id": "role-realm-admin",
+   "name": "realm-admin"
+  },
+  {
+   "clientRole": true,
+   "composite": false,
+   "id": "role-manage-users",
+   "name": "manage-users"
+  }
+ ],
+ "/users/sa-user-5/role-mappings/realm/composite": [
+  {
+   "clientRole": false,
+   "composite": false,
+   "id": "role-default-roles-example-realm",
+   "name": "default-roles-example-realm"
+  },
+  {
+   "clientRole": false,
+   "composite": false,
+   "id": "role-platform-admin",
+   "name": "platform-admin"
+  }
+ ],
+ "/users/sa-user-6/role-mappings/clients/c0/composite": [],
+ "/users/sa-user-6/role-mappings/realm/composite": [
+  {
+   "clientRole": false,
+   "composite": false,
+   "id": "role-default-roles-example-realm",
+   "name": "default-roles-example-realm"
+  }
+ ],
+ "/users/sa-user-7/role-mappings/clients/c0/composite": [],
+ "/users/sa-user-7/role-mappings/realm/composite": [
+  {
+   "clientRole": false,
+   "composite": false,
+   "id": "role-default-roles-example-realm",
+   "name": "default-roles-example-realm"
+  }
+ ]
+}

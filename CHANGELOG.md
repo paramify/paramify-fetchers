@@ -12,6 +12,13 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`keycloak_service_accounts` fetcher.** Lists every Keycloak client with a service account, GET only with
+  view-clients and view-users: its authenticator (shared secret or signed key and certificate), the secret's age,
+  expiry and any rotated secret still valid, its owner from a configurable client attribute, other sign-in flows it
+  allows, and its effective realm and admin roles. Counts secrets older than `max_secret_age_days` and service
+  accounts without an owner only when those settings are set. An authenticator the fetcher doesn't recognize is never
+  assumed to have no secret: it is counted in `service_accounts_unrecognized_authenticator` and leaves the over-age
+  count null. Secrets and keys are never copied.
 - **`keycloak_users_and_roles` fetcher.** Lists every user in a Keycloak realm, GET only with view-users, view-clients
   and view-events: enabled state, required actions, LDAP federation and linked identity providers, OTP and WebAuthn
   authenticators, groups, and effective realm and admin roles through groups and composites. Counts privileged users
