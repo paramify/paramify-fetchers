@@ -35,6 +35,7 @@ from jira_common import (  # noqa: E402
     parse_ts,
     report_failure,
     resolve_fields,
+    role_state,
     role_values,
     ts_sort_key,
     utc_now,
@@ -53,6 +54,24 @@ DEFAULT_FIELDS = {
     "reported_at": "Reported At",
     "phase": "Incident Phase",
 }
+# Roles with no default name: off unless JIRA_INCIDENT_FIELDS names them, because
+# sites record these differently or not at all.
+OPTIONAL_FIELDS = (
+    "reportable",
+    "initial_report_due",
+    "next_update_due",
+    "final_report_due",
+    "last_report_sent",
+    "postmortem",
+)
+# Findings of the fixed-window rule (detected to reported within report_minutes).
+# They are not produced when the initial report is judged against a due-date field.
+WINDOW_FINDINGS = [
+    "report_time_not_measurable",
+    "detected_or_reported_time_unparseable",
+    "reported_before_detected",
+    "reported_late",
+]
 INCIDENT_FIELDS = [
     "summary",
     "project",
@@ -88,8 +107,36 @@ FINDINGS_BY_FIELD = {
 }
 
 
-def _checks_disabled(disabled_fields) -> list:
-    return sorted({f for role in disabled_fields for f in FINDINGS_BY_FIELD.get(role, [])})
+def _checks_disabled(disabled_fields, report_rule: str = "minutes_from_detection") -> list:
+    off = {f for role in disabled_fields for f in FINDINGS_BY_FIELD.get(role, [])}
+    if report_rule == "due_date_field":
+        off.update(WINDOW_FINDINGS)
+    return sorted(off)
+
+
+def _is_after(a, b):
+    """True when a is later than b, False when it is not, None when either is missing
+    or unparseable. When either is a date without a time the calendar days are
+    compared, so a report made on the due day is not late."""
+    ta, tb = parse_ts(a), parse_ts(b)
+    if not ta or not tb:
+        return None
+    if is_date_only(a) or is_date_only(b):
+        return a[:10] > b[:10]
+    return ta > tb
+
+
+def _is_past(due, now, zone=None):
+    """True when `due` has passed at `now`, None when it is missing or unparseable.
+    A date without a time has passed only once its whole day is over in the
+    collector's timezone (the zone Jira renders dates in), or in UTC without one."""
+    td = parse_ts(due)
+    if not td:
+        return None
+    if is_date_only(due):
+        today = now.astimezone(zone).date() if zone is not None else now.date()
+        return today.isoformat() > due
+    return now > td
 
 
 def _minutes_between(start, end):
@@ -128,8 +175,10 @@ def _history(histories: list, phase_ids: set, reference=None, zone=None) -> tupl
             }
             if fid == "status":
                 moves.append(entry)
-            elif fid in phase_ids:
-                phases.append(entry)
+            # The phase role may be the Status field itself, when a site's
+            # workflow statuses are its response phases.
+            if fid in phase_ids:
+                phases.append(dict(entry))
     key = lambda m: ts_sort_key(m["at"])  # noqa: E731
     return sorted(moves, key=key), sorted(phases, key=key)
 
@@ -152,7 +201,7 @@ def _linked_keys(f: dict, types: set = None) -> list:
     return keys
 
 
-def _action_record(issue: dict, now) -> dict:
+def _action_record(issue: dict, now, source: str = "sub-task") -> dict:
     f = issue.get("fields") or {}
     status = f.get("status") or {}
     is_open = name_of(status.get("statusCategory"), "key") != "done"
@@ -160,7 +209,8 @@ def _action_record(issue: dict, now) -> dict:
     return {
         "key": issue.get("key"),
         "summary": f.get("summary"),
-        "postmortem": name_of(f.get("parent"), "key"),
+        "source": source,
+        "postmortem": name_of(f.get("parent"), "key") if source == "sub-task" else None,
         "status": status.get("name"),
         "is_open": is_open,
         "assignee": name_of(f.get("assignee"), "displayName"),
@@ -172,7 +222,7 @@ def _action_record(issue: dict, now) -> dict:
 
 def _incident_record(
     issue, histories, ids, cfg, postmortems: dict, actions: dict, hidden: set,
-    history_known: bool = True, zone=None,
+    history_known: bool = True, zone=None, now=None, linked_actions: dict = None, hidden_actions: set = None,
 ) -> dict:
     f = issue.get("fields") or {}
     status = f.get("status") or {}
@@ -185,10 +235,33 @@ def _incident_record(
     # `findings`: a refused call is not evidence that something is missing.
     unknown = []
 
+    now = now or utc_now()
+    due_rule = cfg["report_rule"] == "due_date_field"
     detected = custom.get("detected_at")
-    reported = custom.get("reported_at") or f.get("created")
-    reported_source = "field" if custom.get("reported_at") else "created"
+    if due_rule:
+        # Judged against a due date, the initial report is only ever the field's
+        # own value: the ticket's created time is not a report.
+        reported = custom.get("reported_at")
+        reported_source = "field" if reported else None
+    else:
+        reported = custom.get("reported_at") or f.get("created")
+        reported_source = "field" if custom.get("reported_at") else "created"
     minutes = _minutes_between(detected, reported)
+    # Reporting deadlines apply to every incident, or only to those whose
+    # reportable field holds one of the configured values. A reportable field
+    # that was configured but could not be resolved applies them to none: the
+    # run already fails on the field problem, and a guess would be a false finding.
+    reportable = custom.get("reportable") if "reportable" in ids else None
+    if not cfg["reportable_values"]:
+        applies = True
+    elif "reportable" not in ids:
+        applies = False
+    else:
+        applies = (reportable or "").strip().lower() in cfg["reportable_values"]
+    initial_due = custom.get("initial_report_due")
+    next_due = custom.get("next_update_due")
+    final_due = custom.get("final_report_due")
+    last_report = custom.get("last_report_sent")
     category = custom.get("category")
     target = _category_target(category, cfg["category_targets"])
 
@@ -203,6 +276,19 @@ def _incident_record(
     pm_hidden = [k for k in linked_pm if k in hidden]
     pm_records = [postmortems[k] for k in pm_keys]
     action_items = [a for k in pm_keys for a in actions.get(k, [])]
+    # Action items may also be issues linked straight to the incident (types in
+    # JIRA_ACTION_ITEM_ISSUE_TYPES), for sites that do not hang them under a post-mortem.
+    linked_ai = _linked_keys(f, cfg["action_types"]) if cfg["action_types"] else []
+    seen_ai = {a["key"] for a in action_items}
+    for k in linked_ai:
+        rec = (linked_actions or {}).get(k)
+        if rec and k not in seen_ai:
+            action_items.append(rec)
+            seen_ai.add(k)
+    linked_ai_hidden = [k for k in linked_ai if k in (hidden_actions or set())]
+    # The post-mortem may be a text field on the incident itself. Only whether it
+    # is filled in is recorded, never its text.
+    pm_field_filled = bool(custom.get("postmortem")) if "postmortem" in ids else None
     severity = custom.get("severity")
     required = resolved and not no_review and (
         not cfg["required_severities"] or (severity or "").strip().lower() in cfg["required_severities"]
@@ -214,6 +300,8 @@ def _incident_record(
     if "detected_at" in ids:
         if not detected:
             findings.append("missing_detected_time")
+        elif due_rule or not applies:
+            pass  # the fixed window is not the rule for this incident
         elif minutes is None and (is_date_only(detected) or is_date_only(reported)):
             findings.append("report_time_not_measurable")
         elif minutes is None:
@@ -222,8 +310,54 @@ def _incident_record(
             findings.append("reported_before_detected")
         elif minutes > cfg["report_minutes"]:
             findings.append("reported_late")
-    if target is not None and minutes is not None and minutes > target:
+    if applies and target is not None and minutes is not None and minutes > target:
         findings.append("category_notification_target_missed")
+    initial_on_time = None
+    if due_rule and applies and initial_due and "initial_report_due" in ids and "reported_at" in ids:
+        if reported:
+            late = _is_after(reported, initial_due)
+            if late is None:
+                findings.append("report_deadline_unparseable")
+            else:
+                initial_on_time = not late
+                if late:
+                    findings.append("initial_report_late")
+        else:
+            past = _is_past(initial_due, now, zone)
+            if past is None:
+                findings.append("report_deadline_unparseable")
+            elif past:
+                initial_on_time = False
+                findings.append("initial_report_not_recorded_past_due")
+    elif (
+        due_rule and applies and cfg["reportable_values"] and not initial_due
+        and "initial_report_due" in ids and "reported_at" in ids
+    ):
+        # The incident is marked as one that must be reported, yet it has no due
+        # time to judge the report against: say so, never pass it in silence.
+        findings.append("initial_report_due_not_set")
+    if applies and next_due and not resolved and "next_update_due" in ids and "last_report_sent" in ids:
+        past = _is_past(next_due, now, zone)
+        # Stale: no report recorded, or the last one is older than this due time.
+        stale = _is_after(next_due, last_report) if last_report else True
+        if past is None or stale is None:
+            findings.append("report_deadline_unparseable")
+        elif past and stale:
+            # The update came due and the last report recorded is older than it (or absent).
+            findings.append("update_overdue")
+    if applies and final_due and "final_report_due" in ids and "last_report_sent" in ids:
+        past = _is_past(final_due, now, zone)
+        if past is None:
+            findings.append("report_deadline_unparseable")
+        elif past and not last_report:
+            findings.append("no_report_by_final_due")
+        elif past:
+            after = _is_after(last_report, final_due)
+            if after is None:
+                findings.append("report_deadline_unparseable")
+            elif after:
+                findings.append("last_report_after_final_due")
+    findings = list(dict.fromkeys(findings))
     if "severity" in ids and not severity:
         findings.append("missing_severity")
     if "category" in ids:
@@ -235,17 +369,22 @@ def _incident_record(
     if "phase" in ids and resolved and not no_review and missing_phases:
         # Past phases live in the history; without it only the current phase is seen.
         (findings if history_known else unknown).append("phases_missing" if history_known else "phases_unknown")
-    if required and not pm_keys:
+    if required and not pm_keys and not pm_field_filled:
         if pm_hidden:
             unknown.append("postmortem_not_visible")
+        elif cfg["postmortem_field_on"] and "postmortem" not in ids:
+            # The post-mortem field was configured but not resolved, so it was never read.
+            unknown.append("postmortem_field_not_read")
         else:
             findings.append("resolved_without_postmortem")
     # A post-mortem lists its sub-tasks even when they could not be read, so an
     # unreadable action item is "not visible", never "no action items".
     expected_actions = sum(p["action_item_count"] for p in pm_records)
-    if pm_keys and expected_actions == 0:
+    if pm_keys and expected_actions == 0 and not linked_ai:
         findings.append("postmortem_without_action_items")
-    elif pm_keys and len(action_items) < expected_actions:
+    elif pm_keys and len([a for a in action_items if a["source"] == "sub-task"]) < expected_actions:
+        unknown.append("action_items_not_visible")
+    if linked_ai_hidden and "action_items_not_visible" not in unknown:
         unknown.append("action_items_not_visible")
     if any(a["is_open"] and not a["assignee"] for a in action_items):
         findings.append("unassigned_action_items")
@@ -269,13 +408,22 @@ def _incident_record(
         "reported_at": reported,
         "reported_at_source": reported_source,
         "minutes_to_report": minutes,
-        "report_window_minutes": cfg["report_minutes"],
+        "report_rule": cfg["report_rule"],
+        "report_window_minutes": None if due_rule else cfg["report_minutes"],
+        "reportable": reportable,
+        "reporting_checks_apply": applies,
+        "initial_report_due": initial_due,
+        "initial_report_on_time": initial_on_time,
+        "next_update_due": next_due,
+        "final_report_due": final_due,
+        "last_report_sent": last_report,
         "category_target_minutes": target,
         "current_phase": custom.get("phase"),
         "phases_seen": phases_seen,
         "phases_missing": (missing_phases if resolved else []) if history_known else None,
         "status_history_known": history_known,
         "postmortem_required": required,
+        "postmortem_field_filled": pm_field_filled,
         "postmortems": pm_records,
         "action_items": action_items,
         "status_transitions": moves,
@@ -300,6 +448,8 @@ def _summarize(incidents: list, complete: bool = True, related_complete: bool = 
         "reported_within_window": sum(
             1 for i in incidents
             if i["minutes_to_report"] is not None
+            and i["report_window_minutes"] is not None
+            and i["reporting_checks_apply"]
             and 0 <= i["minutes_to_report"] <= i["report_window_minutes"]
         ),
         "reported_time_from_ticket_created": sum(
@@ -309,12 +459,28 @@ def _summarize(incidents: list, complete: bool = True, related_complete: bool = 
             1 for i in incidents if i["minutes_to_report"] is None
         ),
         "reported_late": sum(1 for i in incidents if "reported_late" in i["findings"]),
+        "by_reportable": counts(i["reportable"] for i in incidents),
+        "reporting_checks_applied": sum(1 for i in incidents if i["reporting_checks_apply"]),
+        "initial_report_on_time": sum(1 for i in incidents if i["initial_report_on_time"] is True),
+        "initial_report_late": sum(1 for i in incidents if "initial_report_late" in i["findings"]),
+        "initial_report_due_not_set": sum(
+            1 for i in incidents if "initial_report_due_not_set" in i["findings"]
+        ),
+        "initial_report_not_recorded_past_due": sum(
+            1 for i in incidents if "initial_report_not_recorded_past_due" in i["findings"]
+        ),
+        "update_overdue": sum(1 for i in incidents if "update_overdue" in i["findings"]),
+        "no_report_by_final_due": sum(1 for i in incidents if "no_report_by_final_due" in i["findings"]),
+        "last_report_after_final_due": sum(
+            1 for i in incidents if "last_report_after_final_due" in i["findings"]
+        ),
         "category_target_missed": sum(
             1 for i in incidents if "category_notification_target_missed" in i["findings"]
         ),
         "missing_detected_time": sum(1 for i in incidents if "missing_detected_time" in i["findings"]),
         "postmortem_required": sum(1 for i in incidents if i["postmortem_required"]),
-        "resolved_with_postmortem": sum(1 for i in resolved if i["postmortems"]),
+        "resolved_with_postmortem": sum(1 for i in resolved if i["postmortems"] or i["postmortem_field_filled"]),
+        "postmortem_recorded_in_field": sum(1 for i in incidents if i["postmortem_field_filled"]),
         "resolved_without_postmortem": sum(
             1 for i in incidents if "resolved_without_postmortem" in i["findings"]
         ),
@@ -340,7 +506,7 @@ def _config():
     fields, err = json_env("JIRA_INCIDENT_FIELDS", {})
     if err:
         return None, err
-    unknown = sorted(set(fields) - set(DEFAULT_FIELDS))
+    unknown = sorted(set(fields) - set(DEFAULT_FIELDS) - set(OPTIONAL_FIELDS))
     if unknown:
         return None, f"JIRA_INCIDENT_FIELDS has unknown keys: {', '.join(unknown)}"
     targets, err = json_env("JIRA_INCIDENT_CATEGORY_TARGETS", {})
@@ -356,6 +522,10 @@ def _config():
     if report_minutes is None or max_items is None:
         return None, "JIRA_INCIDENT_REPORT_MINUTES and JIRA_INCIDENT_MAX_ITEMS must be positive integers"
     merged = {**DEFAULT_FIELDS, **fields}
+    # An optional role left empty is simply off: it is not a field problem.
+    for role in OPTIONAL_FIELDS:
+        if role in merged and role_state(merged[role]) == "disabled":
+            del merged[role]
     invalid = invalid_roles(merged)
     if invalid:
         return None, (
@@ -380,15 +550,47 @@ def _config():
                 f"{env_name} is set but the {role} field is turned off in JIRA_INCIDENT_FIELDS; "
                 f"the check could never run"
             )
+    reportable_values = {v.lower() for v in list_env("JIRA_INCIDENT_REPORTABLE_VALUES")}
+    if ("reportable" in merged) != bool(reportable_values):
+        return None, (
+            "the reportable field in JIRA_INCIDENT_FIELDS and JIRA_INCIDENT_REPORTABLE_VALUES must be "
+            "set together: one names the field, the other the values that mean reportable"
+        )
+    due_rule = "initial_report_due" in merged
+    if due_rule and "reported_at" in disabled:
+        return None, (
+            "initial_report_due is set in JIRA_INCIDENT_FIELDS but the reported_at field is turned off; "
+            "the initial report could never be compared with its due time"
+        )
+    if due_rule and os.environ.get("JIRA_INCIDENT_REPORT_MINUTES", "").strip():
+        return None, (
+            "JIRA_INCIDENT_REPORT_MINUTES and an initial_report_due field are two rules for the same "
+            "check; set one of them"
+        )
+    for role in ("next_update_due", "final_report_due"):
+        if role in merged and "last_report_sent" not in merged:
+            return None, (
+                f"{role} is set in JIRA_INCIDENT_FIELDS but last_report_sent is not; "
+                f"the check could never run"
+            )
+    postmortem_types = {t.lower() for t in (list_env("JIRA_POSTMORTEM_ISSUE_TYPES") or ["Post-mortem"])}
+    action_types = {t.lower() for t in list_env("JIRA_ACTION_ITEM_ISSUE_TYPES")}
+    if postmortem_types & action_types:
+        return None, (
+            "JIRA_POSTMORTEM_ISSUE_TYPES and JIRA_ACTION_ITEM_ISSUE_TYPES share an issue type: "
+            f"{', '.join(sorted(postmortem_types & action_types))}; a linked issue is one or the other"
+        )
     return {
         "fields": merged,
         "disabled_fields": sorted(disabled),
         "category_targets": targets,
         "report_minutes": report_minutes,
         "max_items": max_items,
-        "postmortem_types": {
-            t.lower() for t in (list_env("JIRA_POSTMORTEM_ISSUE_TYPES") or ["Post-mortem"])
-        },
+        "postmortem_types": postmortem_types,
+        "action_types": action_types,
+        "reportable_values": reportable_values,
+        "report_rule": "due_date_field" if due_rule else "minutes_from_detection",
+        "postmortem_field_on": "postmortem" in merged,
         "required_severities": required_severities,
         "required_phases": required_phases,
         "no_review": {t.lower() for t in (list_env("JIRA_NO_POSTMORTEM_RESOLUTIONS") or DEFAULT_NO_REVIEW)},
@@ -438,9 +640,9 @@ def main() -> int:
         zone = zone_of((collector or {}).get("time_zone"))
         ids, problems, candidates = resolve_fields(client, cfg["fields"])
         raw, truncated, search_complete = client.search_issues(
-            jql, INCIDENT_FIELDS + all_field_ids(ids), cfg["max_items"]
+            jql, list(dict.fromkeys(INCIDENT_FIELDS + all_field_ids(ids))), cfg["max_items"]
         )
-        history_fields = ["status"] + list(ids.get("phase") or [])
+        history_fields = list(dict.fromkeys(["status"] + list(ids.get("phase") or [])))
         histories, history_complete, unknown_ids = client.bulk_changelogs(
             [str(i.get("id")) for i in raw if i.get("id")], history_fields
         )
@@ -476,13 +678,19 @@ def main() -> int:
             rec = _action_record(a, now)
             rec["postmortem"] = parent_of.get(a.get("key")) or rec["postmortem"]
             actions.setdefault(rec["postmortem"], []).append(rec)
-        related_complete = ok_pm and ok_ai
-        missing_related = sorted(set(missing_pm) | set(missing_ai))
+        linked_action_keys = {
+            k for i in raw for k in _linked_keys(i.get("fields") or {}, cfg["action_types"])
+        } if cfg["action_types"] else set()
+        linked_action_issues, missing_la, ok_la = fetch_issues(client, linked_action_keys, ACTION_FIELDS)
+        linked_actions = {a.get("key"): _action_record(a, now, source="linked") for a in linked_action_issues}
+        related_complete = ok_pm and ok_ai and ok_la
+        missing_related = sorted(set(missing_pm) | set(missing_ai) | set(missing_la))
 
         incidents = [
             _incident_record(
                 i, histories.get(str(i.get("id")), []), ids, cfg, postmortems, actions, set(missing_pm),
-                history_known=str(i.get("id")) not in unknown_ids, zone=zone,
+                history_known=str(i.get("id")) not in unknown_ids, zone=zone, now=now,
+                linked_actions=linked_actions, hidden_actions=set(missing_la),
             )
             for i in raw
         ]
@@ -501,10 +709,13 @@ def main() -> int:
             "fields_resolved": ids,
             "field_problems": problems,
             "field_candidates": candidates,
-            "checks_disabled": _checks_disabled(cfg["disabled_fields"]),
+            "checks_disabled": _checks_disabled(cfg["disabled_fields"], cfg["report_rule"]),
+            "report_rule": cfg["report_rule"],
+            "reportable_values": sorted(cfg["reportable_values"]) or "all incidents",
+            "action_item_issue_types": sorted(cfg["action_types"]),
             "required_phases": cfg["required_phases"],
             "no_postmortem_resolutions": sorted(cfg["no_review"]),
-            "report_window_minutes": cfg["report_minutes"],
+            "report_window_minutes": None if cfg["report_rule"] == "due_date_field" else cfg["report_minutes"],
             "category_targets_minutes": cfg["category_targets"],
             "postmortem_issue_types": sorted(cfg["postmortem_types"]),
             "postmortem_required_severities": sorted(cfg["required_severities"]) or "all resolved",
