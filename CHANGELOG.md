@@ -50,7 +50,8 @@ schemas and the `paramify` CLI — not the internal code.
   own code, and keeps only `BuiltIn` recommendations on databases. It writes no file when any read fails, Defender
   for Cloud is not registered, no instance is in scope, an in-scope instance has no Healthy or Unhealthy vulnerability
   assessment result, or an open recommendation has no type. Baselined and exempted findings leave the CSV like fixed
-  ones; the log counts them. The README holds the columns and the intake preset mapping.
+  ones; the log counts them. A warning names any in-scope instance whose Defender for SQL or vulnerability
+  assessment configuration recommendation is Unhealthy. The README holds the columns and the intake preset mapping.
 
 - **`keycloak_service_accounts` fetcher.** Lists every Keycloak client with a service account, GET only with
   view-clients and view-users: its authenticator (shared secret or signed key and certificate), the secret's age,
