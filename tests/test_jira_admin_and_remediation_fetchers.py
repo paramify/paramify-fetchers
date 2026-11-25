@@ -1294,7 +1294,9 @@ def test_site_inventory_uses_shared_client_and_write_and_finish(run):
                                                                         desks=[{"id": "1", "projectKey": "OPS", "projectName": "Ops"}]))
     assert code == 0 and status is None
     assert out["metadata"]["complete"] is True and out["metadata"]["partial_failure"] is False
-    assert out["service_management"] == {"available": True, "service_desks": [{"id": "1", "project_key": "OPS", "project_name": "Ops"}]}
+    sm = out["service_management"]
+    assert (sm["available"], sm["basis"], sm["service_desks_left_out"]) == (True, "service_desk_api", 0)
+    assert sm["service_desks"] == [{"id": "1", "project_key": "OPS", "project_name": "Ops"}]
     assert out["summary"]["issues"]["total"] == 2 and out["summary"]["incident_issues"]["total"] == 2
     assert out["summary"]["issues"]["resolution_hours"]["overall"]["count"] == 1
     assert out["issues"][0]["hours_to_resolve"] == 24.0
@@ -1304,7 +1306,9 @@ def test_site_inventory_uses_shared_client_and_write_and_finish(run):
 def test_site_inventory_without_jsm_does_not_call_the_service_desk_api(run):
     code, out, calls, _ = run("site_inventory", _inventory_router([]))
     assert code == 0
-    assert out["service_management"] == {"available": False, "service_desks": []}
+    sm = out["service_management"]
+    assert (sm["available"], sm["basis"], sm["service_desks"]) == (False, "no_service_desk_project_visible", [])
+    assert sm["declared_out_of_scope"] is None
     assert "/rest/servicedeskapi/servicedesk" not in [p for _, p, _, _ in calls]
 
 

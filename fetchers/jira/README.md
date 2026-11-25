@@ -105,6 +105,7 @@ curl -sS -u "$JIRA_EMAIL:$JIRA_API_TOKEN" -H 'Accept: application/json' \
 | `lookback_days` | `JIRA_LOOKBACK_DAYS` | `90` | Collect issues updated in the last N days |
 | `jql` | `JIRA_ISSUE_JQL` | — | Explicit JQL; overrides `lookback_days` |
 | `projects` | `JIRA_PROJECTS` | none | Comma-separated project keys or exact names (case-insensitive). Limits projects, issue types, statuses, service desks and issues to these projects; see below |
+| `out_of_scope_service_desks` | `JIRA_OUT_OF_SCOPE_SERVICE_DESKS` | none | Keys or exact names of service desk projects that exist and are deliberately not collected. Listed under `service_management.declared_out_of_scope` as stated in configuration, each with `visible_to_collector` |
 | `max_issues` | `JIRA_MAX_ISSUES` | `2000` | Issue cap; `metadata.issues_truncated` records whether it was hit |
 
 ### `jira_remediation_items`
@@ -311,7 +312,7 @@ renamed status does not move it.
 | `collector` | `GET /rest/api/3/myself` — the account the evidence was collected as |
 | `projects` | `GET /rest/api/3/project/search?expand=lead,insight,issueTypes` — type, lead, issue types, total issue count, last update |
 | `issue_types`, `priorities`, `statuses` | `GET /rest/api/3/issuetype`, `/priority/search`, `/status` |
-| `service_management` | `GET /rest/servicedeskapi/servicedesk`, called only when a `service_desk` project exists. A site with none has no Jira Service Management and is recorded as `available: false`, not a failure |
+| `service_management` | `GET /rest/servicedeskapi/servicedesk`, called only when a `service_desk` project is among the projects the account can see (the `JIRA_PROJECTS` selection does not hide it: service desks outside the selection are counted in `service_desks_left_out`). With none visible it is recorded as `available: false` with `basis: no_service_desk_project_visible`, not a failure; a service desk the account cannot browse is not visible, so that is not proof the site has none. Service desks named in `JIRA_OUT_OF_SCOPE_SERVICE_DESKS` appear under `declared_out_of_scope` (`source: configuration`), and when one of them is not visible and no service desk is, `available` is null with `basis: declared_not_visible` |
 | `issues` | `POST /rest/api/3/search/jql` — key, summary, project, type, status, priority, assignee, reporter, created/updated/resolved, hours to resolve, labels |
 | `summary` | Rollups: projects by type, issues by project/type/status category/priority, open vs resolved, open-and-unassigned, resolution time overall and per priority, and separate `change_issues` / `incident_issues` rollups |
 
