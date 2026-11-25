@@ -28,6 +28,8 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`aws_client_vpn_endpoints`** (`EVD-CLIENT-VPN`) — one record per Client VPN endpoint in the region with its split-tunnel setting, client CIDR, authentication options and connection logging, the VPC and subnets it is associated with, the authorization rules that grant groups (or every group) a destination CIDR, and the routes it pushes. Active client sessions are not read. A list whose call failed reads null and the run exits 1. An account with no endpoints succeeds with an empty result. Supports profile/region targets. Maps to KSI-CNA-ULN and KSI-SVC-SIN.
+
 - **`keycloak_service_accounts` fetcher.** Lists every Keycloak client with a service account, GET only with
   view-clients and view-users: its authenticator (shared secret or signed key and certificate), the secret's age,
   expiry and any rotated secret still valid, its owner from a configurable client attribute, other sign-in flows it

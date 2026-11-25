@@ -1,0 +1,49 @@
+name: aws_client_vpn_endpoints
+version: 0.1.0
+description: Shows each Client VPN endpoint's split-tunnel setting, the VPC and subnets it attaches to, who is authorized to which networks, and the routes it pushes.
+category: aws
+
+supports_targets: true
+
+runtime:
+  type: bash
+  entry: fetcher.sh
+
+output:
+  type: json
+  path: aws_client_vpn_endpoints.json
+  aggregation: per_target
+
+target_schema:
+  region:
+    type: string
+    required: false
+    env: AWS_DEFAULT_REGION
+    description: AWS region to collect from.
+  profile:
+    type: string
+    required: false
+    env: AWS_PROFILE
+    description: AWS named profile (credentials resolved from ~/.aws / SSO).
+secrets: []
+
+ksis:
+  - KSI-CNA-ULN
+  - KSI-SVC-SIN
+
+evidence_set:
+  reference_id: EVD-CLIENT-VPN
+  name: Client VPN Endpoints
+  instructions: |
+    Script: aws/client_vpn_endpoints/fetcher.sh
+
+    Access: Read access in the region to ec2:DescribeClientVpnEndpoints, ec2:DescribeClientVpnTargetNetworks, ec2:DescribeClientVpnAuthorizationRules and ec2:DescribeClientVpnRoutes. Without the endpoint list the run fails and results is empty. Without one of the per-endpoint calls, that endpoint's matching list reads null and the run fails.
+
+    Commands Executed:
+    - aws sts get-caller-identity — the account and identity recorded with the evidence
+    - aws ec2 describe-client-vpn-endpoints — every Client VPN endpoint, its split-tunnel setting, client CIDR, authentication, connection logging and session timeout
+    - aws ec2 describe-client-vpn-target-networks (per endpoint) — the VPC and subnets the endpoint is associated with
+    - aws ec2 describe-client-vpn-authorization-rules (per endpoint) — which groups, or all groups, may reach each destination CIDR
+    - aws ec2 describe-client-vpn-routes (per endpoint) — the routes the endpoint pushes and which subnet each targets
+
+    Output: aws_client_vpn_endpoints_<profile>_<region>.json — one record per Client VPN endpoint in results. SplitTunnel is true when clients send only the authorized networks through the VPN and the rest of their traffic directly, false when all client traffic is sent through the VPN. Status is pending-associate, available, deleting or deleted. Authentication lists each option's Type (certificate-authentication, directory-service-authentication or federated-authentication) and the directory id, client root certificate ARN or SAML provider ARN that option uses; those are null for the other types. TargetNetworks lists each association's VpcId, SubnetId and Status (associating, associated, association-failed, disassociating or disassociated). AuthorizationRules lists each rule's DestinationCidr, AuthorizeAllGroups and AccessGroupId (null when every group is authorized). Routes lists each route's DestinationCidr, TargetSubnet, Origin (associate or add-route) and Status. Active client sessions are not read. A list whose call failed reads null rather than empty, and the run fails. An account with no Client VPN endpoints has an empty results list and the run succeeds.
