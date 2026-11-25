@@ -1,0 +1,25 @@
+validator: azure_frontdoor_no_expired_certificates
+cases:
+  - name: compliant
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"served_custom_domains":3,"served_domains_certificate_expired":0,"served_domains_certificate_expiring_soon":0,"served_domains_certificate_expiry_unknown":0}}}'
+
+  - name: served_domains_certificate_expired_nonzero
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"served_custom_domains":3,"served_domains_certificate_expired":1,"served_domains_certificate_expiring_soon":0,"served_domains_certificate_expiry_unknown":0}}}'
+
+  - name: served_domains_certificate_expired_null
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"served_custom_domains":3,"served_domains_certificate_expired":null,"served_domains_certificate_expiring_soon":0,"served_domains_certificate_expiry_unknown":0}}}'
+
+  - name: served_domains_certificate_expired_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"served_custom_domains":3,"served_domains_certificate_expired_renamed":0,"served_domains_certificate_expiring_soon":0,"served_domains_certificate_expiry_unknown":0}}}'
+
+  - name: ten_times_scale_compliant
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"served_custom_domains":30,"served_domains_certificate_expired":0,"served_domains_certificate_expiring_soon":0,"served_domains_certificate_expiry_unknown":0}}}'
+
+  - name: ten_times_scale_one_nonzero
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"served_custom_domains":30,"served_domains_certificate_expired":1,"served_domains_certificate_expiring_soon":0,"served_domains_certificate_expiry_unknown":0}}}'

@@ -1,0 +1,24 @@
+key: azure_kv_certificates_not_expiring_30_days
+name: Key Vault Certificates Not Expiring Within 30 Days
+type: AUTOMATED
+role: configuration
+statement: >
+  No Key Vault certificate in the in-scope vaults that has not yet expired expires within 30 days
+  of the run (0 to 30 whole days left). Certificates with no expiry date are not counted, and with
+  no Key Vault certificates it passes. Does not assert certificates already expired, App Service
+  certificates, auto-renew policy, or whether the collection run succeeded. Fails when the count is
+  above 0, or is null because any in-scope vault's certificates couldn't be listed. Supports
+  KSI-SVC-ASM.
+
+regex: '"certificates_expiring_within_30_days":\s*(?<certificates_expiring_within_30_days>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-KEYVAULT-ROTATION

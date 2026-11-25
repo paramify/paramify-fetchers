@@ -1,0 +1,24 @@
+key: azure_frontdoor_no_expired_certificates
+name: Front Door Served Domain Certificates Not Expired
+type: AUTOMATED
+role: configuration
+statement: >
+  No custom domain that a serving Front Door (Standard/Premium) route uses has a certificate past
+  its expiry date when the fetcher ran. A domain whose certificate expiry can't be read, such as a
+  Front Door managed certificate that exposes no secret, is not counted, and with no served custom
+  domains it passes. Does not assert certificates expiring soon, the TLS floor, or whether the
+  collection run succeeded. Fails when the count is above 0, or is null because a profile, endpoint,
+  route, custom domain or secret list couldn't be read. Supports KSI-SVC-SIN.
+
+regex: '"served_domains_certificate_expired":\s*(?<served_domains_certificate_expired>\d+)'
+rules_summary: MATCH_COUNT NOT_EQUALS 0; MATCH_GROUP[1] EQUALS 0
+validation_rules:
+  - regexOperation: { type: MATCH_COUNT }
+    criteria: NOT_EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+  - regexOperation: { type: MATCH_GROUP, groupNumber: 1 }
+    criteria: EQUALS
+    value: { type: CUSTOM_TEXT, customText: "0" }
+
+evidence_sets:
+  - EVD-AZURE-FRONTDOOR-TLS

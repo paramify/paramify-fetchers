@@ -1,0 +1,34 @@
+validator: azure_kv_app_service_certificates_not_expiring_30_days
+cases:
+  - name: compliant
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"app_service_certificates_expiring_within_30_days":0,"expired_app_service_certificates":0,"in_scope_app_service_certificates":3,"total_app_service_certificates":3}}}'
+
+  - name: app_service_certificates_expiring_within_30_days_nonzero
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"app_service_certificates_expiring_within_30_days":1,"expired_app_service_certificates":0,"in_scope_app_service_certificates":3,"total_app_service_certificates":3}}}'
+
+  - name: app_service_certificates_expiring_within_30_days_null
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"app_service_certificates_expiring_within_30_days":null,"expired_app_service_certificates":0,"in_scope_app_service_certificates":3,"total_app_service_certificates":3}}}'
+
+  - name: app_service_certificates_expiring_within_30_days_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"app_service_certificates_expiring_within_30_days_renamed":0,"expired_app_service_certificates":0,"in_scope_app_service_certificates":3,"total_app_service_certificates":3}}}'
+
+  - name: ten_times_scale_compliant
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"app_service_certificates_expiring_within_30_days":0,"expired_app_service_certificates":0,"in_scope_app_service_certificates":30,"total_app_service_certificates":30}}}'
+
+  - name: ten_times_scale_one_nonzero
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"app_service_certificates_expiring_within_30_days":1,"expired_app_service_certificates":0,"in_scope_app_service_certificates":30,"total_app_service_certificates":30}}}'
+
+  - name: certificate_list_unread
+    expect: FAIL
+    note: When the App Service certificate list fails, the count reads 0 and the population null.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"app_service_certificates_expiring_within_30_days":0,"expired_app_service_certificates":0,"in_scope_app_service_certificates":null,"total_app_service_certificates":3}}}'
+
+  - name: no_app_service_certificates
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"app_service_certificates_expiring_within_30_days":0,"expired_app_service_certificates":0,"in_scope_app_service_certificates":0,"total_app_service_certificates":0}}}'
