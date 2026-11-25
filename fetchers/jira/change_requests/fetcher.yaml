@@ -1,5 +1,5 @@
 name: jira_change_requests
-version: 0.1.0
+version: 0.2.0
 description: >-
   Collects the Jira tickets a change control board works from (change requests,
   internal connection requests and configuration or traffic-policy exceptions):
@@ -39,7 +39,9 @@ config_schema:
     description: >-
       JSON object overriding the Jira field names looked up for each role. Keys:
       change_type, risk, approver, approved_at, security_review, test_results,
-      deployed_at, exception_expiry, last_reviewed. Defaults: "Change Type",
+      deployed_at, exception_expiry, last_reviewed, and the optional emergency
+      (no default name: off unless named, and then
+      JIRA_CHANGE_EMERGENCY_VALUES must be set too). Defaults: "Change Type",
       "Change Risk", "CCB Approver", "CCB Approval Date", "Security Impact
       Analysis", "Test Results", "Deployed At", "Exception Expiry", "Last
       Reviewed" (the names used while building the fetcher, so a new site
@@ -59,6 +61,26 @@ config_schema:
     description: >-
       Comma-separated status names that mean "approved by the CCB", for sites that
       record approval as a workflow transition instead of approver fields.
+  deployed_statuses:
+    type: string
+    required: false
+    env: JIRA_CHANGE_DEPLOYED_STATUSES
+    description: >-
+      Comma-separated status names that mean the change was deployed (e.g.
+      `Implemented`), for workflows where a ticket is deployed before it is
+      closed. When set, a change is deployed when it entered or is in one of
+      these statuses, and its deployment time is its first move into one; a
+      ticket closed without entering them is not deployed. Empty keeps the
+      default: deployed when the ticket reaches a done status.
+  emergency_values:
+    type: string
+    required: false
+    env: JIRA_CHANGE_EMERGENCY_VALUES
+    description: >-
+      Comma-separated values of the emergency field that mean an emergency
+      change (e.g. `Yes`). Set together with the emergency role in
+      field_names. Emergency changes are then flagged and summarized on their
+      own under summary.emergency; their findings are unchanged.
   preapproved_change_types:
     type: string
     required: false
@@ -120,7 +142,16 @@ evidence_set:
     approval_recorded_by). A change is deployed when its deployed-at field is
     set or it is done with a resolution other than the not-deployed list;
     deployment time is that field, else the first time it entered any
-    done-category status (last_done_at and reopened record a later move). A
+    done-category status (last_done_at and reopened record a later move). With
+    JIRA_CHANGE_DEPLOYED_STATUSES set, deployment is instead the first move into
+    one of those statuses (checked against GET /rest/api/3/status; a name that
+    is no status on the site fails the run as partial), a ticket closed without
+    entering them is counted in changes_closed_without_deployment, and a ticket
+    whose history could not be read lists deployment_unknown under unknown and
+    has deployed null. With the emergency field and JIRA_CHANGE_EMERGENCY_VALUES
+    set, each ticket carries emergency (true or false) and summary.emergency
+    repeats the approval counts for emergency changes only; both are null when
+    not configured. A
     date-only approval date is compared at day granularity: a later day is
     approved_after_deploy, the same day is recorded as unknown
     (approval_order_granularity: day) and never a finding. Findings per ticket:

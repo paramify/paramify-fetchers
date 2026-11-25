@@ -12,6 +12,13 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **`jira_change_requests` 0.2.0: deployment by status, and emergency changes summarized on their own.**
+  `deployed_statuses` names the statuses that mean deployed for workflows that deploy before closing: deployment is
+  then the first move into one of them, a ticket closed without entering them is counted in
+  `changes_closed_without_deployment`, and a name that is no status on the site fails the run as partial. The optional
+  `emergency` field role with `emergency_values` flags emergency changes and adds `summary.emergency`. `changes_open`
+  no longer counts a done ticket.
+
 - **`jira_remediation_items` 0.2.0: configurable due-date field and risk-accepted tickets counted apart.**
   `due_date_field` names the field that holds the due date for projects that do not use the built-in Due date;
   when it cannot be resolved the run is partial and the due-date counts are null. `risk_accepted_statuses` and

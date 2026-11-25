@@ -192,6 +192,8 @@ Administration.
 | `field_names` | `JIRA_CHANGE_FIELDS` | see yaml | JSON mapping roles (`approver`, `approved_at`, `change_type`, `risk`, `security_review`, `test_results`, `deployed_at`, `exception_expiry`, `last_reviewed`) to the site's field names |
 | `approved_statuses` | `JIRA_CHANGE_APPROVED_STATUSES` | (none) | Statuses that mean CCB-approved, when approval is a workflow step |
 | `preapproved_change_types` | `JIRA_CHANGE_PREAPPROVED_TYPES` | `Standard` | Change types that need no CCB approval |
+| `deployed_statuses` | `JIRA_CHANGE_DEPLOYED_STATUSES` | (none) | Statuses that mean deployed, for workflows that deploy before closing. Deployment is then the first move into one of them, not reaching a done status |
+| `emergency_values` | `JIRA_CHANGE_EMERGENCY_VALUES` | (none) | Values of the optional `emergency` field role that mean an emergency change; set both together |
 | `exception_issue_types` | `JIRA_EXCEPTION_ISSUE_TYPES` | `Configuration Exception` | Issue types treated as exceptions |
 | `connection_issue_types` | `JIRA_CONNECTION_ISSUE_TYPES` | `Internal Connection` | Issue types treated as internal connection requests |
 | `exception_review_days` | `JIRA_EXCEPTION_REVIEW_DAYS` | `365` | Open exceptions not reviewed within this window are flagged |
@@ -209,6 +211,21 @@ projects each create their own copy of a custom field, so a role may be pinned t
 several ids (`"change_type": "customfield_10043,customfield_10120"` or a JSON
 list); a ticket is read from whichever of them holds a value. Comment bodies are
 not collected, only the count.
+
+With `deployed_statuses` set, a ticket closed without entering one of those
+statuses is not a deployed change; it is counted in
+`changes_closed_without_deployment`. A configured name that is no status on the
+site fails the run as partial (`metadata.deployed_statuses_not_on_site`),
+because every change would otherwise read as not deployed with no finding. A
+ticket whose history could not be read, and whose current status does not say,
+has `deployed: null` and `deployment_unknown` under `unknown`.
+
+With the `emergency` role and `emergency_values` set, each ticket carries
+`emergency` and `summary.emergency` repeats the approval counts for emergency
+changes only (total, deployed, with approval, approved before or after
+deployment, without approval, their findings and keys). The findings themselves
+are the same for every change. `metadata.emergency_values_unmatched` lists
+configured values that no collected ticket holds.
 
 The default names are the ones used while building the fetcher, not a Jira
 standard, so on a new site the first run usually fails with `field_problems`
