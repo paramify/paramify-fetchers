@@ -358,6 +358,8 @@ class Manifest:
     entries: List[ManifestEntry]
     platforms: Dict[str, PlatformConfig] = field(default_factory=dict)
     paramify: Dict[str, Any] = field(default_factory=dict)
+    #: run.concurrent_categories: how many categories' entries run at once (1: one after another).
+    concurrent_categories: int = 1
     # run.schedule: {"every": <frequency>, "at": "HH:MM"}; empty when the manifest sets none.
     schedule: Dict[str, Any] = field(default_factory=dict)
 

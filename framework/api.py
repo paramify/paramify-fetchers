@@ -26,7 +26,10 @@ import secrets
 import shutil
 import sys
 import tempfile
+import threading
+from concurrent.futures import Future
 from datetime import datetime, timezone
+from functools import partial
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as pkg_version
 from pathlib import Path
@@ -1274,6 +1277,7 @@ def validate_notes(manifest: dict, root: Path, fetchers=None, platforms=None) ->
         notes += unknown_config_keys(parsed, fetchers, platforms)
     notes += _duplicate_entry_notes(parsed, fetchers)
     notes += _unused_concurrency_notes(parsed, fetchers)
+    notes += _unused_concurrent_categories_notes(parsed, fetchers)
     for entry, key in zip(parsed.entries, manifest_loader.entry_keys(parsed.entries)):
         f = fetchers.get(entry.use)
         if f is None or not f.is_pipeline:
@@ -1314,6 +1318,19 @@ def _unused_concurrency_notes(parsed, fetchers) -> List[str]:
         elif len(e.targets) < 2:
             notes.append(f"{key}: concurrency {e.concurrency} has no effect with fewer than two targets")
     return notes
+
+
+def _unused_concurrent_categories_notes(parsed, fetchers) -> List[str]:
+    """`run.concurrent_categories` with fewer than two categories to run at once."""
+    if parsed.concurrent_categories <= 1:
+        return []
+    categories = {fetchers[e.use].category for e in parsed.entries
+                  if e.use in fetchers and not fetchers[e.use].is_comparator}
+    if len(categories) >= 2:
+        return []
+    n = parsed.concurrent_categories
+    return [f"concurrent_categories {n} has no effect; every fetcher entry is in one category"
+            if categories else f"concurrent_categories {n} has no effect; the manifest has no fetcher entries"]
 
 
 def validate(manifest: dict, root: Path, fetchers=None, platforms=None) -> List[str]:
@@ -1605,6 +1622,38 @@ def _metadata_inputs(fetcher, run_id: str, collected: dict) -> List[dict]:
     return rows
 
 
+#: Ceiling on waiting for a category's thread after the run stopped. Its fetchers
+#: were killed, so it is only finishing an entry's bookkeeping.
+_LANE_JOIN_TIMEOUT = 10.0
+
+
+class _OrderedSends:
+    """Deliver each entry's events in manifest order while entries run at once.
+
+    The entry at the head of the order delivers as it goes; a later one's are
+    held until it becomes the head. Delivery happens under one lock, so the
+    event callback is never called from two threads at once.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._head: Optional[int] = None
+        self._held: Dict[int, List[Callable[[], None]]] = {}
+
+    def send(self, index: int, fn: Callable[[], None]) -> None:
+        with self._lock:
+            if index == self._head:
+                fn()
+            else:
+                self._held.setdefault(index, []).append(fn)
+
+    def advance(self, index: int) -> None:
+        with self._lock:
+            self._head = index
+            for fn in self._held.pop(index, []):
+                fn()
+
+
 def run(
     manifest: dict,
     root: Path,
@@ -1624,6 +1673,9 @@ def run(
     Raises ValueError if the manifest is schema-invalid.
     """
     from framework.runner.executor import (  # lazy: avoid import cycle
+        _Running,
+        entry_staging_dir,
+        merge_staged_entry,
         merged_config,
         run_entry,
         secret_env_vars,
@@ -1672,14 +1724,22 @@ def run(
     overall_ok = True
     started_at = _iso_now()
 
-    for entry in entries:
-        key = keys[id(entry)]
-        reason = "not discovered" if entry.use not in fetchers else problems.get(entry.use)
-        if reason:
-            emit({"event": "fetcher_skip", "fetcher": entry.use, "reason": reason})
-            skipped.append({"entry_key": key, "fetcher": entry.use, "reason": reason})
-            overall_ok = False
-            continue
+    def skip_reason(entry) -> Optional[str]:
+        return "not discovered" if entry.use not in fetchers else problems.get(entry.use)
+
+    def skip(entry, key: str, reason: str) -> None:
+        nonlocal overall_ok
+        emit({"event": "fetcher_skip", "fetcher": entry.use, "reason": reason})
+        skipped.append({"entry_key": key, "fetcher": entry.use, "reason": reason})
+        overall_ok = False
+
+    def execute(entry, key: str, out_dir: Path, send: Callable[[Callable[[], None]], None],
+                running=None):
+        """Start one entry and run it into out_dir: (results, setup error, assessment).
+
+        Every event goes through `send`, which calls what it is given now or,
+        for an entry running alongside an earlier one, once the earlier one is done.
+        """
         fetcher = fetchers[entry.use]
         spec, platform_cfg = platform_for(fetcher, platforms), platform_for(fetcher, parsed.platforms)
         # An ambient run (supports_targets, no targets[]) is a single invocation.
@@ -1692,20 +1752,23 @@ def run(
         }
         if fetcher.is_comparator:
             start_event["depends_on"] = list(fetcher.depends_on)
-        emit(start_event)
+        send(lambda: emit(start_event))
 
         inputs_index = (
             _inputs_index(fetcher, run_id, run_dir, collected, in_manifest) if fetcher.is_comparator else None
         )
 
         def on_line(line: str, _use=entry.use) -> None:
-            emit({"event": "log_line", "fetcher": _use, "line": line})
+            event = {"event": "log_line", "fetcher": _use, "line": line}
+            send(lambda: emit(event))
 
         # Its own event, not a log_line: consumers drop log_line by default, and
         # a dropped credential has to reach the operator.
         def on_note(note: str, _use=entry.use, _key=key) -> None:
-            emit({"event": "fetcher_note", "fetcher": _use, "note": note})
-            notes.append({"entry_key": _key, "fetcher": _use, "note": note})
+            def deliver() -> None:
+                emit({"event": "fetcher_note", "fetcher": _use, "note": note})
+                notes.append({"entry_key": _key, "fetcher": _use, "note": note})
+            send(deliver)
 
         # Which assessment an issue report is destined for, and whether its cycle
         # closes after the run, are resolved from the manifest but injected into
@@ -1725,7 +1788,7 @@ def run(
             results = run_entry(
                 fetcher,
                 entry,
-                run_dir,
+                out_dir,
                 spec,
                 platform_cfg,
                 on_line=on_line,
@@ -1733,17 +1796,26 @@ def run(
                 inputs_index=inputs_index,
                 secret_vars=secret_vars,
                 entry_key=key,
+                running=running,
             )
         except (RuntimeError, ValueError) as e:
-            emit({"event": "fetcher_error", "fetcher": entry.use, "error": str(e)})
-            setup_errors.append({"entry_key": key, "fetcher": entry.use, "error": str(e)})
+            return None, e, assessment
+        return results, None, assessment
+
+    def finish(entry, key: str, results, error, assessment) -> None:
+        """Record one entry's outcome, once its files are in the run dir: envelopes, sidecars, result events."""
+        nonlocal overall_ok
+        fetcher = fetchers[entry.use]
+        if error is not None:
+            emit({"event": "fetcher_error", "fetcher": entry.use, "error": str(error)})
+            setup_errors.append({"entry_key": key, "fetcher": entry.use, "error": str(error)})
             overall_ok = False
-            collected.setdefault(entry.use, []).append(_setup_failure_record(str(e)))
+            collected.setdefault(entry.use, []).append(_setup_failure_record(str(error)))
             if fetcher.is_issue_report:
                 # No invocation ran, so nothing else records it — and a cycle
                 # must not close on a run this entry was part of.
-                record_failed_entry(fetcher, run_id, run_dir, str(e), assessment)
-            continue
+                record_failed_entry(fetcher, run_id, run_dir, str(error), assessment)
+            return
 
         collected.setdefault(entry.use, []).extend(_input_record(r) for r in results)
         if fetcher.is_comparator:
@@ -1777,6 +1849,103 @@ def run(
                     result_event["error_code"] = r.error_code
             emit(result_event)
         all_results.extend(results)
+
+    def now(fn: Callable[[], None]) -> None:
+        fn()
+
+    def run_in_order(batch) -> None:
+        for entry in batch:
+            key = keys[id(entry)]
+            reason = skip_reason(entry)
+            if reason:
+                skip(entry, key, reason)
+                continue
+            finish(entry, key, *execute(entry, key, run_dir, now))
+
+    def run_by_category(batch) -> None:
+        """Run each category's entries one after another, and up to
+        run.concurrent_categories categories at once. Categories start in the
+        order they first appear in the manifest, each as a worker frees up.
+
+        Each entry writes to its own staging dir. Its events are held until
+        every entry before it in the manifest is done, then its files are moved
+        into the run dir, so the run dir, events, notes and _run_metadata.json
+        come out as a run in manifest order leaves them. The entry at the head
+        of that order streams its events live.
+        """
+        gate = _OrderedSends()
+        group = _Running()
+        stop = threading.Event()
+        futures: Dict[int, Future] = {i: Future() for i in range(len(batch))}
+        stages: Dict[int, Path] = {}
+        lanes: Dict[str, List[int]] = {}
+        for i, entry in enumerate(batch):
+            if not skip_reason(entry):
+                lanes.setdefault(fetchers[entry.use].category or "", []).append(i)
+
+        def lane(indexes: List[int]) -> None:
+            for i in indexes:
+                future = futures[i]
+                if stop.is_set():
+                    future.cancel()
+                    continue
+                entry = batch[i]
+                try:
+                    stages[i] = entry_staging_dir(run_dir, i)
+                    future.set_result(execute(entry, keys[id(entry)], stages[i],
+                                              partial(gate.send, i), group))
+                except BaseException as e:  # noqa: BLE001 — re-raised on the run's thread, in order
+                    future.set_exception(e)
+
+        # A worker never waits on the run's thread (held events are buffered, not
+        # blocked on), so capping the workers cannot deadlock the in-order merge.
+        queued = iter(list(lanes.values()))
+        take = threading.Lock()
+
+        def worker() -> None:
+            while True:
+                with take:
+                    indexes = next(queued, None)
+                if indexes is None:
+                    return
+                lane(indexes)
+
+        threads = [threading.Thread(target=worker, name=f"paramify-run-{n}", daemon=True)
+                   for n in range(min(parsed.concurrent_categories, len(lanes)))]
+        try:
+            for t in threads:
+                t.start()
+            for i, entry in enumerate(batch):
+                key = keys[id(entry)]
+                gate.advance(i)
+                reason = skip_reason(entry)
+                if reason:
+                    skip(entry, key, reason)
+                    continue
+                results, error, assessment = futures[i].result()
+                if results is not None:
+                    merge_staged_entry(results, stages[i], run_dir)
+                gate.send(i, lambda: finish(entry, key, results, error, assessment))
+        except BaseException:
+            # Ctrl-C, a SIGTERM turned into SystemExit, or a runner bug: start no
+            # more entries and stop every fetcher still running in any category.
+            stop.set()
+            group.stop()
+            raise
+        finally:
+            for t in threads:
+                t.join(timeout=_LANE_JOIN_TIMEOUT)
+            for stage in stages.values():
+                shutil.rmtree(stage, ignore_errors=True)
+
+    if parsed.concurrent_categories > 1:
+        def is_comparator(e) -> bool:
+            return e.use in fetchers and fetchers[e.use].is_comparator
+        # Comparators read what the fetchers wrote, so they still run last, in order.
+        run_by_category([e for e in entries if not is_comparator(e)])
+        run_in_order([e for e in entries if is_comparator(e)])
+    else:
+        run_in_order(entries)
 
     completed_at = _iso_now()
     metadata = {

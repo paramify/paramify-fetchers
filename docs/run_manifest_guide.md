@@ -95,6 +95,31 @@ files while it runs. A fetcher's "Evidence saved to …" line names its staging
 directory, which is removed when the entry ends; look for the file in the run
 directory instead.
 
+Entries run one after another, even when they call different services. To run
+the entries of different categories at the same time, set `concurrent_categories`
+under `run` to how many categories may run at once:
+
+```yaml
+run:
+  concurrent_categories: 2   # default 1
+  fetchers:
+  - use: aws_guard_duty
+  - use: aws_config_monitoring
+  - use: qualys_scan_coverage
+```
+
+Each category's entries still run one after another, in manifest order, since
+they share one service's rate limits; here the Qualys entry runs alongside the
+two AWS entries. With more categories than `concurrent_categories`, the rest
+wait for a free slot and start in the order they first appear in the manifest.
+Comparators run last, after every fetcher. The run comes out
+as a serial run leaves it: output lines, events, envelopes and
+`_run_metadata.json` keep manifest order, and a file name two entries share
+still fails the later entry. A later entry's output is printed once every entry
+before it is done. At most one entry per category runs at a time, plus its
+targets when it sets `concurrency`. Like concurrent targets, each entry writes
+to its own staging directory until its turn comes.
+
 ## 4. Set shared config once
 
 Wiz needs its API endpoint, which all Wiz fetchers share. `set-platform-config`

@@ -35,6 +35,11 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`run.concurrent_categories` runs the entries of up to that many categories at once.** Categories start in the order they first appear in the manifest. Entries of one category still
+  run one after another, in manifest order, and comparators run last. Output lines, events, envelopes and
+  `_run_metadata.json` keep manifest order, and a file name two entries share still fails the later entry, so the run
+  reads as a serial one. Default `1`; `paramify validate` notes the setting when the manifest has only one
+  category.
 - **`keycloak_service_accounts` fetcher.** Lists every Keycloak client with a service account, GET only with
   view-clients and view-users: its authenticator (shared secret or signed key and certificate), the secret's age,
   expiry and any rotated secret still valid, its owner from a configurable client attribute, other sign-in flows it
