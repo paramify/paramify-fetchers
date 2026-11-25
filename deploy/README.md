@@ -101,6 +101,7 @@ the same commands:
 | Known CVEs | Many | Far fewer |
 | Runs as | root | `nonroot` (UID 65532) |
 | Scheduler | Debian `cron`, with an env snapshot in `/tmp` | `supercronic`, which passes the env to each job |
+| `pip` and package manager | In the image | Not in the image (two-stage build) |
 | Status | The default | Planned to replace `Dockerfile` |
 
 To build the Wolfi image, set `PARAMIFY_DOCKERFILE` before you build:
@@ -113,6 +114,12 @@ You can also put `PARAMIFY_DOCKERFILE=Dockerfile.wolfi` in `deploy/.env`. Both
 images get the tag `paramify-fetchers:beta`, so the last build is the one that
 runs. The Wolfi image is planned to become the only image, and then
 `Dockerfile` will be removed.
+
+`Dockerfile.wolfi` has two stages. The first stage uses `pip` to install
+the Python packages. The second stage, the image that runs, gets only the
+installed packages. It does not contain `pip` or `apk`, so you cannot install a
+package in a running container. To add a tool, add its package to
+`Dockerfile.wolfi` and build the image again.
 
 The Wolfi image can write only to `/app/evidence` and `/app/manifests`. When you
 mount a host folder on `/app/evidence`, that folder keeps its host owner:

@@ -17,8 +17,9 @@ schemas and the `paramify` CLI — not the internal code.
   with `PARAMIFY_DOCKERFILE=Dockerfile.wolfi`. It runs as the non-root user `nonroot` (UID 65532), which can write
   only to `/app/evidence` and `/app/manifests`; on a Linux host, a mounted evidence folder must be writable by UID
   65532. Its scheduler is `supercronic`, which passes the container's environment to each job, so no env snapshot is
-  written to `/tmp`. `deploy/Dockerfile` (Debian, root, Debian cron) stays the default for now; the Wolfi image is
-  planned to replace it.
+  written to `/tmp`. The Dockerfile has two stages. In the first stage, `pip` installs the Python packages. The image
+  that runs gets only the installed packages. It does not contain `pip` or the `apk` package manager. `deploy/Dockerfile` (Debian, root,
+  Debian cron) stays the default for now; the Wolfi image is planned to replace it.
 
 ### Fixed
 - **`aws_codebuild_pipeline_config` 0.2.1 and `aws_opensearch_encryption_status` 0.2.1 work with jq 1.8.** Both split
