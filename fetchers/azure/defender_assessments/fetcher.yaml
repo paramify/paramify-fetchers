@@ -1,5 +1,5 @@
 name: azure_defender_assessments
-version: 0.4.2
+version: 0.4.3
 description: >-
   Lists every Defender for Cloud check result on the subscription, showing which resources pass or fail which checks and how severe each failure is.
 category: azure
