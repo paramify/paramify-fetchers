@@ -2,7 +2,6 @@ key: azure_frontdoor_no_certificates_expiring_soon
 name: Front Door Served Domain Certificates Not Expiring Within 30 Days
 type: AUTOMATED
 role: configuration
-source: community
 statement: >
   No custom domain that a serving Front Door (Standard/Premium) route uses has a certificate that
   has not yet expired and expires within the fetcher's expiry_warning_days (30) days of the run. A

@@ -2,7 +2,6 @@ key: azure_frontdoor_no_expired_certificates
 name: Front Door Served Domain Certificates Not Expired
 type: AUTOMATED
 role: configuration
-source: community
 statement: >
   No custom domain that a serving Front Door (Standard/Premium) route uses has a certificate past
   its expiry date when the fetcher ran. A domain whose certificate expiry can't be read, such as a

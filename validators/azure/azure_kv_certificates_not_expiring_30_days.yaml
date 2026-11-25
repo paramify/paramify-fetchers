@@ -2,7 +2,6 @@ key: azure_kv_certificates_not_expiring_30_days
 name: Key Vault Certificates Not Expiring Within 30 Days
 type: AUTOMATED
 role: configuration
-source: community
 statement: >
   No Key Vault certificate in the in-scope vaults that has not yet expired expires within 30 days
   of the run (0 to 30 whole days left). Certificates with no expiry date are not counted, and with

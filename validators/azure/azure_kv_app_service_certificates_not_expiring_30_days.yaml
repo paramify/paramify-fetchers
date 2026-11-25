@@ -2,7 +2,6 @@ key: azure_kv_app_service_certificates_not_expiring_30_days
 name: App Service Certificates Not Expiring Within 30 Days
 type: AUTOMATED
 role: configuration
-source: community
 statement: >
   No in-scope App Service certificate that has not yet expired expires within 30 days of the run,
   and the App Service certificate list was read. With no App Service certificates it passes. Does
