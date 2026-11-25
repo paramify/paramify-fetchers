@@ -1,0 +1,98 @@
+{
+  "sample_schema_version": "1.0",
+  "fetcher_name": "aws_client_vpn_endpoints",
+  "fetcher_version": "0.1.0",
+  "source": "synthetic",
+  "captured_on": "2026-11-24",
+  "reviewed": false,
+  "collections": [
+    {
+      "path": "results[]",
+      "records": 1,
+      "fields": {
+        "Id": 1,
+        "Name": 1,
+        "SplitTunnel": 1,
+        "Status": 1,
+        "ClientCidrBlock": 1,
+        "VpcId": 1,
+        "Authentication": 1,
+        "ConnectionLogging": 1,
+        "TargetNetworks": 1,
+        "AuthorizationRules": 1,
+        "Routes": 1
+      }
+    }
+  ],
+  "payload": {
+    "metadata": {
+      "profile": "example-profile",
+      "region": "us-gov-west-1",
+      "datetime": "2026-11-24T00:00:00Z",
+      "account_id": "111111111111",
+      "arn": "arn:aws-us-gov:sts::111111111111:assumed-role/AWSReservedSSO_ReadOnlyAccess_0000000000000000/user1@example.com"
+    },
+    "results": [
+      {
+        "Id": "cvpn-endpoint-00000000000000000",
+        "Name": "example-vpn",
+        "Description": "remote access",
+        "Status": "available",
+        "StatusMessage": null,
+        "SplitTunnel": true,
+        "VpnProtocol": "openvpn",
+        "TransportProtocol": "udp",
+        "VpnPort": 443,
+        "ClientCidrBlock": "10.1.0.0/22",
+        "DnsServers": ["10.0.0.2"],
+        "DnsName": "cvpn-endpoint-00000000000000000.example.vpn",
+        "VpcId": "vpc-00000000000000000",
+        "SecurityGroupIds": ["sg-00000000000000000"],
+        "ServerCertificateArn": "arn:aws-us-gov:acm:us-gov-west-1:111111111111:certificate/00000000-0000-4000-8000-000000000001",
+        "Authentication": [
+          {
+            "Type": "federated-authentication",
+            "DirectoryId": null,
+            "ClientRootCertificateChainArn": null,
+            "SamlProviderArn": "arn:aws-us-gov:iam::111111111111:saml-provider/Example",
+            "SelfServiceSamlProviderArn": null
+          }
+        ],
+        "ConnectionLogging": {"Enabled": true, "LogGroup": "vpn", "LogStream": "connections"},
+        "SessionTimeoutHours": 24,
+        "SelfServicePortal": "disabled",
+        "ClientConnectEnabled": false,
+        "RouteEnforcement": true,
+        "DisconnectOnSessionTimeout": true,
+        "TargetNetworks": [
+          {
+            "AssociationId": "cvpn-assoc-00000000000000000",
+            "VpcId": "vpc-00000000000000000",
+            "SubnetId": "subnet-00000000000000000",
+            "Status": "associated",
+            "SecurityGroupIds": ["sg-00000000000000000"]
+          }
+        ],
+        "AuthorizationRules": [
+          {
+            "DestinationCidr": "10.0.0.0/16",
+            "AuthorizeAllGroups": false,
+            "AccessGroupId": "group-example",
+            "Description": "engineering",
+            "Status": "active"
+          }
+        ],
+        "Routes": [
+          {
+            "DestinationCidr": "10.0.0.0/16",
+            "TargetSubnet": "subnet-00000000000000000",
+            "Origin": "add-route",
+            "Type": "Nat",
+            "Status": "active",
+            "Description": "app"
+          }
+        ]
+      }
+    ]
+  }
+}
