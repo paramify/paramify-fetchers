@@ -10,6 +10,15 @@ schemas and the `paramify` CLI — not the internal code.
 
 ## [Unreleased]
 
+### Changed
+
+- **`jira_remediation_items` 0.2.0: configurable due-date field and risk-accepted tickets counted apart.**
+  `due_date_field` names the field that holds the due date for projects that do not use the built-in Due date;
+  when it cannot be resolved the run is partial and the due-date counts are null. `risk_accepted_statuses` and
+  `risk_accepted_resolutions` flag tickets closed by accepting the risk and add `risk_accepted`,
+  `closed_risk_accepted` and `closed_excluding_risk_accepted` to the summary. A date-only due date now counts as
+  passed once its day is over in the collector's timezone, not in UTC.
+
 ### Added
 
 - **`keycloak_service_accounts` fetcher.** Lists every Keycloak client with a service account, GET only with
