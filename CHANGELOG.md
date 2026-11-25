@@ -43,6 +43,14 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`azure_defender_sql_vulnerability_report` 0.1.0: Defender for SQL vulnerability findings as an issue report.**
+  Writes every open SQL vulnerability assessment rule on each SQL managed instance database (`master` included) as one
+  CSV row for a Paramify VULNERABILITY assessment, keyed by the lowercased database id and the recommendation's key.
+  It reads the same recommendations, catalogue and severities as `azure_defender_assessments`, through that fetcher's
+  own code, and keeps only `BuiltIn` recommendations on databases. It writes no file when any read fails, Defender
+  for Cloud is not registered, no instance is in scope, an in-scope instance has no vulnerability assessment result,
+  or an open recommendation has no type. The README holds the columns and the intake preset mapping.
+
 - **`keycloak_service_accounts` fetcher.** Lists every Keycloak client with a service account, GET only with
   view-clients and view-users: its authenticator (shared secret or signed key and certificate), the secret's age,
   expiry and any rotated secret still valid, its owner from a configurable client attribute, other sign-in flows it
