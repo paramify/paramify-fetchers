@@ -122,6 +122,29 @@ def _project_record(p: dict) -> dict:
     }
 
 
+def _declared_desks(declared: list, visible_projects: list) -> list:
+    """One record per service desk named in JIRA_OUT_OF_SCOPE_SERVICE_DESKS: a key or exact
+    name (case does not matter), matched against the projects the account can see. The
+    name is the operator's statement; only visible_to_collector is observed."""
+    by_key = {str(p.get("key") or "").lower(): p for p in visible_projects}
+    by_name: dict = {}
+    for p in visible_projects:
+        by_name.setdefault(str(p.get("name") or "").strip().lower(), p)
+    out = []
+    for name in declared:
+        found = by_key.get(name.lower()) or by_name.get(name.lower())
+        out.append(
+            {
+                "name": name,
+                "source": "configuration",
+                "visible_to_collector": found is not None,
+                "project_key": found.get("key") if found else None,
+                "project_type": found.get("projectTypeKey") if found else None,
+            }
+        )
+    return out
+
+
 def _issue_record(issue: dict) -> dict:
     f = issue.get("fields") or {}
     status = f.get("status") or {}
@@ -237,6 +260,8 @@ def main() -> int:
         return 1
     # Comma-separated project keys or exact names (a name may contain spaces, not commas).
     wanted_projects = list_env("JIRA_PROJECTS")
+    # Service desks the operator states exist and are deliberately not collected.
+    declared_desks = list(dict.fromkeys(list_env("JIRA_OUT_OF_SCOPE_SERVICE_DESKS")))
     jql = os.environ.get("JIRA_ISSUE_JQL", "").strip()
     if jql:
         lookback_days = None
@@ -251,6 +276,9 @@ def main() -> int:
     statuses: list = []
     service_desks = None
     jsm_available = None
+    desks_left_out = None
+    jsm_basis = "unknown"
+    declared_out_of_scope = None
     issues: list = []
     truncated = False
     projects_ok = False
@@ -277,6 +305,7 @@ def main() -> int:
             "GET /rest/api/3/project/search",
             params={"expand": "lead,insight,issueTypes"},
         )
+        visible_projects = list(raw_projects)  # every project the account can see, before JIRA_PROJECTS narrows it
         selected = None
         if wanted_projects:
             if not projects_ok:
@@ -297,6 +326,17 @@ def main() -> int:
             raw_projects = selected
             jql = _scoped_jql([str(p.get("id")) for p in selected], jql)
         projects = [_project_record(p) for p in raw_projects]
+        if declared_desks:
+            declared_out_of_scope = _declared_desks(declared_desks, visible_projects)
+            collected_keys = {str(p.get("key") or "").lower() for p in raw_projects}
+            both = [d["name"] for d in declared_out_of_scope if (d["project_key"] or "").lower() in collected_keys]
+            if both:
+                report_failure(
+                    "JIRA_OUT_OF_SCOPE_SERVICE_DESKS names projects this run collects: " + ", ".join(both)
+                    + "; a project cannot be both collected and out of scope. Remove it from one of "
+                    "JIRA_OUT_OF_SCOPE_SERVICE_DESKS and JIRA_PROJECTS (with no JIRA_PROJECTS every visible "
+                    "project is collected)", "bad_config")
+                return 1
 
         raw_types = client.request("GET", "/rest/api/3/issuetype", "GET /rest/api/3/issuetype")
         if selected is not None:
@@ -353,14 +393,23 @@ def main() -> int:
         # called. A site without JSM answers that API with a 403 HTML page,
         # indistinguishable from a real permission denial, so it must not be
         # asked. No JSM is recorded as `available: false`, not as a failure.
-        has_service_projects = any(p["project_type"] == "service_desk" for p in projects)
+        # The whole visible list is checked, not only the JIRA_PROJECTS selection:
+        # a service desk outside the selection is left out, not absent. A service
+        # desk the account cannot browse is not in the list at all, so "no service
+        # desk visible" is what is recorded, and with desks declared out of scope
+        # their existence is taken from that statement and availability is left null.
+        has_service_projects = any(p.get("projectTypeKey") == "service_desk" for p in visible_projects)
         desks = client.service_desks() if has_service_projects else NOT_FOUND
         if desks is NOT_FOUND:
             service_desks = []
-            jsm_available = False
+            desks_left_out = 0
+            hidden = [d for d in declared_out_of_scope or [] if not d["visible_to_collector"]]
+            jsm_available = None if hidden else False
+            jsm_basis = "declared_not_visible" if hidden else "no_service_desk_project_visible"
         elif desks is None:
             jsm_available = None
         else:
+            jsm_basis = "service_desk_api"
             service_desks = [
                 {
                     "id": d.get("id"),
@@ -371,6 +420,7 @@ def main() -> int:
                 if selected is None
                 or str(d.get("projectKey") or "") in {str(p.get("key") or "") for p in selected}
             ]
+            desks_left_out = len(desks) - len(service_desks)
             jsm_available = True
 
         raw_issues, truncated, search_complete = client.search_issues(jql, ISSUE_FIELDS, max_issues)
@@ -407,7 +457,17 @@ def main() -> int:
         "statuses": statuses,
         "service_management": {
             "available": jsm_available,
+            # How availability was decided: service_desk_api (the list was read),
+            # no_service_desk_project_visible (none among the projects this account can
+            # see; one it cannot browse would not show), declared_not_visible (stated in
+            # JIRA_OUT_OF_SCOPE_SERVICE_DESKS and not visible, so availability is null)
+            # or unknown (the collection did not get that far).
+            "basis": jsm_basis,
             "service_desks": service_desks,
+            # Service desks outside the JIRA_PROJECTS selection: counted, not listed.
+            "service_desks_left_out": desks_left_out,
+            # Stated in configuration, not read from Jira; null when nothing is declared.
+            "declared_out_of_scope": declared_out_of_scope,
         },
         "issues": issues,
     }
