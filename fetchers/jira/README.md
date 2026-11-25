@@ -112,7 +112,22 @@ curl -sS -u "$JIRA_EMAIL:$JIRA_API_TOKEN" -H 'Accept: application/json' \
 | Config key | Env | Default | Description |
 |---|---|---|---|
 | `jql` | `JIRA_REMEDIATION_JQL` | (required) | JQL selecting the findings tickets, closed ones included |
+| `due_date_field` | `JIRA_REMEDIATION_DUE_DATE_FIELD` | (none) | Field holding the due date when the project does not use the built-in Due date: a field name or `customfield_` ids separated by commas. Empty reads the built-in Due date |
+| `risk_accepted_statuses` | `JIRA_REMEDIATION_RISK_ACCEPTED_STATUSES` | (none) | Status names that mean the risk was accepted, not fixed; those tickets are flagged `risk_accepted` and counted apart |
+| `risk_accepted_resolutions` | `JIRA_REMEDIATION_RISK_ACCEPTED_RESOLUTIONS` | (none) | Resolution names that mean the same, for projects that record it as a resolution |
 | `max_items` | `JIRA_REMEDIATION_MAX_ITEMS` | `2000` | Ticket cap; `metadata.items_truncated` records whether it was hit |
+
+With `due_date_field` set, the field is resolved through `GET /rest/api/3/field`
+and replaces the built-in Due date for `overdue`, `open_without_due_date` and
+`closed_after_due_date`. When it cannot be resolved (no such field, or several
+share the name: see `metadata.field_candidates`) the run is partial,
+`metadata.due_date_known` is false and the due-date counts are null. A due
+value that is not a date is kept as written and counted in
+`open_due_date_unparseable`. With a risk-accepted status or resolution set, the
+summary adds `risk_accepted`, `closed_risk_accepted` and
+`closed_excluding_risk_accepted`; they are null when neither is set.
+`metadata.risk_accepted_values_unmatched` lists configured values seen on no
+collected ticket, which is how a mistyped value shows up.
 
 Calls `GET /rest/api/3/status` (the done-category statuses), `POST
 /rest/api/3/search/jql` and `POST /rest/api/3/changelog/bulkfetch` (status
