@@ -27,6 +27,13 @@ schemas and the `paramify` CLI — not the internal code.
   `emergency` field role with `emergency_values` flags emergency changes and adds `summary.emergency`. `changes_open`
   no longer counts a done ticket.
 
+- **`jira_site_inventory` 0.3.0: service desks outside the collection are shown as left out or out of scope, not
+  absent.** A `JIRA_PROJECTS` selection with no service desk in it no longer reports the site as having no Jira
+  Service Management: service desks outside the selection are counted in `service_management.service_desks_left_out`.
+  `service_management.basis` says how availability was decided. `out_of_scope_service_desks` names service desks that
+  exist and are deliberately not collected; they are listed under `declared_out_of_scope` as stated in configuration,
+  each with whether the account can see it, and when one is not visible `available` is null, not false.
+
 - **`jira_remediation_items` 0.2.0: configurable due-date field and risk-accepted tickets counted apart.**
   `due_date_field` names the field that holds the due date for projects that do not use the built-in Due date;
   when it cannot be resolved the run is partial and the due-date counts are null. `risk_accepted_statuses` and
