@@ -194,6 +194,9 @@ Administration.
 | `preapproved_change_types` | `JIRA_CHANGE_PREAPPROVED_TYPES` | `Standard` | Change types that need no CCB approval |
 | `deployed_statuses` | `JIRA_CHANGE_DEPLOYED_STATUSES` | (none) | Statuses that mean deployed, for workflows that deploy before closing. Deployment is then the first move into one of them, not reaching a done status |
 | `emergency_values` | `JIRA_CHANGE_EMERGENCY_VALUES` | (none) | Values of the optional `emergency` field role that mean an emergency change; set both together |
+| `emergency_approval_exempt` | `JIRA_CHANGE_EMERGENCY_APPROVAL_EXEMPT` | (off) | `true` where the process lets an emergency change be deployed before approval: its approval findings go under `exempted`, not `findings` |
+| `notification_issue_types` | `JIRA_CHANGE_NOTIFICATION_ISSUE_TYPES` | (none) | Issue types of the notification tickets linked to a change. When set they are read and replace the comments-and-watchers check |
+| `notification_required_change_types` | `JIRA_CHANGE_NOTIFICATION_REQUIRED_TYPES` | (none) | Change types that need a notification; a deployed one with none linked is `notification_missing` |
 | `exception_issue_types` | `JIRA_EXCEPTION_ISSUE_TYPES` | `Configuration Exception` | Issue types treated as exceptions |
 | `connection_issue_types` | `JIRA_CONNECTION_ISSUE_TYPES` | `Internal Connection` | Issue types treated as internal connection requests |
 | `exception_review_days` | `JIRA_EXCEPTION_REVIEW_DAYS` | `365` | Open exceptions not reviewed within this window are flagged |
@@ -224,8 +227,31 @@ With the `emergency` role and `emergency_values` set, each ticket carries
 `emergency` and `summary.emergency` repeats the approval counts for emergency
 changes only (total, deployed, with approval, approved before or after
 deployment, without approval, their findings and keys). The findings themselves
-are the same for every change. `metadata.emergency_values_unmatched` lists
+are the same for every change unless `emergency_approval_exempt` is on: then
+`deployed_without_approval` and `approved_after_deploy` on an emergency change
+are listed under the ticket's `exempted`, counted in `summary.exempted`, and
+still counted in `summary.emergency`. `metadata.emergency_values_unmatched` lists
 configured values that no collected ticket holds.
+
+`approved_by` names who approved: the approver field's value, or for a
+status-based approval whoever moved the ticket into the approved status.
+
+With `notification_issue_types` set, the linked tickets of those types are read
+(`POST /rest/api/3/issue/bulkfetch`, and their status history) and listed on
+each change under `notifications`: status, `sent` (done and not cancelled),
+`sent_at` (the `notification_sent` field role, else the first move into a done
+status, else the resolution date, see `sent_at_source`), and with the
+`notification_due` field role `due`, `overdue` and `sent_late`. Both roles name
+fields on the notification ticket and are off unless named in
+`JIRA_CHANGE_FIELDS`. The comments-and-watchers finding
+(`deployed_without_notification_trail`) is then not produced. Findings:
+`notification_missing` (needs `notification_required_change_types`),
+`notification_overdue` and `notification_sent_late` (need `notification_due`).
+A linked ticket that could not be read is `notifications_not_read` under
+`unknown` and makes the run partial; a link whose issue type Jira did not give
+is `notification_link_type_unknown`, never `notification_missing`.
+`summary.notifications` counts each notification ticket once. The collector
+needs Browse Projects on the project that holds the notification tickets.
 
 The default names are the ones used while building the fetcher, not a Jira
 standard, so on a new site the first run usually fails with `field_problems`

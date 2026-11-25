@@ -12,6 +12,14 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **`jira_change_requests` 0.3.0: who approved, emergency approval exemption, and linked notification tickets.**
+  `approved_by` names the approver, for a status-based approval whoever made the approving move.
+  `emergency_approval_exempt` records the approval findings of emergency changes under `exempted`, not `findings`.
+  `notification_issue_types` reads the notification tickets linked to each change (sent, sent time, and with the
+  `notification_due` and `notification_sent` field roles due, overdue and sent late) and replaces the
+  comments-and-watchers check; `notification_required_change_types` flags a deployed change of those types with none
+  linked. A linked ticket that could not be read is unknown and makes the run partial, never a missing notification.
+
 - **`jira_change_requests` 0.2.0: deployment by status, and emergency changes summarized on their own.**
   `deployed_statuses` names the statuses that mean deployed for workflows that deploy before closing: deployment is
   then the first move into one of them, a ticket closed without entering them is counted in
