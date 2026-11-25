@@ -105,6 +105,7 @@ curl -sS -u "$JIRA_EMAIL:$JIRA_API_TOKEN" -H 'Accept: application/json' \
 | `lookback_days` | `JIRA_LOOKBACK_DAYS` | `90` | Collect issues updated in the last N days |
 | `jql` | `JIRA_ISSUE_JQL` | — | Explicit JQL; overrides `lookback_days` |
 | `projects` | `JIRA_PROJECTS` | none | Comma-separated project keys or exact names (case-insensitive). Limits projects, issue types, statuses, service desks and issues to these projects; see below |
+| `out_of_scope_service_desks` | `JIRA_OUT_OF_SCOPE_SERVICE_DESKS` | none | Keys or exact names of service desk projects that exist and are deliberately not collected. Listed under `service_management.declared_out_of_scope` as stated in configuration, each with `visible_to_collector` |
 | `max_issues` | `JIRA_MAX_ISSUES` | `2000` | Issue cap; `metadata.issues_truncated` records whether it was hit |
 
 ### `jira_remediation_items`
@@ -112,7 +113,22 @@ curl -sS -u "$JIRA_EMAIL:$JIRA_API_TOKEN" -H 'Accept: application/json' \
 | Config key | Env | Default | Description |
 |---|---|---|---|
 | `jql` | `JIRA_REMEDIATION_JQL` | (required) | JQL selecting the findings tickets, closed ones included |
+| `due_date_field` | `JIRA_REMEDIATION_DUE_DATE_FIELD` | (none) | Field holding the due date when the project does not use the built-in Due date: a field name or `customfield_` ids separated by commas. Empty reads the built-in Due date |
+| `risk_accepted_statuses` | `JIRA_REMEDIATION_RISK_ACCEPTED_STATUSES` | (none) | Status names that mean the risk was accepted, not fixed; those tickets are flagged `risk_accepted` and counted apart |
+| `risk_accepted_resolutions` | `JIRA_REMEDIATION_RISK_ACCEPTED_RESOLUTIONS` | (none) | Resolution names that mean the same, for projects that record it as a resolution |
 | `max_items` | `JIRA_REMEDIATION_MAX_ITEMS` | `2000` | Ticket cap; `metadata.items_truncated` records whether it was hit |
+
+With `due_date_field` set, the field is resolved through `GET /rest/api/3/field`
+and replaces the built-in Due date for `overdue`, `open_without_due_date` and
+`closed_after_due_date`. When it cannot be resolved (no such field, or several
+share the name: see `metadata.field_candidates`) the run is partial,
+`metadata.due_date_known` is false and the due-date counts are null. A due
+value that is not a date is kept as written and counted in
+`open_due_date_unparseable`. With a risk-accepted status or resolution set, the
+summary adds `risk_accepted`, `closed_risk_accepted` and
+`closed_excluding_risk_accepted`; they are null when neither is set.
+`metadata.risk_accepted_values_unmatched` lists configured values seen on no
+collected ticket, which is how a mistyped value shows up.
 
 Calls `GET /rest/api/3/status` (the done-category statuses), `POST
 /rest/api/3/search/jql` and `POST /rest/api/3/changelog/bulkfetch` (status
@@ -177,6 +193,11 @@ Administration.
 | `field_names` | `JIRA_CHANGE_FIELDS` | see yaml | JSON mapping roles (`approver`, `approved_at`, `change_type`, `risk`, `security_review`, `test_results`, `deployed_at`, `exception_expiry`, `last_reviewed`) to the site's field names |
 | `approved_statuses` | `JIRA_CHANGE_APPROVED_STATUSES` | (none) | Statuses that mean CCB-approved, when approval is a workflow step |
 | `preapproved_change_types` | `JIRA_CHANGE_PREAPPROVED_TYPES` | `Standard` | Change types that need no CCB approval |
+| `deployed_statuses` | `JIRA_CHANGE_DEPLOYED_STATUSES` | (none) | Statuses that mean deployed, for workflows that deploy before closing. Deployment is then the first move into one of them, not reaching a done status |
+| `emergency_values` | `JIRA_CHANGE_EMERGENCY_VALUES` | (none) | Values of the optional `emergency` field role that mean an emergency change; set both together |
+| `emergency_approval_exempt` | `JIRA_CHANGE_EMERGENCY_APPROVAL_EXEMPT` | (off) | `true` where the process lets an emergency change be deployed before approval: its approval findings go under `exempted`, not `findings` |
+| `notification_issue_types` | `JIRA_CHANGE_NOTIFICATION_ISSUE_TYPES` | (none) | Issue types of the notification tickets linked to a change. When set they are read and replace the comments-and-watchers check |
+| `notification_required_change_types` | `JIRA_CHANGE_NOTIFICATION_REQUIRED_TYPES` | (none) | Change types that need a notification; a deployed one with none linked is `notification_missing` |
 | `exception_issue_types` | `JIRA_EXCEPTION_ISSUE_TYPES` | `Configuration Exception` | Issue types treated as exceptions |
 | `connection_issue_types` | `JIRA_CONNECTION_ISSUE_TYPES` | `Internal Connection` | Issue types treated as internal connection requests |
 | `exception_review_days` | `JIRA_EXCEPTION_REVIEW_DAYS` | `365` | Open exceptions not reviewed within this window are flagged |
@@ -195,6 +216,44 @@ several ids (`"change_type": "customfield_10043,customfield_10120"` or a JSON
 list); a ticket is read from whichever of them holds a value. Comment bodies are
 not collected, only the count.
 
+With `deployed_statuses` set, a ticket closed without entering one of those
+statuses is not a deployed change; it is counted in
+`changes_closed_without_deployment`. A configured name that is no status on the
+site fails the run as partial (`metadata.deployed_statuses_not_on_site`),
+because every change would otherwise read as not deployed with no finding. A
+ticket whose history could not be read, and whose current status does not say,
+has `deployed: null` and `deployment_unknown` under `unknown`.
+
+With the `emergency` role and `emergency_values` set, each ticket carries
+`emergency` and `summary.emergency` repeats the approval counts for emergency
+changes only (total, deployed, with approval, approved before or after
+deployment, without approval, their findings and keys). The findings themselves
+are the same for every change unless `emergency_approval_exempt` is on: then
+`deployed_without_approval` and `approved_after_deploy` on an emergency change
+are listed under the ticket's `exempted`, counted in `summary.exempted`, and
+still counted in `summary.emergency`. `metadata.emergency_values_unmatched` lists
+configured values that no collected ticket holds.
+
+`approved_by` names who approved: the approver field's value, or for a
+status-based approval whoever moved the ticket into the approved status.
+
+With `notification_issue_types` set, the linked tickets of those types are read
+(`POST /rest/api/3/issue/bulkfetch`, and their status history) and listed on
+each change under `notifications`: status, `sent` (done and not cancelled),
+`sent_at` (the `notification_sent` field role, else the first move into a done
+status, else the resolution date, see `sent_at_source`), and with the
+`notification_due` field role `due`, `overdue` and `sent_late`. Both roles name
+fields on the notification ticket and are off unless named in
+`JIRA_CHANGE_FIELDS`. The comments-and-watchers finding
+(`deployed_without_notification_trail`) is then not produced. Findings:
+`notification_missing` (needs `notification_required_change_types`),
+`notification_overdue` and `notification_sent_late` (need `notification_due`).
+A linked ticket that could not be read is `notifications_not_read` under
+`unknown` and makes the run partial; a link whose issue type Jira did not give
+is `notification_link_type_unknown`, never `notification_missing`.
+`summary.notifications` counts each notification ticket once. The collector
+needs Browse Projects on the project that holds the notification tickets.
+
 The default names are the ones used while building the fetcher, not a Jira
 standard, so on a new site the first run usually fails with `field_problems`
 until `JIRA_CHANGE_FIELDS` names that site's fields. That is deliberate: the
@@ -209,7 +268,11 @@ with no `JIRA_CHANGE_APPROVED_STATUSES`), and for incidents
 `JIRA_POSTMORTEM_REQUIRED_SEVERITIES` with `severity` off,
 `JIRA_INCIDENT_REQUIRED_PHASES` with `phase` off, or
 `JIRA_INCIDENT_CATEGORY_TARGETS` / `JIRA_INCIDENT_REPORT_MINUTES` with
-`category` or `detected_at` off.
+`category` or `detected_at` off, an `initial_report_due` field together with
+`JIRA_INCIDENT_REPORT_MINUTES` or with `reported_at` off, `next_update_due` or
+`final_report_due` without `last_report_sent`, a `reportable` field without
+`JIRA_INCIDENT_REPORTABLE_VALUES` (or the reverse), and an issue type listed in
+both `JIRA_POSTMORTEM_ISSUE_TYPES` and `JIRA_ACTION_ITEM_ISSUE_TYPES`.
 
 When a change has no deployed-at field, its deployment time is the first move
 into any done-category status (the status list is read once from
@@ -256,7 +319,9 @@ renamed status does not move it.
 | Config key | Env | Default | Description |
 |---|---|---|---|
 | `jql` | `JIRA_INCIDENT_JQL` | (required) | JQL selecting the incident tickets |
-| `field_names` | `JIRA_INCIDENT_FIELDS` | see yaml | JSON mapping roles (`severity`, `category`, `detected_at`, `reported_at`, `phase`) to field names |
+| `field_names` | `JIRA_INCIDENT_FIELDS` | see yaml | JSON mapping roles (`severity`, `category`, `detected_at`, `reported_at`, `phase`) to field names. Optional roles, off unless named: `reportable`, `initial_report_due`, `next_update_due`, `final_report_due`, `last_report_sent`, `postmortem`. `phase` may be the built-in `Status` field |
+| `reportable_values` | `JIRA_INCIDENT_REPORTABLE_VALUES` | (none) | Values of the `reportable` field that mean the incident must be reported; reporting checks then run only on those incidents |
+| `action_item_issue_types` | `JIRA_ACTION_ITEM_ISSUE_TYPES` | (none) | Issue types that count as action items when linked straight to an incident |
 | `report_minutes` | `JIRA_INCIDENT_REPORT_MINUTES` | `60` | Detection-to-report window |
 | `category_targets` | `JIRA_INCIDENT_CATEGORY_TARGETS` | (none) | JSON of per-category notification targets in minutes, matched by name or prefix |
 | `postmortem_issue_types` | `JIRA_POSTMORTEM_ISSUE_TYPES` | `Post-mortem` | Linked issue types that count as post-mortems; their sub-tasks are the action items. The collector needs Browse Projects on the post-mortem project too: Jira removes links to issues the caller cannot see, so a hidden post-mortem looks like no post-mortem |
@@ -273,7 +338,7 @@ renamed status does not move it.
 | `collector` | `GET /rest/api/3/myself` — the account the evidence was collected as |
 | `projects` | `GET /rest/api/3/project/search?expand=lead,insight,issueTypes` — type, lead, issue types, total issue count, last update |
 | `issue_types`, `priorities`, `statuses` | `GET /rest/api/3/issuetype`, `/priority/search`, `/status` |
-| `service_management` | `GET /rest/servicedeskapi/servicedesk`, called only when a `service_desk` project exists. A site with none has no Jira Service Management and is recorded as `available: false`, not a failure |
+| `service_management` | `GET /rest/servicedeskapi/servicedesk`, called only when a `service_desk` project is among the projects the account can see (the `JIRA_PROJECTS` selection does not hide it: service desks outside the selection are counted in `service_desks_left_out`). With none visible it is recorded as `available: false` with `basis: no_service_desk_project_visible`, not a failure; a service desk the account cannot browse is not visible, so that is not proof the site has none. Service desks named in `JIRA_OUT_OF_SCOPE_SERVICE_DESKS` appear under `declared_out_of_scope` (`source: configuration`), and when one of them is not visible and no service desk is, `available` is null with `basis: declared_not_visible` |
 | `issues` | `POST /rest/api/3/search/jql` — key, summary, project, type, status, priority, assignee, reporter, created/updated/resolved, hours to resolve, labels |
 | `summary` | Rollups: projects by type, issues by project/type/status category/priority, open vs resolved, open-and-unassigned, resolution time overall and per priority, and separate `change_issues` / `incident_issues` rollups |
 

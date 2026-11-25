@@ -88,7 +88,7 @@ BACKUP_KINDS = {
 
 # MySQL labels an on-demand backup FULL / Automatic, the same as a scheduled one (Microsoft's BackupPut.json example,
 # 2023-12-30); only the name, customer_<time>_<id>_<user name>, sets it apart. Scheduled backups are named daily_... in
-# that example but daily-<time>-<id> in a live Azure Government response (2024-12-30), so both separators are accepted.
+# that example but daily-<time>-<id> in the 2024-12-30 api-version, so both separators are accepted.
 MYSQL_ON_DEMAND_PREFIXES = ("customer_", "customer-")
 
 

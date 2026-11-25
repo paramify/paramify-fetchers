@@ -1,12 +1,14 @@
 name: jira_incident_postmortems
-version: 0.1.0
+version: 0.2.1
 description: >-
   Collects Jira incident tickets with severity, category, detected and reported
   times (minutes to report against a reporting window and per-category
-  notification targets), response phase history, linked post-mortems and their
-  action items (owner, due date, status), with per-incident findings such as
-  reported late, resolved without a post-mortem, post-mortem without action
-  items, and unassigned or overdue action items.
+  notification targets, or the initial report against a due-date field, with
+  next-update and final-report due times), response phase history, post-mortems
+  (linked tickets or a field on the incident) and their action items (owner,
+  due date, status), with per-incident findings such as reported late, resolved
+  without a post-mortem, post-mortem without action items, and unassigned or
+  overdue action items.
 category: jira
 
 supports_targets: false
@@ -51,12 +53,25 @@ config_schema:
       several, metadata.field_candidates lists the ids to choose from.
       Without a reported-at field the ticket's created time is used and counted
       in summary.reported_time_from_ticket_created.
+      Optional keys, off unless named here: reportable (with reportable_values,
+      limits the reporting checks to incidents holding one of those values),
+      initial_report_due (the initial report is then judged against this due
+      time instead of report_minutes, using only the reported_at field's own
+      value, never the created time; setting report_minutes as well is refused
+      as bad_config), next_update_due and final_report_due (both need
+      last_report_sent), last_report_sent, and postmortem (a text field on the
+      incident that holds the post-mortem; only whether it is filled in is
+      recorded, never its text). phase may name the built-in Status field when
+      the workflow statuses are the response phases.
   report_minutes:
     type: integer
     required: false
     env: JIRA_INCIDENT_REPORT_MINUTES
-    default: 60
-    description: Maximum minutes from detection to report before an incident is flagged as reported late.
+    description: >-
+      Maximum minutes from detection to report before an incident is flagged as
+      reported late; 60 when not set. It has no default here on purpose: a
+      default would count as set, and setting it with detected_at turned off or
+      with an initial_report_due field is refused as bad_config.
   category_targets:
     type: string
     required: false
@@ -65,6 +80,23 @@ config_schema:
       JSON object of notification targets in minutes per category, matched by
       exact name or longest whole-word prefix, case-insensitive, e.g. {"CAT 4":
       15, "CAT 1": 120}. With targets set, a category without one is flagged.
+  reportable_values:
+    type: string
+    required: false
+    env: JIRA_INCIDENT_REPORTABLE_VALUES
+    description: >-
+      Comma-separated values of the reportable field that mean the incident must
+      be reported, e.g. Yes. Required with the reportable field and refused
+      without it. Reporting checks then run only on incidents holding one of
+      these values; an incident with another value, or none, gets none of them.
+  action_item_issue_types:
+    type: string
+    required: false
+    env: JIRA_ACTION_ITEM_ISSUE_TYPES
+    description: >-
+      Comma-separated issue types that count as action items when linked
+      straight to an incident, for sites that do not track them as sub-tasks of
+      a post-mortem ticket. May not overlap postmortem_issue_types.
   postmortem_issue_types:
     type: string
     required: false
@@ -112,9 +144,32 @@ evidence_set:
     (summary, type, status, priority, assignee, created, resolutiondate,
     issuelinks and the resolved custom fields), reads status and phase history
     with POST /rest/api/3/changelog/bulkfetch, then reads linked issues of the
-    configured post-mortem types and their sub-tasks (the action items) with
+    configured post-mortem types and their sub-tasks (the action items), and
+    linked issues of the configured action item types, with
     POST /rest/api/3/issue/bulkfetch. Per incident: minutes_to_report (detected
     to reported), category target, phases_seen, post-mortems and action items.
+    With an initial_report_due field the initial report is judged against that
+    due time (initial_report_late, or initial_report_not_recorded_past_due when
+    the reported_at field is empty after the due time; the ticket's created
+    time is never taken as the report) and the fixed-window findings are listed
+    in metadata.checks_disabled. With next_update_due an open incident whose
+    due time has passed with no report at or after it is update_overdue. With
+    final_report_due, a passed due time with no report recorded is
+    no_report_by_final_due, and a last report later than it is
+    last_report_after_final_due. A due or report value that cannot be read as
+    a time is report_deadline_unparseable. A due date without a time compares
+    calendar days, and has passed once that day is over in the collector's
+    Jira timezone. Because last_report_sent holds only the latest report,
+    last_report_after_final_due cannot tell a late final report from a further
+    report sent after an on-time one. Jira strips links to issues the collector
+    cannot see, so linked action items in a project without Browse are not counted.
+    With phase set to the Status field, a required phase that is itself a
+    done-category status is checked on every resolved incident. With a reportable field these checks, reported_late and
+    category targets run only where reporting_checks_apply is true. With a
+    postmortem field, a filled field counts as the post-mortem
+    (postmortem_field_filled); its text is not collected. A configured field
+    that could not be resolved runs none of its checks
+    (postmortem_field_not_read under unknown) and fails the run.
     Only links to the configured post-mortem types are followed. Jira strips
     links to issues the collector cannot see (measured: an issue in a project
     without Browse disappears from issuelinks and from bulkfetch without an
@@ -128,7 +183,11 @@ evidence_set:
     post-mortem or action item was not read.
     A detected or reported value that is a date without a time cannot measure
     minutes, so it is report_time_not_measurable, never late or on time.
-    Findings: missing_detected_time, report_time_not_measurable,
+    Findings: initial_report_late, initial_report_not_recorded_past_due,
+    initial_report_due_not_set (an incident whose reportable field marks it as
+    reportable has no initial report due time),
+    update_overdue, no_report_by_final_due, last_report_after_final_due,
+    report_deadline_unparseable, missing_detected_time, report_time_not_measurable,
     detected_or_reported_time_unparseable,
     reported_before_detected, reported_late,
     category_notification_target_missed, missing_severity, missing_category,

@@ -1,0 +1,297 @@
+[
+  {
+    "id": "00000000-0000-0000-0000-000000000021",
+    "time": 1794961260268,
+    "type": "CLIENT_LOGIN",
+    "realmId": "00000000-0000-0000-0000-000000000018",
+    "clientId": "paramify-reader",
+    "userId": "00000000-0000-0000-0000-000000000011",
+    "ipAddress": "127.0.0.1",
+    "details": {
+      "token_id": "trrtcc:00000000-0000-0000-0000-000000000005",
+      "grant_type": "client_credentials",
+      "scope": "kc-admin-api email profile",
+      "client_auth_method": "client-secret",
+      "username": "service-account-paramify-reader"
+    }
+  },
+  {
+    "id": "00000000-0000-0000-0000-000000000050",
+    "time": 1794961239235,
+    "type": "CLIENT_LOGIN",
+    "realmId": "00000000-0000-0000-0000-000000000018",
+    "clientId": "paramify-reader",
+    "userId": "00000000-0000-0000-0000-000000000011",
+    "ipAddress": "127.0.0.1",
+    "details": {
+      "token_id": "trrtcc:00000000-0000-0000-0000-000000000024",
+      "grant_type": "client_credentials",
+      "scope": "kc-admin-api email profile",
+      "client_auth_method": "client-secret",
+      "username": "service-account-paramify-reader"
+    }
+  },
+  {
+    "id": "00000000-0000-0000-0000-000000000057",
+    "time": 1794961238920,
+    "type": "CLIENT_LOGIN",
+    "realmId": "00000000-0000-0000-0000-000000000018",
+    "clientId": "paramify-reader",
+    "userId": "00000000-0000-0000-0000-000000000011",
+    "ipAddress": "127.0.0.1",
+    "details": {
+      "token_id": "trrtcc:00000000-0000-0000-0000-000000000063",
+      "grant_type": "client_credentials",
+      "scope": "kc-admin-api email profile",
+      "client_auth_method": "client-secret",
+      "username": "service-account-paramify-reader"
+    }
+  },
+  {
+    "id": "00000000-0000-0000-0000-000000000020",
+    "time": 1794961238363,
+    "type": "CLIENT_LOGIN",
+    "realmId": "00000000-0000-0000-0000-000000000018",
+    "clientId": "paramify-reader",
+    "userId": "00000000-0000-0000-0000-000000000011",
+    "ipAddress": "127.0.0.1",
+    "details": {
+      "token_id": "trrtcc:00000000-0000-0000-0000-000000000060",
+      "grant_type": "client_credentials",
+      "scope": "kc-admin-api email profile",
+      "client_auth_method": "client-secret",
+      "username": "service-account-paramify-reader"
+    }
+  },
+  {
+    "id": "00000000-0000-0000-0000-000000000026",
+    "time": 1794961226575,
+    "type": "CLIENT_LOGIN",
+    "realmId": "00000000-0000-0000-0000-000000000018",
+    "clientId": "paramify-reader",
+    "userId": "00000000-0000-0000-0000-000000000011",
+    "ipAddress": "127.0.0.1",
+    "details": {
+      "token_id": "trrtcc:00000000-0000-0000-0000-000000000027",
+      "grant_type": "client_credentials",
+      "scope": "kc-admin-api email profile",
+      "client_auth_method": "client-secret",
+      "username": "service-account-paramify-reader"
+    }
+  },
+  {
+    "id": "00000000-0000-0000-0000-000000000028",
+    "time": 1794961201221,
+    "type": "CLIENT_LOGIN",
+    "realmId": "00000000-0000-0000-0000-000000000018",
+    "clientId": "paramify-reader",
+    "userId": "00000000-0000-0000-0000-000000000011",
+    "ipAddress": "127.0.0.1",
+    "details": {
+      "token_id": "trrtcc:00000000-0000-0000-0000-000000000061",
+      "grant_type": "client_credentials",
+      "scope": "email profile",
+      "client_auth_method": "client-secret",
+      "username": "service-account-paramify-reader"
+    }
+  },
+  {
+    "id": "00000000-0000-0000-0000-000000000033",
+    "time": 1794961159159,
+    "type": "CLIENT_LOGIN",
+    "realmId": "00000000-0000-0000-0000-000000000018",
+    "clientId": "paramify-reader",
+    "userId": "00000000-0000-0000-0000-000000000011",
+    "ipAddress": "127.0.0.1",
+    "details": {
+      "token_id": "trrtcc:00000000-0000-0000-0000-000000000010",
+      "grant_type": "client_credentials",
+      "scope": "email profile",
+      "client_auth_method": "client-secret",
+      "username": "service-account-paramify-reader"
+    }
+  },
+  {
+    "id": "00000000-0000-0000-0000-000000000048",
+    "time": 1794961146942,
+    "type": "CLIENT_LOGIN",
+    "realmId": "00000000-0000-0000-0000-000000000018",
+    "clientId": "paramify-reader",
+    "userId": "00000000-0000-0000-0000-000000000011",
+    "ipAddress": "127.0.0.1",
+    "details": {
+      "token_id": "trrtcc:00000000-0000-0000-0000-000000000038",
+      "grant_type": "client_credentials",
+      "scope": "email profile",
+      "client_auth_method": "client-secret",
+      "username": "service-account-paramify-reader"
+    }
+  },
+  {
+    "id": "00000000-0000-0000-0000-000000000002",
+    "time": 1794961135016,
+    "type": "CLIENT_LOGIN",
+    "realmId": "00000000-0000-0000-0000-000000000018",
+    "clientId": "paramify-reader",
+    "userId": "00000000-0000-0000-0000-000000000011",
+    "ipAddress": "127.0.0.1",
+    "details": {
+      "token_id": "trrtcc:00000000-0000-0000-0000-000000000008",
+      "grant_type": "client_credentials",
+      "scope": "email profile",
+      "client_auth_method": "client-secret",
+      "username": "service-account-paramify-reader"
+    }
+  },
+  {
+    "id": "00000000-0000-0000-0000-000000000062",
+    "time": 1794961126959,
+    "type": "CLIENT_LOGIN",
+    "realmId": "00000000-0000-0000-0000-000000000018",
+    "clientId": "paramify-reader",
+    "userId": "00000000-0000-0000-0000-000000000011",
+    "ipAddress": "127.0.0.1",
+    "details": {
+      "token_id": "trrtcc:00000000-0000-0000-0000-000000000032",
+      "grant_type": "client_credentials",
+      "scope": "email profile",
+      "client_auth_method": "client-secret",
+      "username": "service-account-paramify-reader"
+    }
+  },
+  {
+    "id": "00000000-0000-0000-0000-000000000013",
+    "time": 1794961112253,
+    "type": "LOGIN_ERROR",
+    "realmId": "00000000-0000-0000-0000-000000000018",
+    "clientId": "example-app",
+    "userId": "00000000-0000-0000-0000-000000000044",
+    "ipAddress": "127.0.0.1",
+    "error": "user_temporarily_disabled",
+    "details": {
+      "auth_method": "openid-connect",
+      "grant_type": "password",
+      "client_auth_method": "client-secret",
+      "username": "carol"
+    }
+  },
+  {
+    "id": "00000000-0000-0000-0000-000000000003",
+    "time": 1794961112180,
+    "type": "LOGIN_ERROR",
+    "realmId": "00000000-0000-0000-0000-000000000018",
+    "clientId": "example-app",
+    "userId": "00000000-0000-0000-0000-000000000044",
+    "ipAddress": "127.0.0.1",
+    "error": "user_temporarily_disabled",
+    "details": {
+      "auth_method": "openid-connect",
+      "grant_type": "password",
+      "client_auth_method": "client-secret",
+      "username": "carol"
+    }
+  },
+  {
+    "id": "00000000-0000-0000-0000-000000000009",
+    "time": 1794961112104,
+    "type": "LOGIN_ERROR",
+    "realmId": "00000000-0000-0000-0000-000000000018",
+    "clientId": "example-app",
+    "userId": "00000000-0000-0000-0000-000000000044",
+    "ipAddress": "127.0.0.1",
+    "error": "user_temporarily_disabled",
+    "details": {
+      "auth_method": "openid-connect",
+      "grant_type": "password",
+      "client_auth_method": "client-secret",
+      "username": "carol"
+    }
+  },
+  {
+    "id": "00000000-0000-0000-0000-000000000017",
+    "time": 1794961112031,
+    "type": "USER_DISABLED_BY_TEMPORARY_LOCKOUT",
+    "realmId": "00000000-0000-0000-0000-000000000018",
+    "userId": "00000000-0000-0000-0000-000000000044",
+    "ipAddress": "127.0.0.1",
+    "details": {
+      "reason": "brute_force_attack detected",
+      "num_failures": "2",
+      "not_before": "2026-11-18T00:19:32"
+    }
+  },
+  {
+    "id": "00000000-0000-0000-0000-000000000019",
+    "time": 1794961112022,
+    "type": "LOGIN_ERROR",
+    "realmId": "00000000-0000-0000-0000-000000000018",
+    "clientId": "example-app",
+    "userId": "00000000-0000-0000-0000-000000000044",
+    "ipAddress": "127.0.0.1",
+    "error": "invalid_user_credentials",
+    "details": {
+      "auth_method": "openid-connect",
+      "grant_type": "password",
+      "client_auth_method": "client-secret",
+      "username": "carol"
+    }
+  },
+  {
+    "id": "00000000-0000-0000-0000-000000000046",
+    "time": 1794961111820,
+    "type": "LOGIN_ERROR",
+    "realmId": "00000000-0000-0000-0000-000000000018",
+    "clientId": "example-app",
+    "userId": "00000000-0000-0000-0000-000000000044",
+    "ipAddress": "127.0.0.1",
+    "error": "invalid_user_credentials",
+    "details": {
+      "auth_method": "openid-connect",
+      "grant_type": "password",
+      "client_auth_method": "client-secret",
+      "username": "carol"
+    }
+  },
+  {
+    "id": "00000000-0000-0000-0000-000000000053",
+    "time": 1794961111721,
+    "type": "LOGIN",
+    "realmId": "00000000-0000-0000-0000-000000000018",
+    "clientId": "example-app",
+    "userId": "00000000-0000-0000-0000-000000000004",
+    "sessionId": "D9MM6UAiTXDeKaAL1N7ZinFL",
+    "ipAddress": "127.0.0.1",
+    "details": {
+      "refresh_token_provider_id": "default",
+      "auth_method": "openid-connect",
+      "token_id": "onrtro:00000000-0000-0000-0000-000000000035",
+      "grant_type": "password",
+      "refresh_token_type": "Refresh",
+      "scope": "email profile",
+      "refresh_token_id": "00000000-0000-0000-0000-000000000025",
+      "client_auth_method": "client-secret",
+      "username": "alice"
+    }
+  },
+  {
+    "id": "00000000-0000-0000-0000-000000000030",
+    "time": 1794961111590,
+    "type": "LOGIN",
+    "realmId": "00000000-0000-0000-0000-000000000018",
+    "clientId": "example-app",
+    "userId": "00000000-0000-0000-0000-000000000004",
+    "sessionId": "F1ZMS95rtibvzPukXMY8dUWe",
+    "ipAddress": "127.0.0.1",
+    "details": {
+      "refresh_token_provider_id": "default",
+      "auth_method": "openid-connect",
+      "token_id": "onrtro:00000000-0000-0000-0000-000000000015",
+      "grant_type": "password",
+      "refresh_token_type": "Refresh",
+      "scope": "email profile",
+      "refresh_token_id": "00000000-0000-0000-0000-000000000042",
+      "client_auth_method": "client-secret",
+      "username": "alice"
+    }
+  }
+]

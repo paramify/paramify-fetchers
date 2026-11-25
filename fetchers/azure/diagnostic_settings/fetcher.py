@@ -213,8 +213,21 @@ def category_coverage(settings: list[dict]) -> dict:
     }
 
 
-def summarize(settings: list[dict]) -> dict:
-    """Whether the Activity Log is exported at all, and whether it is complete."""
+SETTING_FIELDS = (
+    "total_diagnostic_settings", "activity_log_exported", "settings_with_storage_account",
+    "settings_with_log_analytics_workspace", "settings_with_event_hub", "settings_with_partner_solution",
+    "log_category_coverage", "covered_required_log_categories", "required_log_category_percentage",
+    "all_required_log_categories_covered", "settings_capturing_required_categories",
+    "settings_with_legacy_retention",
+)
+
+
+def summarize(settings: list[dict] | None) -> dict:
+    """Whether the Activity Log is exported at all, and whether it is complete.
+
+    None (the list was not read) gives null for every count, the coverage map and the verdicts built from it."""
+    if settings is None:
+        return {**dict.fromkeys(SETTING_FIELDS), "required_log_categories": list(REQUIRED_LOG_CATEGORIES)}
     coverage = category_coverage(settings)
     required_covered = [c for c in REQUIRED_LOG_CATEGORIES if coverage.get(c)]
     return {
@@ -254,8 +267,8 @@ def summarize(settings: list[dict]) -> dict:
 
 # --- collection (lazy azure imports) ---
 
-def collect_diagnostic_settings(subscription_id, cred, collector: Collector) -> list[dict]:
-    """One diagnostic_settings.list() at subscription scope."""
+def collect_diagnostic_settings(subscription_id, cred, collector: Collector) -> list[dict] | None:
+    """One diagnostic_settings.list() at subscription scope; None when it couldn't be read."""
     from azure.mgmt.monitor import MonitorManagementClient
 
     def _client():
@@ -263,7 +276,7 @@ def collect_diagnostic_settings(subscription_id, cred, collector: Collector) -> 
 
     client = collector.guard("monitor.MonitorManagementClient (init)", _client)
     if client is None:
-        return []
+        return None
 
     # azure-mgmt-monitor 7.0.0 dropped this operation group; without the check the
     # failure would read as an opaque AttributeError instead of naming the fix.
@@ -275,7 +288,7 @@ def collect_diagnostic_settings(subscription_id, cred, collector: Collector) -> 
                 "operation group (removed in 7.0.0) — pin azure-mgmt-monitor<7"
             ),
         )
-        return []
+        return None
 
     def _list():
         # Subscription scope returns one page; the SDK follows nextLink regardless.
@@ -286,8 +299,8 @@ def collect_diagnostic_settings(subscription_id, cred, collector: Collector) -> 
             )
         ]
 
-    settings = collector.guard("monitor.diagnostic_settings.list", _list, default=[])
-    return sorted(settings, key=lambda r: r.get("id") or "")
+    settings = collector.guard("monitor.diagnostic_settings.list", _list)
+    return None if settings is None else sorted(settings, key=lambda r: r.get("id") or "")
 
 
 def main() -> int:
@@ -306,7 +319,7 @@ def main() -> int:
     subscription_id = sub["subscription_id"]
     cred = collector.guard("azure.identity.DefaultAzureCredential", credential)
 
-    settings: list[dict] = []
+    settings: list[dict] | None = None
     registration = REGISTRATION_UNKNOWN
     if subscription_id and cred is not None:
         # ARM returns an empty list, not an error, for an unregistered provider.
@@ -320,7 +333,7 @@ def main() -> int:
                 subscription_id,
             )
         settings = collect_diagnostic_settings(subscription_id, cred, collector)
-        if not settings and collector.ok:
+        if settings == [] and collector.ok:
             logger.warning(
                 "No subscription-scope diagnostic setting on %s — the Activity Log "
                 "is not exported and is retained for 90 days only",
@@ -340,7 +353,7 @@ def main() -> int:
         subscription_source=sub["subscription_source"],
         collector=collector,
         results={
-            "diagnostic_settings": settings,
+            "diagnostic_settings": settings or [],
             "scope": "subscription",
             "provider_registration_status": registration,
         },

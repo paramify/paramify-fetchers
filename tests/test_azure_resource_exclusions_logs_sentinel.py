@@ -161,6 +161,15 @@ def test_activity_alerts_counts_are_null_when_their_list_was_refused(monkeypatch
     assert evidence["summary"]["resource_exclusion_patterns_unmatched"] is None
 
 
+def test_activity_alerts_refused_leave_log_storage_protection_null(monkeypatch, tmp_path):
+    code, evidence, _ = run_activity_alerts(monkeypatch, tmp_path, None, "alerts")
+    summary = evidence["summary"]
+    assert code == 1 and set(summary["log_storage_protection_coverage"].values()) == {None}
+    assert (summary["all_log_storage_protection_operations_covered"], summary["uncovered_log_storage_protection_operations"],
+            summary["log_storage_protection_operations_covered"]) == (None, None, None)
+    assert set(evidence["results"]["log_storage_protection_operations"]) == set(ala.LOG_STORAGE_PROTECTION_OPERATIONS)
+
+
 def test_activity_alerts_exclude_by_group_and_id_but_keep_routing_through_excluded_records(monkeypatch, tmp_path):
     named = f"{IN_RG}/providers/Microsoft.Insights/activityLogAlerts/ala-named"
     code, evidence, referenced = run_activity_alerts(

@@ -1,5 +1,5 @@
 name: azure_log_analytics_workspaces
-version: 0.3.2
+version: 0.4.0
 description: >-
   Shows how long each Log Analytics workspace keeps its logs, who can reach and read them, where they are exported, and whether Microsoft Sentinel is onboarded.
 category: azure
@@ -79,8 +79,8 @@ evidence_set:
     Summary fields:
 
     What was checked?
-    - total_workspaces — Number of in-scope Log Analytics workspaces read
-    - total_tables — Number of tables, built-in and custom, across the in-scope workspaces whose tables were read
+    - total_workspaces — Number of in-scope Log Analytics workspaces read; null when the workspace list could not be read, as is every count and figure below built from it
+    - total_tables — Number of tables, built-in and custom, across the in-scope workspaces; null when any workspace's tables could not be read
     - provider_registration_status — Whether the Log Analytics provider (Microsoft.OperationalInsights) is registered on the subscription: registered, not_registered or unknown
 
     Which resources are left out of scope?
@@ -92,7 +92,7 @@ evidence_set:
     How long are logs kept, and can ingestion stop?
     - min_workspace_retention_in_days — Days of the shortest workspace retention (how long a workspace keeps data available to query by default) across in-scope workspaces; null when none reports one
     - max_workspace_retention_in_days — Days of the longest workspace retention across in-scope workspaces; null when none reports one
-    - min_table_total_retention_in_days — Days of the shortest total retention (query retention plus long-term retention) of any table, across in-scope workspaces whose tables were read; null when no table reports one. A table's retention can be set apart from its workspace's
+    - min_table_total_retention_in_days — Days of the shortest total retention (query retention plus long-term retention) of any table, across in-scope workspaces; null when no table reports one or any workspace's tables could not be read. A table's retention can be set apart from its workspace's
     - workspaces_with_daily_cap — Number of workspaces with a daily ingestion cap (a daily quota other than -1, which means no cap); data arriving after the cap is reached is dropped for the rest of that day
 
     Who can reach and read the logs?
@@ -103,9 +103,9 @@ evidence_set:
     - workspaces_local_auth_disabled — Number of workspaces with shared-key (local) authentication turned off, so callers must sign in with Entra ID; not set means shared keys still work
 
     Are logs exported?
-    - workspaces_with_data_exports — Number of workspaces with at least one data export rule, enabled or not
-    - total_data_exports — Number of data export rules across in-scope workspaces, enabled or not
+    - workspaces_with_data_exports — Number of workspaces with at least one data export rule, enabled or not; null when any workspace's data exports could not be read
+    - total_data_exports — Number of data export rules across in-scope workspaces, enabled or not; null when any workspace's data exports could not be read
 
     Is Microsoft Sentinel onboarded?
-    - sentinel_onboarded_workspaces — Number of workspaces with Sentinel onboarded, meaning the SecurityInsights solution is switched on in the workspace
-    - sentinel_onboarded — True if at least one in-scope workspace has Sentinel onboarded; false if none does or none was read, including when a resource_exclusions pattern takes out the workspace Sentinel is onboarded to, and when the solutions couldn't be read (the run then fails); never null
+    - sentinel_onboarded_workspaces — Number of workspaces with Sentinel onboarded, meaning the SecurityInsights solution is switched on in the workspace; null when any workspace's solutions could not be read
+    - sentinel_onboarded — True if at least one in-scope workspace has Sentinel onboarded; false if none does, including when a resource_exclusions pattern takes out the workspace Sentinel is onboarded to; null when the workspace list could not be read, or when no workspace is known to have it and any workspace's solutions couldn't be read (the run then fails)

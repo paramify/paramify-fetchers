@@ -1,0 +1,62 @@
+{
+  "apiVersion": "networking.istio.io/v1",
+  "items": [
+    {
+      "apiVersion": "networking.istio.io/v1",
+      "kind": "VirtualService",
+      "metadata": {
+        "name": "internal",
+        "namespace": "payments",
+        "uid": "00000000-0000-0000-0000-000000000021"
+      },
+      "spec": {
+        "hosts": [
+          "ledger"
+        ],
+        "http": [
+          {
+            "route": [
+              {
+                "destination": {
+                  "host": "ledger"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "apiVersion": "networking.istio.io/v1",
+      "kind": "VirtualService",
+      "metadata": {
+        "name": "shop",
+        "namespace": "shop",
+        "uid": "00000000-0000-0000-0000-000000000022"
+      },
+      "spec": {
+        "gateways": [
+          "ingress/public"
+        ],
+        "hosts": [
+          "shop.example.com"
+        ],
+        "http": [
+          {
+            "route": [
+              {
+                "destination": {
+                  "host": "shop.shop.svc.cluster.local"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "kind": "VirtualServiceList",
+  "metadata": {
+    "continue": ""
+  }
+}

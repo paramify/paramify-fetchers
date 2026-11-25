@@ -129,7 +129,7 @@ def smart_detector_rule(raw: dict) -> dict:
 PROJECT = {RULE_METRIC: metric_rule, RULE_LOG_SEARCH: log_search_rule, RULE_SMART_DETECTOR: smart_detector_rule}
 
 
-def rule_record(rule_type: str, raw: dict, groups: dict, processing_rules: list[dict]) -> dict:
+def rule_record(rule_type: str, raw: dict, groups: dict, processing_rules: list[dict] | None) -> dict:
     rule = {"id": raw.get("id"), "name": raw.get("name"), **PROJECT[rule_type](raw)}
     return {**rule, **route(rule["enabled"], rule["action_group_ids"], rule["scopes"], groups, processing_rules)}
 
@@ -138,8 +138,26 @@ def _count(rules: list[dict], field: str, value) -> int:
     return sum(1 for r in rules if r[field] is value)
 
 
-def summarize(rules: list[dict], groups: list[dict], processing_rules: list[dict]) -> dict:
-    """Unknown (null) verdicts are counted apart, never folded into "no"."""
+# Counts and verdicts that read suppression; null when the processing rule list was not read.
+SUPPRESSION_FIELDS = (
+    "enabled_rules_suppressed", "enabled_rules_possibly_suppressed", "enabled_rules_reaching_human",
+    "enabled_rules_reaching_human_unknown", "enabled_rules_not_reaching_human", "reaching_human_percentage",
+    "all_enabled_rules_reach_human", "suppressing_processing_rules_active", "processing_rules",
+    "enabled_rules_without_action_groups",
+)
+
+
+def summarize(rules: list[dict], groups: list[dict], processing_rules: list[dict], processing_rules_read: bool = True) -> dict:
+    """Unknown (null) verdicts are counted apart, never folded into "no".
+
+    processing_rules_read=False (that list was not read) gives null for what depends on suppression."""
+    summary = _summarize(rules, groups, processing_rules)
+    if not processing_rules_read:
+        summary.update(dict.fromkeys(SUPPRESSION_FIELDS))
+    return summary
+
+
+def _summarize(rules: list[dict], groups: list[dict], processing_rules: list[dict]) -> dict:
     alerting = [r for r in rules if r["is_alerting_rule"]]
     enabled = [r for r in alerting if r["enabled"]]
     reaching = _count(enabled, "reaches_human", True)
@@ -255,7 +273,7 @@ def main() -> int:
                 outside_scope = sorted({g for g in referenced if not g.lower().startswith(prefix)})
                 referenced = [g for g in referenced if g.lower().startswith(prefix)]
             add_referenced_groups(rest, referenced, by_id, collector)
-            rules = [rule_record(t, r, by_id, processing_rules) for t, r in raw_rules]
+            rules = [rule_record(t, r, by_id, processing_rules if read["processing_rules"] else None) for t, r in raw_rules]
             processing_rules = in_scope_processing
     elif not subscription_id:
         collector.record(
@@ -290,7 +308,7 @@ def main() -> int:
             "excluded": excluded,
         },
         summary={
-            **summarize(rules, group_records, processing_rules),
+            **summarize(rules, group_records, processing_rules, read["processing_rules"]),
             "provider_registration_status": registration,
             **exclusions.summary(excluded, ("alert_rule", "action_group", "processing_rule"), {
                 name: len(rows) if read[name] else None for name, rows in (

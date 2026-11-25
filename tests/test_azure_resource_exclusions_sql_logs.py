@@ -634,7 +634,7 @@ def run_rds(monkeypatch, tmp_path, patterns, inventory=None):
     read: list = []
     monitor = ns(diagnostic_settings_category=ns(list=lambda resource_uri: read.append(resource_uri) or [category]),
                  diagnostic_settings=ns(list=lambda resource_uri: [setting]))
-    monkeypatch.setattr(rds, "enumerate_resources", lambda *a: inventory or {"rows": INVENTORY, "total_records": 5, "pages": 1})
+    monkeypatch.setattr(rds, "enumerate_resources", lambda *a: inventory or {"rows": INVENTORY, "total_records": 5, "pages": 1, "read": True})
     monkeypatch.setattr(rds, "monitor_client", lambda *a: monitor)
     monkeypatch.setattr(rds, "AzureRestClient", lambda cred: _Rest())
     for env in (rds.BASIC_LOOKBACK_ENV, rds.APPROVED_WORKSPACES_ENV, rds.INGESTION_LOOKBACK_ENV):
@@ -656,9 +656,15 @@ def test_diagnostic_settings_without_patterns_add_only_empty_exclusion_fields(mo
 
 
 def test_diagnostic_settings_unread_inventory_leaves_unmatched_patterns_null(monkeypatch, tmp_path, caplog):
-    code, evidence, _ = run_rds(monkeypatch, tmp_path, PATTERNS, inventory={"rows": [], "total_records": None, "pages": 0})
+    code, evidence, _ = run_rds(monkeypatch, tmp_path, PATTERNS, inventory={"rows": [], "total_records": None, "pages": 0, "read": False})
     assert evidence["summary"]["resource_exclusion_patterns_unmatched"] is None
     assert "matched nothing" not in caplog.text
+    assert (evidence["summary"]["in_scope_resources"], evidence["summary"]["excluded_resources"]) == (None, None)
+
+
+def test_diagnostic_settings_empty_inventory_reads_zero_in_scope(monkeypatch, tmp_path):
+    _, evidence, _ = run_rds(monkeypatch, tmp_path, PATTERNS, inventory={"rows": [], "total_records": 0, "pages": 1, "read": True})
+    assert (evidence["summary"]["in_scope_resources"], evidence["summary"]["excluded_resources"]) == (0, 0)
 
 
 def test_diagnostic_settings_exclude_and_skip_resources_but_still_read_an_excluded_destination(

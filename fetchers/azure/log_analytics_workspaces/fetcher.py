@@ -281,22 +281,48 @@ def workspace_record(
     }
 
 
-def summarize(workspaces: list[dict]) -> dict:
-    """Retention floor, exposure, access mode and SIEM onboarding across workspaces."""
+WORKSPACE_FIELDS = (
+    "total_workspaces", "min_workspace_retention_in_days", "max_workspace_retention_in_days",
+    "min_table_total_retention_in_days", "total_tables", "workspaces_with_daily_cap",
+    "workspaces_public_ingestion_enabled", "workspaces_public_query_enabled",
+    "workspaces_resource_or_workspace_access_mode", "workspaces_workspace_only_access_mode",
+    "workspaces_local_auth_disabled", "workspaces_with_data_exports", "total_data_exports",
+    "sentinel_onboarded_workspaces", "sentinel_onboarded",
+)
+
+
+def summarize(workspaces: list[dict] | None) -> dict:
+    """Retention floor, exposure, access mode and SIEM onboarding across workspaces.
+
+    None (the list was not read) gives null for every figure; a figure built from a per-workspace
+    read (tables, data exports, solutions) is null while any workspace's read failed.
+    """
+    if workspaces is None:
+        return dict.fromkeys(WORKSPACE_FIELDS)
     retention = [w["retention_in_days"] for w in workspaces if w["retention_in_days"] is not None]
     table_totals = [
         w["table_retention"]["min_total_retention_in_days"]
         for w in workspaces
         if w["table_retention"] and w["table_retention"]["min_total_retention_in_days"] is not None
     ]
+    unread = {
+        "tables": any(w["table_retention"] is None for w in workspaces),
+        "exports": any(w["data_exports"] is None for w in workspaces),
+        "solutions": any(w["sentinel_onboarded"] is None for w in workspaces),
+    }
+    onboarded = [w["sentinel_onboarded"] for w in workspaces]
+
+    def known(is_unread, value):
+        return None if is_unread else value
+
     return {
         "total_workspaces": len(workspaces),
         "min_workspace_retention_in_days": min(retention) if retention else None,
         "max_workspace_retention_in_days": max(retention) if retention else None,
-        "min_table_total_retention_in_days": min(table_totals) if table_totals else None,
-        "total_tables": sum(
+        "min_table_total_retention_in_days": known(unread["tables"], min(table_totals) if table_totals else None),
+        "total_tables": known(unread["tables"], sum(
             w["table_retention"]["table_count"] for w in workspaces if w["table_retention"]
-        ),
+        )),
         "workspaces_with_daily_cap": sum(1 for w in workspaces if w["daily_cap_enabled"]),
         "workspaces_public_ingestion_enabled": sum(
             1 for w in workspaces if w["public_ingestion_enabled"]
@@ -309,10 +335,11 @@ def summarize(workspaces: list[dict]) -> dict:
             1 for w in workspaces if w["access_mode"] == ACCESS_MODE_WORKSPACE_ONLY
         ),
         "workspaces_local_auth_disabled": sum(1 for w in workspaces if w["local_auth_disabled"]),
-        "workspaces_with_data_exports": sum(1 for w in workspaces if w["data_exports"]),
-        "total_data_exports": sum(len(w["data_exports"] or []) for w in workspaces),
-        "sentinel_onboarded_workspaces": sum(1 for w in workspaces if w["sentinel_onboarded"]),
-        "sentinel_onboarded": any(w["sentinel_onboarded"] for w in workspaces),
+        "workspaces_with_data_exports": known(unread["exports"], sum(1 for w in workspaces if w["data_exports"])),
+        "total_data_exports": known(unread["exports"], sum(len(w["data_exports"] or []) for w in workspaces)),
+        "sentinel_onboarded_workspaces": known(unread["solutions"], sum(1 for o in onboarded if o)),
+        # True once any workspace has it; null while a solutions read failed and none is known to have it.
+        "sentinel_onboarded": True if any(o is True for o in onboarded) else None if unread["solutions"] else False,
     }
 
 
@@ -419,7 +446,6 @@ def main() -> int:
         )
 
     listed = workspaces is not None
-    workspaces = workspaces or []
     if not listed:
         exclusions.mark_unread()
     exclusions.record_invalid(collector)
@@ -430,7 +456,7 @@ def main() -> int:
         subscription_source=sub["subscription_source"],
         collector=collector,
         results={
-            "workspaces": workspaces,
+            "workspaces": workspaces or [],
             "provider_registration_status": registration,
             "excluded": excluded,
         },

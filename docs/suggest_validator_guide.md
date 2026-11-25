@@ -19,8 +19,8 @@ Node.js (Paramify runs validator regexes as JavaScript)
 
 Create a key and set `PARAMIFY_UPLOAD_API_TOKEN`:
 [API key setup](../uploaders/paramify_evidence/README.md#paramify-api-key).
-The permissions listed there leave out one this skill needs:
-**View Solution Capabilities**, which it uses to read narratives.
+The skill needs **View Solution Capabilities** to read narratives, in
+addition to the evidence and validator permissions.
 
 ![The Create API Key dialog with View Solution Capabilities, View/Write Evidences, and View/Write Validators](img/suggest_validator/app-01-api-key.png)
 

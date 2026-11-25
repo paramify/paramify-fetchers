@@ -10,6 +10,321 @@ schemas and the `paramify` CLI — not the internal code.
 
 ## [Unreleased]
 
+### Changed
+
+- **`jira_change_requests` 0.3.0: who approved, emergency approval exemption, and linked notification tickets.**
+  `approved_by` names the approver, for a status-based approval whoever made the approving move.
+  `emergency_approval_exempt` records the approval findings of emergency changes under `exempted`, not `findings`.
+  `notification_issue_types` reads the notification tickets linked to each change (sent, sent time, and with the
+  `notification_due` and `notification_sent` field roles due, overdue and sent late) and replaces the
+  comments-and-watchers check; `notification_required_change_types` flags a deployed change of those types with none
+  linked. A linked ticket that could not be read is unknown and makes the run partial, never a missing notification.
+
+- **`jira_change_requests` 0.2.0: deployment by status, and emergency changes summarized on their own.**
+  `deployed_statuses` names the statuses that mean deployed for workflows that deploy before closing: deployment is
+  then the first move into one of them, a ticket closed without entering them is counted in
+  `changes_closed_without_deployment`, and a name that is no status on the site fails the run as partial. The optional
+  `emergency` field role with `emergency_values` flags emergency changes and adds `summary.emergency`. `changes_open`
+  no longer counts a done ticket.
+
+- **`jira_site_inventory` 0.3.0: service desks outside the collection are shown as left out or out of scope, not
+  absent.** A `JIRA_PROJECTS` selection with no service desk in it no longer reports the site as having no Jira
+  Service Management: service desks outside the selection are counted in `service_management.service_desks_left_out`.
+  `service_management.basis` says how availability was decided. `out_of_scope_service_desks` names service desks that
+  exist and are deliberately not collected; they are listed under `declared_out_of_scope` as stated in configuration,
+  each with whether the account can see it, and when one is not visible `available` is null, not false.
+
+- **`jira_remediation_items` 0.2.0: configurable due-date field and risk-accepted tickets counted apart.**
+  `due_date_field` names the field that holds the due date for projects that do not use the built-in Due date;
+  when it cannot be resolved the run is partial and the due-date counts are null. `risk_accepted_statuses` and
+  `risk_accepted_resolutions` flag tickets closed by accepting the risk and add `risk_accepted`,
+  `closed_risk_accepted` and `closed_excluding_risk_accepted` to the summary. A date-only due date now counts as
+  passed once its day is over in the collector's timezone, not in UTC.
+
+### Added
+
+- **`keycloak_service_accounts` fetcher.** Lists every Keycloak client with a service account, GET only with
+  view-clients and view-users: its authenticator (shared secret or signed key and certificate), the secret's age,
+  expiry and any rotated secret still valid, its owner from a configurable client attribute, other sign-in flows it
+  allows, and its effective realm and admin roles. Counts secrets older than `max_secret_age_days` and service
+  accounts without an owner only when those settings are set. An authenticator the fetcher doesn't recognize is never
+  assumed to have no secret: it is counted in `service_accounts_unrecognized_authenticator` and leaves the over-age
+  count null. Secrets and keys are never copied.
+- **`keycloak_users_and_roles` fetcher.** Lists every user in a Keycloak realm, GET only with view-users, view-clients
+  and view-events: enabled state, required actions, LDAP federation and linked identity providers, OTP and WebAuthn
+  authenticators, groups, and effective realm and admin roles through groups and composites. Counts privileged users
+  (realm-management admin roles, `manage-organizations` included, plus any realm roles set in `privileged_roles`), users
+  who can sign in with a Keycloak-checked credential (local, or brokered but still holding a local password) without a
+  second factor, and enabled accounts with no stored sign-in in `inactive_days` (default 90). Inactivity is judged only
+  when sign-ins are kept that long and a stored event predates the window, and stays null for an account with no
+  creation time. Service accounts are left out by their client link, not their username. The realm is named in the
+  summary, and the master realm is refused as `bad_config`. Email addresses, names, attributes and credential data are
+  never copied.
+- **`keycloak_admin_events` fetcher.** Reads the sign-in and admin events Keycloak has stored over a window (default 7
+  days), GET only with view-events: successful, failed and blocked sign-ins counted apart, brute-force lockouts, users
+  created and disabled, password resets, role grants and other privileged changes, and how recently events arrived,
+  leaving out the fetcher's own token requests. Usernames, IP addresses and changed objects are never copied. More
+  than 20,000 events in a window leaves counts null rather than undercounted. The window ends when the run starts, and
+  an event read twice while paging counts once. `newest_login_event` counts only `LOGIN` and `LOGIN_ERROR`.
+  `users_disabled` is null when admin event details are off or a user update has no changed object. Client scope
+  assignments count as privileged changes.
+- **`keycloak` category and `keycloak_realm_security` fetcher.** Reads a Keycloak realm through the Admin REST API with a
+  read-only service-account client: session and token lifetimes, brute-force lockout, password policy, the browser
+  and reset-credentials flows with each step's effective requirement (so a phishing-resistant authenticator counts
+  only when every sign-in must pass it), required actions such as terms and conditions, identity providers, user
+  federation, and login and admin event logging. Client secrets and bind credentials are never written to the
+  evidence, and an unreadable section leaves its fields null rather than empty. The local sign-in check leaves out
+  session reuse, the identity provider redirector and the Organization step that Keycloak 26 adds to new realms. A
+  refused call names the client that holds the missing role, `master-realm` when the realm read is `master`.
+- **`kubernetes_workload_resilience` fetcher and `kubernetes` category.** Reads any cluster's Kubernetes API (GET and
+  LIST only) through a kubeconfig, including AKS with kubelogin, or the in-cluster service account. For each Deployment
+  and StatefulSet: replicas with any autoscaler minimum, PodDisruptionBudget coverage and budgets that block node drains,
+  zone spread as configured and where ready pods actually run (the scheduler spreads by default, so placement decides),
+  and readiness and liveness probes. A workload's pods are the ones it owns, found through its ReplicaSets, not every
+  pod with matching labels. Each budget is judged once, over every pod it selects, with Kubernetes' rounding. When a
+  pod's zone or owner, or a budget's pod count, can't be found, the workload is listed as unknown and the matching list
+  is null, not empty. An API server that can't be reached is recorded as `target_unreachable`, and each call times
+  out. System namespaces are left out by default. The README has the least-privilege RBAC.
+- **`alertmanager_alert_delivery` fetcher and `alertmanager` category.** Reads Prometheus Alertmanager's v2 API and
+  metrics endpoint, GET only: the route tree and receivers (names and integration types only, never receiver
+  settings), active, silenced and inhibited alerts, silences, and the notifications started and the notifications that
+  failed after all their retries. Counts are per receiver when Alertmanager runs with receiver-name-in-metrics,
+  otherwise per integration type. Routes written with the older `match` and `match_re` keys show those as matchers.
+  Reports receivers and routes that deliver nowhere. The counts do not show that an integration accepted a
+  notification, or that a person received it. `counters_since` is when the counts started: the process start, or with
+  receiver names the last successful configuration reload, which also resets them. An unread endpoint, or a response
+  that is not the shape Alertmanager documents, is a failed read: its fields are null, not 0, and the run exits 1. This
+  includes a `/metrics` page without `alertmanager_build_info`, a missing notification counter, a counter value that
+  is not a number, and a status without its configuration.
+- **`istio_mesh_security` fetcher and `istio` category.** Reads an Istio mesh (1.22 or later) through the Kubernetes
+  API (GET and LIST only), with a kubeconfig (including AKS with kubelogin) or the in-cluster service account: mesh-wide
+  mTLS mode and weaker namespace, workload or port overrides; allow-nothing default-deny policies and allow-all rules;
+  plaintext and sub-TLS 1.2 gateway servers; DestinationRules turning TLS off; the outbound traffic policy; the root
+  certificate's expiry and istiod's workload certificate lifetime. A refused call names the permission it needs; the
+  README has the least-privilege RBAC.
+  - Judgments follow Istio's own rules. No mesh-wide policy means PERMISSIVE. When there are several, the oldest one
+    is in effect. A dry-run AuthorizationPolicy enforces nothing. A gateway server on any protocol but HTTPS or TLS is
+    plaintext unless it redirects to HTTPS. A DestinationRule subset can turn TLS off.
+  - Ambient namespaces count as in the mesh, as do sidecar-injected ones.
+  - Settings: `control_plane_namespace` (istiod, its ConfigMaps), `mesh_configmap` (`istio-<revision>` for a revisioned
+    install) and `root_namespace` (taken from the mesh config; the setting is a fallback).
+  - With more than one istiod revision, the longest workload certificate lifetime is reported.
+  - A ConfigMap that can't be parsed, or a call that times out, is a recorded failure that leaves only its own fields
+    null.
+
+- **Literal pattern lists.** A `type: patterns` field can declare `globs: false`; `validate`, the run and the TUI then
+  refuse a pattern holding `*` or `?`, and `describe` says the field takes patterns without wildcards.
+
+- **`azure_devops_work_items` 0.4.0: TFVC changeset inclusions.** A new `changeset_inclusions` pattern list
+  (`AZURE_DEVOPS_CHANGESET_INCLUSIONS`, `path:<TFVC server path>` patterns with a reason each, edited like the Front
+  Door and DNS lists) names the TFVC paths whose linked changesets are in scope. A pattern takes in its path and
+  everything under it, without regard to case. Paths are literal: `validate` and the run refuse `*` and `?`, since the
+  read check couldn't prove every path a wildcard covers. Set, each run first reads every included path's latest
+  changeset and fails, writing no evidence, if one is missing, empty or can't be read. A linked changeset is then in
+  scope only if a file it changed (or renamed from) is under an included path, read from the changeset read the
+  fetcher already makes and paged to the end of its change list when that read didn't list every file; one whose
+  changed files can't all be read stays in scope. Others are left out under `results.excluded`, as `not_included`,
+  or as `not_readable` when the identity can't read them (TF14098, 401 or 403), which no longer fails the run. After a
+  refused changeset, every included path is read again at the end of the changeset reads, and one that no longer reads
+  fails the run without evidence, so access lost mid-run can't pass as changesets outside the paths. Each entry names
+  the work items that link it. `changed_before_approval`, `approved_by_change_author` and `first_linked_change` use
+  in-scope changesets only; an item whose changesets were all left out has none to check, as an item linked to
+  nothing, and doesn't hold the summary's change-order lists unknown. Those lists can't cover a refused changeset, so
+  an item that links one reads `unreadable_linked_changesets: true` and is listed in
+  `change_items_with_unreadable_changesets`. New: `results.changeset_inclusion_checks`,
+  `results.changeset_inclusion_recheck`, `results.excluded`, `unreadable_linked_changesets` on each work item, and in
+  the summary `changeset_inclusion_patterns`, `in_scope_changesets` (null when a linked changeset couldn't be read),
+  `not_included_changesets`, `not_readable_changesets`, `changeset_inclusions_rechecked` and
+  `change_items_with_unreadable_changesets`. Unset, a refused changeset still fails the run and the evidence only gains
+  these keys.
+
+### Changed
+
+- **`jira_incident_postmortems` 0.2.0: report deadlines from due-date fields, a post-mortem field, linked action
+  items.** New optional roles in `JIRA_INCIDENT_FIELDS`, all off unless named. With `initial_report_due`, the initial
+  report is judged against that due time instead of `report_minutes` after detection, and only the `reported_at`
+  field's own value counts as the report, never the ticket's created time. `next_update_due` and `final_report_due`
+  (with `last_report_sent`) add `update_overdue`, `no_report_by_final_due` and `last_report_after_final_due`.
+  `reportable` with `JIRA_INCIDENT_REPORTABLE_VALUES` limits every reporting check to incidents that must be reported.
+  `postmortem` names a text field on the incident that holds the post-mortem; only whether it is filled in is
+  recorded. `JIRA_ACTION_ITEM_ISSUE_TYPES` counts issues linked straight to an incident as action items. `phase` may
+  name the built-in Status field. Settings that contradict each other are refused as `bad_config`, and a configured
+  field that cannot be resolved runs none of its checks. A site that sets none of these gets the same findings as
+  before; each action item gains a `source` and each incident the new fields.
+
+- **`azure_entra_sign_in_logs` 0.4.0: 50053 sign-in rejections.** `sign_ins_rejected_50053` counts interactive
+  sign-ins Entra rejected with ResultType 50053, and `users_rejected_50053` counts the users they belong to. Entra logs
+  both smart lockout and sign-ins from a malicious IP address under that code, so the counts are evidence, not a
+  pass or fail on smart lockout. With the sign-in logs unread, both are null.
+
+- **`azure_activity_log_alerts` 0.4.0: alerts on attempts to alter protected log storage.** A new fixed map,
+  `log_storage_protection_coverage`, shows whether an alert that reaches a person fires on deleting or changing a
+  container's immutability policy, clearing a legal hold, or deleting a blob container or storage account. An alert
+  with no outcome filter fires on the attempt, so one Azure denies is seen too; one filtered on status, subStatus or
+  level counts only as possible, as does any match while the action groups or processing rules are unread. With the
+  alert list unread, the map and its counts are null, not uncovered. An alert scoped below the storage account gets
+  no credit for deleting the account. It is kept apart from the 12 CIS operations, so their totals do not move.
+  `all_log_storage_protection_operations_covered` gives one verdict.
+
+- **`azure_resource_inventory` 0.5.0: reconciled against an expected population.** Two new settings work together.
+  `required_resources` takes exact ARM ids (`id:` only, compared without case, no globs): each must itself be in the
+  in-scope inventory, and no child, sibling or pattern match stands in for it; a resource group id is checked against
+  the subscription's resource groups. `allowed_resources` takes `rg:`, `location:` and `id:` globs for families whose
+  ids change, such as backup snapshots; a family may be empty. Resource groups are reconciled in both directions
+  under the same `resource_exclusions` as resources: an excluded required group is missing, and an in-scope group
+  that is neither required nor allowed, even an empty one, is unexpected. Missing required ids are counted and listed
+  (`required_resources_missing`), resources and resource groups neither required nor allowed are counted by type
+  (`unexpected_resources`), each records what expects it, and `inventory_matches_expected` gives one verdict.
+  Unset, the fields stay null.
+
+### Fixed
+
+- **`jira_incident_postmortems` 0.2.1: `report_minutes` no longer has a default in `fetcher.yaml`.** A run exports
+  every declared default, so the 60-minute default counted as "set" and every manifest that turned `detected_at` off,
+  or named an `initial_report_due` field, was refused as `bad_config`. The window is still 60 minutes when the setting
+  is absent.
+
+- **Front Door counts and verdicts read null when a list they're built from wasn't read.** Before, a refused list
+  inside one profile (endpoints, routes, custom domains, rule sets, secrets, security policies, diagnostic settings,
+  origin groups, origins, metrics), or the profile list itself, read as empty: counts came out short or 0, verdicts
+  were judged against nothing, and `scope_exclusion_patterns_unmatched` could name a pattern never compared with a
+  profile's routes. Now every summary field reads null when any in-scope profile has an unread list it's built from;
+  each fetcher's `fetcher.yaml` names those lists field by field.
+  - In-scope counts follow the same rule, and each `excluded_*` count and `scope_exclusion_patterns_unmatched` read
+    null with them. `in_scope_routes` needs the endpoint, route and custom domain lists, since a route leaves scope
+    when every host it serves is excluded.
+  - Records: each profile's own counts (`route_count`, `endpoint_count`, `custom_domain_count`, `secret_count`,
+    `rule_set_count`, `origin_group_count`, `origin_count`) are null when their list wasn't read. A route that
+    accepts HTTP and carries a rule set has a null `https_only` while the profile's rule sets weren't all read.
+  - `azure_front_door_tls` 0.6.3: a custom domain's `routed` and `served` are null while its profile's routes
+    weren't read, and its certificate status and expiry are null when it names a secret and the secret list wasn't
+    read.
+  - `azure_front_door_waf_coverage` 0.6.3:
+    - A host-route whose profile's security policies weren't read has `effective_scope: unknown` and `protected`
+      null.
+    - A WAF policy that can't be found while the WAF policy list wasn't read is unknown, not `waf_unresolved`, and
+      a policy whose blocking is unknown leaves `waf_blocking` and `protected` null. Such host-routes count in
+      `unknown_host_routes`.
+    - A profile's `waf_log_exported`, `access_log_exported`, `captured_log_categories` and `waf_log_destinations`
+      are null when either log list wasn't read, and `waf_in_use` is null rather than false while its routes
+      weren't read.
+    - `endpoints_without_routes` and `unrouted_custom_domains` no longer list anything from a profile whose routes
+      weren't read.
+  - `azure_front_door_origins` 0.8.3:
+    - An origin group's origin fields and connection verdict are null when its origin list wasn't read, and
+      `serving`, `protocols_to_origin` and `connection_protected` are null when a route or rule set reaching it
+      wasn't read. An excluded group lists `origins: null` then.
+    - `in_scope_apps` and `excluded_apps` are null when the origin group scope is unknown, or when any profile's
+      origin group or origin list wasn't read, excluded profiles included.
+    - A group's `enabled_regions` and `active_regions` are null when its origin list wasn't read.
+    - Health records read health and traffic null, for the group and each origin, region and hour, when that
+      profile's metrics weren't read; `traffic_shift_count` and `traffic_shifts` too when its request metrics weren't.
+    - The production app counts are also null when an excluded profile's endpoint, route or rule set list wasn't
+      read, since its groups can put an app behind Front Door.
+  - `azure_front_door_waf_policies` 0.2.2: when the managed rule set definitions weren't read, a default rule set's
+    `rule_definition_found` is null instead of false, so the policy is no longer reported as
+    `rule_definition_not_found`. Its `blocking` is null unless another reason already makes it false. The blocking,
+    rule group and newest-version counts read null, and every count reads null when the policy list wasn't read.
+
+- **`azure_network_security_groups` 0.6.2: every count and verdict from an unread list reads null, not 0.** When the
+  network security group list isn't read, the group and rule counts (`total_network_security_groups`,
+  `total_security_rules`, the open-to-Internet and outbound counts) and the east-west verdicts read null. When the
+  virtual network list isn't read, the subnet counts, the east-west verdicts and the NIC coverage counts that need a
+  subnet's group (`nics_protected_by_subnet_nsg_only`, `nics_without_any_nsg`, `nic_nsg_coverage_percentage`) read
+  null; each NIC's `subnet_nsg_ids`, `unresolved_subnet_ids` and `nsg_protection_source` are null, and
+  `protected_by_nsg` is true for a NIC with its own group and null otherwise. When the network interface list isn't
+  read, the NIC counts read null. Each subnet's east-west fields are null while the group list is unread. Before, these
+  read 0 or were judged against an empty list.
+
+- **In-scope counts read null, not 0, when their list couldn't be read.** A failed sign-in or list call left
+  `in_scope_*` at 0, as if the subscription had none. Each now reads null when the list it counts wasn't read, and 0
+  only when it was read and is empty; the matching `excluded_*` count is null with it.
+  `azure_network_security_groups` 0.6.1 (`in_scope_network_security_groups`, `in_scope_virtual_networks`,
+  `in_scope_network_interfaces`, each by its own list), `azure_resource_inventory` 0.4.2 and
+  `azure_resource_diagnostic_settings` 0.4.2 (`in_scope_resources`), `azure_private_dns_zone_configuration` 0.4.2
+  (`in_scope_private_dns_zones`), `azure_private_endpoint_configuration` 0.3.3 (`in_scope_private_endpoints`),
+  `azure_defender_assessments` 0.4.2 (`in_scope_assessments`, also null when the list stopped partway; still 0 when
+  Defender for Cloud isn't registered) and `azure_residual_resources` 0.3.2 (`in_scope_orphaned_resources` when any
+  list orphans are found from wasn't read, `in_scope_role_assignments` by its own list).
+
+- **`azure_policy_compliance` 0.6.0: unread reads give null counts, and an
+  unread remediation task can no longer read as complete.**
+  - `deployments_complete` could read true on a run that missed a task's
+    deployment list: a later task's read replaced the record of unread tasks.
+    A task whose deployments could not be listed now keeps it false.
+  - A remediation task at a scope the fetcher doesn't recognise now fails the
+    run, where before it was skipped with only a log line.
+  - When the compliance summary could not be read, `non_compliant_resources`,
+    `non_compliant_policies`, `compliant_resources`, `resources_evaluated`,
+    `resource_compliance_percentage`, `assignments_evaluated`,
+    `non_compliant_assignments` and `compliant_assignments` read null, not 0.
+    When the remediation task list could not be read, `remediation_tasks`,
+    `remediation_tasks_by_provisioning_state` and the two deployment totals
+    read null, not 0. `listed_non_compliant_states` and
+    `listed_distinct_non_compliant_resources` read null when the non-compliant
+    states query failed. With the provider not registered they still read 0.
+  - With a `resource_exclusions` pattern set and the summary unread,
+    `non_compliant_assignments` and `compliant_assignments` read null, not 0.
+  - When the task list or any task's deployment list was not read,
+    `remediation_deployments_listed`, `remediation_deployments_by_status` and
+    the `remediated_resources_*` counts (and
+    `succeeded_remediations_now_non_compliant`) read null, not counts over the
+    partial list.
+  - `resources_by_compliance_state` and `policies_by_compliance_state` read null,
+    not `{}`, when the compliance summary could not be read.
+    `non_compliant_states_truncated` reads null when the non-compliant states
+    query failed, and `remediation_deployments_truncated` reads null when the
+    task list or a task's deployment list was not read, not false.
+
+- **Four Azure monitoring fetchers give null counts, not 0 or false, when a
+  list could not be read.** The run still exits 1 as `partial_failure`.
+  - `azure_activity_log_alerts` 0.5.0: when the alert rule list is not read,
+    every alert count, both coverage maps and every coverage verdict
+    (`all_monitored_operations_covered`, `service_health_alert_configured`,
+    `all_change_operations_covered`) are null. Before they read 0 and false.
+    The two operation totals stay 12 and 4. When the processing rule list is
+    not read, `suppressed` and `reaches_human` are null per alert, and
+    `alerts_suppressed`, `alerts_possibly_suppressed`, `alerts_reaching_human`,
+    the change coverage fields and `monitored_operation_coverage_reaching_human`
+    are null. Before they read as if no rule suppressed anything. An enabled
+    alert with no deliverable action group of its own is unknown too, since a
+    processing rule may add one: `routes_to_enabled_receiver` and
+    `routes_to_person` read null, not false, so `reaches_human` is null and the
+    alert counts in `alerts_routing_unknown` and `alerts_reaching_human_unknown`.
+    `processing_rule_matches` and `suppressed_by_processing_rules` are null, not
+    `[]`.
+  - `azure_diagnostic_settings` 0.2.0: when the settings are not read,
+    `activity_log_exported`, the counts, the coverage map and the required
+    category verdicts are null. Before, `activity_log_exported` read false.
+  - `azure_resource_diagnostic_settings` 0.5.0: when Resource Graph is not
+    read, the resource, coverage and ingestion counts and verdicts and the
+    destination counts are null. Before they read 0.
+  - `azure_log_analytics_workspaces` 0.4.0: when the workspace list is not
+    read, every count is null. A workspace whose tables or data exports are
+    not read makes `total_tables`, `min_table_total_retention_in_days` and the
+    data export counts null. `sentinel_onboarded_workspaces` is null while any workspace's
+    solutions are unread, and `sentinel_onboarded` is null while any are unread
+    and none is known to have Sentinel; before, it read false.
+
+- **`azure_alert_rules` 0.4.0: suppression fields are null when the alert
+  processing rule list could not be read.** The run still exits 1 as
+  `partial_failure`. Before, the refused list read as empty, so every rule showed
+  `suppressed: false` and counted as reaching a person. Now each enabled rule's
+  `suppressed` and `reaches_human` are null, and `enabled_rules_suppressed`,
+  `enabled_rules_possibly_suppressed`, `enabled_rules_reaching_human`,
+  `enabled_rules_reaching_human_unknown`, `enabled_rules_not_reaching_human`,
+  `reaching_human_percentage`, `all_enabled_rules_reach_human`,
+  `suppressing_processing_rules_active` and `processing_rules` are null. A
+  list that was read and is empty still gives 0 and false. An enabled rule
+  with no deliverable action group of its own is unknown too, since a
+  processing rule may add one:
+  `routes_to_enabled_receiver` and `routes_to_person` read null, not false, so
+  `reaches_human` is null and the rule counts in
+  `enabled_rules_routing_unknown`. `processing_rule_matches` and
+  `suppressed_by_processing_rules` are null, not `[]`, and
+  `enabled_rules_without_action_groups` is null.
+
+## [0.7.0-beta] - 2026-11-24
 ### Breaking
 
 - **`kind: inventory` requires a `pipeline:` block.** A `fetcher.yaml` with
@@ -60,6 +375,21 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Added
 
+- **`loki_log_ingestion` 0.1.0 and the `loki` category: whether expected log sources are arriving in Loki.** Each
+  expected source is a name and a LogQL stream selector (`LOKI_EXPECTED_SOURCES`). For each one the fetcher counts the
+  lines and streams in a recent window and finds the time of the newest line within a longer search window, through
+  GET calls to Loki's query API. `max_age_minutes` has no default, so `sources_stale` stays null until it is set, and
+  staleness compares the exact age, not the rounded one. A response that is not the shape Loki documents is a failed
+  read, not 0. A source whose silence is normal can be marked quiet (`LOKI_QUIET_SOURCES`) and judged by a heartbeat
+  source, which can pick out one kind of line with a line filter; a quiet source without a heartbeat leaves the
+  overall verdict null. Log lines and stream labels are never copied. The category sends `LOKI_TENANT_ID` as
+  `X-Scope-OrgID` and an optional bearer token for a proxy.
+- **`openscap_benchmark_results` 0.1.0 and the `openscap` category: each target's latest OpenSCAP benchmark
+  result.** Reads XCCDF results and ARF reports written by `oscap xccdf eval`, gzipped or not, from an Azure Blob
+  Storage container (GET only, with the run's Azure identity) or a local directory. For each target's newest scan it
+  reports the profile, rule results, failed rules by severity, errors and waived rules. `expected_targets` and
+  `max_age_days` have no default, so their fields stay null until set. Rule text is never copied, and XML is parsed
+  with defusedxml.
 - **The TUI shows which environment variables a manifest is missing, and stops a run that would fail on them.**
   - The manifest settings row has an `env` button (`✓ all set` or `✗ 2 missing`), each fetcher's status names what it
     needs (`✗ needs OKTA_API_TOKEN`), and the line under the table splits what a run needs from what only an upload needs.
@@ -6154,7 +6484,8 @@ change before 1.0 (see [`docs/versioning.md`](https://github.com/paramify/parami
 - TUI restyled — border titles, status pills, denser controls, and hatched empty
   states.
 
-[Unreleased]: https://github.com/paramify/paramify-fetchers/compare/v0.6.0-beta...HEAD
+[Unreleased]: https://github.com/paramify/paramify-fetchers/compare/v0.7.0-beta...HEAD
+[0.7.0-beta]: https://github.com/paramify/paramify-fetchers/compare/v0.6.0-beta...v0.7.0-beta
 [0.6.0-beta]: https://github.com/paramify/paramify-fetchers/compare/v0.5.1-beta...v0.6.0-beta
 [0.5.1-beta]: https://github.com/paramify/paramify-fetchers/compare/v0.5.0-beta...v0.5.1-beta
 [0.5.0-beta]: https://github.com/paramify/paramify-fetchers/compare/v0.4.0-beta...v0.5.0-beta

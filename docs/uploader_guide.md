@@ -26,8 +26,9 @@ syncs the scripts, `v` syncs the validators and `u` uploads the newest run. The
 Create a key with the permissions in
 [API key setup](../uploaders/paramify_evidence/README.md#paramify-api-key)
 ([help-center steps](https://support.paramify.com/hc/en-us/articles/43292803890451-Create-a-Paramify-API-Key)),
-then export it. `paramify doctor` confirms it's set. Uploads also read `.env` at
-the repo root, but `paramify doctor` doesn't.
+then export it or put it in the `.env` at the repo root. `paramify doctor`
+confirms that it is set. Uploads and `paramify doctor` read that `.env` too, and an
+exported value wins over it.
 
 ![export PARAMIFY_UPLOAD_API_TOKEN, then paramify doctor reporting the API token set from that variable](img/uploader/01-key.png)
 

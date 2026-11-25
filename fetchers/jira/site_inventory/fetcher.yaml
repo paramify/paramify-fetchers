@@ -1,5 +1,5 @@
 name: jira_site_inventory
-version: 0.2.0
+version: 0.3.0
 description: >-
   Inventories a Jira Cloud site — deployment info, projects with leads and issue
   counts, issue types, priorities, statuses, Jira Service Management service
@@ -51,6 +51,18 @@ config_schema:
       Priorities stay site-wide. The issue query is limited to these projects
       even when `jql` names others. A name that matches no project the
       account can see fails the run as bad_config.
+  out_of_scope_service_desks:
+    type: string
+    required: false
+    env: JIRA_OUT_OF_SCOPE_SERVICE_DESKS
+    description: >-
+      Comma-separated keys or exact names of Jira Service Management projects
+      that exist on the site and are deliberately not collected, for example
+      because the collector account is not given access to them. They are listed
+      under service_management.declared_out_of_scope as stated in configuration
+      (source: configuration), each with whether the account can see it; a
+      service desk the account cannot browse cannot be read from Jira at all.
+      Naming a project this run collects is refused as bad_config.
   max_issues:
     type: integer
     required: false
@@ -70,11 +82,20 @@ evidence_set:
     /rest/api/3/myself, /rest/api/3/project/search (expand=lead,insight,issueTypes),
     /rest/api/3/issuetype, /rest/api/3/priority/search and /rest/api/3/status
     (or GET /rest/api/3/project/{id}/statuses per project when JIRA_PROJECTS is
-    set); lists service desks via GET /rest/servicedeskapi/servicedesk when Jira
-    Service Management is present; and pages recent issues through
+    set); lists service desks via GET /rest/servicedeskapi/servicedesk when a
+    service_desk project is among the projects the account can see; and pages
+    recent issues through
     POST /rest/api/3/search/jql (nextPageToken). When JIRA_PROJECTS is set,
     projects, issue types, statuses, service desks and issues are limited to
-    the named projects; metadata.projects_left_out counts the others.
+    the named projects; metadata.projects_left_out counts the others and
+    service_management.service_desks_left_out counts the service desks outside
+    them. service_management.basis says how availability was decided:
+    service_desk_api (the list was read), no_service_desk_project_visible (none
+    among the visible projects; one the account cannot browse would not show),
+    declared_not_visible or unknown. Service desks named in
+    JIRA_OUT_OF_SCOPE_SERVICE_DESKS are listed under declared_out_of_scope as
+    stated in configuration, each with visible_to_collector; when one is not
+    visible and no service desk is, available is null, not false.
     Priorities stay site-wide. Summary counts are null, not
     zero, for a section whose read failed or did not finish (projects, or the
     issue sample when the search failed or hit the cap). Output:

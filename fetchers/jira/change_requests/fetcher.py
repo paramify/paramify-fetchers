@@ -20,6 +20,7 @@ from jira_common import (  # noqa: E402
     counts,
     disabled_roles,
     done_entries,
+    fetch_issues,
     field_problem_reason,
     in_offset_of,
     int_env,
@@ -32,6 +33,7 @@ from jira_common import (  # noqa: E402
     parse_ts,
     report_failure,
     resolve_fields,
+    role_state,
     role_values,
     status_catalog,
     ts_sort_key,
@@ -56,6 +58,13 @@ DEFAULT_FIELDS = {
     "exception_expiry": "Exception Expiry",
     "last_reviewed": "Last Reviewed",
 }
+# Roles with no default name: off unless JIRA_CHANGE_FIELDS names them.
+# notification_due and notification_sent are read from the linked notification
+# tickets, not from the change.
+OPTIONAL_FIELDS = ("emergency", "notification_due", "notification_sent")
+NOTIFICATION_ROLES = ("notification_due", "notification_sent")
+NOTIFICATION_FIELDS = ["summary", "issuetype", "status", "created", "resolutiondate", "resolution", "labels"]
+TRUE_VALUES, FALSE_VALUES = {"true", "1", "yes"}, {"false", "0", "no", ""}
 BASE_FIELDS = [
     "summary",
     "project",
@@ -138,11 +147,88 @@ def _links(f: dict) -> list:
     out = []
     for link in f.get("issuelinks") or []:
         ltype = link.get("type") or {}
-        if link.get("outwardIssue"):
-            out.append({"relation": ltype.get("outward"), "key": link["outwardIssue"].get("key")})
-        elif link.get("inwardIssue"):
-            out.append({"relation": ltype.get("inward"), "key": link["inwardIssue"].get("key")})
+        side = "outward" if link.get("outwardIssue") else "inward" if link.get("inwardIssue") else None
+        if side:
+            other = link[side + "Issue"]
+            fields = other.get("fields") if isinstance(other.get("fields"), dict) else {}
+            out.append(
+                {
+                    "relation": ltype.get(side),
+                    "key": other.get("key"),
+                    # None when Jira did not say: the link is then not known to be a notification or not.
+                    "issue_type": name_of(fields.get("issuetype")),
+                }
+            )
     return out
+
+
+def _is_past(due, now, zone=None):
+    """True when `due` has passed at `now`, None when it does not parse. A date
+    without a time has passed only once its whole day is over in the collector's
+    timezone (the zone Jira renders dates in), or in UTC without one."""
+    td = parse_ts(due)
+    if not td:
+        return None
+    if is_date_only(due):
+        today = now.astimezone(zone).date() if zone is not None else now.date()
+        return today.isoformat() > due
+    return now > td
+
+
+def _is_after(a, b):
+    """True when a is after b, None when either does not parse. Against a date
+    without a time only the calendar days are compared, so the due day itself is on time."""
+    ta, tb = parse_ts(a), parse_ts(b)
+    if not ta or not tb:
+        return None
+    if is_date_only(a) or is_date_only(b):
+        return a[:10] > b[:10]
+    return ta > tb
+
+
+def _notification(issue: dict, histories: list, history_known: bool, ids: dict, cfg: dict, now, catalog, zone) -> dict:
+    """One linked notification ticket. It counts as sent when it is in a done status
+    and was not cancelled; the sent time is the notification_sent field when that
+    holds a value, else its first move into a done status, else its resolution date."""
+    f = issue.get("fields") or {}
+    status = f.get("status") or {}
+    closed = name_of(status.get("statusCategory"), "key") == "done"
+    cancelled = closed and (name_of(f.get("resolution")) or "").strip().lower() in cfg["not_deployed"]
+    sent = closed and not cancelled
+    custom = role_values(f, {r: ids[r] for r in NOTIFICATION_ROLES if r in ids})
+    due = custom.get("notification_due")
+    sent_field = custom.get("notification_sent")
+    sent_at, source = None, None
+    if sent:
+        moves, _ = _transitions(histories, {}, f.get("created"), zone)
+        done_moves = [m for m in done_entries(moves, status, catalog) if parse_ts(m["at"])] if catalog[2] else []
+        if sent_field:
+            sent_at, source = sent_field, "field"
+        elif done_moves:
+            sent_at, source = done_moves[0]["at"], "status_history"
+        elif f.get("resolutiondate"):
+            sent_at, source = f.get("resolutiondate"), "resolutiondate"
+    due_on = "notification_due" in ids
+    return {
+        "key": issue.get("key"),
+        "read": True,
+        "summary": f.get("summary"),
+        "issue_type": name_of(f.get("issuetype")),
+        "status": status.get("name"),
+        "created": f.get("created"),
+        "labels": f.get("labels") or [],
+        "cancelled": cancelled,
+        "sent": sent,
+        "sent_at": sent_at,
+        "sent_at_source": source,
+        # The notification_sent field as written, also when the ticket is not done yet.
+        "sent_field_value": sent_field if "notification_sent" in ids else None,
+        "status_history_known": history_known,
+        "due": due if due_on else None,
+        # None when the notification_due field is off or this ticket has no due value.
+        "overdue": (_is_past(due, now, zone) if not sent and not cancelled else False) if due_on and due else None,
+        "sent_late": _is_after(sent_at, due) if due_on and due and sent and sent_at else None,
+    }
 
 
 def _record(
@@ -154,7 +240,10 @@ def _record(
     catalog=(set(), set(), False),
     history_known: bool = True,
     zone=None,
+    notes=None,
 ) -> dict:
+    """`notes` maps the key of every linked notification ticket that was read to its
+    record (see _notification); it is None when notification tickets are not configured."""
     f = issue.get("fields") or {}
     status = f.get("status") or {}
     category = name_of(status.get("statusCategory"), "key")
@@ -182,7 +271,20 @@ def _record(
     resolution = name_of(f.get("resolution"))
     closed = category == "done"
     cancelled = closed and (resolution or "").strip().lower() in cfg["not_deployed"]
-    done = (closed and not cancelled) or bool(custom.get("deployed_at"))
+    # With JIRA_CHANGE_DEPLOYED_STATUSES set, a change is deployed when it entered
+    # (or is in) one of those statuses, not when it reached the done category: a
+    # ticket closed without passing through them was not deployed. When this
+    # ticket's history could not be read and it is not in such a status now,
+    # whether it was deployed is unknown, never "not deployed".
+    deploy_statuses = cfg["deployed_statuses"]
+    deploy_moves = [m for m in moves if (m["to"] or "").strip().lower() in deploy_statuses]
+    deployment_unknown = False
+    if deploy_statuses:
+        by_status = bool(deploy_moves) or (status.get("name") or "").strip().lower() in deploy_statuses
+        done = by_status or bool(custom.get("deployed_at"))
+        deployment_unknown = not done and not history_known
+    else:
+        done = (closed and not cancelled) or bool(custom.get("deployed_at"))
     # Deployment time, when there is no deployed-at field: the FIRST move into the
     # done category. A ticket deployed on day 1, approved on day 3 and reopened
     # and closed again on day 10 was still approved late; using the last move
@@ -190,12 +292,39 @@ def _record(
     done_moves = done_entries(moves, status, catalog) if closed else []
     first_done_at = done_moves[0]["at"] if done_moves else None
     last_done_at = done_moves[-1]["at"] if done_moves else None
-    deployed_at = custom.get("deployed_at") or first_done_at or (
-        f.get("resolutiondate") if closed and not cancelled else None
-    )
+    if deploy_statuses:
+        deployed_at = custom.get("deployed_at") or (deploy_moves[0]["at"] if deploy_moves else None)
+    else:
+        deployed_at = custom.get("deployed_at") or first_done_at or (
+            f.get("resolutiondate") if closed and not cancelled else None
+        )
+    # None when the emergency field is not configured or could not be resolved.
+    emergency = None
+    if cfg["emergency_values"] and "emergency" in ids:
+        emergency = (custom.get("emergency") or "").strip().lower() in cfg["emergency_values"]
     approval_change = next(
         (c for c in reversed(changes) if c["field"] in ("approver", "approved_at")), None
     )
+    # Who approved: the approver field, or whoever moved the ticket into the approved status.
+    approved_by = None
+    if approval_source == "fields":
+        approved_by = custom.get("approver")
+    elif approval_source == "status":
+        approved_by = approved_status_move["by"]
+    # With JIRA_CHANGE_EMERGENCY_APPROVAL_EXEMPT on, an emergency change may be deployed
+    # before it is approved: the approval findings are recorded under `exempted`, not `findings`.
+    approval_exempt = (emergency is True) if cfg["emergency_exempt"] else None
+    links = _links(f)
+    notifications = notification_required = None
+    untyped_links = False
+    if cfg["notification_types"]:
+        linked = [k for k in links if (k["issue_type"] or "").strip().lower() in cfg["notification_types"]]
+        untyped_links = any(k["issue_type"] is None for k in links)
+        notifications = [
+            {**(notes or {}).get(k["key"], {"key": k["key"], "read": False}), "relation": k["relation"]} for k in linked
+        ]
+        if cfg["notification_required_types"]:
+            notification_required = bool(change_type) and change_type.strip().lower() in cfg["notification_required_types"]
     approved_ts, deployed_ts = parse_ts(approved_at), parse_ts(deployed_at)
     # A date-only value (an approval date field) has no time of day, so it is
     # compared with the deployment at day granularity: an earlier day is before,
@@ -222,15 +351,22 @@ def _record(
     approval_unknown = bool(not history_known and not approval_source and cfg["approved_statuses"])
 
     findings = []
+    exempted = []
     if approval_time_unparseable:
         findings.append("approval_time_unparseable")
+    if not is_exception:
+        if deployment_unknown:
+            unknown.append("deployment_unknown")
+        elif deploy_statuses and done and not deployed_at:
+            # In a deployed status with no move into it on record: deployed, but when is not known.
+            unknown.append("deployment_time_unknown")
     if done and not is_exception:
         if approval_unknown and not preapproved:
             unknown.append("approval_unknown")
         elif not approval_source and not preapproved:
-            findings.append("deployed_without_approval")
+            (exempted if approval_exempt else findings).append("deployed_without_approval")
         if approved_before_deploy is False:
-            findings.append("approved_after_deploy")
+            (exempted if approval_exempt else findings).append("approved_after_deploy")
         if tests in FAILED_TESTS:
             findings.append("deployed_with_failed_tests")
         elif "test_results" in ids and tests not in PASSED_TESTS:
@@ -239,9 +375,23 @@ def _record(
             findings.append("connection_without_security_review")
         if is_connection and "risk" in ids and not custom.get("risk"):
             findings.append("connection_without_risk")
-        # Jira makes the reporter a watcher, so one watcher alone is not a trail.
-        if not comments.get("total") and (watches.get("watchCount") or 0) <= 1:
-            findings.append("deployed_without_notification_trail")
+        if notifications is None:
+            # Jira makes the reporter a watcher, so one watcher alone is not a trail.
+            if not comments.get("total") and (watches.get("watchCount") or 0) <= 1:
+                findings.append("deployed_without_notification_trail")
+        elif notification_required and not notifications:
+            # A link whose issue type Jira did not give may be the notification: unknown, not missing.
+            if untyped_links:
+                unknown.append("notification_link_type_unknown")
+            else:
+                findings.append("notification_missing")
+    if notifications and not is_exception:
+        if any(not n["read"] for n in notifications):
+            unknown.append("notifications_not_read")
+        if any(n.get("overdue") for n in notifications):
+            findings.append("notification_overdue")
+        if any(n.get("sent_late") for n in notifications):
+            findings.append("notification_sent_late")
 
     exception = None
     if is_exception:
@@ -291,8 +441,14 @@ def _record(
         "approver": custom.get("approver"),
         "approved_at": approved_at,
         "approval_source": approval_source,
+        "approved_by": approved_by,
+        # None unless JIRA_CHANGE_EMERGENCY_APPROVAL_EXEMPT is on.
+        "approval_exempt": approval_exempt,
         "approval_recorded_by": approval_change["by"] if approval_change else None,
-        "deployed": done and not is_exception,
+        "emergency": emergency,
+        "emergency_value": custom.get("emergency") if "emergency" in ids else None,
+        # None when the ticket's history could not be read and its status does not say (see deployment_unknown).
+        "deployed": None if deployment_unknown and not is_exception else done and not is_exception,
         "deployed_at": deployed_at if not is_exception else None,
         "last_done_at": last_done_at if not is_exception else None,
         "reopened": len(done_moves) > 1 if history_known else None,
@@ -305,16 +461,73 @@ def _record(
         "comment_count": comments.get("total"),
         "labels": f.get("labels") or [],
         "components": [c.get("name") for c in f.get("components") or [] if c.get("name")],
-        "linked_issues": _links(f),
+        "linked_issues": links,
+        # None unless JIRA_CHANGE_NOTIFICATION_ISSUE_TYPES is set; exceptions take no notification checks.
+        "notification_required": notification_required if not is_exception else None,
+        "notifications": notifications if not is_exception else None,
         "exception": exception,
         "status_transitions": moves,
         "field_changes": changes,
         "findings": findings,
+        # Findings not raised because the change is an exempt emergency change.
+        "exempted": exempted,
         "unknown": unknown,
     }
 
 
-def _summarize(records: list, complete: bool = True) -> dict:
+def _emergency_summary(changes: list) -> dict:
+    """The same approval counts as the main summary, for emergency changes only."""
+    emergency = [r for r in changes if r["emergency"]]
+    deployed = [r for r in emergency if r["deployed"]]
+    return {
+        "total": len(emergency),
+        "deployed": len(deployed),
+        "deployed_with_approval": sum(1 for r in deployed if r["approval_source"]),
+        "approved_before_deploy": sum(1 for r in deployed if r["approved_before_deploy"]),
+        "approved_after_deploy": sum(1 for r in deployed if r["approved_before_deploy"] is False),
+        # Counted whether it was raised as a finding or exempted.
+        "deployed_without_approval": sum(
+            1 for r in deployed if "deployed_without_approval" in r["findings"] + r["exempted"]
+        ),
+        "open": sum(1 for r in emergency if r["deployed"] is False and r["status_category"] != "done"),
+        "findings": counts(f for r in emergency for f in r["findings"]),
+        "exempted": counts(f for r in emergency for f in r["exempted"]),
+        "keys": [r["key"] for r in emergency],
+    }
+
+
+def _notification_summary(changes: list, required_on: bool) -> dict:
+    """Counts over the linked notification tickets; a ticket linked to two changes is counted once."""
+    notes = list({n["key"]: n for r in changes for n in r["notifications"] or []}.values())
+    read = [n for n in notes if n["read"]]
+    requiring = [r for r in changes if r["notification_required"]]
+    return {
+        # Null unless JIRA_CHANGE_NOTIFICATION_REQUIRED_TYPES is set.
+        "changes_requiring": len(requiring) if required_on else None,
+        "changes_requiring_with_notification": sum(1 for r in requiring if r["notifications"]) if required_on else None,
+        "changes_deployed_without_required_notification": sum(
+            1 for r in requiring if "notification_missing" in r["findings"]
+        )
+        if required_on
+        else None,
+        "tickets": len(notes),
+        "tickets_not_read": len(notes) - len(read),
+        "tickets_sent": sum(1 for n in read if n["sent"]),
+        "tickets_open": sum(1 for n in read if not n["sent"] and not n["cancelled"]),
+        "tickets_cancelled": sum(1 for n in read if n["cancelled"]),
+        "tickets_overdue": sum(1 for n in read if n["overdue"]),
+        "tickets_sent_late": sum(1 for n in read if n["sent_late"]),
+    }
+
+
+def _summarize(
+    records: list,
+    complete: bool = True,
+    emergency_on: bool = False,
+    deploy_by_status: bool = False,
+    notifications_on: bool = False,
+    notification_required_on: bool = False,
+) -> dict:
     changes = [r for r in records if r["kind"] != "exception"]
     deployed = [r for r in changes if r["deployed"]]
     exceptions = [r for r in records if r["kind"] == "exception"]
@@ -339,7 +552,28 @@ def _summarize(records: list, complete: bool = True) -> dict:
         "changes_deployed_preapproved": sum(
             1 for r in deployed if not r["approval_source"] and r["preapproved"]
         ),
-        "changes_open": sum(1 for r in changes if not r["deployed"] and not r["cancelled"]),
+        # A done ticket is never open; without deployed statuses every done ticket is
+        # deployed or cancelled, so the extra condition changes nothing there.
+        "changes_open": sum(
+            1
+            for r in changes
+            if r["deployed"] is False and not r["cancelled"] and r["status_category"] != "done"
+        ),
+        # Closed without entering a deployed status and not cancelled. Null unless
+        # JIRA_CHANGE_DEPLOYED_STATUSES is set (otherwise such a ticket counts as deployed).
+        "changes_closed_without_deployment": sum(
+            1
+            for r in changes
+            if r["deployed"] is False and not r["cancelled"] and r["status_category"] == "done"
+        )
+        if deploy_by_status
+        else None,
+        "changes_deployment_unknown": sum(1 for r in changes if r["deployed"] is None),
+        # Null unless the emergency field and JIRA_CHANGE_EMERGENCY_VALUES are set and the field resolved.
+        "emergency": _emergency_summary(changes) if emergency_on else None,
+        # Null unless JIRA_CHANGE_NOTIFICATION_ISSUE_TYPES is set.
+        "notifications": _notification_summary(changes, notification_required_on) if notifications_on else None,
+        "exempted": counts(f for r in records for f in r["exempted"]),
         "changes_cancelled": sum(1 for r in changes if r["cancelled"]),
         "exceptions_total": len(exceptions),
         "exceptions_open": len(open_ex),
@@ -357,7 +591,7 @@ def _config():
     fields, err = json_env("JIRA_CHANGE_FIELDS", {})
     if err:
         return None, err
-    unknown = sorted(set(fields) - set(DEFAULT_FIELDS))
+    unknown = sorted(set(fields) - set(DEFAULT_FIELDS) - set(OPTIONAL_FIELDS))
     if unknown:
         return None, f"JIRA_CHANGE_FIELDS has unknown keys: {', '.join(unknown)}"
     review_days = int_env("JIRA_EXCEPTION_REVIEW_DAYS", 365)
@@ -365,6 +599,10 @@ def _config():
     if review_days is None or max_items is None:
         return None, "JIRA_EXCEPTION_REVIEW_DAYS and JIRA_CHANGE_MAX_ITEMS must be positive integers"
     merged = {**DEFAULT_FIELDS, **fields}
+    # An optional role left empty is simply off: it is not a field problem.
+    for role in OPTIONAL_FIELDS:
+        if role in merged and role_state(merged[role]) == "disabled":
+            del merged[role]
     invalid = invalid_roles(merged)
     if invalid:
         return None, (
@@ -389,9 +627,45 @@ def _config():
             "JIRA_CHANGE_FIELDS; every pre-approved change would be reported as unapproved. "
             "Set JIRA_CHANGE_PREAPPROVED_TYPES to an empty value if no change type is pre-approved"
         )
+    emergency_values = _lower_set(list_env("JIRA_CHANGE_EMERGENCY_VALUES"))
+    if ("emergency" in merged) != bool(emergency_values):
+        return None, (
+            "the emergency field in JIRA_CHANGE_FIELDS and JIRA_CHANGE_EMERGENCY_VALUES must be set "
+            "together: one names the field, the other the values that mean an emergency change"
+        )
+    exempt_raw = os.environ.get("JIRA_CHANGE_EMERGENCY_APPROVAL_EXEMPT", "").strip().lower()
+    if exempt_raw not in TRUE_VALUES | FALSE_VALUES:
+        return None, "JIRA_CHANGE_EMERGENCY_APPROVAL_EXEMPT must be true or false"
+    emergency_exempt = exempt_raw in TRUE_VALUES
+    if emergency_exempt and not emergency_values:
+        return None, (
+            "JIRA_CHANGE_EMERGENCY_APPROVAL_EXEMPT is on but no emergency field is set in JIRA_CHANGE_FIELDS; "
+            "there is no way to tell which changes are emergency changes"
+        )
+    notification_types = _lower_set(list_env("JIRA_CHANGE_NOTIFICATION_ISSUE_TYPES"))
+    notification_required_types = _lower_set(list_env("JIRA_CHANGE_NOTIFICATION_REQUIRED_TYPES"))
+    if not notification_types:
+        needs = [r for r in NOTIFICATION_ROLES if r in merged]
+        if notification_required_types:
+            needs.append("JIRA_CHANGE_NOTIFICATION_REQUIRED_TYPES")
+        if needs:
+            return None, (
+                f"{', '.join(needs)} set without JIRA_CHANGE_NOTIFICATION_ISSUE_TYPES; "
+                "that setting names the issue types of the linked notification tickets"
+            )
+    if notification_required_types and "change_type" in disabled:
+        return None, (
+            "JIRA_CHANGE_NOTIFICATION_REQUIRED_TYPES is set but the change_type field is turned off in "
+            "JIRA_CHANGE_FIELDS; no change could be matched to it"
+        )
     return {
         "fields": merged,
         "disabled_fields": sorted(disabled),
+        "emergency_exempt": emergency_exempt,
+        "notification_types": notification_types,
+        "notification_required_types": notification_required_types,
+        "deployed_statuses": _lower_set(list_env("JIRA_CHANGE_DEPLOYED_STATUSES")),
+        "emergency_values": emergency_values,
         "approved_statuses": approved_statuses,
         "preapproved_types": preapproved_types,
         "exception_types": _lower_set(
@@ -442,10 +716,19 @@ def main() -> int:
     history_complete = True
     search_complete = False
     catalog = (set(), set(), False)
+    # Configured deployed statuses that are not statuses on this site; None until checked.
+    deploy_unmatched = None
+    notes = None
+    notes_complete = True
     try:
         collector = collector_info(client)
         ids, problems, candidates = resolve_fields(client, cfg["fields"])
         catalog = status_catalog(client)
+        if cfg["deployed_statuses"]:
+            site = client.request("GET", "/rest/api/3/status", "GET /rest/api/3/status")
+            if isinstance(site, list):
+                names = {st["name"].strip().lower() for st in site if isinstance(st, dict) and isinstance(st.get("name"), str)}
+                deploy_unmatched = sorted(cfg["deployed_statuses"] - names)
         zone = zone_of((collector or {}).get("time_zone"))
         raw, truncated, search_complete = client.search_issues(
             jql, BASE_FIELDS + all_field_ids(ids), cfg["max_items"]
@@ -454,10 +737,32 @@ def main() -> int:
             [str(i.get("id")) for i in raw if i.get("id")],
             ["status"] + all_field_ids(ids),
         )
+        if cfg["notification_types"]:
+            # The search gives each linked issue's type; the linked notification tickets
+            # are then read once for their status, dates and status history.
+            keys = {
+                k["key"]
+                for i in raw
+                for k in _links(i.get("fields") or {})
+                if (k["issue_type"] or "").strip().lower() in cfg["notification_types"]
+            }
+            note_fields = NOTIFICATION_FIELDS + all_field_ids({r: ids[r] for r in NOTIFICATION_ROLES if r in ids})
+            note_issues, note_missing, notes_complete = fetch_issues(client, keys, note_fields)
+            note_hist, note_hist_complete, note_unknown = client.bulk_changelogs(
+                [str(n.get("id")) for n in note_issues if n.get("id")], ["status"]
+            )
+            notes_complete = notes_complete and note_hist_complete and not note_missing
+            notes = {
+                n.get("key"): _notification(
+                    n, note_hist.get(str(n.get("id")), []), str(n.get("id")) not in note_unknown,
+                    ids, cfg, now, catalog, zone,
+                )
+                for n in note_issues
+            }
         records = [
             _record(
                 i, histories.get(str(i.get("id")), []), ids, cfg, now, catalog,
-                history_known=str(i.get("id")) not in unknown_ids, zone=zone,
+                history_known=str(i.get("id")) not in unknown_ids, zone=zone, notes=notes,
             )
             for i in raw
         ]
@@ -467,6 +772,18 @@ def main() -> int:
         client.fail("collection", type(e).__name__, str(e)[:200], "internal_error")
         search_complete = False  # the collection did not finish, so no count is trusted
 
+    emergency_seen = {(r["emergency_value"] or "").strip().lower() for r in records}
+    # With notification tickets configured they replace the comments-and-watchers check, and
+    # the notification findings whose setting is missing are listed as off. Without them the
+    # notification findings are an optional feature that was not asked for, and are not listed.
+    checks_off = set(_checks_disabled(cfg["disabled_fields"]))
+    if cfg["notification_types"]:
+        checks_off.add("deployed_without_notification_trail")
+        if not cfg["notification_required_types"]:
+            checks_off.add("notification_missing")
+        if "notification_due" not in ids:
+            checks_off.update(["notification_overdue", "notification_sent_late"])
+    change_types_seen = {(r["change_type"] or "").strip().lower() for r in records}
     evidence = {
         "metadata": {
             "collected_at": now.isoformat(),
@@ -476,9 +793,26 @@ def main() -> int:
             "fields_resolved": ids,
             "field_problems": problems,
             "field_candidates": candidates,
-            "checks_disabled": _checks_disabled(cfg["disabled_fields"]),
+            "checks_disabled": sorted(checks_off),
             "not_deployed_resolutions": sorted(cfg["not_deployed"]),
             "approved_statuses": sorted(cfg["approved_statuses"]),
+            "deployed_statuses": sorted(cfg["deployed_statuses"]) or None,
+            "deployed_statuses_not_on_site": deploy_unmatched,
+            "emergency_values": sorted(cfg["emergency_values"]) or None,
+            # Configured emergency values held by no collected ticket: there may be no
+            # emergency change, or the value is not how the field spells it.
+            "emergency_values_unmatched": sorted(cfg["emergency_values"] - {v for v in emergency_seen if v})
+            if cfg["emergency_values"]
+            else None,
+            "emergency_approval_exempt": cfg["emergency_exempt"],
+            "notification_issue_types": sorted(cfg["notification_types"]) or None,
+            "notification_required_change_types": sorted(cfg["notification_required_types"]) or None,
+            # Configured change types held by no collected ticket: none may exist, or the
+            # value is not how the field spells it and those changes were not checked.
+            "notification_required_change_types_unmatched": sorted(cfg["notification_required_types"] - change_types_seen)
+            if cfg["notification_required_types"]
+            else None,
+            "notification_tickets_complete": notes_complete if cfg["notification_types"] else None,
             "preapproved_change_types": sorted(cfg["preapproved_types"]),
             "exception_review_days": cfg["review_days"],
             "max_items": cfg["max_items"],
@@ -492,7 +826,14 @@ def main() -> int:
         },
         "collector": collector,
         # A capped search is also unfinished: its totals would read as the population.
-        "summary": _summarize(records, search_complete and not truncated),
+        "summary": _summarize(
+            records,
+            search_complete and not truncated,
+            bool(cfg["emergency_values"]) and "emergency" in ids,
+            bool(cfg["deployed_statuses"]),
+            bool(cfg["notification_types"]),
+            bool(cfg["notification_required_types"]),
+        ),
         "tickets": records,
     }
     incomplete = ""
@@ -500,6 +841,16 @@ def main() -> int:
         incomplete = f"tickets truncated at JIRA_CHANGE_MAX_ITEMS={cfg['max_items']}"
     elif not history_complete:
         incomplete = "status history incomplete for some tickets"
+    elif not notes_complete:
+        incomplete = "some linked notification tickets could not be read"
+    if deploy_unmatched:
+        # A mistyped status would report every change as not deployed, with no finding.
+        reason = (
+            f"JIRA_CHANGE_DEPLOYED_STATUSES names no status on this site: {', '.join(deploy_unmatched)}; "
+            "deployments into it cannot be seen"
+        )
+        logger.warning("%s", reason)
+        incomplete = f"{incomplete}; {reason}" if incomplete else reason
     field_reason = field_problem_reason(problems, "JIRA_CHANGE_FIELDS")
     if field_reason:
         logger.warning("%s", field_reason)

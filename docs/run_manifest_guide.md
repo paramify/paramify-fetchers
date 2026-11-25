@@ -216,7 +216,7 @@ cover tracked validators. Untracking doesn't remove anything from Paramify.
 | `no assessment_id set` or `no close_cycle set` | It's an issue-report fetcher. `paramify assessments select <fetcher> -f daily` picks the assessment by name, then asks the close policy ([choosing a close policy](pipelines_guide.md#2-point-it-at-an-assessment)). |
 | A `paramify_*` fetcher reports missing targets | Its targets are Paramify programs. `paramify programs target -f daily` writes them by name. |
 | Doctor says a CLI is `not found on PATH` | Install it ([install](../README.md#install)). |
-| Doctor lists a variable as `missing` that's in `.env` | `run` and `doctor` read only the environment, not `.env`. Export the variables first. |
+| Doctor lists a variable as `missing` that's in `.env` | `run` and `doctor` read only the `.env` at the repo root. They skip a line with no value after `=`. Put the value on that line, or move the line to the repo-root `.env`. |
 | `git add` says the manifest is ignored | `.gitignore` has `manifests/*`, despite its comment. Use `git add -f`. The file holds no secret values. |
 
 **More detail:** [config, secrets and passthrough](config_injection_guide.md) ·

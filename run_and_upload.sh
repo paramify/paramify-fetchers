@@ -4,9 +4,11 @@
 # The framework keeps these as SEPARATE stages on purpose; this script just chains
 # them — the kind of thing that lives in your CI job / cron, not in the framework.
 #
+# In a container, use deploy/run-and-upload.sh instead (see deploy/README.md).
+#
 # Secrets must already be in the environment before running (never put values here):
-#   KNOWBE4_API_KEY, KNOWBE4_REGION   — for collection
-#   PARAMIFY_UPLOAD_API_TOKEN         — for upload
+#   the variables your manifest reads  — for collection (`paramify env -m <manifest>` lists them)
+#   PARAMIFY_UPLOAD_API_TOKEN          — for upload
 #
 # Config (non-secret) is set here / overridable via env:
 #   MANIFEST                 (default: manifest.yaml)
@@ -19,8 +21,8 @@ MANIFEST="${MANIFEST:-manifest.yaml}"
 # Upload target is the uploader's own default (production: app.paramify.com).
 # Export PARAMIFY_API_BASE_URL before running to point elsewhere (e.g. stage);
 # the uploader subprocess inherits it. We deliberately do NOT default it to
-# stage here — the README points customers at this script, and a silent stage
-# default would route real evidence to staging.
+# stage here — customers copy this script, and a silent stage default would
+# route real evidence to staging.
 
 echo "==> collect: $MANIFEST"
 # Requires the package installed in the venv: pip install -e .

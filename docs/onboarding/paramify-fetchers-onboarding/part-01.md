@@ -2,7 +2,7 @@
 
 Somewhere right now, a security engineer is screenshotting an admin console because an auditor asked them to prove every employee account belongs to a current employee. Next quarter, another auditor will ask again, and they'll screenshot it again. This repo exists to delete that ritual: small scripts called **fetchers** pull evidence from the tools a customer already runs — Okta, AWS, GitLab, Rippling — and write it to disk as JSON, where a separate uploader ships it to Paramify.
 
-You're joining this codebase, and it has 172 fetchers. The wrong way in is reading all of them. The right way in is following *one* — from its YAML self-description, through the runner that executes it, to the enveloped evidence file it leaves on disk — until you could explain each handoff to the next new dev.
+You're joining this codebase, and it has 353 fetchers. The wrong way in is reading all of them. The right way in is following *one* — from its YAML self-description, through the runner that executes it, to the enveloped evidence file it leaves on disk — until you could explain each handoff to the next new dev.
 
 By the end of this part, you'll have the `paramify` CLI installed, a complete collection run sitting in a `run-<timestamp>/` directory, and a working mental model of the four pieces and the contract that binds them. You will not need credentials for any of it — we run the whole pipeline against a fake API token on purpose, because the wiring is the lesson, not the data.
 
@@ -58,7 +58,7 @@ paramify list
 The editable install registers one console command, `paramify` (`pyproject.toml`, `[project.scripts]`), and `list` should report:
 
 ```
-Discovered 172 fetchers:
+Discovered 353 fetchers:
 
   aws_auto_scaling_high_availability                 v0.1.0    [fanout] category=aws
   aws_backup_recovery_high_availability              v0.1.0    [fanout] category=aws
@@ -69,7 +69,7 @@ Discovered 172 fetchers:
 Where does that list come from? Discovery (`framework/config_loader.py`) walks `fetchers/<category>/<short_name>/` looking for `fetcher.yaml` files, validates each against `framework/schemas/fetcher_schema.json`, and refuses duplicates by name. Every front-end — the CLI, its `--json` mode, the `paramify tui` terminal UI — goes through one facade, `framework/api.py`, so they can't disagree about what exists.
 
 > [!ASIDE]
-> If you count `fetcher.yaml` files on disk you'll get 173 and briefly question the README. Discovery skips any directory starting with `_` — `_template/`, `_categories/`, and per-category `_shared/` — so the one under `_template/` is invisible to the runner. The underscore *is* the off switch.
+> If you count `fetcher.yaml` files on disk you'll get 354 and briefly question the README. Discovery skips any directory starting with `_` — `_template/`, `_categories/`, and per-category `_shared/` — so the one under `_template/` is invisible to the runner. The underscore *is* the off switch.
 
 Now ask the catalog about the fetcher we'll be tracing:
 
@@ -326,7 +326,7 @@ ls /tmp/tour/evidence/run-*/
 
 You've read the contract from both sides; in Part 2 you sign it. We'll copy `fetchers/_template/` into a new category, fill in a `fetcher.yaml` the discovery layer accepts, write the collection script with a failure ledger that can defend itself, and take it through the same smoke-test-then-runner gauntlet — the same path as `docs/porting_guide.md`, but with the reasoning attached. The open question to carry there: of everything `rippling_current_employees` does, which parts were *contract* and which were merely *convention*?
 
-Before the exercises, one question, two sentences, in your own words: why does the *runner* write the envelope, when the fetcher already knows everything about its own run? The answer that satisfies a skeptical colleague explains what would go wrong across 172 fetchers — and on customer infrastructure — if each script wrapped its own output.
+Before the exercises, one question, two sentences, in your own words: why does the *runner* write the envelope, when the fetcher already knows everything about its own run? The answer that satisfies a skeptical colleague explains what would go wrong across 353 fetchers — and on customer infrastructure — if each script wrapped its own output.
 
 ## Exercises
 
