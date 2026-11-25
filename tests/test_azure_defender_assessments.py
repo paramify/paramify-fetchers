@@ -22,6 +22,8 @@ _spec = importlib.util.spec_from_file_location(
 da = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(da)
 Collector = sys.modules["azure_common"].Collector
+# The collection the fetcher imports from _shared/defender.py reads Resource Graph through this module.
+defender = sys.modules["defender"]
 
 SUB_ID = "00000000-0000-0000-0000-000000000000"
 APP = f"/subscriptions/{SUB_ID}/resourceGroups/rg-example/providers/Microsoft.Web/sites/app-example"
@@ -155,7 +157,7 @@ def _security_module(monkeypatch, assessments=None, list_error=None, catalogue_e
 
 def _collect(monkeypatch, graph, assessments=None, list_error=None, catalogue_error=None):
     _security_module(monkeypatch, assessments, list_error, catalogue_error)
-    monkeypatch.setattr(da, "resource_graph_client", lambda cred: graph)
+    monkeypatch.setattr(defender, "resource_graph_client", lambda cred: graph)
     collector = Collector(logging.getLogger("test"))
     return da.collect_assessments(SUB_ID, object(), collector), collector
 
@@ -206,7 +208,7 @@ def test_main_exits_1_with_catalogue_severities_when_the_severity_query_is_trunc
     _security_module(monkeypatch, [assessment(AUTH)])
     graph = FakeGraph([{"id": assessment(AUTH).id, "severity": "High"}], truncate=True)
     failures = []
-    monkeypatch.setattr(da, "resource_graph_client", lambda cred: graph)
+    monkeypatch.setattr(defender, "resource_graph_client", lambda cred: graph)
     monkeypatch.setattr(da, "credential", lambda: object())
     monkeypatch.setattr(da, "load_dotenv", lambda: None)
     monkeypatch.setattr(da, "report_failure", lambda reason, code: failures.append(reason))
@@ -388,7 +390,7 @@ def test_a_date_without_an_offset_is_read_as_utc():
 
 
 def _run_main(monkeypatch, tmp_path, rows=(), graph=None):
-    monkeypatch.setattr(da, "resource_graph_client", lambda cred: graph or FakeGraph(list(rows)))
+    monkeypatch.setattr(defender, "resource_graph_client", lambda cred: graph or FakeGraph(list(rows)))
     monkeypatch.setattr(da, "credential", lambda: object())
     monkeypatch.setattr(da, "load_dotenv", lambda: None)
     codes = []
@@ -482,7 +484,7 @@ def test_main_summary_documents_every_field(monkeypatch, fake_models, tmp_path, 
     checks = [(AUTH, "High"), (TLS, "Medium"), (CUSTOM, "Low")]
     _security_module(monkeypatch, [assessment(c) for c, _ in checks])
     graph = FakeGraph([{"id": assessment(c).id, "severity": s} for c, s in checks])
-    monkeypatch.setattr(da, "resource_graph_client", lambda cred: graph)
+    monkeypatch.setattr(defender, "resource_graph_client", lambda cred: graph)
     monkeypatch.setattr(da, "credential", lambda: object())
     monkeypatch.setattr(da, "load_dotenv", lambda: None)
     monkeypatch.setenv("EVIDENCE_DIR", str(tmp_path))
