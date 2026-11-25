@@ -1,0 +1,30 @@
+validator: azure_kv_certificates_not_expiring_30_days
+cases:
+  - name: compliant
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"app_service_certificates_expiring_within_30_days":0,"certificates_expiring_within_30_days":0,"expired_certificates":0,"in_scope_certificates":4,"total_certificates":4}}}'
+
+  - name: certificates_expiring_within_30_days_nonzero
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"app_service_certificates_expiring_within_30_days":0,"certificates_expiring_within_30_days":1,"expired_certificates":0,"in_scope_certificates":4,"total_certificates":4}}}'
+
+  - name: certificates_expiring_within_30_days_null
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"app_service_certificates_expiring_within_30_days":0,"certificates_expiring_within_30_days":null,"expired_certificates":0,"in_scope_certificates":4,"total_certificates":4}}}'
+
+  - name: certificates_expiring_within_30_days_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"app_service_certificates_expiring_within_30_days":0,"certificates_expiring_within_30_days_renamed":0,"expired_certificates":0,"in_scope_certificates":4,"total_certificates":4}}}'
+
+  - name: ten_times_scale_compliant
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"app_service_certificates_expiring_within_30_days":0,"certificates_expiring_within_30_days":0,"expired_certificates":0,"in_scope_certificates":40,"total_certificates":40}}}'
+
+  - name: ten_times_scale_one_nonzero
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"app_service_certificates_expiring_within_30_days":0,"certificates_expiring_within_30_days":1,"expired_certificates":0,"in_scope_certificates":40,"total_certificates":40}}}'
+
+  - name: app_service_certificate_expiring_not_counted
+    expect: PASS
+    note: Reads only the Key Vault count, never the App Service field that ends with the same name.
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"app_service_certificates_expiring_within_30_days":1,"certificates_expiring_within_30_days":0,"expired_certificates":0,"in_scope_certificates":4,"total_certificates":4}}}'

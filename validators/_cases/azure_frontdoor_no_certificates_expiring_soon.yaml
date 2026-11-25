@@ -1,0 +1,25 @@
+validator: azure_frontdoor_no_certificates_expiring_soon
+cases:
+  - name: compliant
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"expiry_warning_days":30,"served_custom_domains":3,"served_domains_certificate_expired":0,"served_domains_certificate_expiring_soon":0,"served_domains_certificate_expiry_unknown":0}}}'
+
+  - name: served_domains_certificate_expiring_soon_nonzero
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"expiry_warning_days":30,"served_custom_domains":3,"served_domains_certificate_expired":0,"served_domains_certificate_expiring_soon":1,"served_domains_certificate_expiry_unknown":0}}}'
+
+  - name: served_domains_certificate_expiring_soon_null
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"expiry_warning_days":30,"served_custom_domains":3,"served_domains_certificate_expired":0,"served_domains_certificate_expiring_soon":null,"served_domains_certificate_expiry_unknown":0}}}'
+
+  - name: served_domains_certificate_expiring_soon_renamed
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"expiry_warning_days":30,"served_custom_domains":3,"served_domains_certificate_expired":0,"served_domains_certificate_expiring_soon_renamed":0,"served_domains_certificate_expiry_unknown":0}}}'
+
+  - name: ten_times_scale_compliant
+    expect: PASS
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"expiry_warning_days":30,"served_custom_domains":30,"served_domains_certificate_expired":0,"served_domains_certificate_expiring_soon":0,"served_domains_certificate_expiry_unknown":0}}}'
+
+  - name: ten_times_scale_one_nonzero
+    expect: FAIL
+    artifact: '{"metadata":{"exit_code":0},"payload":{"results":{},"summary":{"expiry_warning_days":30,"served_custom_domains":30,"served_domains_certificate_expired":0,"served_domains_certificate_expiring_soon":1,"served_domains_certificate_expiry_unknown":0}}}'
