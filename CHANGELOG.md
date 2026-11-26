@@ -12,6 +12,18 @@ schemas and the `paramify` CLI — not the internal code.
 
 ### Changed
 
+- **`azure_defender_sql_vulnerability_report` 0.2.0: baselined and exempted findings are rows, and every database
+  must be scanned.** Baselined (`Healthy`, `PassPerBaseline`) and exempted (`NotApplicable`, `Exempt`) results are now
+  rows beside the open ones, with new `Status` and `Status Cause` columns that carry Defender's values unchanged, so
+  the intake preset decides whether they are skipped like fixed findings or mapped as risk-accepted. A database with
+  vulnerability assessment results but none Healthy or Unhealthy fails the run, as an instance with none already did.
+  The collection code is now shared with `azure_defender_assessments` through `_shared/defender.py` instead of loading
+  that fetcher's script.
+
+- **`azure_defender_assessments` 0.4.3: collection code moved to `_shared/defender.py`.** The recommendation list,
+  catalogue and severity reads and the record projection now live in a shared module that
+  `azure_defender_sql_vulnerability_report` also imports. The evidence it writes is unchanged.
+
 - **`jira_change_requests` 0.3.0: who approved, emergency approval exemption, and linked notification tickets.**
   `approved_by` names the approver, for a status-based approval whoever made the approving move.
   `emergency_approval_exempt` records the approval findings of emergency changes under `exempted`, not `findings`.
@@ -42,6 +54,16 @@ schemas and the `paramify` CLI — not the internal code.
   passed once its day is over in the collector's timezone, not in UTC.
 
 ### Added
+
+- **`azure_defender_sql_vulnerability_report` 0.1.0: Defender for SQL vulnerability findings as an issue report.**
+  Writes every open SQL vulnerability assessment rule on each SQL managed instance database (`master` included) as one
+  CSV row for a Paramify VULNERABILITY assessment, keyed by the lowercased database id and the recommendation's key.
+  It reads the same recommendations, catalogue and severities as `azure_defender_assessments`, through that fetcher's
+  own code, and keeps only `BuiltIn` recommendations on databases. It writes no file when any read fails, Defender
+  for Cloud is not registered, no instance is in scope, an in-scope instance has no Healthy or Unhealthy vulnerability
+  assessment result, or an open recommendation has no type. Baselined and exempted findings leave the CSV like fixed
+  ones; the log counts them. A warning names any in-scope instance whose Defender for SQL or vulnerability
+  assessment configuration recommendation is Unhealthy. The README holds the columns and the intake preset mapping.
 
 - **`keycloak_service_accounts` fetcher.** Lists every Keycloak client with a service account, GET only with
   view-clients and view-users: its authenticator (shared secret or signed key and certificate), the secret's age,

@@ -360,6 +360,7 @@ Defender for Cloud and Azure Policy:
 | `azure_defender_plans` | Defender for Cloud plans: tier, sub-plan, enablement and coverage |
 | `azure_defender_assessments` | Every Defender for Cloud assessment result per resource, with status and severity |
 | `azure_defender_vulnerability_findings` | Defender for Cloud CVE findings on each container image and server: open findings by severity, how many have a fix, latest scan, and per finding the CVE, CVSS score, package, fixed version and age since the CVE was published |
+| `azure_defender_sql_vulnerability_report` | Issue report, not evidence: every open Defender for Cloud SQL vulnerability assessment finding on SQL managed instance databases as a CSV for a Paramify vulnerability assessment, one row per rule on each database (see [its README](defender_sql_vulnerability_report/README.md)) |
 | `azure_defender_regulatory_compliance` | Regulatory compliance standards, their controls and assessments, with passed, failed and skipped counts |
 | `azure_policy_assignments` | Policy assignments in effect, own and inherited: enforcement mode, scope, exclusions, and whether each actually enforces |
 | `azure_policy_compliance` | Non-compliant resources and policies, evaluation details, and remediation tasks with their deployments |
