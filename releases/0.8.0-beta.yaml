@@ -1,0 +1,155 @@
+# What `paramify update` shows for v0.8.0-beta. The full list is the
+# CHANGELOG's [0.8.0-beta] section; this is the part a user acts on.
+# Format and rules: releases/README.md.
+version: 0.8.0-beta
+date: 2026-11-26
+highlights: []
+fetchers:
+- name: alertmanager_alert_delivery
+  version: 0.1.0
+  note: fetcher and `alertmanager` category
+  draft: true
+- name: aws_backup_vault_encryption
+  version: 0.1.0
+  note: 'TODO: say what changed for the user'
+  draft: true
+- name: aws_client_vpn_tls
+  version: 0.1.0
+  note: 'TODO: say what changed for the user'
+  draft: true
+- name: aws_ec2_instance_inventory
+  version: 0.1.0
+  note: 'TODO: say what changed for the user'
+  draft: true
+- name: aws_ssm_compliance_summary
+  version: 0.1.0
+  note: 'TODO: say what changed for the user'
+  draft: true
+- name: azure_activity_log_alerts
+  version: 0.5.0
+  note: alerts on attempts to alter protected log storage
+  draft: true
+- name: azure_alert_rules
+  version: 0.4.0
+  note: suppression fields are null when the alert processing rule list could not be read
+  draft: true
+- name: azure_defender_assessments
+  version: 0.4.3
+  note: collection code moved to `_shared/defender.py`
+  draft: true
+- name: azure_defender_sql_vulnerability_report
+  version: 0.2.0
+  note: baselined and exempted findings are rows, and every database must be scanned
+  draft: true
+- name: azure_devops_work_items
+  version: 0.4.0
+  note: TFVC changeset inclusions
+  draft: true
+- name: azure_diagnostic_settings
+  version: 0.2.0
+  note: when the settings are not read, `activity_log_exported`, the counts, the coverage map and the required…
+  draft: true
+- name: azure_entra_sign_in_logs
+  version: 0.4.0
+  note: 50053 sign-in rejections
+  draft: true
+- name: azure_front_door_origins
+  version: 0.8.3
+  note: app counts read null when which groups reach an app is unknown
+  draft: true
+- name: azure_front_door_tls
+  version: 0.6.3
+  note: a custom domain's `routed` and `served` are null while its profile's routes weren't read, and its certificate…
+  draft: true
+- name: azure_front_door_waf_coverage
+  version: 0.6.3
+  note: 'TODO: say what changed for the user'
+  draft: true
+- name: azure_front_door_waf_policies
+  version: 0.2.2
+  note: when the managed rule set definitions weren't read, a default rule set's `rule_definition_found` is null…
+  draft: true
+- name: azure_log_analytics_workspaces
+  version: 0.4.0
+  note: when the workspace list is not read, every count is null
+  draft: true
+- name: azure_network_security_groups
+  version: 0.6.2
+  note: every count and verdict from an unread list reads null, not 0
+  draft: true
+- name: azure_policy_compliance
+  version: 0.6.0
+  note: unread reads give null counts, and an unread remediation task can no longer read as complete
+  draft: true
+- name: azure_private_dns_zone_configuration
+  version: 0.4.2
+  note: 'TODO: say what changed for the user'
+  draft: true
+- name: azure_private_endpoint_configuration
+  version: 0.3.3
+  note: 'TODO: say what changed for the user'
+  draft: true
+- name: azure_residual_resources
+  version: 0.3.2
+  note: 'TODO: say what changed for the user'
+  draft: true
+- name: azure_resource_diagnostic_settings
+  version: 0.5.0
+  note: when Resource Graph is not read, the resource, coverage and ingestion counts and verdicts and the destination…
+  draft: true
+- name: azure_resource_inventory
+  version: 0.5.0
+  note: reconciled against an expected population
+  draft: true
+- name: istio_mesh_security
+  version: 0.1.0
+  note: fetcher and `istio` category
+  draft: true
+- name: jira_change_requests
+  version: 0.3.0
+  note: who approved, emergency approval exemption, and linked notification tickets
+  draft: true
+- name: jira_incident_postmortems
+  version: 0.2.1
+  note: report deadlines from due-date fields, a post-mortem field, linked action items
+  draft: true
+- name: jira_remediation_items
+  version: 0.2.0
+  note: configurable due-date field and risk-accepted tickets counted apart
+  draft: true
+- name: jira_site_inventory
+  version: 0.3.0
+  note: service desks outside the collection are shown as left out or out of scope, not absent
+  draft: true
+- name: keycloak_admin_events
+  version: 0.1.0
+  note: fetcher
+  draft: true
+- name: keycloak_realm_security
+  version: 0.1.0
+  note: Keycloak 26 Organization step is not a local sign-in; master reads name master-realm
+  draft: true
+- name: keycloak_service_accounts
+  version: 0.1.0
+  note: fetcher
+  draft: true
+- name: keycloak_users_and_roles
+  version: 0.1.0
+  note: fetcher
+  draft: true
+- name: kubernetes_workload_resilience
+  version: 0.1.0
+  note: fetcher and `kubernetes` category
+  draft: true
+- name: loki_log_ingestion
+  version: 0.1.0
+  note: malformed reads, exact age, quiet sources with heartbeats
+  draft: true
+- name: openscap_benchmark_results
+  version: 0.1.0
+  note: 'mark as a community fetcher (source: community)'
+  draft: true
+- name: tenable_vuln_scan
+  version: 0.2.0
+  note: 'TODO: say what changed for the user'
+  draft: true
